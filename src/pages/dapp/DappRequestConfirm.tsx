@@ -27,6 +27,7 @@ const DappRequestConfirm: React.FC = () => {
     sendUtxoTransaction,
     refreshActiveBalance,
     addActivity,
+    isConnected,
     isSyncing,
     syncPercent
   } = useWalletStore()
@@ -48,8 +49,8 @@ const DappRequestConfirm: React.FC = () => {
     () => networks.find((n) => n.id === pendingRequest?.networkId) || activeNetwork,
     [networks, pendingRequest, activeNetwork]
   )
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
 
   useEffect(() => {
     if (!canUseChromeStorage()) {

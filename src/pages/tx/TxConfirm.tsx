@@ -43,6 +43,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     sendEvmTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
+    isConnected,
     isSyncing,
     syncPercent
   } = useWalletStore()
@@ -60,8 +61,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
 
   const enteredAmountNumRaw = Number(txState.enteredAmount ?? amount)
   const enteredAmount = Number.isFinite(enteredAmountNumRaw) && enteredAmountNumRaw > 0 ? enteredAmountNumRaw : safeAmount
