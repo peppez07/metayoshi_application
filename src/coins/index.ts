@@ -32,10 +32,9 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
-// Public Chrome Web Store build policy (current release):
-// keep only RTM enabled until BTCZ/FIRO QA is complete.
-const DISABLED_NETWORK_IDS = new Set(['doge', 'tide', 'firo'])
-const DEFAULT_ENABLED_COIN_IDS = ['rtm','btcz']
+// Runtime default: keep Tide disabled until its QA cycle is complete.
+const DISABLED_NETWORK_IDS = new Set(['tide'])
+const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'firo']
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()

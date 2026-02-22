@@ -14,6 +14,7 @@ Initialization event:
 
 Current network families exposed in this SDK:
 - Raptoreum (`rtm`)
+- Dogecoin (`doge`)
 - BitcoinZ (`btcz`)
 - Firo (`firo`)
 

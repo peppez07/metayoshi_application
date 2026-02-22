@@ -279,6 +279,13 @@ function supportsAddressIndex(coinSymbol?: string): boolean {
   return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
 }
 
+// Balance refresh should avoid noisy address-index probes on bridges that do not
+// support them reliably for unfunded addresses.
+function supportsAddressIndexBalance(coinSymbol?: string): boolean {
+  const symbol = String(coinSymbol || '').trim().toUpperCase()
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE'
+}
+
 function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
   // Tide was previously derived with a legacy coin-type path; always re-derive
@@ -1217,9 +1224,9 @@ export const useWalletStore = create<WalletState>()(
             }
 
             const balanceOptions = {
-              // RTM/BTCZ/TIDE/FIRO support non-wallet address balance via address-index
+              // RTM/BTCZ/TIDE support non-wallet address balance via address-index
               // or configured explorer fallback (BTCZ).
-              preferAddressIndex: supportsAddressIndex(net.coinSymbol)
+              preferAddressIndex: supportsAddressIndexBalance(net.coinSymbol)
             }
             let balance = await getUtxoBalance(rpcConfig, address, balanceOptions)
             if (balance.total <= 0) {

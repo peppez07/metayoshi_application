@@ -939,18 +939,20 @@ export async function getUtxoBalance(
   const total = confirmed + unconfirmed
   if (address && total <= 0) {
     try {
-      const byAddressUtxos = await getAddressUtxos(config, address, 0)
-      if (byAddressUtxos.length > 0) {
-        let addrConfirmed = 0
-        let addrUnconfirmed = 0
-        for (const utxo of byAddressUtxos) {
-          if (utxo.confirmations >= 1) addrConfirmed += utxo.amount
-          else addrUnconfirmed += utxo.amount
-        }
-        return {
-          confirmed: Number(addrConfirmed.toFixed(8)),
-          unconfirmed: Number(addrUnconfirmed.toFixed(8)),
-          total: Number((addrConfirmed + addrUnconfirmed).toFixed(8))
+      if (options?.preferAddressIndex) {
+        const byAddressUtxos = await getAddressUtxos(config, address, 0)
+        if (byAddressUtxos.length > 0) {
+          let addrConfirmed = 0
+          let addrUnconfirmed = 0
+          for (const utxo of byAddressUtxos) {
+            if (utxo.confirmations >= 1) addrConfirmed += utxo.amount
+            else addrUnconfirmed += utxo.amount
+          }
+          return {
+            confirmed: Number(addrConfirmed.toFixed(8)),
+            unconfirmed: Number(addrUnconfirmed.toFixed(8)),
+            total: Number((addrConfirmed + addrUnconfirmed).toFixed(8))
+          }
         }
       }
     } catch {

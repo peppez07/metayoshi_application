@@ -103,12 +103,13 @@ VITE_ENABLED_COINS=rtm
 
 Allowed ids:
 - `rtm`
+- `doge`
 - `btcz`
 - `firo`
 - `all`
 
 If omitted/invalid, app falls back to enabled defaults.
-Current app runtime keeps `doge`, `tide`, `btcz`, and `firo` disabled for the public RTM-only release.
+Current app runtime keeps only `tide` disabled by default.
 
 ## RTM donation policy
 
@@ -156,7 +157,7 @@ Helpers:
 - `window.metayoshi.switchNetwork(networkId)`
 
 Current implementation status (as of 2026-02-21):
-- UTXO-focused networks for SDK usage: `rtm`, `btcz`, `firo`
+- UTXO-focused networks for SDK usage: `rtm`, `doge`, `btcz`, `firo`
 - `wallet_signMessage`: not supported in DApp SDK (`-32601`)
 - `wallet_sendTransaction`: supported with explicit popup approval
 
