@@ -1,0 +1,57 @@
+import type {
+  CoinModule,
+  CoinRuntimeContext,
+  Network,
+  NetworkCapabilitiesInput,
+  UtxoAddressSpec
+} from './types'
+import { FIRO_API_INFO } from './interceptors'
+import firoLogo from './coinlogos/firo.webp'
+
+export const FIRO_CAPABILITIES: NetworkCapabilitiesInput = {
+  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+}
+
+// Source:
+// - firoorg/firo/src/chainparams.cpp -> PUBKEY_ADDRESS=82
+// - satoshilabs/slips/slip-0044.md -> XZC(ZCoin/Firo) coin type 136
+export const FIRO_ADDRESS_SPEC: UtxoAddressSpec = {
+  bip44CoinType: 136,
+  p2pkhVersion: 0x52
+}
+
+export const FIRO_FEE_PER_BYTE = 0.00002
+
+export function estimateFiroFee(txBytes: number): number {
+  return txBytes * FIRO_FEE_PER_BYTE
+}
+
+export function createFiroNetwork(ctx: CoinRuntimeContext): Network {
+  void ctx
+  return {
+    id: 'firo',
+    name: 'Firo',
+    symbol: 'FIRO',
+    coinType: 'UTXO',
+    coinSymbol: 'FIRO',
+    rpcUrl: import.meta.env.VITE_FIRO_RPC || FIRO_API_INFO.defaultRpcUrl,
+    rpcUsername: 'rpcuser',
+    rpcPassword: 'rpcpass',
+    bridgeUrl: import.meta.env.VITE_FIRO_BRIDGE_URL || FIRO_API_INFO.defaultBridgeUrl,
+    explorerUrl: import.meta.env.VITE_FIRO_EXPLORER || FIRO_API_INFO.defaultExplorerUrl || 'https://explorer.firo.org',
+    capabilities: FIRO_CAPABILITIES,
+    feePerByte: FIRO_FEE_PER_BYTE,
+    logo: firoLogo
+  }
+}
+
+export const firoCoin: CoinModule = {
+  id: 'firo',
+  symbol: 'FIRO',
+  coinSymbol: 'FIRO',
+  capabilities: FIRO_CAPABILITIES,
+  utxoAddress: FIRO_ADDRESS_SPEC,
+  createNetwork: createFiroNetwork,
+  estimateFee: estimateFiroFee
+}

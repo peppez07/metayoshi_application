@@ -1,0 +1,89 @@
+{
+  "manifest_version": 3,
+  "name": "MetaYoshi",
+  "version": "0.0.2",
+  "version_name": "0.0.2-beta",
+  "action": {
+    "default_popup": "app/src/ui/index.html",
+    "default_icon": {
+      "16": "assets/metayoshi-16.png",
+      "32": "assets/metayoshi-32.png",
+      "48": "assets/metayoshi-48.png",
+      "128": "assets/metayoshi-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/metayoshi-16.png",
+    "32": "assets/metayoshi-32.png",
+    "48": "assets/metayoshi-48.png",
+    "128": "assets/metayoshi-128.png"
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://metayoshi.app/*",
+    "https://*.metayoshi.app/*",
+    "https://explorer.btcz.rocks/*",
+    "https://gateway.pinata.cloud/*",
+    "https://ipfs.io/*",
+    "https://cloudflare-ipfs.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*",
+    "http://host.docker.internal/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://metayoshi.app/*",
+        "https://*.metayoshi.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*"
+      ],
+      "js": [
+        "assets/content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/inpage.js"
+      ],
+      "matches": [
+        "https://metayoshi.app/*",
+        "https://*.metayoshi.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*"
+      ]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "metayoshi@metayoshi.app",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ],
+        "optional": []
+      }
+    }
+  }
+}

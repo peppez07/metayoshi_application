@@ -1,0 +1,149 @@
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, type ReactElement } from 'react'
+import { useWalletStore } from './store/walletStore'
+import { resolveNetworkCapabilities } from './lib/networkCapabilities'
+
+// Pages (to be created)
+import Register from './pages/Register'
+import Unlock from './pages/Unlock'
+import Connecting from './pages/Connecting'
+import WalletLayout from './pages/wallet/WalletLayout'
+import Assets from './pages/wallet/Assets'
+import AssetsPage from './pages/wallet/AssetsPage'
+import AssetPreviewPage from './pages/wallet/AssetPreviewPage'
+import Activity from './pages/wallet/Activity'
+import Send from './pages/wallet/Send'
+import Swap from './pages/wallet/Swap'
+import Sync from './pages/wallet/Sync'
+import Disconnected from './pages/wallet/Disconnected'
+import DappConnectStep1 from './pages/dapp/DappConnectStep1'
+import DappConnectStep2 from './pages/dapp/DappConnectStep2'
+import DappRequestConfirm from './pages/dapp/DappRequestConfirm'
+import TxConfirm from './pages/tx/TxConfirm'
+import TxReject from './pages/tx/TxReject'
+import SettingsLayout from './pages/settings/SettingsLayout'
+import MainSettings from './pages/settings/MainSettings'
+import PasswordSettings from './pages/settings/PasswordSettings'
+import AutolockSettings from './pages/settings/AutolockSettings'
+import SecuritySettings from './pages/settings/SecuritySettings'
+import BackupSettings from './pages/settings/BackupSettings'
+import RestoreSettings from './pages/settings/RestoreSettings'
+import ShowSecrets from './pages/settings/ShowSecrets'
+import DownloadKeys from './pages/settings/DownloadKeys'
+import AccountManager from './pages/settings/AccountManager'
+import AuthorizedSites from './pages/settings/AuthorizedSites'
+import LocalRpcSettings from './pages/settings/LocalRpcSettings'
+import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
+
+const WalletIndexRedirect = () => {
+  const { networks, activeNetworkId } = useWalletStore()
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const caps = resolveNetworkCapabilities(activeNetwork)
+  return <Navigate to={caps.ui.showAssetsTab ? '/wallet/assets' : '/wallet/activity'} replace />
+}
+
+const SendRouteGate = () => {
+  const { networks, activeNetworkId } = useWalletStore()
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const caps = resolveNetworkCapabilities(activeNetwork)
+  return caps.ui.showSendAction ? <Send /> : <Navigate to="/wallet/activity" replace />
+}
+
+const AssetsRouteGate = () => {
+  const { networks, activeNetworkId } = useWalletStore()
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const caps = resolveNetworkCapabilities(activeNetwork)
+  return caps.ui.showAssetsTab ? <Assets /> : <Navigate to="/wallet/activity" replace />
+}
+
+const TxRouteGate = ({ element }: { element: ReactElement }) => {
+  const { isLocked, networks, activeNetworkId } = useWalletStore()
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const caps = resolveNetworkCapabilities(activeNetwork)
+  if (isLocked) return <Navigate to="/unlock" replace />
+  if (!caps.features.nativeSend) return <Navigate to="/wallet/activity" replace />
+  return element
+}
+
+function App() {
+  const { isLocked, isInitialized, checkAutolock, sessionMnemonic, lock } = useWalletStore()
+
+  // Force lock on every popup open when there is no in-memory session.
+  // sessionMnemonic is never persisted to localStorage, so it is always null
+  // after the extension popup is closed and reopened. isLocked IS persisted,
+  // so without this guard the wallet could appear unlocked with no mnemonic.
+  useEffect(() => {
+    if (isInitialized && !isLocked && !sessionMnemonic) {
+      lock()
+    }
+  }, []) // intentionally only on mount
+
+  useEffect(() => {
+    const interval = setInterval(checkAutolock, 60000)
+    return () => clearInterval(interval)
+  }, [checkAutolock])
+
+  return (
+    <div className="w-[360px] h-[600px] bg-dark-900 overflow-hidden">
+      <div className="wallet-container">
+        <Routes>
+          {/* Auth Flow */}
+          <Route path="/register" element={<Register />} />
+          <Route path="/unlock" element={<Unlock />} />
+          
+          {/* Main Wallet Flow */}
+          <Route path="/connecting" element={<Connecting />} />
+          
+          <Route path="/wallet" element={isLocked ? <Navigate to="/unlock" /> : <WalletLayout />}>
+            <Route index element={<WalletIndexRedirect />} />
+            <Route path="assets" element={<AssetsRouteGate />} />
+            <Route path="activity" element={<Activity />} />
+            <Route path="send" element={<SendRouteGate />} />
+            <Route path="swap" element={<Swap />} />
+            <Route path="sync" element={<Sync />} />
+            <Route path="disconnected" element={<Disconnected />} />
+          </Route>
+
+          {/* Full Assets Page */}
+          <Route path="/assets" element={isLocked ? <Navigate to="/unlock" /> : <AssetsPage />} />
+          <Route path="/assets/preview" element={isLocked ? <Navigate to="/unlock" /> : <AssetPreviewPage />} />
+
+          {/* Dapp Flow */}
+          <Route path="/dapp/connect/1" element={<DappConnectStep1 />} />
+          <Route path="/dapp/connect/2" element={<DappConnectStep2 />} />
+          <Route path="/dapp/request/confirm" element={<DappRequestConfirm />} />
+
+          {/* Transaction Flow */}
+          <Route path="/tx/confirm" element={<TxRouteGate element={<TxConfirm />} />} />
+          <Route path="/tx/reject" element={<TxRouteGate element={<TxReject />} />} />
+
+          {/* Settings Flow */}
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<MainSettings />} />
+            <Route path="security" element={<SecuritySettings />} />
+            <Route path="backup" element={<BackupSettings />} />
+            <Route path="restore" element={<RestoreSettings />} />
+            <Route path="show-secrets" element={<ShowSecrets />} />
+            <Route path="download-keys" element={<DownloadKeys />} />
+            <Route path="accounts" element={<AccountManager />} />
+            <Route path="password" element={<PasswordSettings />} />
+            <Route path="autolock" element={<AutolockSettings />} />
+            <Route path="authorized-sites" element={<AuthorizedSites />} />
+            <Route path="local-rpc" element={<LocalRpcSettings />} />
+            <Route path="bridge-auth" element={<BridgeTxAuthSettings />} />
+            <Route path="rpc" element={<Navigate to="/settings" replace />} />
+          </Route>
+
+          {/* Default Route */}
+          <Route path="*" element={
+            !isInitialized ? <Navigate to="/register" /> : 
+            isLocked ? <Navigate to="/unlock" /> : 
+            <Navigate to="/wallet/assets" />
+          } />
+        </Routes>
+      </div>
+    </div>
+  )
+}
+
+export default App
