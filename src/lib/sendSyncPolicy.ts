@@ -7,7 +7,7 @@ function isFinitePercent(value: number | null): value is number {
 export function isSendBlockedBySync(syncing: boolean, syncPercent: number | null, connected = false): boolean {
   // Keep send actions available during temporary "waiting/syncing" windows
   // once the wallet already has a good connection.
-  if (connected && syncing) return false
+  if (connected && syncing && !isFinitePercent(syncPercent)) return false
   if (syncing) return true
   if (isFinitePercent(syncPercent)) return syncPercent < MIN_SYNC_PERCENT_FOR_SEND
   return false
