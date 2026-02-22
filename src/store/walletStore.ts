@@ -1203,25 +1203,32 @@ export const useWalletStore = create<WalletState>()(
         })
         let syncPercent: number | null = null
         let isChainSyncing = false
-        try {
-          const chainInfo = await getBlockchainInfo(rpcConfig)
-              const vpRaw = Number(chainInfo.verificationprogress)
-              const fallbackFromBlocks =
-                Number(chainInfo.headers) > 0
-                  ? (Number(chainInfo.blocks) / Number(chainInfo.headers))
-                  : NaN
-              const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
-              if (Number.isFinite(progress01) && progress01 >= 0) {
-                syncPercent = Math.max(0, Math.min(100, progress01 * 100))
-              }
-              if (typeof chainInfo.initialblockdownload === 'boolean') {
-                isChainSyncing = chainInfo.initialblockdownload
-              } else if (syncPercent !== null) {
-                isChainSyncing = syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-              }
-            } catch (err) {
-              console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
+        const isBtczBridgeMode =
+          String(net.coinSymbol || '').trim().toUpperCase() === 'BTCZ' && !useLocalRpc
+
+        // BTCZ bridge deployments are frequently missing a healthy chain RPC backend
+        // even when explorer data can still provide balances. Skip noisy chain probe.
+        if (!isBtczBridgeMode) {
+          try {
+            const chainInfo = await getBlockchainInfo(rpcConfig)
+            const vpRaw = Number(chainInfo.verificationprogress)
+            const fallbackFromBlocks =
+              Number(chainInfo.headers) > 0
+                ? (Number(chainInfo.blocks) / Number(chainInfo.headers))
+                : NaN
+            const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
+            if (Number.isFinite(progress01) && progress01 >= 0) {
+              syncPercent = Math.max(0, Math.min(100, progress01 * 100))
             }
+            if (typeof chainInfo.initialblockdownload === 'boolean') {
+              isChainSyncing = chainInfo.initialblockdownload
+            } else if (syncPercent !== null) {
+              isChainSyncing = syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+            }
+          } catch (err) {
+            console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
+          }
+        }
 
             const balanceOptions = {
               // RTM/BTCZ/TIDE support non-wallet address balance via address-index
