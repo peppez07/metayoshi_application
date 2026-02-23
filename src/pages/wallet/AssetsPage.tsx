@@ -521,7 +521,7 @@ const AssetsPage: React.FC = () => {
                   type="submit"
                   className="w-full btn-primary flex items-center justify-center gap-2"
                   isLoading={sending}
-                  disabled={sending}
+                  disabled={sendBlockedBySync || !toAddress.trim() || !qty || parseFloat(qty) <= 0 || sending}
                 >
                   <IoArrowUpOutline className="w-4 h-4" />
                   Send {parseAssetName(selectedAsset).sub || parseAssetName(selectedAsset).root}
