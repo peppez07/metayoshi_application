@@ -155,7 +155,6 @@ const Send: React.FC = () => {
           <Button 
             type="submit"
             className="w-full btn-primary"
-            disabled={!caps.features.nativeSend || sendBlockedBySync || !toAddress.trim() || !amount || parseFloat(amount) <= 0}
           >
             Continue
           </Button>
