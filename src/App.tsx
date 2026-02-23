@@ -34,6 +34,7 @@ import AccountManager from './pages/settings/AccountManager'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
 import LocalRpcSettings from './pages/settings/LocalRpcSettings'
 import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
+import TermsAndRules from './pages/TermsAndRules'
 
 const WalletIndexRedirect = () => {
   const { networks, activeNetworkId } = useWalletStore()
@@ -89,6 +90,7 @@ function App() {
         <Routes>
           {/* Auth Flow */}
           <Route path="/register" element={<Register />} />
+          <Route path="/terms" element={<TermsAndRules />} />
           <Route path="/unlock" element={<Unlock />} />
           
           {/* Main Wallet Flow */}

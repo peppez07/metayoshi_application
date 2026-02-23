@@ -16,6 +16,9 @@ const Register: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [ack, setAck] = useState(false)
   const [termsAck, setTermsAck] = useState(false)
+  const [createStep, setCreateStep] = useState<'form' | 'verify'>('form')
+  const [challengeIndex, setChallengeIndex] = useState<number | null>(null)
+  const [challengeInput, setChallengeInput] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -24,13 +27,36 @@ const Register: React.FC = () => {
     [mnemonic]
   )
 
+  const openTermsInInternalTab = () => {
+    const termsHashPath = '#/terms'
+    const extensionUrl = typeof chrome !== 'undefined' && chrome.runtime?.getURL
+      ? chrome.runtime.getURL(`app/src/ui/index.html${termsHashPath}`)
+      : `/${termsHashPath}`
+    window.open(extensionUrl, '_blank', 'noopener,noreferrer')
+  }
+
   useEffect(() => {
     if (mode !== 'create') return
+    setCreateStep('form')
+    setChallengeIndex(null)
+    setChallengeInput('')
     // Generate a new mnemonic once on first open in create mode.
     if (!mnemonic.trim()) {
       setMnemonic(bip39.generateMnemonic())
     }
   }, [mode])
+
+  const createVault = async () => {
+    setBusy(true)
+    try {
+      await initialize(password, normalizedMnemonic)
+      navigate('/connecting')
+    } catch (e: any) {
+      setError(String(e?.message ?? 'Failed to create vault'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const handleSubmit = async () => {
     setError('')
@@ -55,15 +81,35 @@ const Register: React.FC = () => {
       return
     }
 
-    setBusy(true)
-    try {
-      await initialize(password, normalizedMnemonic)
-      navigate('/connecting')
-    } catch (e: any) {
-      setError(String(e?.message ?? 'Failed to create vault'))
-    } finally {
-      setBusy(false)
+    if (mode === 'create') {
+      const words = normalizedMnemonic.split(' ')
+      if (!words.length) {
+        setError('Invalid mnemonic phrase')
+        return
+      }
+      setChallengeIndex(Math.floor(Math.random() * words.length))
+      setChallengeInput('')
+      setCreateStep('verify')
+      return
     }
+
+    await createVault()
+  }
+
+  const handleVerifyAndCreate = async () => {
+    if (challengeIndex === null) {
+      setError('Verification is not ready. Please go back and try again.')
+      return
+    }
+    const words = normalizedMnemonic.split(' ')
+    const expectedWord = words[challengeIndex]
+    const typedWord = challengeInput.trim().toLowerCase()
+    if (typedWord !== expectedWord) {
+      setError('Incorrect word. Try again or go back to restart.')
+      return
+    }
+    setError('')
+    await createVault()
   }
 
   return (
@@ -97,97 +143,147 @@ const Register: React.FC = () => {
             </button>
           </div>
 
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-              Secret Recovery Phrase
-            </label>
-            <textarea
-              className="input-field min-h-[110px] resize-none text-xs leading-relaxed py-3 font-mono"
-              value={mnemonic}
-              onChange={(e) => setMnemonic(e.target.value)}
-              placeholder={mode === 'create' ? 'Generated recovery phrase' : 'Enter 12/24 words separated by spaces'}
-              readOnly={mode === 'create'}
-            />
-            {mode === 'create' && (
+          {mode === 'create' && createStep === 'verify' ? (
+            <>
+              <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-4 space-y-2">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Seed Phrase Check</p>
+                <p className="text-xs text-gray-300 leading-relaxed">
+                  Prove you memorized your phrase before the vault is created.
+                </p>
+              </div>
+
+              <Input
+                type="text"
+                placeholder={challengeIndex !== null ? `Enter word #${challengeIndex + 1}` : 'Enter requested word'}
+                value={challengeInput}
+                onChange={(e) => setChallengeInput(e.target.value)}
+                className="bg-dark-700/50 border-dark-600 text-center h-12"
+                autoComplete="off"
+                autoFocus
+              />
+
+              {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
+
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   className="flex-1"
-                  onClick={() => setMnemonic(bip39.generateMnemonic())}
+                  onClick={() => {
+                    setError('')
+                    setCreateStep('form')
+                    setChallengeIndex(null)
+                    setChallengeInput('')
+                  }}
+                  disabled={busy}
                 >
-                  Regenerate
+                  Restart
                 </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => navigator.clipboard.writeText(normalizedMnemonic)}
-                >
-                  Copy
+                <Button className="flex-1 btn-primary" onClick={handleVerifyAndCreate} isLoading={busy}>
+                  Verify & Create
                 </Button>
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2 text-left">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
+                  Secret Recovery Phrase
+                </label>
+                <textarea
+                  className="input-field min-h-[110px] resize-none text-xs leading-relaxed py-3 font-mono"
+                  value={mnemonic}
+                  onChange={(e) => setMnemonic(e.target.value)}
+                  placeholder={mode === 'create' ? 'Generated recovery phrase' : 'Enter 12/24 words separated by spaces'}
+                  readOnly={mode === 'create'}
+                />
+                {mode === 'create' && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => setMnemonic(bip39.generateMnemonic())}
+                    >
+                      Regenerate
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => navigator.clipboard.writeText(normalizedMnemonic)}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                )}
+              </div>
 
-          <div className="space-y-3">
-            <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="bg-dark-700/50 border-dark-600 text-center h-12"
-            />
-            <Input
-              type="password"
-              placeholder="Confirm Password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="bg-dark-700/50 border-dark-600 text-center h-12"
-            />
-          </div>
+              <div className="space-y-3">
+                <Input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="bg-dark-700/50 border-dark-600 text-center h-12"
+                />
+                <Input
+                  type="password"
+                  placeholder="Confirm Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="bg-dark-700/50 border-dark-600 text-center h-12"
+                />
+              </div>
 
-          <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={ack}
-              onChange={(e) => setAck(e.target.checked)}
-              className="w-4 h-4 accent-primary"
-            />
-            <span className="text-xs font-bold text-gray-300">
-              I saved my recovery phrase securely
-            </span>
-          </label>
+              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={ack}
+                  onChange={(e) => setAck(e.target.checked)}
+                  className="w-4 h-4 accent-primary"
+                />
+                <span className="text-xs font-bold text-gray-300">
+                  I saved my recovery phrase securely
+                </span>
+              </label>
 
-          <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-3 space-y-2">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Terms And Rules</p>
-            <ul className="text-[11px] text-gray-300 leading-relaxed list-disc pl-4 space-y-1">
-              <li>MetaYoshi is a non-custodial wallet.</li>
-              <li>MetaYoshi is not responsible for any loss, damage, or software bug impact.</li>
-              <li>Your keys and recovery phrase are fully under your control and your responsibility.</li>
-              <li>Any prompt, transaction, signature, or approval accepted in MetaYoshi is under your own responsibility.</li>
-              <li>You confirm that you are at least 18 years old and legally able to use this wallet in your jurisdiction.</li>
-              <li>You are responsible for complying with all local laws, regulations, sanctions, and tax obligations.</li>
-              <li>You must verify all recipient addresses, amounts, and network details before approving transactions.</li>
-              <li>MetaYoshi does not provide financial, investment, tax, or legal advice.</li>
-            </ul>
-          </div>
+              <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Terms And Rules</p>
+                  <button
+                    type="button"
+                    onClick={openTermsInInternalTab}
+                    className="text-[10px] font-bold text-primary hover:underline uppercase tracking-widest"
+                  >
+                    Open Full Terms
+                  </button>
+                </div>
+                <ul className="text-[11px] text-gray-300 leading-relaxed list-disc pl-4 space-y-1">
+                  <li>MetaYoshi is non-custodial. Only you control your keys and recovery phrase.</li>
+                  <li>Lost or exposed recovery data can permanently result in loss of funds.</li>
+                  <li>All transactions and signatures are your responsibility and can be irreversible.</li>
+                  <li>MetaYoshi is provided as-is and does not provide legal, tax, or investment advice.</li>
+                  <li>You are responsible for legal and regulatory compliance in your jurisdiction.</li>
+                </ul>
+              </div>
 
-          <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={termsAck}
-              onChange={(e) => setTermsAck(e.target.checked)}
-              className="w-4 h-4 accent-primary"
-            />
-            <span className="text-xs font-bold text-gray-300">
-              I accept MetaYoshi Terms and Rules
-            </span>
-          </label>
+              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={termsAck}
+                  onChange={(e) => setTermsAck(e.target.checked)}
+                  className="w-4 h-4 accent-primary"
+                />
+                <span className="text-xs font-bold text-gray-300">
+                  I accept MetaYoshi Terms and Rules
+                </span>
+              </label>
 
-          {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
+              {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
 
-          <Button className="w-full btn-primary" onClick={handleSubmit} isLoading={busy}>
-            {mode === 'create' ? 'Create Vault' : 'Import Vault'}
-          </Button>
+              <Button className="w-full btn-primary" onClick={handleSubmit} isLoading={busy}>
+                {mode === 'create' ? 'Create Vault' : 'Import Vault'}
+              </Button>
+            </>
+          )}
         </div>
 
         <footer className="text-gray-500 text-xs font-medium mt-auto">
