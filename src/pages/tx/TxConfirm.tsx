@@ -153,7 +153,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         timestamp: Date.now(),
         networkId: activeNetwork.id
       })
-      await refreshActiveBalance()
+      void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((err) => {
+        console.warn('Post-send fast balance refresh failed:', err)
+      })
       navigate('/connecting')
     } catch (e: any) {
       setSubmitError(String(e?.message ?? 'Transaction failed'))

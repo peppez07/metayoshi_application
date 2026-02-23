@@ -162,7 +162,7 @@ interface WalletState {
   }) => void
 
   // RPC
-  refreshActiveBalance: () => Promise<void>
+  refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
   sendEvmTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendUtxoTransaction: (params: {
     to: string
@@ -1130,7 +1130,9 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverrides: { ...state.localRpcOverrides, [networkId]: override }
         })),
 
-      refreshActiveBalance: async () => {
+      refreshActiveBalance: async (options) => {
+        const fastMode = options?.fast === true
+        const skipZeroBalanceRecheck = options?.skipZeroBalanceRecheck === true
         const { networks, activeNetworkId, accounts, activeAccountId } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
@@ -1145,6 +1147,7 @@ export const useWalletStore = create<WalletState>()(
           return false
         }
         const waitForUiStabilize = async () => {
+          if (fastMode) return
           const elapsed = Date.now() - requestStartedAt
           await delay(Math.max(0, BALANCE_UI_STABILIZE_MS - elapsed))
         }
@@ -1194,7 +1197,7 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
-          } else if (net.coinType === 'UTXO') {
+        } else if (net.coinType === 'UTXO') {
         const { useLocalRpc, localRpcOverrides } = get()
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc,
@@ -1236,7 +1239,7 @@ export const useWalletStore = create<WalletState>()(
               preferAddressIndex: supportsAddressIndexBalance(net.coinSymbol)
             }
             let balance = await getUtxoBalance(rpcConfig, address, balanceOptions)
-            if (balance.total <= 0) {
+            if (balance.total <= 0 && !skipZeroBalanceRecheck && !fastMode) {
               await delay(UTXO_ZERO_BALANCE_RECHECK_MS)
               if (isStaleRequest()) return
               try {
