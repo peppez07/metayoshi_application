@@ -32,6 +32,7 @@ export interface RtmDonationPolicy {
   address: string
   source: 'bridge' | 'env'
 }
+export type CoinDonationPolicy = RtmDonationPolicy
 
 function parseBool(value: unknown): boolean {
   const normalized = String(value ?? '').trim().toLowerCase()
@@ -98,6 +99,85 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
 
 const policyCache = new Map<string, { ts: number; value: RtmDonationPolicy | null }>()
 const CACHE_TTL_MS = 60_000
+
+const DONATION_COIN_ID_BY_NETWORK_ID: Record<string, string> = {
+  rtm: 'raptoreum',
+  doge: 'dogecoin',
+  btcz: 'bitcoinz',
+  firo: 'firo'
+}
+
+function resolveDonationCoinId(network: Network): string {
+  return DONATION_COIN_ID_BY_NETWORK_ID[String(network.id || '').trim()] || ''
+}
+
+function resolveDonationEnvPrefix(network: Network): string {
+  const id = String(network.id || '').trim().toUpperCase()
+  if (!id) return ''
+  if (id === 'DOGE') return 'DOGE'
+  if (id === 'BTCZ') return 'BTCZ'
+  if (id === 'RTM') return 'RTM'
+  return id
+}
+
+export function supportsCoinDonationPolicy(network: Network): boolean {
+  return Boolean(resolveDonationCoinId(network))
+}
+
+function readDonationPolicyFromEnv(network: Network): RtmDonationPolicy | null {
+  const prefix = resolveDonationEnvPrefix(network)
+  if (!prefix) return null
+  const configuredAddress = String((import.meta.env as any)[`VITE_${prefix}_DONATION_ADDRESS`] || '').trim()
+  const envPercent = clampPercent(Number((import.meta.env as any)[`VITE_${prefix}_DONATION_PERCENT`] || RTM_DONATION_PERCENT_DEFAULT))
+  if (!configuredAddress || envPercent <= 0) return null
+  return {
+    address: configuredAddress,
+    percent: envPercent,
+    required: parseBool((import.meta.env as any)[`VITE_${prefix}_DONATION_REQUIRED`] || false),
+    enabled: true,
+    source: 'env'
+  }
+}
+
+export async function fetchCoinDonationPolicy(network: Network): Promise<CoinDonationPolicy | null> {
+  const coinId = resolveDonationCoinId(network)
+  if (!coinId) return null
+  const cacheKey = `${network.id}:${network.bridgeUrl || network.rpcUrl}`
+  const now = Date.now()
+  const cached = policyCache.get(cacheKey)
+  if (cached && now - cached.ts < CACHE_TTL_MS) return cached.value
+
+  const headers = buildAuthHeader(network)
+  const base = extractApiBase(network)
+  const bridgeUrl = String(network.bridgeUrl || '').trim().replace(/\/+$/, '')
+  const candidates = [
+    base ? `${base}/donation` : '',
+    base ? `${base}/v1/bridge/donation/${coinId}/main` : '',
+    base ? `${base}/v1/bridge/config/donation/${coinId}/main` : '',
+    base ? `${base}/v1/bridge/policy/${coinId}/main` : '',
+    bridgeUrl ? `${bridgeUrl}/donation` : '',
+    base ? `${base}/v1/bridge/methods/${coinId}` : ''
+  ].filter(Boolean)
+
+  for (const url of candidates) {
+    const json = await fetchJson(url, headers)
+    const parsed = parsePolicyPayload(json)
+    if (parsed) {
+      const value: RtmDonationPolicy = { ...parsed, source: 'bridge' }
+      policyCache.set(cacheKey, { ts: now, value })
+      return value
+    }
+  }
+
+  const envValue = readDonationPolicyFromEnv(network)
+  if (envValue) {
+    policyCache.set(cacheKey, { ts: now, value: envValue })
+    return envValue
+  }
+
+  policyCache.set(cacheKey, { ts: now, value: null })
+  return null
+}
 
 export async function fetchRtmDonationPolicy(network: Network): Promise<RtmDonationPolicy | null> {
   if (network.id !== 'rtm') return null

@@ -45,6 +45,7 @@ export interface FullBackupV1 {
   activity: Activity[]
   authorizedSites: string[]
   autolockMinutes: number
+  donationPercent: number
   backupConfirmed: boolean
   networkAssets: Record<string, Record<string, number>>
 }
@@ -105,6 +106,7 @@ interface WalletState {
   networkAssets: Record<string, Record<string, number>>
   authorizedSites: string[]
   autolockMinutes: number
+  donationPercent: number
   lastActiveTimestamp: number
   activity: Activity[]
 
@@ -140,6 +142,7 @@ interface WalletState {
   removeAuthorizedSite: (origin: string) => void
   
   setAutolock: (minutes: number) => void
+  setDonationPercent: (percent: number) => void
   updateLastActive: () => void
   checkAutolock: () => void
   
@@ -200,6 +203,13 @@ interface WalletState {
 
 const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
+const MIN_DONATION_PERCENT = 0.5
+const MAX_DONATION_PERCENT = 5
+
+function clampDonationPercent(value: number): number {
+  if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
+  return Math.max(MIN_DONATION_PERCENT, Math.min(MAX_DONATION_PERCENT, Number(value.toFixed(1))))
+}
 
 function delay(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve()
@@ -540,6 +550,7 @@ export const useWalletStore = create<WalletState>()(
       networkAssets: {},
       authorizedSites: [],
       autolockMinutes: 5,
+      donationPercent: MIN_DONATION_PERCENT,
       lastActiveTimestamp: Date.now(),
       useLocalRpc: false,
       localRpcOverrides: {},
@@ -723,6 +734,7 @@ export const useWalletStore = create<WalletState>()(
           activeAccountId: null,
           syncPercent: null,
           lowSyncStreak: 0,
+          donationPercent: MIN_DONATION_PERCENT,
           activity: []
         }),
 
@@ -1000,6 +1012,7 @@ export const useWalletStore = create<WalletState>()(
           activity:         Array.isArray(backup.activity) ? backup.activity : [],
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
+          donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
           networkAssets:    backup.networkAssets ?? {},
           lastActiveTimestamp: Date.now()
         })
@@ -1020,6 +1033,7 @@ export const useWalletStore = create<WalletState>()(
       }),
 
       setAutolock: (minutes) => set({ autolockMinutes: minutes }),
+      setDonationPercent: (percent) => set({ donationPercent: clampDonationPercent(Number(percent)) }),
       
       updateLastActive: () => set({ lastActiveTimestamp: Date.now() }),
       
@@ -1710,6 +1724,7 @@ export const useWalletStore = create<WalletState>()(
         syncPercent: state.syncPercent,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
+        donationPercent: state.donationPercent,
         lastActiveTimestamp: state.lastActiveTimestamp,
         activity: state.activity
       }),
@@ -1742,7 +1757,8 @@ export const useWalletStore = create<WalletState>()(
           nextAccountIndex,
           activeAccountId,
           networks: INITIAL_NETWORKS,
-          activeNetworkId
+          activeNetworkId,
+          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }
       }
     }

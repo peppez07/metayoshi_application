@@ -21,8 +21,9 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import {
   RTM_DONATION_ENABLED_DEFAULT,
   RTM_DONATION_PERCENT_DEFAULT,
-  fetchRtmDonationPolicy,
-  type RtmDonationPolicy
+  fetchCoinDonationPolicy,
+  supportsCoinDonationPolicy,
+  type CoinDonationPolicy
 } from '../../coins/rtm'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ const WalletLayout: React.FC = () => {
     setActiveAccount,
     setActiveNetwork,
     refreshActiveBalance,
+    donationPercent: donationPercentSetting,
     isConnected,
     isSyncing,
     syncPercent,
@@ -77,16 +79,16 @@ const WalletLayout: React.FC = () => {
   const [sendError, setSendError] = useState('')
   const [donationEnabled, setDonationEnabled] = useState(RTM_DONATION_ENABLED_DEFAULT)
   const [donationMode, setDonationMode] = useState<'add' | 'deduct'>('add')
-  const [donationPolicy, setDonationPolicy] = useState<RtmDonationPolicy | null>(null)
+  const [donationPolicy, setDonationPolicy] = useState<CoinDonationPolicy | null>(null)
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
-  const donationSupported = activeNetwork?.id === 'rtm'
+  const donationSupported = supportsCoinDonationPolicy(activeNetwork)
+  const donationRequired = donationSupported ? donationPolicy?.required === true : false
   const donationPercent = donationSupported
-    ? (donationPolicy?.percent ?? RTM_DONATION_PERCENT_DEFAULT)
+    ? (donationRequired ? (donationPolicy?.percent ?? RTM_DONATION_PERCENT_DEFAULT) : donationPercentSetting)
     : 0
   const donationAddress = donationSupported ? String(donationPolicy?.address || '').trim() : ''
-  const donationRequired = donationSupported ? donationPolicy?.required === true : false
   const donationActive = donationSupported && donationEnabled && Boolean(donationAddress)
   const numericAmount = Number(amount)
   const enteredAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
@@ -128,7 +130,7 @@ const WalletLayout: React.FC = () => {
   useEffect(() => {
     if (!showSendSheet || !donationSupported) return
     let cancelled = false
-    void fetchRtmDonationPolicy(activeNetwork).then((policy) => {
+    void fetchCoinDonationPolicy(activeNetwork).then((policy) => {
       if (cancelled) return
       setDonationPolicy(policy)
       if (policy?.required) {
@@ -525,7 +527,7 @@ const WalletLayout: React.FC = () => {
                     <>
                       {!donationAddress && (
                         <div className="text-[9px] leading-relaxed text-red-300">
-                          Donation unavailable: set `VITE_RTM_DONATION_ADDRESS` or enable bridge donation endpoint.
+                          Donation unavailable: configure bridge donation policy for this coin or set a coin donation env (example: VITE_DOGE_DONATION_ADDRESS).
                         </div>
                       )}
                       {donationAddress && <div className="grid grid-cols-2 gap-2">

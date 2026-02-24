@@ -12,6 +12,7 @@ const MainSettings: React.FC = () => {
         { label: 'Manage accounts', path: '/settings/accounts' },
         { label: 'Change wallet password', path: '/settings/password' },
         { label: 'Change wallet Autolock', path: '/settings/autolock' },
+        { label: 'Change donation %', path: '/settings/donation' },
       ]
     },
     {

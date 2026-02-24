@@ -41,6 +41,7 @@ const BackupSettings: React.FC = () => {
     activity,
     authorizedSites,
     autolockMinutes,
+    donationPercent,
     backupConfirmed,
     networkAssets,
     nextAccountIndex,
@@ -101,6 +102,7 @@ const BackupSettings: React.FC = () => {
       activity,
       authorizedSites,
       autolockMinutes,
+      donationPercent,
       backupConfirmed,
       networkAssets
     }
