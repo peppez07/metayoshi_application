@@ -87,6 +87,7 @@ const Activity: React.FC = () => {
               asset={item.asset}
               address={item.to || item.from}
               status={item.status}
+              timestamp={item.timestamp}
               onClick={() => setSelectedTx(item)}
             />
           ))

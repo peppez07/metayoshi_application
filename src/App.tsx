@@ -67,7 +67,7 @@ const TxRouteGate = ({ element }: { element: ReactElement }) => {
 }
 
 function App() {
-  const { isLocked, isInitialized, checkAutolock, sessionMnemonic, lock } = useWalletStore()
+  const { isLocked, isInitialized, hasVault, checkAutolock, sessionMnemonic, lock } = useWalletStore()
 
   // Force lock on every popup open when there is no in-memory session.
   // sessionMnemonic is never persisted to localStorage, so it is always null
@@ -89,7 +89,7 @@ function App() {
       <div className="wallet-container">
         <Routes>
           {/* Auth Flow */}
-          <Route path="/register" element={<Register />} />
+          <Route path="/register" element={hasVault ? <Navigate to="/unlock" replace /> : <Register />} />
           <Route path="/terms" element={<TermsAndRules />} />
           <Route path="/unlock" element={<Unlock />} />
           
@@ -138,9 +138,9 @@ function App() {
 
           {/* Default Route */}
           <Route path="*" element={
-            !isInitialized ? <Navigate to="/register" /> : 
+            !hasVault || !isInitialized ? <Navigate to="/register" /> : 
             isLocked ? <Navigate to="/unlock" /> : 
-            <Navigate to="/wallet/assets" />
+            <WalletIndexRedirect />
           } />
         </Routes>
       </div>

@@ -116,14 +116,14 @@ const AssetsPage: React.FC = () => {
     networks, activeNetworkId,
     networkAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
     isConnected,
-    isSyncing, syncPercent
+    isSyncing, syncPercent, lowSyncStreak
   } = useWalletStore()
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
   const [search,       setSearch]       = useState('')
   const [refreshing,   setRefreshing]   = useState(false)

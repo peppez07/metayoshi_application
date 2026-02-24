@@ -51,7 +51,8 @@ const WalletLayout: React.FC = () => {
     refreshActiveBalance,
     isConnected,
     isSyncing,
-    syncPercent
+    syncPercent,
+    lowSyncStreak
   } = useWalletStore()
 
   // ── sheet visibility ──────────────────────────────────────────────────────
@@ -143,8 +144,8 @@ const WalletLayout: React.FC = () => {
 
   // ── tabs — only show Assets if the network supports token assets ───────────
   const caps = networkCapabilities(activeNetwork)
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const TABS = [
     ...(caps.ui.showAssetsTab ? [{ id: 'assets', label: 'Assets' }] : []),
     ...(caps.ui.showActivityTab ? [{ id: 'activity', label: 'Activity' }] : [])

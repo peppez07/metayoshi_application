@@ -24,12 +24,14 @@ const DappRequestConfirm: React.FC = () => {
     activeAccountId,
     setActiveNetwork,
     setActiveAccount,
+    sendXrpTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
     addActivity,
     isConnected,
     isSyncing,
-    syncPercent
+    syncPercent,
+    lowSyncStreak
   } = useWalletStore()
   const [pendingRequest, setPendingRequest] = useState<DappPendingRequest | null>(null)
   const [loadingRequest, setLoadingRequest] = useState(true)
@@ -49,8 +51,8 @@ const DappRequestConfirm: React.FC = () => {
     () => networks.find((n) => n.id === pendingRequest?.networkId) || activeNetwork,
     [networks, pendingRequest, activeNetwork]
   )
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
   useEffect(() => {
     if (!canUseChromeStorage()) {
@@ -147,10 +149,15 @@ const DappRequestConfirm: React.FC = () => {
         setActiveAccount(pendingRequest.accountId)
       }
 
-      const tx = await sendUtxoTransaction({
-        to: pendingRequest.request.to,
-        amount: pendingRequest.request.amount
-      })
+      const tx = requestNetwork.coinType === 'XRP'
+        ? await sendXrpTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : await sendUtxoTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
 
       const latestState = useWalletStore.getState()
       const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]

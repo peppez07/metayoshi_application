@@ -9,7 +9,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 
 const Send: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, networks, activeNetworkId, isSyncing, syncPercent, isConnected } = useWalletStore()
+  const { accounts, activeAccountId, networks, activeNetworkId, isSyncing, syncPercent, isConnected, lowSyncStreak } = useWalletStore()
   const [toAddress, setToAddress] = useState('')
   const [amount, setAmount] = useState('')
   const [error, setError] = useState('')
@@ -17,8 +17,8 @@ const Send: React.FC = () => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault()

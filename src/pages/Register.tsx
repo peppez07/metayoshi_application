@@ -8,7 +8,7 @@ import * as bip39 from 'bip39'
 
 const Register: React.FC = () => {
   const navigate = useNavigate()
-  const { initialize } = useWalletStore()
+  const { initialize, hasVault, isInitialized } = useWalletStore()
 
   const [mode, setMode] = useState<'create' | 'import'>('create')
   const [mnemonic, setMnemonic] = useState('')
@@ -28,12 +28,29 @@ const Register: React.FC = () => {
   )
 
   const openTermsInInternalTab = () => {
-    const termsHashPath = '#/terms'
-    const extensionUrl = typeof chrome !== 'undefined' && chrome.runtime?.getURL
-      ? chrome.runtime.getURL(`app/src/ui/index.html${termsHashPath}`)
-      : `/${termsHashPath}`
-    window.open(extensionUrl, '_blank', 'noopener,noreferrer')
+    navigate('/terms')
+    try {
+      if (typeof chrome !== 'undefined' && chrome.windows?.getCurrent) {
+        chrome.windows.getCurrent({}, (win) => {
+          const id = win?.id
+          if (typeof id !== 'number' || !chrome.windows?.update) return
+          chrome.windows.update(id, {
+            width: 520,
+            height: 700,
+            focused: true
+          })
+        })
+      }
+    } catch {
+      // no-op
+    }
   }
+
+  useEffect(() => {
+    if (hasVault || isInitialized) {
+      navigate('/unlock', { replace: true })
+    }
+  }, [hasVault, isInitialized, navigate])
 
   useEffect(() => {
     if (mode !== 'create') return
@@ -253,7 +270,7 @@ const Register: React.FC = () => {
                     onClick={openTermsInInternalTab}
                     className="text-[10px] font-bold text-primary hover:underline uppercase tracking-widest"
                   >
-                    Open Full Terms
+                    Show Terms
                   </button>
                 </div>
                 <ul className="text-[11px] text-gray-300 leading-relaxed list-disc pl-4 space-y-1">

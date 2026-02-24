@@ -7,7 +7,7 @@ import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import {
   getUtxoBalance, sendRawTransaction, createRawTransaction, listUtxoUnspent,
   getAddressUtxos, getAddressMempoolSpentOutpoints, listAssetBalancesByAddress, sendRtmAssetNonCustodial,
-  getBlockchainInfo, scanAddressUnspent, validateAddress, getAssetDetailsByName,
+  getBlockchainInfo, scanAddressUnspent, validateAddress, getAssetDetailsByName, sendToAddress,
   type RtmAssetDetails,
   type UtxoRpcConfig
 } from '../lib/utxoRpc'
@@ -97,6 +97,8 @@ interface WalletState {
   isSyncing: boolean
   /** Sync percentage for current network when known (0-100). */
   syncPercent: number | null
+  /** Consecutive refresh checks below the safe sync threshold. */
+  lowSyncStreak: number
   /** Monotonic id for active balance refresh requests. */
   balanceRefreshNonce: number
   /** Per-network asset balances. Key = networkId, value = { assetName: rawAmount (sats) } */
@@ -166,6 +168,7 @@ interface WalletState {
   // RPC
   refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
   sendEvmTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendUtxoTransaction: (params: {
     to: string
     amount: string
@@ -532,6 +535,7 @@ export const useWalletStore = create<WalletState>()(
       isConnected: false,
       isSyncing: false,
       syncPercent: null,
+      lowSyncStreak: 0,
       balanceRefreshNonce: 0,
       networkAssets: {},
       authorizedSites: [],
@@ -718,6 +722,7 @@ export const useWalletStore = create<WalletState>()(
           nextAccountIndex: 1,
           activeAccountId: null,
           syncPercent: null,
+          lowSyncStreak: 0,
           activity: []
         }),
 
@@ -1194,7 +1199,7 @@ export const useWalletStore = create<WalletState>()(
           console.warn(`No address for ${activeNetworkId} — skipping balance refresh`)
           await waitForUiStabilize()
           if (isStaleRequest()) return
-          set({ isSyncing: false, isConnected: false, syncPercent: null })
+          set({ isSyncing: false, isConnected: false, syncPercent: null, lowSyncStreak: 0 })
           return
         }
 
@@ -1208,6 +1213,7 @@ export const useWalletStore = create<WalletState>()(
               isSyncing: false,
               isConnected: true,
               syncPercent: 100,
+              lowSyncStreak: 0,
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
@@ -1235,6 +1241,7 @@ export const useWalletStore = create<WalletState>()(
             isSyncing: false,
             isConnected: true,
             syncPercent: 100,
+            lowSyncStreak: 0,
             accounts: state.accounts.map((a) =>
               a.id === acc.id
                 ? {
@@ -1305,6 +1312,11 @@ export const useWalletStore = create<WalletState>()(
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
+              lowSyncStreak: (() => {
+                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
+              })(),
               isSyncing: isChainSyncing,
               isConnected: true,
               syncPercent,
@@ -1333,6 +1345,7 @@ export const useWalletStore = create<WalletState>()(
               isSyncing: false,
               isConnected: state.isConnected,
               syncPercent: state.syncPercent,
+              lowSyncStreak: state.lowSyncStreak,
               accounts: state.accounts
             }))
             return
@@ -1342,7 +1355,7 @@ export const useWalletStore = create<WalletState>()(
           console.error(`[${net?.symbol}] all RPC attempts failed:`, err)
           await waitForUiStabilize()
           if (isStaleRequest()) return
-          set({ isSyncing: false, isConnected: false })
+          set({ isSyncing: false, isConnected: false, lowSyncStreak: 0 })
         }
       },
 
@@ -1365,6 +1378,33 @@ export const useWalletStore = create<WalletState>()(
         })
 
         return { hash: tx.hash }
+      },
+
+      sendXrpTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, isLocked, useLocalRpc: ulrXrp, localRpcOverrides: lroXrp } = get()
+        if (isLocked) throw new Error('Wallet is locked')
+
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.coinType !== 'XRP') throw new Error('Active network is not XRP')
+
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          useLocalRpc: ulrXrp,
+          localRpcOverride: lroXrp[net.id],
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+
+        const toAddress = String(to || '').trim()
+        const amountValue = Number(amount)
+        if (!toAddress) throw new Error('Recipient address is required')
+        if (!Number.isFinite(amountValue) || amountValue <= 0) throw new Error('Amount must be greater than 0')
+
+        const recipientValidation = await validateAddress(rpcConfig, toAddress)
+        if (!recipientValidation?.isvalid) {
+          throw new Error(`Recipient address is invalid for XRP: ${toAddress}`)
+        }
+
+        const txid = await sendToAddress(rpcConfig, toAddress, Number(amountValue.toFixed(6)))
+        return { hash: txid }
       },
 
       sendUtxoTransaction: async ({ to, amount, donation }) => {

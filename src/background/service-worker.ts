@@ -30,8 +30,10 @@ const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
 const APP_POPUP_WIDTH = 380
 const APP_POPUP_HEIGHT = 640
+const APP_POPUP_MAX_HEIGHT = 700
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const managedPopupWindowIds = new Set<number>()
+let managedPopupWindowId: number | null = null
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -336,6 +338,23 @@ async function openUnlockPopup(): Promise<void> {
 async function openManagedPopup(url: string): Promise<void> {
   const left = await resolvePopupLeft()
   const top = await resolvePopupTop()
+
+  const existingWindow = await findManagedPopupWindow()
+  if (existingWindow?.id !== undefined) {
+    const windowId = existingWindow.id
+    managedPopupWindowId = windowId
+    managedPopupWindowIds.add(windowId)
+    await chrome.windows.update(windowId, {
+      width: APP_POPUP_WIDTH,
+      height: APP_POPUP_HEIGHT,
+      left,
+      top,
+      focused: true
+    })
+    await updateManagedPopupWindowRoute(windowId, url)
+    return
+  }
+
   const created = await chrome.windows.create({
     url,
     type: 'popup',
@@ -346,7 +365,67 @@ async function openManagedPopup(url: string): Promise<void> {
     focused: true
   })
   if (created && typeof created.id === 'number') {
+    managedPopupWindowId = created.id
     managedPopupWindowIds.add(created.id)
+  }
+}
+
+function isManagedPopupUrl(url: string | undefined): boolean {
+  if (!url) return false
+  const base = chrome.runtime.getURL(APP_ENTRY_PATH)
+  return url.startsWith(base)
+}
+
+async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
+  if (typeof managedPopupWindowId === 'number') {
+    try {
+      const win = await chrome.windows.get(managedPopupWindowId, { populate: true })
+      const tabUrl = win.tabs?.[0]?.url
+      if (win.type === 'popup' && isManagedPopupUrl(tabUrl)) {
+        return win
+      }
+    } catch {
+      managedPopupWindowId = null
+    }
+  }
+
+  try {
+    const all = await chrome.windows.getAll({ populate: true })
+    const managed = all.filter((win) => win.type === 'popup' && isManagedPopupUrl(win.tabs?.[0]?.url))
+    if (managed.length === 0) return null
+
+    const [primary, ...duplicates] = managed
+    if (typeof primary.id === 'number') {
+      managedPopupWindowId = primary.id
+      managedPopupWindowIds.add(primary.id)
+    }
+    for (const dup of duplicates) {
+      if (typeof dup.id === 'number') {
+        managedPopupWindowIds.delete(dup.id)
+        try {
+          await chrome.windows.remove(dup.id)
+        } catch {
+          // Ignore close races.
+        }
+      }
+    }
+    return primary
+  } catch {
+    return null
+  }
+}
+
+async function updateManagedPopupWindowRoute(windowId: number, url: string): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ windowId })
+    const targetTab = tabs[0]
+    if (targetTab?.id !== undefined) {
+      await chrome.tabs.update(targetTab.id, { url, active: true })
+      return
+    }
+    await chrome.tabs.create({ windowId, url, active: true })
+  } catch {
+    // Ignore tab update/create races.
   }
 }
 
@@ -374,12 +453,19 @@ async function resolvePopupTop(): Promise<number | undefined> {
   }
 }
 
-async function enforceManagedPopupWidth(windowId: number): Promise<void> {
+async function enforceManagedPopupBounds(windowId: number): Promise<void> {
   try {
     const win = await chrome.windows.get(windowId)
     if (win.type !== 'popup') return
+    const nextBounds: chrome.windows.UpdateInfo = {}
     if (typeof win.width === 'number' && win.width !== APP_POPUP_WIDTH) {
-      await chrome.windows.update(windowId, { width: APP_POPUP_WIDTH })
+      nextBounds.width = APP_POPUP_WIDTH
+    }
+    if (typeof win.height === 'number' && win.height > APP_POPUP_MAX_HEIGHT) {
+      nextBounds.height = APP_POPUP_MAX_HEIGHT
+    }
+    if (Object.keys(nextBounds).length > 0) {
+      await chrome.windows.update(windowId, nextBounds)
     }
   } catch {
     // Ignore transient failures (window closed/race).
@@ -1062,10 +1148,13 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
 chrome.windows.onBoundsChanged.addListener((win) => {
   if (typeof win.id !== 'number') return
   if (!managedPopupWindowIds.has(win.id)) return
-  void enforceManagedPopupWidth(win.id)
+  void enforceManagedPopupBounds(win.id)
 })
 
 chrome.windows.onRemoved.addListener((windowId) => {
+  if (managedPopupWindowId === windowId) {
+    managedPopupWindowId = null
+  }
   managedPopupWindowIds.delete(windowId)
 })
 

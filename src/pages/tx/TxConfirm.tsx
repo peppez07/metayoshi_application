@@ -41,11 +41,13 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     activeNetworkId,
     addActivity,
     sendEvmTransaction,
+    sendXrpTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
     isConnected,
     isSyncing,
-    syncPercent
+    syncPercent,
+    lowSyncStreak
   } = useWalletStore()
   const [activeTab, setActiveTab] = useState('details')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -61,8 +63,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected)
+  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
   const enteredAmountNumRaw = Number(txState.enteredAmount ?? amount)
   const enteredAmount = Number.isFinite(enteredAmountNumRaw) && enteredAmountNumRaw > 0 ? enteredAmountNumRaw : safeAmount
@@ -126,6 +128,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       let res: { hash: string }
       if (activeNetwork.coinType === 'EVM') {
         res = await sendEvmTransaction({ to: toAddress, amount })
+      } else if (activeNetwork.coinType === 'XRP') {
+        res = await sendXrpTransaction({ to: toAddress, amount })
       } else if (activeNetwork.coinType === 'UTXO') {
         res = await sendUtxoTransaction({
           to: toAddress,
