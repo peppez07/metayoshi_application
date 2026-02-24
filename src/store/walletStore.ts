@@ -13,6 +13,8 @@ import {
 } from '../lib/utxoRpc'
 import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
+import { deriveXrpAddress } from '../lib/xrpAddress'
+import { getXrpAccountBalance } from '../lib/xrpRpc'
 import { signLegacyP2pkhTransaction, signBtczTransparentTransaction, type UnsignedTxInput } from '../lib/utxoSign'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
@@ -356,6 +358,7 @@ async function deriveAccountAddresses(
   const networkAddresses: Record<string, string> = {}
   const derivationErrors: string[] = []
   let firstUtxoAddress = ''
+  let firstXrpAddress = ''
 
   for (const net of networks) {
     if (net.coinType === 'UTXO' && net.coinSymbol) {
@@ -368,6 +371,16 @@ async function deriveAccountAddresses(
         derivationErrors.push(`${net.symbol}: ${msg}`)
         console.warn(`Failed to derive ${net.coinSymbol} address (account ${derivationIndex}):`, err)
       }
+    } else if (net.coinType === 'XRP') {
+      try {
+        const xrp = await deriveXrpAddress(mnemonic, derivationIndex)
+        networkAddresses[net.id] = xrp.address
+        if (!firstXrpAddress) firstXrpAddress = xrp.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive XRP address (account ${derivationIndex}):`, err)
+      }
     } else if (net.coinType === 'EVM') {
       networkAddresses[net.id] = evmWallet.address
     }
@@ -378,7 +391,8 @@ async function deriveAccountAddresses(
       EVM: evmWallet.address,
       UTXO: firstUtxoAddress,
       BTC: '',
-      SOL: ''
+      SOL: '',
+      XRP: firstXrpAddress
     },
     networkAddresses,
     derivationErrors
@@ -402,7 +416,8 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
         EVM: addresses.EVM ?? '',
         UTXO: addresses.UTXO ?? '',
         BTC: addresses.BTC ?? '',
-        SOL: addresses.SOL ?? ''
+        SOL: addresses.SOL ?? '',
+        XRP: addresses.XRP ?? ''
       },
       networkAddresses: { ...networkAddresses },
       networkBalances: { ...networkBalances },
@@ -627,7 +642,7 @@ export const useWalletStore = create<WalletState>()(
               id: 'acc-1',
               name: 'Account 1',
               derivationIndex: 0,
-              addresses: { EVM: '', UTXO: '', BTC: '', SOL: '' },
+              addresses: { EVM: '', UTXO: '', BTC: '', SOL: '', XRP: '' },
               networkAddresses: {},
               networkBalances: {},
               balance: '0'
@@ -646,7 +661,8 @@ export const useWalletStore = create<WalletState>()(
                 EVM: derived.addresses.EVM || account.addresses?.EVM || '',
                 UTXO: derived.addresses.UTXO || account.addresses?.UTXO || '',
                 BTC: account.addresses?.BTC || '',
-                SOL: account.addresses?.SOL || ''
+                SOL: account.addresses?.SOL || '',
+                XRP: derived.addresses.XRP || account.addresses?.XRP || ''
               },
               networkAddresses: {
                 ...(account.networkAddresses ?? {}),
@@ -753,6 +769,9 @@ export const useWalletStore = create<WalletState>()(
           let address = ''
           if (net.coinType === 'EVM') {
             address = deriveEvmWallet(sessionMnemonic, accountIndex).address
+          } else if (net.coinType === 'XRP') {
+            const derived = await deriveXrpAddress(sessionMnemonic, accountIndex)
+            address = derived.address
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
             const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
             address = derived.address
@@ -946,7 +965,8 @@ export const useWalletStore = create<WalletState>()(
               EVM:  derived.addresses.EVM  || acc.addresses?.EVM  || '',
               UTXO: derived.addresses.UTXO || acc.addresses?.UTXO || '',
               BTC:  acc.addresses?.BTC || '',
-              SOL:  acc.addresses?.SOL || ''
+              SOL:  acc.addresses?.SOL || '',
+              XRP:  derived.addresses.XRP || acc.addresses?.XRP || ''
             },
             networkAddresses: {
               ...(acc.networkAddresses ?? {}),
@@ -1044,6 +1064,9 @@ export const useWalletStore = create<WalletState>()(
 
         if (selectedNetwork.coinType === 'EVM') {
           selectedAddress = deriveEvmWallet(sessionMnemonic, derivationIndex).address
+        } else if (selectedNetwork.coinType === 'XRP') {
+          const derived = await deriveXrpAddress(sessionMnemonic, derivationIndex)
+          selectedAddress = derived.address
         } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
           const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
           selectedAddress = derived.address
@@ -1053,9 +1076,10 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
         }
 
-        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', SOL: '' }
+        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', SOL: '', XRP: '' }
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
+        if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
 
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
@@ -1197,6 +1221,33 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
+        } else if (net.coinType === 'XRP') {
+          const { useLocalRpc, localRpcOverrides } = get()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc,
+            localRpcOverride: localRpcOverrides[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const balance = await getXrpAccountBalance(rpcConfig, address)
+          await waitForUiStabilize()
+          if (isStaleRequest()) return
+          set((state) => ({
+            isSyncing: false,
+            isConnected: true,
+            syncPercent: 100,
+            accounts: state.accounts.map((a) =>
+              a.id === acc.id
+                ? {
+                    ...a,
+                    balance: balance.balance,
+                    networkBalances: {
+                      ...(a.networkBalances ?? {}),
+                      [activeNetworkId]: balance.balance
+                    }
+                  }
+                : a
+            )
+          }))
         } else if (net.coinType === 'UTXO') {
         const { useLocalRpc, localRpcOverrides } = get()
         const rpcConfig = await createUtxoRpcConfig(net, {

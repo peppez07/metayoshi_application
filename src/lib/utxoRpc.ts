@@ -722,6 +722,14 @@ async function jsonRpcCall(
   return result
 }
 
+export async function callBridgeMethod(
+  config: UtxoRpcConfig,
+  method: string,
+  params: any[] = []
+): Promise<any> {
+  return await jsonRpcCall(config, method, params)
+}
+
 export interface UtxoUnspent {
   txid: string
   vout: number

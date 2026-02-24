@@ -396,7 +396,7 @@ const AssetsPage: React.FC = () => {
           onClick={closeSheet}
         >
           <div
-            className="w-full max-w-[360px] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200"
+            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200"
             onClick={e => e.stopPropagation()}
           >
             {/* drag handle */}
@@ -537,3 +537,4 @@ const AssetsPage: React.FC = () => {
 }
 
 export default AssetsPage
+

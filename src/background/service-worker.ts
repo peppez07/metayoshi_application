@@ -28,8 +28,10 @@ import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } fr
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
-const APP_POPUP_WIDTH = 360
-const APP_POPUP_HEIGHT = 600
+const APP_POPUP_WIDTH = 380
+const APP_POPUP_HEIGHT = 640
+const APP_ENTRY_PATH = 'app/src/ui/index.html'
+const managedPopupWindowIds = new Set<number>()
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -73,7 +75,7 @@ interface WalletState {
   hasVault?: boolean
   accounts?: Array<{
     id: string
-    addresses: { EVM?: string; UTXO?: string }
+    addresses: { EVM?: string; UTXO?: string; XRP?: string }
     networkAddresses?: Record<string, string>
   }>
   activeAccountId?: string | null
@@ -84,8 +86,12 @@ interface WalletState {
 
 function resolveDappNetworks(state: WalletState): Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
   return (state.networks || []).filter((network) => (
-    network?.coinType === 'UTXO' && Boolean(String(network.id || '').trim())
+    (network?.coinType === 'UTXO' || network?.coinType === 'XRP') && Boolean(String(network.id || '').trim())
   ))
+}
+
+function resolveCoinDecimals(network?: { coinType?: string }): number {
+  return network?.coinType === 'XRP' ? 6 : 8
 }
 
 installGlobalErrorMonitor('background-sw')
@@ -162,6 +168,9 @@ function getActiveAddressFromState(state: WalletState, networkId: string): strin
 
   if (network.coinType === 'EVM') {
     return account.addresses?.EVM || null
+  }
+  if (network.coinType === 'XRP') {
+    return account.addresses?.XRP || null
   }
   if (network.coinType === 'UTXO') {
     return account.addresses?.UTXO || null
@@ -298,46 +307,83 @@ function buildUnlockPopupUrl(): string {
   return buildPopupRouteUrl('/unlock')
 }
 
-function resolvePopupEntryPath(): string {
-  const manifest = chrome.runtime.getManifest()
-  const popupPath = String(manifest?.action?.default_popup || '').trim()
-  return popupPath || 'app/src/ui/index.html'
-}
-
 function buildPopupRouteUrl(route: string): string {
   const normalizedRoute = String(route || '').trim()
   const hashRoute = normalizedRoute.startsWith('/') ? normalizedRoute : `/${normalizedRoute}`
-  return `${chrome.runtime.getURL(resolvePopupEntryPath())}#${hashRoute}`
+  return `${chrome.runtime.getURL(APP_ENTRY_PATH)}#${hashRoute}`
+}
+
+function buildWalletHomePopupUrl(): string {
+  return buildPopupRouteUrl('/')
+}
+
+async function openWalletHomePopup(): Promise<void> {
+  await openManagedPopup(buildWalletHomePopupUrl())
 }
 
 async function openApprovalPopup(): Promise<void> {
-  await chrome.windows.create({
-    url: buildApprovalPopupUrl(),
-    type: 'popup',
-    width: APP_POPUP_WIDTH,
-    height: APP_POPUP_HEIGHT,
-    focused: true
-  })
+  await openManagedPopup(buildApprovalPopupUrl())
 }
 
 async function openRequestPopup(requestId: string): Promise<void> {
-  await chrome.windows.create({
-    url: buildRequestPopupUrl(requestId),
-    type: 'popup',
-    width: APP_POPUP_WIDTH,
-    height: APP_POPUP_HEIGHT,
-    focused: true
-  })
+  await openManagedPopup(buildRequestPopupUrl(requestId))
 }
 
 async function openUnlockPopup(): Promise<void> {
-  await chrome.windows.create({
-    url: buildUnlockPopupUrl(),
+  await openManagedPopup(buildUnlockPopupUrl())
+}
+
+async function openManagedPopup(url: string): Promise<void> {
+  const left = await resolvePopupLeft()
+  const top = await resolvePopupTop()
+  const created = await chrome.windows.create({
+    url,
     type: 'popup',
     width: APP_POPUP_WIDTH,
     height: APP_POPUP_HEIGHT,
+    left,
+    top,
     focused: true
   })
+  if (created && typeof created.id === 'number') {
+    managedPopupWindowIds.add(created.id)
+  }
+}
+
+async function resolvePopupLeft(): Promise<number | undefined> {
+  try {
+    const base = await chrome.windows.getLastFocused()
+    const baseLeft = Number(base.left)
+    const baseWidth = Number(base.width)
+    if (!Number.isFinite(baseLeft) || !Number.isFinite(baseWidth)) return undefined
+    return Math.max(0, Math.round(baseLeft + (baseWidth - APP_POPUP_WIDTH) / 2))
+  } catch {
+    return undefined
+  }
+}
+
+async function resolvePopupTop(): Promise<number | undefined> {
+  try {
+    const base = await chrome.windows.getLastFocused()
+    const baseTop = Number(base.top)
+    const baseHeight = Number(base.height)
+    if (!Number.isFinite(baseTop) || !Number.isFinite(baseHeight)) return undefined
+    return Math.max(0, Math.round(baseTop + (baseHeight - APP_POPUP_HEIGHT) / 2))
+  } catch {
+    return undefined
+  }
+}
+
+async function enforceManagedPopupWidth(windowId: number): Promise<void> {
+  try {
+    const win = await chrome.windows.get(windowId)
+    if (win.type !== 'popup') return
+    if (typeof win.width === 'number' && win.width !== APP_POPUP_WIDTH) {
+      await chrome.windows.update(windowId, { width: APP_POPUP_WIDTH })
+    }
+  } catch {
+    // Ignore transient failures (window closed/race).
+  }
 }
 
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
@@ -628,7 +674,7 @@ function buildDappRuntimeContext(state: WalletState): DappRuntimeContext {
       coinId: network?.id || null,
       coinName: network?.name || null,
       coinSymbol: network?.symbol || null,
-      coinDecimals: 8,
+      coinDecimals: resolveCoinDecimals(network),
       chainId: network?.chainId?.toString() || network?.id || null,
       networkId: network?.id || null,
       networkLabel: network?.name || null,
@@ -685,8 +731,9 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
 
   if (method === 'wallet_getCapabilities' || method === 'metayoshi_getCapabilities') {
+    const nativeSend = network?.coinType === 'UTXO'
     const features = {
-      nativeSend: true,
+      nativeSend,
       signMessage: false,
       assetLayer: false,
       assetSend: false
@@ -782,7 +829,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network || network.coinType !== 'UTXO') {
-      throw { code: -32603, message: 'No supported UTXO network selected' }
+      throw { code: -32603, message: 'No supported send-capable network selected' }
     }
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) {
@@ -860,7 +907,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       coinId: network.id,
       coinName: network.name,
       coinSymbol: network.symbol,
-      coinDecimals: 8
+      coinDecimals: resolveCoinDecimals(network)
     })
     
     return { networkId: normalizedNetworkId, networkLabel: network.name }
@@ -981,14 +1028,14 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
           // Network changed
           if (newState.activeNetworkId !== oldState.activeNetworkId) {
             const network = newState.networks?.find((n) => n.id === newState.activeNetworkId)
-            if (network && network.coinType === 'UTXO' && String(network.id || '').trim()) {
+            if (network && (network.coinType === 'UTXO' || network.coinType === 'XRP') && String(network.id || '').trim()) {
               broadcastEvent('networkChanged', {
                 networkId: network.id,
                 networkLabel: network.name,
                 coinId: network.id,
                 coinName: network.name,
                 coinSymbol: network.symbol,
-                coinDecimals: 8
+                coinDecimals: resolveCoinDecimals(network)
               })
             }
           }
@@ -1012,5 +1059,24 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
   }
 })
 
+chrome.windows.onBoundsChanged.addListener((win) => {
+  if (typeof win.id !== 'number') return
+  if (!managedPopupWindowIds.has(win.id)) return
+  void enforceManagedPopupWidth(win.id)
+})
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  managedPopupWindowIds.delete(windowId)
+})
+
+if (chrome.action?.onClicked) {
+  chrome.action.onClicked.addListener(() => {
+    void openWalletHomePopup().catch((err) => {
+      void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })
+    })
+  })
+}
+
 // Initialize
 console.log('MetaYoshi Wallet Background Service Worker initialized')
+

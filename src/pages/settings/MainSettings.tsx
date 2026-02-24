@@ -32,7 +32,6 @@ const MainSettings: React.FC = () => {
       title: 'NODE / RPC',
       items: [
         { label: 'Local node RPC', path: '/settings/local-rpc' },
-        { label: 'Bridge tx auth', path: '/settings/bridge-auth' },
       ]
     },
     {

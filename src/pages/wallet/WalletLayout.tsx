@@ -264,7 +264,7 @@ const WalletLayout: React.FC = () => {
       {/* Tabs — Assets tab hidden for UTXO networks */}
       <Tabs tabs={TABS} activeTab={activeTab} onChange={handleTabChange} />
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <PageTransition>
           <Outlet />
         </PageTransition>
@@ -277,7 +277,7 @@ const WalletLayout: React.FC = () => {
           onClick={() => setShowAccountSheet(false)}
         >
           <div
-            className="w-full max-w-[360px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-3 animate-in slide-in-from-bottom duration-200"
+            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-3 animate-in slide-in-from-bottom duration-200"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-1">
@@ -347,7 +347,7 @@ const WalletLayout: React.FC = () => {
           onClick={() => { setShowNetworkSheet(false); setNetworkSearch('') }}
         >
           <div
-            className="w-full max-w-[360px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-5 space-y-3 animate-in slide-in-from-bottom duration-200"
+            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-5 space-y-3 animate-in slide-in-from-bottom duration-200"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -424,7 +424,7 @@ const WalletLayout: React.FC = () => {
           onClick={() => setShowSendSheet(false)}
         >
           <div
-            className="w-full max-w-[360px] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200"
+            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200"
             onClick={e => e.stopPropagation()}
           >
             {/* Sheet header */}
@@ -612,3 +612,4 @@ const QuickAction: React.FC<QuickActionProps> = ({ icon, label, onClick, disable
 )
 
 export default WalletLayout
+

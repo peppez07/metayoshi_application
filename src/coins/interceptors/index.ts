@@ -3,6 +3,7 @@ import { DOGE_API_INFO, dogeApiInterceptor } from './doge'
 import { FIRO_API_INFO, firoApiInterceptor } from './firo'
 import { RTM_API_INFO, rtmApiInterceptor } from './rtm'
 import { TIDE_API_INFO, tideApiInterceptor } from './tide'
+import { XRP_API_INFO, xrpApiInterceptor } from './xrp'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
 const INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = {
@@ -10,7 +11,8 @@ const INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = {
   doge: dogeApiInterceptor,
   tide: tideApiInterceptor,
   btcz: btczApiInterceptor,
-  firo: firoApiInterceptor
+  firo: firoApiInterceptor,
+  xrp: xrpApiInterceptor
 }
 
 const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = {
@@ -18,7 +20,8 @@ const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = {
   doge: DOGE_API_INFO,
   tide: TIDE_API_INFO,
   btcz: BTCZ_API_INFO,
-  firo: FIRO_API_INFO
+  firo: FIRO_API_INFO,
+  xrp: XRP_API_INFO
 }
 
 export function getCoinApiInterceptor(networkId?: string): CoinApiInterceptor | undefined {
@@ -36,7 +39,8 @@ export {
   DOGE_API_INFO,
   TIDE_API_INFO,
   BTCZ_API_INFO,
-  FIRO_API_INFO
+  FIRO_API_INFO,
+  XRP_API_INFO
 }
 
 export type { CoinApiInfo, CoinApiInterceptor } from './types'

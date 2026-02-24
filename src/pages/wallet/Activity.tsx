@@ -76,24 +76,26 @@ const Activity: React.FC = () => {
   })()
 
   return (
-    <div className="flex flex-col">
-      {filteredActivity.length > 0 ? (
-        filteredActivity.map((item) => (
-          <ActivityRow 
-            key={item.id}
-            type={item.type}
-            amount={item.amount}
-            asset={item.asset}
-            address={item.to || item.from}
-            status={item.status}
-            onClick={() => setSelectedTx(item)}
-          />
-        ))
-      ) : (
-        <div className="flex flex-col items-center justify-center p-12 text-center opacity-50">
-          <p className="text-sm font-medium">You have no transactions</p>
-        </div>
-      )}
+    <div className="h-full flex flex-col">
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {filteredActivity.length > 0 ? (
+          filteredActivity.map((item) => (
+            <ActivityRow
+              key={item.id}
+              type={item.type}
+              amount={item.amount}
+              asset={item.asset}
+              address={item.to || item.from}
+              status={item.status}
+              onClick={() => setSelectedTx(item)}
+            />
+          ))
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-50">
+            <p className="text-sm font-medium">You have no transactions</p>
+          </div>
+        )}
+      </div>
 
       {selectedTx && createPortal(
         <div
@@ -101,7 +103,7 @@ const Activity: React.FC = () => {
           onClick={() => setSelectedTx(null)}
         >
           <div
-            className="w-full max-w-[360px] max-h-[92vh] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200 flex flex-col overflow-hidden"
+            className="w-full max-w-[380px] max-h-[92vh] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200 flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 z-10 flex items-center justify-between px-6 pt-5 pb-3 border-b border-dark-600 bg-dark-800">
@@ -122,8 +124,8 @@ const Activity: React.FC = () => {
               <DetailRow label="Network" value={`${selectedNetwork.name} (${selectedNetwork.symbol})`} />
               <DetailRow label="Asset" value={selectedTx.asset} />
               <DetailRow label="Amount" value={selectedTx.amount} />
-              <DetailRow label="From" value={selectedTx.from || fallbackFromAddress || '—'} isMono />
-              <DetailRow label="To" value={selectedTx.to || '—'} isMono />
+              <DetailRow label="From" value={selectedTx.from || fallbackFromAddress || '-'} isMono />
+              <DetailRow label="To" value={selectedTx.to || '-'} isMono />
 
               <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3">
                 <div className="flex items-center justify-between mb-1">
@@ -178,3 +180,5 @@ const DetailRow: React.FC<DetailRowProps> = ({ label, value, isMono = false }) =
 )
 
 export default Activity
+
+

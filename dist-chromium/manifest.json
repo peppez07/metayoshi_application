@@ -4,7 +4,6 @@
   "version": "0.0.2",
   "version_name": "0.0.2-beta",
   "action": {
-    "default_popup": "app/src/ui/index.html",
     "default_icon": {
       "16": "assets/metayoshi-16.png",
       "32": "assets/metayoshi-32.png",

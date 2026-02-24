@@ -85,7 +85,7 @@ function App() {
   }, [checkAutolock])
 
   return (
-    <div className="w-[360px] h-[600px] bg-dark-900 overflow-hidden">
+    <div className="w-full h-full bg-dark-900 overflow-hidden">
       <div className="wallet-container">
         <Routes>
           {/* Auth Flow */}

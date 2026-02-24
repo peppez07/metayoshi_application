@@ -106,9 +106,11 @@ const Assets: React.FC = () => {
 
   if (!caps.features.assetLayer) {
     return (
-      <div className="flex flex-col items-center justify-center py-14 gap-3 text-center px-6 opacity-50">
-        <IoLayersOutline className="w-7 h-7 text-gray-500" />
-        <p className="text-sm font-medium">Assets not supported on {activeNetwork.name}</p>
+      <div className="h-full flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center py-14 gap-3 text-center px-6 opacity-50">
+          <IoLayersOutline className="w-7 h-7 text-gray-500" />
+          <p className="text-sm font-medium">Assets not supported on {activeNetwork.name}</p>
+        </div>
       </div>
     )
   }
@@ -152,40 +154,44 @@ const Assets: React.FC = () => {
 
   if (total === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-14 gap-3 text-center px-6 opacity-50">
-        <IoLayersOutline className="w-7 h-7 text-gray-500" />
-        <p className="text-sm font-medium">No assets on this address</p>
-        <p className="text-xs text-gray-500">
-          Assets you hold on {activeNetwork.name} will appear here.
-        </p>
+      <div className="h-full flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center py-14 gap-3 text-center px-6 opacity-50">
+          <IoLayersOutline className="w-7 h-7 text-gray-500" />
+          <p className="text-sm font-medium">No assets on this address</p>
+          <p className="text-xs text-gray-500">
+            Assets you hold on {activeNetwork.name} will appear here.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col">
-      {preview.map(([name, raw]) => (
-        <AssetPreviewRow
-          key={name}
-          name={name}
-          rawAmount={raw}
-          onClick={() => navigate('/assets')}
-          onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
-          previewAvailable={previewByAsset[name] === true}
-        />
-      ))}
+    <div className="h-full flex flex-col">
+      <div className="flex-1">
+        {preview.map(([name, raw]) => (
+          <AssetPreviewRow
+            key={name}
+            name={name}
+            rawAmount={raw}
+            onClick={() => navigate('/assets')}
+            onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
+            previewAvailable={previewByAsset[name] === true}
+          />
+        ))}
 
-      {total > 3 && (
-        <button
-          onClick={() => navigate('/assets')}
-          className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-dark-700/50 transition-colors border-b border-dark-600/50 group"
-        >
-          <span className="text-xs font-bold text-gray-400 group-hover:text-white transition-colors">
-            View all {total} assets
-          </span>
-          <IoChevronForward className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
-        </button>
-      )}
+        {total > 3 && (
+          <button
+            onClick={() => navigate('/assets')}
+            className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-dark-700/50 transition-colors border-b border-dark-600/50 group"
+          >
+            <span className="text-xs font-bold text-gray-400 group-hover:text-white transition-colors">
+              View all {total} assets
+            </span>
+            <IoChevronForward className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

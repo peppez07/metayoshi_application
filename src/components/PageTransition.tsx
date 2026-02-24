@@ -12,7 +12,7 @@ export const PageTransition: React.FC<PageTransitionProps> = ({ children }) => {
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -10 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="min-h-full flex flex-col"
+      className="h-full min-h-0 flex flex-col"
     >
       {children}
     </motion.div>

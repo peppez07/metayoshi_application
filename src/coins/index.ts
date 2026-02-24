@@ -4,6 +4,7 @@ import { dogeCoin } from './doge'
 import { firoCoin } from './firo'
 import { rtmCoin } from './rtm'
 import { tideCoin } from './tide'
+import { xrpCoin } from './xrp'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
 export type { CoinType, Network } from './types'
@@ -28,13 +29,14 @@ export const ALL_COIN_MODULES: CoinModule[] = [
   dogeCoin,
   btczCoin,
   tideCoin,
-  firoCoin
+  firoCoin,
+  xrpCoin
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 // Runtime default: keep Tide disabled until its QA cycle is complete.
 const DISABLED_NETWORK_IDS = new Set(['tide'])
-const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'firo']
+const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'firo', 'xrp']
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()
