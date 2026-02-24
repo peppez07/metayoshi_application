@@ -17,6 +17,7 @@ interface TxState {
   to?: string
   amount?: string
   from?: string
+  origin?: string
   enteredAmount?: string
   donationEnabled?: boolean
   donationPercent?: number
@@ -57,6 +58,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const toAddress = txState.to?.trim() ?? ''
   const amount = txState.amount?.trim() ?? ''
   const fromAddress = txState.from?.trim() ?? ''
+  const requestOrigin = String(txState.origin ?? '').trim() || 'metayoshi provider'
   const hasTxState = Boolean(toAddress && amount)
   const numericAmount = Number(amount)
   const safeAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
@@ -243,7 +245,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
 
           <div className="space-y-1">
             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">Origin</p>
-            <p className="text-[11px] font-medium text-primary">https://projectname.domain</p>
+            <p className="text-[11px] font-medium text-primary break-all">{requestOrigin}</p>
           </div>
 
           <div className="p-3 bg-dark-800 rounded-xl border border-dark-600 space-y-1">
