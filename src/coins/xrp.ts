@@ -1,5 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { XRP_API_INFO } from './interceptors'
+import xrpLogo from './coinlogos/xrp.webp'
 
 export const XRP_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
@@ -20,7 +21,8 @@ export function createXrpNetwork(ctx: CoinRuntimeContext): Network {
     rpcPassword: import.meta.env.VITE_XRP_RPC_PASSWORD || 'rpcpass',
     bridgeUrl: import.meta.env.VITE_XRP_BRIDGE_URL || XRP_API_INFO.defaultBridgeUrl,
     explorerUrl: import.meta.env.VITE_XRP_EXPLORER || XRP_API_INFO.defaultExplorerUrl || 'https://xrpscan.com',
-    capabilities: XRP_CAPABILITIES
+    capabilities: XRP_CAPABILITIES,
+    logo: xrpLogo
   }
 }
 

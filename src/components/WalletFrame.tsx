@@ -245,11 +245,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       {/* Network bottom sheet */}
       {showNetworkMenu && (
         <div
-          className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end"
+          className="absolute inset-0 z-50 bg-black/45 backdrop-blur-sm p-3 pt-[86px] flex flex-col"
           onClick={() => { setShowNetworkMenu(false); setNetworkSearch('') }}
         >
           <div
-            className="w-full bg-dark-800 rounded-t-3xl border-t border-dark-600 p-5 space-y-3 animate-in slide-in-from-bottom duration-200"
+            className="w-full h-full min-h-0 bg-dark-800 rounded-2xl border border-dark-600 p-4 space-y-3 animate-in slide-in-from-top duration-200 flex flex-col shadow-xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -273,7 +273,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             </div>
 
             {/* List */}
-            <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+            <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
               {networks
                 .filter(n =>
                   networkSearch.trim() === '' ||
@@ -316,13 +316,19 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
       {/* Account bottom sheet */}
       {showAccountMenu && (
-        <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end">
-          <div className="w-full bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+        <div
+          className="absolute inset-0 z-50 bg-black/45 backdrop-blur-sm p-3 pt-[86px] flex flex-col"
+          onClick={() => setShowAccountMenu(false)}
+        >
+          <div
+            className="w-full h-full min-h-0 bg-dark-800 rounded-2xl border border-dark-600 p-4 space-y-3 animate-in slide-in-from-top duration-200 flex flex-col shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Accounts</h3>
               <button onClick={() => setShowAccountMenu(false)}><IoClose className="w-6 h-6" /></button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
               {accounts.map(acc => {
                 const addr = acc.networkAddresses?.[activeNetworkId]
                   || (activeNetwork.coinType === 'EVM' ? acc.addresses?.EVM : '')
@@ -366,7 +372,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 )
               })}
             </div>
-            <Button variant="outline" className="w-full" onClick={lock}>Lock Wallet</Button>
+            <Button variant="outline" className="w-full shrink-0" onClick={lock}>Lock Wallet</Button>
           </div>
         </div>
       )}

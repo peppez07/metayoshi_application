@@ -264,7 +264,7 @@ const WalletLayout: React.FC = () => {
       {/* Tabs — Assets tab hidden for UTXO networks */}
       <Tabs tabs={TABS} activeTab={activeTab} onChange={handleTabChange} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <PageTransition>
           <Outlet />
         </PageTransition>
