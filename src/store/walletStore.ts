@@ -1180,7 +1180,14 @@ export const useWalletStore = create<WalletState>()(
           const elapsed = Date.now() - requestStartedAt
           await delay(Math.max(0, BALANCE_UI_STABILIZE_MS - elapsed))
         }
-        set((state) => ({ balanceRefreshNonce: requestNonce, isSyncing: true, accounts: state.accounts }))
+        set((state) => ({
+          balanceRefreshNonce: requestNonce,
+          // Keep last known sync status while probing, avoid flashing "Sync ..."
+          // on every refresh tick before real chain info is resolved.
+          isSyncing: state.isSyncing,
+          syncPercent: state.syncPercent,
+          accounts: state.accounts
+        }))
 
         // ── Resolve the correct per-network address ──────────────────────────
         // NEVER fall back to acc.addresses.UTXO — that slot holds the FIRST UTXO
@@ -1234,14 +1241,42 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: localRpcOverrides[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
+          let xrpSyncPercent: number | null = null
+          let xrpIsSyncing = false
+          try {
+            const chainInfo = await getBlockchainInfo(rpcConfig)
+            const vpRaw = Number(chainInfo?.verificationprogress)
+            const fallbackFromBlocks =
+              Number(chainInfo?.headers) > 0
+                ? (Number(chainInfo?.blocks) / Number(chainInfo?.headers))
+                : NaN
+            const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
+            if (Number.isFinite(progress01) && progress01 >= 0) {
+              xrpSyncPercent = Math.max(0, Math.min(100, progress01 * 100))
+            }
+            if (typeof chainInfo?.initialblockdownload === 'boolean') {
+              xrpIsSyncing = chainInfo.initialblockdownload
+            } else if (xrpSyncPercent !== null) {
+              xrpIsSyncing = xrpSyncPercent < MIN_SYNC_PERCENT_FOR_SEND
+            }
+          } catch (err) {
+            console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
+          }
           const balance = await getXrpAccountBalance(rpcConfig, address)
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set((state) => ({
-            isSyncing: false,
+            isSyncing: xrpIsSyncing,
             isConnected: true,
-            syncPercent: 100,
-            lowSyncStreak: 0,
+            syncPercent: xrpSyncPercent,
+            lowSyncStreak: (() => {
+              const syncPercentIsLow =
+                typeof xrpSyncPercent === 'number'
+                && Number.isFinite(xrpSyncPercent)
+                && xrpSyncPercent < MIN_SYNC_PERCENT_FOR_SEND
+              const lowSyncCheck = xrpIsSyncing || syncPercentIsLow
+              return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
+            })(),
             accounts: state.accounts.map((a) =>
               a.id === acc.id
                 ? {

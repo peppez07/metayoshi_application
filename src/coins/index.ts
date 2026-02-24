@@ -34,9 +34,8 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
-// Runtime default: keep Tide disabled until its QA cycle is complete.
-const DISABLED_NETWORK_IDS = new Set(['tide'])
-const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'firo', 'xrp']
+const DISABLED_NETWORK_IDS = new Set<string>()
+const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'tide', 'firo', 'xrp']
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()

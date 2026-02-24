@@ -34,6 +34,7 @@ const APP_POPUP_MAX_HEIGHT = 700
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const managedPopupWindowIds = new Set<number>()
 let managedPopupWindowId: number | null = null
+let managedPopupOpenQueue: Promise<void> = Promise.resolve()
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -336,6 +337,16 @@ async function openUnlockPopup(): Promise<void> {
 }
 
 async function openManagedPopup(url: string): Promise<void> {
+  const nextTask = managedPopupOpenQueue
+    .catch(() => {
+      // Keep queue alive after prior failure.
+    })
+    .then(() => openManagedPopupInternal(url))
+  managedPopupOpenQueue = nextTask
+  await nextTask
+}
+
+async function openManagedPopupInternal(url: string): Promise<void> {
   const left = await resolvePopupLeft()
   const top = await resolvePopupTop()
 
@@ -376,12 +387,17 @@ function isManagedPopupUrl(url: string | undefined): boolean {
   return url.startsWith(base)
 }
 
+function windowHasManagedPopupTab(win: chrome.windows.Window | null | undefined): boolean {
+  if (!win || win.type !== 'popup') return false
+  const tabs = Array.isArray(win.tabs) ? win.tabs : []
+  return tabs.some((tab) => isManagedPopupUrl(tab?.url))
+}
+
 async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
   if (typeof managedPopupWindowId === 'number') {
     try {
       const win = await chrome.windows.get(managedPopupWindowId, { populate: true })
-      const tabUrl = win.tabs?.[0]?.url
-      if (win.type === 'popup' && isManagedPopupUrl(tabUrl)) {
+      if (windowHasManagedPopupTab(win)) {
         return win
       }
     } catch {
@@ -391,7 +407,7 @@ async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
 
   try {
     const all = await chrome.windows.getAll({ populate: true })
-    const managed = all.filter((win) => win.type === 'popup' && isManagedPopupUrl(win.tabs?.[0]?.url))
+    const managed = all.filter((win) => windowHasManagedPopupTab(win))
     if (managed.length === 0) return null
 
     const [primary, ...duplicates] = managed
@@ -412,6 +428,45 @@ async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
     return primary
   } catch {
     return null
+  }
+}
+
+async function enforceSingleManagedPopupWindow(): Promise<void> {
+  try {
+    const all = await chrome.windows.getAll({ populate: true })
+    const managed = all.filter((win) => windowHasManagedPopupTab(win))
+    if (managed.length === 0) return
+
+    let primary = managed[0]
+    for (const candidate of managed) {
+      const candidateFocused = candidate.focused === true
+      const primaryFocused = primary.focused === true
+      if (candidateFocused && !primaryFocused) {
+        primary = candidate
+      } else if (candidateFocused === primaryFocused) {
+        const cId = typeof candidate.id === 'number' ? candidate.id : Number.MAX_SAFE_INTEGER
+        const pId = typeof primary.id === 'number' ? primary.id : Number.MAX_SAFE_INTEGER
+        if (cId < pId) primary = candidate
+      }
+    }
+
+    if (typeof primary.id === 'number') {
+      managedPopupWindowId = primary.id
+      managedPopupWindowIds.add(primary.id)
+    }
+
+    for (const win of managed) {
+      if (win.id === primary.id) continue
+      if (typeof win.id !== 'number') continue
+      managedPopupWindowIds.delete(win.id)
+      try {
+        await chrome.windows.remove(win.id)
+      } catch {
+        // Ignore close races.
+      }
+    }
+  } catch {
+    // Ignore transient window query errors.
   }
 }
 
@@ -1149,6 +1204,7 @@ chrome.windows.onBoundsChanged.addListener((win) => {
   if (typeof win.id !== 'number') return
   if (!managedPopupWindowIds.has(win.id)) return
   void enforceManagedPopupBounds(win.id)
+  void enforceSingleManagedPopupWindow()
 })
 
 chrome.windows.onRemoved.addListener((windowId) => {
@@ -1160,11 +1216,19 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 if (chrome.action?.onClicked) {
   chrome.action.onClicked.addListener(() => {
+    void enforceSingleManagedPopupWindow()
     void openWalletHomePopup().catch((err) => {
       void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })
     })
   })
 }
+
+// Safety sweep: enforce singleton popup even if duplicate windows are created by races
+// outside the normal openManagedPopup flow.
+void enforceSingleManagedPopupWindow()
+setInterval(() => {
+  void enforceSingleManagedPopupWindow()
+}, 1500)
 
 // Initialize
 console.log('MetaYoshi Wallet Background Service Worker initialized')

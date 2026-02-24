@@ -105,11 +105,12 @@ Allowed ids:
 - `rtm`
 - `doge`
 - `btcz`
+- `tide`
 - `firo`
+- `xrp`
 - `all`
 
 If omitted/invalid, app falls back to enabled defaults.
-Current app runtime keeps only `tide` disabled by default.
 
 ## RTM donation policy
 
