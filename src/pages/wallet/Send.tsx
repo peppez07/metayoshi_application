@@ -3,9 +3,25 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
 import { useWalletStore } from '../../store/walletStore'
-import { IoArrowBack } from 'react-icons/io5'
+import { IoArrowBack, IoInformationCircleOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
+
+function formatCoinAmount(v: number): string {
+  return v.toFixed(8).replace(/\.?0+$/, '')
+}
+
+function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
+  if (network.coinType === 'UTXO') {
+    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
+    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
+    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
+    return (estimatedBytes * feePerByteSats) / 1e8
+  }
+  if (network.coinType === 'XRP') return 0.000012
+  return 0.002151
+}
 
 const Send: React.FC = () => {
   const navigate = useNavigate()
@@ -17,6 +33,7 @@ const Send: React.FC = () => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  const estimatedFeeCoin = React.useMemo(() => estimateNativeSendFee(activeNetwork), [activeNetwork])
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -138,6 +155,13 @@ const Send: React.FC = () => {
               ))}
             </div>
           </div>
+        </div>
+
+        <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
+          <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
+          <p className="text-[10px] text-gray-600 leading-relaxed">
+            Estimated required fee: ~{formatCoinAmount(estimatedFeeCoin)} {activeNetwork.symbol}. Change is returned automatically.
+          </p>
         </div>
 
         {error && (

@@ -6,23 +6,28 @@ import { TIDE_API_INFO, tideApiInterceptor } from './tide'
 import { XRP_API_INFO, xrpApiInterceptor } from './xrp'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
-const INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = {
-  rtm: rtmApiInterceptor,
-  doge: dogeApiInterceptor,
-  tide: tideApiInterceptor,
-  btcz: btczApiInterceptor,
-  firo: firoApiInterceptor,
-  xrp: xrpApiInterceptor
-}
+export const COIN_API_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp'] as const
 
-const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = {
-  rtm: RTM_API_INFO,
-  doge: DOGE_API_INFO,
-  tide: TIDE_API_INFO,
-  btcz: BTCZ_API_INFO,
-  firo: FIRO_API_INFO,
-  xrp: XRP_API_INFO
-}
+const COIN_API_REGISTRY: ReadonlyArray<{
+  networkId: (typeof COIN_API_ORDER)[number]
+  interceptor: CoinApiInterceptor
+  info: CoinApiInfo
+}> = [
+  { networkId: 'rtm', interceptor: rtmApiInterceptor, info: RTM_API_INFO },
+  { networkId: 'doge', interceptor: dogeApiInterceptor, info: DOGE_API_INFO },
+  { networkId: 'btcz', interceptor: btczApiInterceptor, info: BTCZ_API_INFO },
+  { networkId: 'tide', interceptor: tideApiInterceptor, info: TIDE_API_INFO },
+  { networkId: 'firo', interceptor: firoApiInterceptor, info: FIRO_API_INFO },
+  { networkId: 'xrp', interceptor: xrpApiInterceptor, info: XRP_API_INFO }
+]
+
+const INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = Object.fromEntries(
+  COIN_API_REGISTRY.map((entry) => [entry.networkId, entry.interceptor])
+)
+
+const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = Object.fromEntries(
+  COIN_API_REGISTRY.map((entry) => [entry.networkId, entry.info])
+)
 
 export function getCoinApiInterceptor(networkId?: string): CoinApiInterceptor | undefined {
   if (!networkId) return undefined

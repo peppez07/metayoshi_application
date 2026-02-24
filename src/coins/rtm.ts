@@ -24,6 +24,11 @@ export const RTM_DONATION_ENABLED_DEFAULT = true
 export const RTM_DONATION_PERCENT_DEFAULT = 0.5
 // Safe app-level fallback used when bridge donation policy is unavailable and env is unset.
 export const RTM_DONATION_ADDRESS_DEFAULT = 'RTRcdtm5uvFn7iQjLmEQvvcvJhKDzNsfAf'
+// Optional app fallbacks for non-RTM donation-enabled coins.
+// Leave empty to disable hardcoded fallback for that coin.
+export const DOGE_DONATION_ADDRESS_DEFAULT = ''
+export const BTCZ_DONATION_ADDRESS_DEFAULT = 't1RQhfEpBeCLo3yyNxewhCAwfTgXieQuotH'
+export const FIRO_DONATION_ADDRESS_DEFAULT = 'aPkbNkmpaWieJ22xdeaUh7vJnPT5stjJjC'
 
 export interface RtmDonationPolicy {
   enabled: boolean
@@ -120,6 +125,14 @@ function resolveDonationEnvPrefix(network: Network): string {
   return id
 }
 
+function resolveDonationAddressDefault(prefix: string): string {
+  if (prefix === 'RTM') return RTM_DONATION_ADDRESS_DEFAULT
+  if (prefix === 'DOGE') return DOGE_DONATION_ADDRESS_DEFAULT
+  if (prefix === 'BTCZ') return BTCZ_DONATION_ADDRESS_DEFAULT
+  if (prefix === 'FIRO') return FIRO_DONATION_ADDRESS_DEFAULT
+  return ''
+}
+
 export function supportsCoinDonationPolicy(network: Network): boolean {
   return Boolean(resolveDonationCoinId(network))
 }
@@ -128,10 +141,11 @@ function readDonationPolicyFromEnv(network: Network): RtmDonationPolicy | null {
   const prefix = resolveDonationEnvPrefix(network)
   if (!prefix) return null
   const configuredAddress = String((import.meta.env as any)[`VITE_${prefix}_DONATION_ADDRESS`] || '').trim()
+  const fallbackAddress = configuredAddress || resolveDonationAddressDefault(prefix)
   const envPercent = clampPercent(Number((import.meta.env as any)[`VITE_${prefix}_DONATION_PERCENT`] || RTM_DONATION_PERCENT_DEFAULT))
-  if (!configuredAddress || envPercent <= 0) return null
+  if (!fallbackAddress || envPercent <= 0) return null
   return {
-    address: configuredAddress,
+    address: fallbackAddress,
     percent: envPercent,
     required: parseBool((import.meta.env as any)[`VITE_${prefix}_DONATION_REQUIRED`] || false),
     enabled: true,

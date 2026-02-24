@@ -37,6 +37,20 @@ function formatCoinAmount(v: number): string {
   return v.toFixed(8).replace(/\.?0+$/, '')
 }
 
+function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
+  if (network.coinType === 'UTXO') {
+    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
+    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
+    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+    // Mirrors simple send sizing used in wallet send flow.
+    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
+    return (estimatedBytes * feePerByteSats) / 1e8
+  }
+  if (network.coinType === 'XRP') return 0.000012
+  // Conservative fallback for non-UTXO/non-XRP networks.
+  return 0.002151
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 const WalletLayout: React.FC = () => {
@@ -511,7 +525,7 @@ const WalletLayout: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={donationEnabled}
-                      disabled={donationRequired}
+                      disabled={donationRequired || !donationAddress}
                       onChange={(e) => setDonationEnabled(e.target.checked)}
                       className="w-4 h-4 accent-primary"
                     />
@@ -525,7 +539,7 @@ const WalletLayout: React.FC = () => {
 
                   {donationEnabled && (
                     <>
-                      {!donationAddress && (
+                      {!donationAddress && donationRequired && (
                         <div className="text-[9px] leading-relaxed text-red-300">
                           Donation unavailable: configure bridge donation policy for this coin or set a coin donation env (example: VITE_DOGE_DONATION_ADDRESS).
                         </div>
