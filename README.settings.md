@@ -113,6 +113,7 @@ Allowed ids:
 - `firo`
 - `xrp`
 - `arr`
+- `eth`
 - `ada`
 - `xmr`
 - `all`
@@ -171,6 +172,7 @@ Legacy RPC alias support:
 
 Current implementation status (as of 2026-02-25):
 - SDK/network usage: `rtm`, `doge`, `btcz`, `firo`, `xrp`, `tide`, `arr`, `ada`, `xmr`
+- Ethereum (`eth`) is available in UI concept mode with runtime send disabled by capability flags.
 - `wallet_signMessage`: not supported in DApp SDK (`-32601`)
 - `wallet_sendTransaction`: supported with explicit popup approval
 

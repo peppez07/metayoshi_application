@@ -20,6 +20,7 @@ Current network families exposed in this SDK:
 - XRP (`xrp`)
 - Tidecoin (`tide`)
 - Pirate (`arr`)
+- Ethereum (`eth`, concept mode)
 - Cardano (`ada`)
 - Monero (`xmr`)
 
@@ -99,6 +100,7 @@ Alias namespaces supported for wallet RPC methods below:
   - amount is coin units (decimal string, chain precision is validated per network)
   - returns: `{ hash: string, txid: string }`
   - flow: wallet popup opens, unlock is required when locked, user must approve/reject, popup closes after completion.
+  - note: `eth` concept mode currently reports send as unsupported (disabled by network capability flags).
 
 ### Not supported
 

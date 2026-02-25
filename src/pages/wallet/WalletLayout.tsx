@@ -19,6 +19,7 @@ import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from '../../lib/coinModel'
 import {
   DONATION_ENABLED_DEFAULT,
   DONATION_PERCENT_DEFAULT,
@@ -161,6 +162,10 @@ const WalletLayout: React.FC = () => {
 
   // ── tabs — only show Assets if the network supports token assets ───────────
   const caps = networkCapabilities(activeNetwork)
+  const coinModel = resolveCoinModelFamily(activeNetwork)
+  const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
+  const isModelRoute = location.pathname.startsWith('/wallet/model/')
+  const expectedModelPath = `/wallet/model/${coinModelRouteKey}`
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const TABS = [
@@ -168,11 +173,19 @@ const WalletLayout: React.FC = () => {
     ...(caps.ui.showActivityTab ? [{ id: 'activity', label: 'Activity' }] : [])
   ]
 
-  const activeTab = location.pathname.includes('/activity')
+  const activeTab = isModelRoute
+    ? ''
+    : location.pathname.includes('/activity')
     ? 'activity'
     : (caps.ui.showAssetsTab ? 'assets' : 'activity')
 
   const handleTabChange = (id: string) => navigate(`/wallet/${id}`)
+
+  useEffect(() => {
+    if (!isModelRoute) return
+    if (location.pathname === expectedModelPath) return
+    navigate(expectedModelPath, { replace: true })
+  }, [isModelRoute, location.pathname, expectedModelPath, navigate])
 
   // ── send submit ────────────────────────────────────────────────────────────
   const handleSend = (e: React.FormEvent) => {
@@ -260,7 +273,7 @@ const WalletLayout: React.FC = () => {
         </div>
 
         {/* Quick-action buttons */}
-        <div className={`flex justify-center gap-10 w-full px-8 mb-4 ${caps.ui.showAssetsAction ? '' : 'gap-0 justify-center'}`}>
+        <div className={`flex justify-center gap-10 w-full px-8 mb-4 ${(caps.ui.showAssetsAction || caps.ui.showSendAction) ? '' : 'gap-0 justify-center'}`}>
           {caps.ui.showAssetsAction && (
             <QuickAction
               icon={<IoLayersOutline className="w-6 h-6" />}
@@ -276,6 +289,11 @@ const WalletLayout: React.FC = () => {
               disabled={sendBlockedBySync}
             />
           )}
+          <QuickAction
+            icon={<IoSearchOutline className="w-6 h-6" />}
+            label="Model"
+            onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
+          />
         </div>
       </div>
 

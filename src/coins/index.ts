@@ -3,6 +3,7 @@ import { cardanoCoin } from './cardano'
 import { BTC_ADDRESS_SPEC } from './btc'
 import { btczCoin } from './btcz'
 import { dogeCoin } from './doge'
+import { ethCoin } from './eth'
 import { firoCoin } from './firo'
 import { moneroCoin } from './monero'
 import { rtmCoin } from './rtm'
@@ -30,6 +31,7 @@ export const DEFAULT_UTXO_COIN_SYMBOL = 'RTM'
 
 export const ALL_COIN_MODULES: CoinModule[] = [
   rtmCoin,
+  ethCoin,
   dogeCoin,
   btczCoin,
   tideCoin,
@@ -42,7 +44,7 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>()
-const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada']
+const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'eth', 'btcz', 'doge', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada']
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()

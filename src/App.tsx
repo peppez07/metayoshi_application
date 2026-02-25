@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, type ReactElement } from 'react'
 import { useWalletStore } from './store/walletStore'
 import { resolveNetworkCapabilities } from './lib/networkCapabilities'
+import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from './lib/coinModel'
 
 // Pages (to be created)
 import Register from './pages/Register'
@@ -16,6 +17,13 @@ import Send from './pages/wallet/Send'
 import Swap from './pages/wallet/Swap'
 import Sync from './pages/wallet/Sync'
 import Disconnected from './pages/wallet/Disconnected'
+import EvmModelPage from './pages/wallet/models/EvmModelPage'
+import CardanoModelPage from './pages/wallet/models/CardanoModelPage'
+import MoneroModelPage from './pages/wallet/models/MoneroModelPage'
+import UtxoAssetsModelPage from './pages/wallet/models/UtxoAssetsModelPage'
+import UtxoClassicModelPage from './pages/wallet/models/UtxoClassicModelPage'
+import XrpModelPage from './pages/wallet/models/XrpModelPage'
+import GenericModelPage from './pages/wallet/models/GenericModelPage'
 import DappConnectStep1 from './pages/dapp/DappConnectStep1'
 import DappConnectStep2 from './pages/dapp/DappConnectStep2'
 import DappRequestConfirm from './pages/dapp/DappRequestConfirm'
@@ -56,6 +64,13 @@ const AssetsRouteGate = () => {
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   return caps.ui.showAssetsTab ? <Assets /> : <Navigate to="/wallet/activity" replace />
+}
+
+const WalletModelRedirect = () => {
+  const { networks, activeNetworkId } = useWalletStore()
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const modelKey = coinModelFamilyToRouteKey(resolveCoinModelFamily(activeNetwork))
+  return <Navigate to={`/wallet/model/${modelKey}`} replace />
 }
 
 const TxRouteGate = ({ element }: { element: ReactElement }) => {
@@ -101,6 +116,14 @@ function App() {
             <Route index element={<WalletIndexRedirect />} />
             <Route path="assets" element={<AssetsRouteGate />} />
             <Route path="activity" element={<Activity />} />
+            <Route path="model" element={<WalletModelRedirect />} />
+            <Route path="model/utxo-assets" element={<UtxoAssetsModelPage />} />
+            <Route path="model/utxo-classic" element={<UtxoClassicModelPage />} />
+            <Route path="model/xrp" element={<XrpModelPage />} />
+            <Route path="model/evm" element={<EvmModelPage />} />
+            <Route path="model/cardano" element={<CardanoModelPage />} />
+            <Route path="model/monero" element={<MoneroModelPage />} />
+            <Route path="model/generic" element={<GenericModelPage />} />
             <Route path="send" element={<SendRouteGate />} />
             <Route path="swap" element={<Swap />} />
             <Route path="sync" element={<Sync />} />

@@ -4,7 +4,7 @@ Browser extension wallet app for Chromium and Firefox.
 
 Current focus:
 - Unified chain RPC adapter flow (balance/sync/send/validate)
-- Multi-chain support: RTM, DOGE, BTCZ, FIRO, XRP, TIDE, ARRR, ADA, XMR
+- Multi-chain support: RTM, ETH (concept mode), DOGE, BTCZ, FIRO, XRP, TIDE, ARRR, ADA, XMR
 - Per-network account naming (account labels are independent per coin/network)
 
 Primary docs:
