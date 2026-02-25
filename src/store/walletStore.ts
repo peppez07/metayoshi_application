@@ -1645,9 +1645,10 @@ export const useWalletStore = create<WalletState>()(
           Object.entries(outputsSats).map(([address, satsValue]) => [address, coins8(satsValue)])
         )
 
-        const isBtcz = String(net.coinSymbol || '').trim().toUpperCase() === 'BTCZ'
-        let btczBranchId: number | undefined
-        if (isBtcz) {
+        const coinSymbol = String(net.coinSymbol || '').trim().toUpperCase()
+        const isSaplingTransparent = coinSymbol === 'BTCZ' || coinSymbol === 'ARRR'
+        let saplingBranchId: number | undefined
+        if (isSaplingTransparent) {
           try {
             const chainInfo = await getBlockchainInfo(rpcConfig)
             const branchRaw = String(
@@ -1656,10 +1657,10 @@ export const useWalletStore = create<WalletState>()(
               ?? ''
             ).trim()
             if (/^[0-9a-fA-F]{8}$/.test(branchRaw)) {
-              btczBranchId = Number.parseInt(branchRaw, 16) >>> 0
+              saplingBranchId = Number.parseInt(branchRaw, 16) >>> 0
             }
           } catch (err) {
-            console.warn(`[${net.symbol}] could not resolve consensus branch id, using BTCZ Sapling default`, err)
+            console.warn(`[${net.symbol}] could not resolve consensus branch id, using Sapling signer default`, err)
           }
         }
 
@@ -1677,13 +1678,13 @@ export const useWalletStore = create<WalletState>()(
         let signedHex = ''
         try {
           // Strict non-custodial policy: sign only client-side.
-          signedHex = isBtcz
-            ? await signBtczTransparentTransaction(rawHex, signingInputs, derived.privHex, { consensusBranchId: btczBranchId })
+          signedHex = isSaplingTransparent
+            ? await signBtczTransparentTransaction(rawHex, signingInputs, derived.privHex, { consensusBranchId: saplingBranchId })
             : await signLegacyP2pkhTransaction(rawHex, signingInputs, derived.privHex)
         } catch (signErr) {
-          if (isBtcz && isClientSignerFormatError(signErr)) {
+          if (isSaplingTransparent && isClientSignerFormatError(signErr)) {
             throw new Error(
-              'BTCZ client-side signing failed while parsing transaction format. ' +
+              `${net.symbol} client-side signing failed while parsing transaction format. ` +
               'Only transparent Overwinter/Sapling transactions are supported.'
             )
           }

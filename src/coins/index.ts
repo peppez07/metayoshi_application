@@ -1,3 +1,4 @@
+import { arrCoin } from './arr'
 import { BTC_ADDRESS_SPEC } from './btc'
 import { btczCoin } from './btcz'
 import { dogeCoin } from './doge'
@@ -30,12 +31,13 @@ export const ALL_COIN_MODULES: CoinModule[] = [
   btczCoin,
   tideCoin,
   firoCoin,
-  xrpCoin
+  xrpCoin,
+  arrCoin
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>()
-const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'tide', 'firo', 'xrp']
+const DEFAULT_ENABLED_COIN_IDS = ['rtm', 'btcz', 'doge', 'tide', 'firo', 'xrp', 'arr']
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()

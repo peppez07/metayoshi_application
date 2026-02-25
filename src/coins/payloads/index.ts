@@ -1,3 +1,4 @@
+import { ARR_PAYLOADS } from './arr'
 import { BTCZ_PAYLOADS } from './btcz'
 import { DOGE_PAYLOADS } from './doge'
 import { FIRO_PAYLOADS } from './firo'
@@ -5,7 +6,7 @@ import { RTM_PAYLOADS } from './rtm'
 import { TIDE_PAYLOADS } from './tide'
 import type { CoinPayloadCatalog } from './types'
 
-export const PAYLOAD_CATALOG_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo'] as const
+export const PAYLOAD_CATALOG_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'arr'] as const
 
 const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   networkId: (typeof PAYLOAD_CATALOG_ORDER)[number]
@@ -15,7 +16,8 @@ const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   { networkId: 'doge', catalog: DOGE_PAYLOADS },
   { networkId: 'btcz', catalog: BTCZ_PAYLOADS },
   { networkId: 'tide', catalog: TIDE_PAYLOADS },
-  { networkId: 'firo', catalog: FIRO_PAYLOADS }
+  { networkId: 'firo', catalog: FIRO_PAYLOADS },
+  { networkId: 'arr', catalog: ARR_PAYLOADS }
 ]
 
 export const PAYLOADS_BY_NETWORK_ID = Object.fromEntries(
@@ -32,7 +34,8 @@ export {
   DOGE_PAYLOADS,
   TIDE_PAYLOADS,
   BTCZ_PAYLOADS,
-  FIRO_PAYLOADS
+  FIRO_PAYLOADS,
+  ARR_PAYLOADS
 }
 
 export type { CoinPayloadCatalog, CoinPayloadBuilders, JsonRpcEnvelope, UtxoTxInputRef } from './types'

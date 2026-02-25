@@ -24,7 +24,7 @@ For Chrome Web Store/public distribution:
 Server env example:
 
 ```env
-BRIDGE_SUBDOMAIN_MAP=rtm=raptoreum:main,trtm=raptoreum:test,doge=dogecoin:main,btcz=bitcoinz:main,tide=tidecoin:main,firo=firo:main
+BRIDGE_SUBDOMAIN_MAP=rtm=raptoreum:main,trtm=raptoreum:test,doge=dogecoin:main,btcz=bitcoinz:main,tide=tidecoin:main,firo=firo:main,arr=arr:main
 ```
 
 Subdomain endpoints:
@@ -34,6 +34,7 @@ Subdomain endpoints:
 - `https://btcz.metayoshi.app/v1/bridge`
 - `https://tide.metayoshi.app/v1/bridge`
 - `https://firo.metayoshi.app/v1/bridge`
+- `https://arr.metayoshi.app/v1/bridge`
 
 Strict routes are always valid:
 - `https://rtm.metayoshi.app/v1/bridge/raptoreum/main/wallet/mainwallet`
@@ -42,6 +43,7 @@ Strict routes are always valid:
 - `https://btcz.metayoshi.app/v1/bridge/bitcoinz/main`
 - `https://tide.metayoshi.app/v1/bridge/tidecoin/main`
 - `https://firo.metayoshi.app/v1/bridge/firo/main`
+- `https://arr.metayoshi.app/v1/bridge/arr/main`
 
 ## Recommended write auth model
 
@@ -108,6 +110,7 @@ Allowed ids:
 - `tide`
 - `firo`
 - `xrp`
+- `arr`
 - `all`
 
 If omitted/invalid, app falls back to enabled defaults.
@@ -158,7 +161,7 @@ Helpers:
 - `window.metayoshi.switchNetwork(networkId)`
 
 Current implementation status (as of 2026-02-21):
-- UTXO-focused networks for SDK usage: `rtm`, `doge`, `btcz`, `firo`
+- UTXO-focused networks for SDK usage: `rtm`, `doge`, `btcz`, `firo`, `arr`
 - `wallet_signMessage`: not supported in DApp SDK (`-32601`)
 - `wallet_sendTransaction`: supported with explicit popup approval
 

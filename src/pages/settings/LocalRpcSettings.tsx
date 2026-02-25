@@ -21,7 +21,8 @@ const LOCAL_RPC_DEFAULTS: Record<string, { rpcUrl: string; rpcUsername: string; 
   doge: { rpcUrl: 'http://127.0.0.1:22555', rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' },
   btcz: { rpcUrl: 'http://127.0.0.1:1979',  rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' },
   tide: { rpcUrl: 'http://127.0.0.1:42068', rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' },
-  firo: { rpcUrl: 'http://127.0.0.1:8888',  rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' }
+  firo: { rpcUrl: 'http://127.0.0.1:8888',  rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' },
+  arr:  { rpcUrl: 'http://127.0.0.1:7771',  rpcUsername: 'rpcuser', rpcPassword: 'rpcpass', rpcWallet: '' }
 }
 
 // ── NetworkRpcCard ────────────────────────────────────────────────────────────
