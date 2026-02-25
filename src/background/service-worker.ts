@@ -877,7 +877,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
 
   if (method === 'wallet_getCapabilities' || method === 'metayoshi_getCapabilities') {
-    const nativeSend = network?.coinType === 'UTXO'
+    const nativeSend = network?.coinType === 'UTXO' || network?.id === 'ada' || network?.id === 'xmr'
     const features = {
       nativeSend,
       signMessage: false,
@@ -974,7 +974,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
-    if (!network || network.coinType !== 'UTXO') {
+    if (!network || (network.coinType !== 'UTXO' && network.id !== 'ada' && network.id !== 'xmr')) {
       throw { code: -32603, message: 'No supported send-capable network selected' }
     }
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]

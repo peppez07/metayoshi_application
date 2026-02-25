@@ -25,6 +25,8 @@ const DappRequestConfirm: React.FC = () => {
     setActiveNetwork,
     setActiveAccount,
     sendXrpTransaction,
+    sendCardanoTransaction,
+    sendMoneroTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
     addActivity,
@@ -151,6 +153,16 @@ const DappRequestConfirm: React.FC = () => {
 
       const tx = requestNetwork.coinType === 'XRP'
         ? await sendXrpTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.id === 'ada'
+        ? await sendCardanoTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.id === 'xmr'
+        ? await sendMoneroTransaction({
             to: pendingRequest.request.to,
             amount: pendingRequest.request.amount
           })

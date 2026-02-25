@@ -176,6 +176,8 @@ interface WalletState {
   refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
   sendEvmTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendMoneroTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendUtxoTransaction: (params: {
     to: string
     amount: string
@@ -303,6 +305,36 @@ function supportsAddressIndex(coinSymbol?: string): boolean {
 function supportsAddressIndexBalance(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
   return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE'
+}
+
+function resolveSyncStateFromChainInfo(chainInfo: any): { syncPercent: number | null; isChainSyncing: boolean } {
+  let syncPercent: number | null = null
+  let isChainSyncing = false
+  const vpRaw = Number(chainInfo?.verificationprogress)
+  const fallbackFromBlocks =
+    Number(chainInfo?.headers) > 0
+      ? (Number(chainInfo?.blocks) / Number(chainInfo?.headers))
+      : NaN
+  const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
+  if (Number.isFinite(progress01) && progress01 >= 0) {
+    syncPercent = Math.max(0, Math.min(100, progress01 * 100))
+  }
+  if (typeof chainInfo?.initialblockdownload === 'boolean') {
+    isChainSyncing = chainInfo.initialblockdownload
+  } else if (syncPercent !== null) {
+    isChainSyncing = syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+  }
+  return { syncPercent, isChainSyncing }
+}
+
+function parseCoinAmount(amount: string, decimals: number, symbol: string): number {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error(`Invalid ${symbol} amount`)
+  const [whole, fraction = ''] = raw.split('.')
+  if (fraction.length > decimals) throw new Error(`${symbol} supports up to ${decimals} decimals`)
+  const numeric = Number(raw)
+  if (!Number.isFinite(numeric) || numeric <= 0) throw new Error(`Amount must be greater than 0`)
+  return Number(`${whole}.${fraction.padEnd(decimals, '0').slice(0, decimals)}`)
 }
 
 function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
@@ -1462,14 +1494,28 @@ export const useWalletStore = create<WalletState>()(
               localRpcOverride: localRpcOverrides[net.id],
               secureBridgeSigner: get().signBackendAuthMessage
             })
+            let syncPercent: number | null = null
+            let isChainSyncing = false
+            try {
+              const chainInfo = await getBlockchainInfo(rpcConfig)
+              const parsed = resolveSyncStateFromChainInfo(chainInfo)
+              syncPercent = parsed.syncPercent
+              isChainSyncing = parsed.isChainSyncing
+            } catch (err) {
+              console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
+            }
             const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
-              isSyncing: false,
+              isSyncing: isChainSyncing,
               isConnected: true,
-              syncPercent: null,
-              lowSyncStreak: 0,
+              syncPercent,
+              lowSyncStreak: (() => {
+                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
+              })(),
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
@@ -1490,14 +1536,28 @@ export const useWalletStore = create<WalletState>()(
               localRpcOverride: localRpcOverrides[net.id],
               secureBridgeSigner: get().signBackendAuthMessage
             })
+            let syncPercent: number | null = null
+            let isChainSyncing = false
+            try {
+              const chainInfo = await getBlockchainInfo(rpcConfig)
+              const parsed = resolveSyncStateFromChainInfo(chainInfo)
+              syncPercent = parsed.syncPercent
+              isChainSyncing = parsed.isChainSyncing
+            } catch (err) {
+              console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
+            }
             const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
-              isSyncing: false,
+              isSyncing: isChainSyncing,
               isConnected: true,
-              syncPercent: null,
-              lowSyncStreak: 0,
+              syncPercent,
+              lowSyncStreak: (() => {
+                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
+              })(),
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
@@ -1562,6 +1622,38 @@ export const useWalletStore = create<WalletState>()(
         void to
         void amount
         throw new Error('XRP send is disabled by strict non-custodial policy')
+      },
+
+      sendCardanoTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, useLocalRpc, localRpcOverrides } = get()
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.id !== 'ada') throw new Error('Active network is not Cardano')
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          useLocalRpc,
+          localRpcOverride: localRpcOverrides[net.id],
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const toAddress = String(to || '').trim()
+        if (!toAddress) throw new Error('Destination address is required')
+        const amountValue = parseCoinAmount(amount, 6, 'ADA')
+        const txid = await sendToAddress(rpcConfig, toAddress, amountValue)
+        return { hash: String(txid) }
+      },
+
+      sendMoneroTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, useLocalRpc, localRpcOverrides } = get()
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.id !== 'xmr') throw new Error('Active network is not Monero')
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          useLocalRpc,
+          localRpcOverride: localRpcOverrides[net.id],
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const toAddress = String(to || '').trim()
+        if (!toAddress) throw new Error('Destination address is required')
+        const amountValue = parseCoinAmount(amount, 12, 'XMR')
+        const txid = await sendToAddress(rpcConfig, toAddress, amountValue)
+        return { hash: String(txid) }
       },
 
       sendUtxoTransaction: async ({ to, amount, donation }) => {
