@@ -2,10 +2,11 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import { XMR_API_INFO } from './interceptors'
 import moneroLogo from './coinlogos/monero.webp'
 
+const XMR_NON_CUSTODIAL_ENABLED = /^(1|true|yes)$/i.test(String(import.meta.env.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
+
 export const XMR_CAPABILITIES: NetworkCapabilitiesInput = {
-  // Native send stays disabled until non-custodial XMR signing/broadcast is implemented.
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: XMR_NON_CUSTODIAL_ENABLED, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: XMR_NON_CUSTODIAL_ENABLED, showActivityTab: true }
 }
 
 export function createMoneroNetwork(ctx: CoinRuntimeContext): Network {

@@ -3,9 +3,8 @@ import { ADA_API_INFO } from './interceptors'
 import cardanoLogo from './coinlogos/cardano.webp'
 
 export const ADA_CAPABILITIES: NetworkCapabilitiesInput = {
-  // Native send stays disabled until non-custodial ADA signing/broadcast is implemented.
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
 }
 
 export function createCardanoNetwork(ctx: CoinRuntimeContext): Network {

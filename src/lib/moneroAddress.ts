@@ -107,7 +107,7 @@ function moneroBase58Encode(data: Uint8Array): string {
 }
 
 function resolveMoneroAddressPrefix(rpcUrlHint?: string): number {
-  const env = String(import.meta.env.VITE_XMR_NETWORK || '').trim().toLowerCase()
+  const env = String((import.meta as any)?.env?.VITE_XMR_NETWORK || '').trim().toLowerCase()
   if (env === 'testnet') return 53
   if (env === 'stagenet') return 24
   if (env === 'mainnet') return 18

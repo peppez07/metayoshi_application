@@ -15,7 +15,9 @@ import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
 import { deriveXrpAddress } from '../lib/xrpAddress'
 import { deriveCardanoAddress } from '../lib/cardanoAddress'
+import { sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
+import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -1668,36 +1670,41 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendCardanoTransaction: async ({ to, amount }) => {
-        const { networks, activeNetworkId, useLocalRpc, localRpcOverrides } = get()
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net || net.id !== 'ada') throw new Error('Active network is not Cardano')
-        const rpcConfig = await createUtxoRpcConfig(net, {
-          useLocalRpc,
-          localRpcOverride: localRpcOverrides[net.id],
-          secureBridgeSigner: get().signBackendAuthMessage
-        })
-        return await sendChainTransaction({
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
+        if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
+        return await sendCardanoNonCustodial({
           network: net,
-          rpcConfig,
-          to,
-          amount
+          mnemonic: sessionMnemonic,
+          accountIndex,
+          fromAddress,
+          toAddress: to,
+          amountAda: amount,
+          walletId: String(net.rpcWallet || '').trim() || undefined
         })
       },
 
       sendMoneroTransaction: async ({ to, amount }) => {
-        const { networks, activeNetworkId, useLocalRpc, localRpcOverrides } = get()
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net || net.id !== 'xmr') throw new Error('Active network is not Monero')
-        const rpcConfig = await createUtxoRpcConfig(net, {
-          useLocalRpc,
-          localRpcOverride: localRpcOverrides[net.id],
-          secureBridgeSigner: get().signBackendAuthMessage
-        })
-        return await sendChainTransaction({
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
+        if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
+        return await sendMoneroNonCustodial({
           network: net,
-          rpcConfig,
-          to,
-          amount
+          mnemonic: sessionMnemonic,
+          accountIndex,
+          fromAddress,
+          toAddress: to,
+          amountXmr: amount
         })
       },
 

@@ -1,9 +1,9 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import ethereumLogo from './coinlogos/ethereum.webp'
 
 export const ETH_CAPABILITIES: NetworkCapabilitiesInput = {
-  // Intentionally disabled for now: UI/design study mode only.
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
 }
 
 export function createEthNetwork(ctx: CoinRuntimeContext): Network {
@@ -23,7 +23,7 @@ export function createEthNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_ETH_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_ETH_EXPLORER || 'https://etherscan.io',
     capabilities: ETH_CAPABILITIES,
-    logo: '/MetayoshiLogo.png'
+    logo: ethereumLogo
   }
 }
 
@@ -34,4 +34,3 @@ export const ethCoin: CoinModule = {
   capabilities: ETH_CAPABILITIES,
   createNetwork: createEthNetwork
 }
-

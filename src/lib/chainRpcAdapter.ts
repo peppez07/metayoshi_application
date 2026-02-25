@@ -68,6 +68,11 @@ export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsup
 
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
   const protocol = resolveProtocol(network)
+  if (network.id === 'ada') return 'non-custodial'
+  if (network.id === 'xmr') {
+    const enabled = /^(1|true|yes)$/i.test(String((import.meta as any)?.env?.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
+    return enabled ? 'non-custodial' : 'unsupported'
+  }
   if (network.coinType === 'EVM') return 'non-custodial'
   if (protocol === 'utxo-jsonrpc') return 'non-custodial'
   if (protocol === 'xrp-jsonrpc-compat') return 'unsupported'

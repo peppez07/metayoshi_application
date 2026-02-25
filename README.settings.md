@@ -184,6 +184,35 @@ Current implementation status (as of 2026-02-25):
   - validate
   - send
 - Chain-specific handlers are still used underneath where required (for example XRP, Cardano, Monero compatibility mappings).
+
+## Cardano Non-Custodial Send (Strict)
+
+The app now uses a strict Cardano flow where signing happens client-side and server only constructs/submits:
+
+- Construct: `POST /v1/cardano/:chain/tx/construct`
+- Submit signed CBOR: `POST /v1/cardano/:chain/tx/submit`
+
+Required app env:
+
+- `VITE_API_BASE_URL=https://<api-domain>`
+- `VITE_APP_API_KEY=<APP_API_KEY>`
+- `VITE_ADA_NETWORK=mainnet` (or `testnet`/`preprod`/`preview`)
+
+## Monero Non-Custodial Send (Strict Gate)
+
+Monero send stays disabled by default and is enabled only when you explicitly pass the gate:
+
+- `VITE_ENABLE_XMR_NON_CUSTODIAL=true`
+
+When enabled, the app requires a runtime signer object:
+
+- `window.__METAYOSHI_MONERO_RUNTIME__.signTransfer(...)`
+- optional `window.__METAYOSHI_MONERO_RUNTIME__.selfTest()`
+
+Before first send, app enforces deterministic vector check in code and runtime self-test.
+Signed tx blob is submitted to:
+
+- `POST /v1/monero/:chain/tx/submit`
 - Account names are stored per network (`account.networkNames[networkId]`), so renaming an account on one coin does not rename it on other coins.
 
 ## DApp permission and storage model
