@@ -19,10 +19,17 @@ import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
-import { fetchChainBalanceAndSync, sendChainTransaction, sendUtxoNonCustodialTransaction } from '../lib/chainRpcAdapter'
+import {
+  fetchChainBalanceAndSync,
+  resolveChainSendCustodyMode,
+  sendChainTransaction,
+  sendUtxoNonCustodialTransaction,
+  validateChainAddress
+} from '../lib/chainRpcAdapter'
 import {
   DEFAULT_ACTIVE_NETWORK_ID,
   DEFAULT_NETWORK_ID,
+  getCoinRuntimeProfile,
   INITIAL_NETWORKS,
   estimateNetworkFee
 } from '../coins'
@@ -78,6 +85,24 @@ export interface Activity {
   status: 'pending' | 'confirmed' | 'rejected'
   timestamp: number
   networkId: string
+}
+
+export interface ChainModelLiveSnapshot {
+  networkId: string
+  symbol: string
+  protocol: string
+  backendMode: 'evm-rpc' | 'bridge' | 'local-rpc'
+  address: string
+  addressValid: boolean
+  balance: string
+  syncPercent: number | null
+  isSyncing: boolean
+  isConnected: boolean
+  nonCustodialCompliant: boolean
+  sendCustodyMode: 'non-custodial' | 'custodial-server' | 'unsupported'
+  serverMatched: boolean
+  checkedAt: number
+  error?: string
 }
 
 interface WalletState {
@@ -176,6 +201,7 @@ interface WalletState {
 
   // RPC
   refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
+  probeActiveChainModel: () => Promise<ChainModelLiveSnapshot>
   sendEvmTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
@@ -1506,6 +1532,107 @@ export const useWalletStore = create<WalletState>()(
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set({ isSyncing: false, isConnected: false, lowSyncStreak: 0 })
+        }
+      },
+
+      probeActiveChainModel: async () => {
+        const { networks, activeNetworkId, accounts, activeAccountId, useLocalRpc, localRpcOverrides } = get()
+        const net = networks.find((n) => n.id === activeNetworkId)
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        if (!net || !acc) throw new Error('No active account/network')
+
+        const profile = getCoinRuntimeProfile(net.id)
+        const sendCustodyMode = resolveChainSendCustodyMode(net)
+        const backendMode: ChainModelLiveSnapshot['backendMode'] =
+          net.coinType === 'EVM'
+            ? 'evm-rpc'
+            : (useLocalRpc ? 'local-rpc' : 'bridge')
+
+        let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
+        if (address && net.coinType === 'UTXO' && net.coinSymbol && !isAddressForCoinSymbol(address, net.coinSymbol)) {
+          address = null
+        }
+        if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
+        if (!address || net.coinType === 'UTXO') {
+          const ensured = await get().ensureNetworkAddress(activeNetworkId)
+          if (ensured) address = ensured
+        }
+        const resolvedAddress = String(address || '').trim()
+
+        const base: ChainModelLiveSnapshot = {
+          networkId: net.id,
+          symbol: net.symbol,
+          protocol: profile?.protocol || 'unknown',
+          backendMode,
+          address: resolvedAddress,
+          addressValid: false,
+          balance: getCachedBalanceForNetwork(acc, activeNetworkId, true),
+          syncPercent: get().syncPercent,
+          isSyncing: get().isSyncing,
+          isConnected: get().isConnected,
+          nonCustodialCompliant: sendCustodyMode === 'non-custodial',
+          sendCustodyMode,
+          serverMatched: false,
+          checkedAt: Date.now()
+        }
+        if (!resolvedAddress) {
+          return { ...base, error: 'No active address for network/account' }
+        }
+
+        try {
+          if (net.coinType === 'EVM') {
+            const [snapshot, addressValid] = await Promise.all([
+              fetchChainBalanceAndSync({
+                network: net,
+                address: resolvedAddress
+              }),
+              validateChainAddress(net, undefined, resolvedAddress)
+            ])
+            return {
+              ...base,
+              checkedAt: Date.now(),
+              addressValid,
+              balance: snapshot.balance,
+              syncPercent: snapshot.syncPercent,
+              isSyncing: snapshot.isSyncing,
+              isConnected: true,
+              serverMatched: true
+            }
+          }
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc,
+            localRpcOverride: localRpcOverrides[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const [snapshot, addressValid] = await Promise.all([
+            fetchChainBalanceAndSync({
+              network: net,
+              address: resolvedAddress,
+              rpcConfig,
+              preferAddressIndexBalance: net.coinType === 'UTXO' ? supportsAddressIndexBalance(net.coinSymbol) : undefined
+            }),
+            validateChainAddress(net, rpcConfig, resolvedAddress)
+          ])
+          return {
+            ...base,
+            checkedAt: Date.now(),
+            addressValid,
+            balance: snapshot.balance,
+            syncPercent: snapshot.syncPercent,
+            isSyncing: snapshot.isSyncing,
+            isConnected: true,
+            serverMatched: true
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          return {
+            ...base,
+            checkedAt: Date.now(),
+            isConnected: false,
+            serverMatched: false,
+            error: message
+          }
         }
       },
 

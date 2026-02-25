@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { IoFlashOutline, IoLayersOutline, IoSparklesOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 type GasLane = 'economy' | 'balanced' | 'priority'
 
@@ -9,6 +11,7 @@ const EvmModelPage: React.FC = () => {
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const [gasLane, setGasLane] = useState<GasLane>('balanced')
   const [intent, setIntent] = useState<'swap' | 'send' | 'approve'>('send')
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   const evmAddress = useMemo(
     () => activeAccount?.networkAddresses?.[activeNetworkId] || activeAccount?.addresses?.EVM || '',
@@ -90,6 +93,8 @@ const EvmModelPage: React.FC = () => {
           Active intent: <span className="font-bold text-gray-200 uppercase">{intent}</span> with <span className="font-bold text-gray-200 uppercase">{gasLane}</span> lane.
         </p>
       </section>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

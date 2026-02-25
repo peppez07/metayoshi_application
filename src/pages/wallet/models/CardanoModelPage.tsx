@@ -1,11 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import { IoGitNetworkOutline, IoLeafOutline, IoPulseOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const CardanoModelPage: React.FC = () => {
   const { accounts, activeAccountId, activeNetworkId } = useWalletStore()
   const [view, setView] = useState<'utxo' | 'staking' | 'policies'>('utxo')
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   const cardanoAddress = useMemo(
     () => activeAccount?.networkAddresses?.[activeNetworkId] || '',
@@ -71,6 +74,8 @@ const CardanoModelPage: React.FC = () => {
       <div className="rounded-lg border border-dark-600 bg-dark-800/40 p-2 text-[10px] font-mono text-gray-500 break-all">
         {cardanoAddress || 'No Cardano address available'}
       </div>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

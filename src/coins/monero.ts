@@ -3,8 +3,9 @@ import { XMR_API_INFO } from './interceptors'
 import moneroLogo from './coinlogos/monero.webp'
 
 export const XMR_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  // Native send stays disabled until non-custodial XMR signing/broadcast is implemented.
+  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
 }
 
 export function createMoneroNetwork(ctx: CoinRuntimeContext): Network {

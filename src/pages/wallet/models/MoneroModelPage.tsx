@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { IoEyeOffOutline, IoLocateOutline, IoShieldHalfOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const MoneroModelPage: React.FC = () => {
   const { accounts, activeAccountId, activeNetworkId } = useWalletStore()
@@ -8,6 +10,7 @@ const MoneroModelPage: React.FC = () => {
   const [scanMode, setScanMode] = useState<'fast' | 'balanced' | 'deep'>('balanced')
   const [subaccount, setSubaccount] = useState(0)
   const [showPrivateHints, setShowPrivateHints] = useState(false)
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   const xmrAddress = useMemo(
     () => activeAccount?.networkAddresses?.[activeNetworkId] || '',
@@ -101,6 +104,8 @@ const MoneroModelPage: React.FC = () => {
       <div className="rounded-lg border border-dark-600 bg-dark-800/40 p-2 text-[10px] font-mono text-gray-500 break-all">
         {xmrAddress || 'No Monero address available'}
       </div>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

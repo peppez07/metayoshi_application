@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { IoPricetagOutline, IoTimerOutline } from 'react-icons/io5'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const XrpModelPage: React.FC = () => {
   const [useDestinationTag, setUseDestinationTag] = useState(false)
   const [tag, setTag] = useState('')
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
@@ -44,6 +47,8 @@ const XrpModelPage: React.FC = () => {
           className="w-full bg-dark-700/60 border border-dark-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary disabled:opacity-50"
         />
       </section>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

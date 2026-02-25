@@ -11,7 +11,6 @@ import {
   listUtxoUnspent,
   scanAddressUnspent,
   sendRawTransaction,
-  sendToAddress,
   validateAddress,
   type UtxoUnspent
 } from './utxoRpc'
@@ -63,6 +62,17 @@ export interface SendUtxoNonCustodialInput {
 
 function resolveProtocol(network: Network): string {
   return getCoinRuntimeProfile(network.id)?.protocol || 'utxo-jsonrpc'
+}
+
+export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
+
+export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
+  const protocol = resolveProtocol(network)
+  if (network.coinType === 'EVM') return 'non-custodial'
+  if (protocol === 'utxo-jsonrpc') return 'non-custodial'
+  if (protocol === 'xrp-jsonrpc-compat') return 'unsupported'
+  if (protocol === 'cardano-wallet-compat' || protocol === 'monero-wallet-compat') return 'custodial-server'
+  return 'unsupported'
 }
 
 function resolveSyncStateFromChainInfo(chainInfo: any): { syncPercent: number | null; isSyncing: boolean } {
@@ -208,14 +218,12 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
   }
   if (!input.rpcConfig) throw new Error(`RPC config is required for ${input.network.symbol}`)
   if (protocol === 'cardano-wallet-compat') {
-    const amount = parseCoinAmount(input.amount, 6, 'ADA')
-    const txid = await sendToAddress(input.rpcConfig, to, amount)
-    return { hash: String(txid) }
+    void parseCoinAmount(input.amount, 6, 'ADA')
+    throw new Error('Cardano send is disabled by strict non-custodial policy')
   }
   if (protocol === 'monero-wallet-compat') {
-    const amount = parseCoinAmount(input.amount, 12, 'XMR')
-    const txid = await sendToAddress(input.rpcConfig, to, amount)
-    return { hash: String(txid) }
+    void parseCoinAmount(input.amount, 12, 'XMR')
+    throw new Error('Monero send is disabled by strict non-custodial policy')
   }
   throw new Error(`Unsupported protocol: ${protocol}`)
 }

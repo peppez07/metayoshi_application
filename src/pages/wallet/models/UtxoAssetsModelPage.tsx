@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { IoCubeOutline, IoFunnelOutline, IoGitCompareOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const ASSET_ROWS: Array<{ symbol: string; amount: string }> = [
   { symbol: 'YOSHI', amount: '482.10' },
@@ -15,6 +17,7 @@ const UtxoAssetsModelPage: React.FC = () => {
   const [query, setQuery] = useState('')
   const [composer, setComposer] = useState<'single' | 'batch'>('single')
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   const filteredAssets = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -80,6 +83,8 @@ const UtxoAssetsModelPage: React.FC = () => {
       <div className="rounded-lg border border-dark-600 bg-dark-800/40 p-2 text-[10px] font-mono text-gray-500 break-all">
         {address || 'No active address'}
       </div>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

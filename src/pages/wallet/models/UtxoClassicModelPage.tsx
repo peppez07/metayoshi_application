@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { IoConstructOutline, IoOptionsOutline } from 'react-icons/io5'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const UtxoClassicModelPage: React.FC = () => {
   const [feePreset, setFeePreset] = useState<'low' | 'normal' | 'high'>('normal')
   const [coinControl, setCoinControl] = useState(false)
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
@@ -56,6 +59,8 @@ const UtxoClassicModelPage: React.FC = () => {
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 text-[11px] text-gray-300">
         Estimated profile: <span className="font-bold uppercase">{feePreset}</span> fee, <span className="font-bold">{coinControl ? 'manual' : 'automatic'}</span> input strategy.
       </section>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

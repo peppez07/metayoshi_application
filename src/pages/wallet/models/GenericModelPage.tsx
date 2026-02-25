@@ -1,10 +1,13 @@
 import React from 'react'
 import { IoAlertCircleOutline, IoExtensionPuzzleOutline, IoServerOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
+import { ModelRuntimeStatus } from './ModelRuntimeStatus'
+import { useChainModelLiveData } from './useChainModelLiveData'
 
 const GenericModelPage: React.FC = () => {
   const { networks, activeNetworkId } = useWalletStore()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
@@ -18,6 +21,8 @@ const GenericModelPage: React.FC = () => {
         <Row icon={<IoExtensionPuzzleOutline className="w-4 h-4 text-primary" />} label="Coin Type" value={activeNetwork.coinType} />
         <Row icon={<IoAlertCircleOutline className="w-4 h-4 text-primary" />} label="Status" value="Fallback model active" />
       </section>
+
+      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }
