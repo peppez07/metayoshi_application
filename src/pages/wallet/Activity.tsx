@@ -2,15 +2,21 @@ import React, { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ActivityRow } from '../../components/ListItems'
 import { useWalletStore, type Activity as WalletActivity } from '../../store/walletStore'
-import { IoClose, IoCopyOutline, IoOpenOutline, IoCheckmark } from 'react-icons/io5'
+import { IoClose, IoCopyOutline, IoOpenOutline, IoCheckmark, IoSearchOutline } from 'react-icons/io5'
+import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 
 const Activity: React.FC = () => {
   const { activity, activeNetworkId, networks, accounts, activeAccountId } = useWalletStore()
   const [selectedTx, setSelectedTx] = useState<WalletActivity | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'sent' | 'received' | 'swap'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('all')
+  const [periodFilter, setPeriodFilter] = useState<'all' | '24h' | '7d' | '30d'>('all')
 
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+  const activeCaps = resolveNetworkCapabilities(activeNetwork)
 
   const activeAccountAddressSet = useMemo(() => {
     const set = new Set<string>()
@@ -31,7 +37,7 @@ const Activity: React.FC = () => {
     return set
   }, [activeAccount])
 
-  const filteredActivity = activity
+  const baseActivity = activity
     .filter((a) => {
       if (a.networkId !== activeNetworkId) return false
       if (a.accountId) return a.accountId === activeAccount?.id
@@ -48,6 +54,38 @@ const Activity: React.FC = () => {
       )
     })
     .sort((a, b) => b.timestamp - a.timestamp)
+
+  const filteredActivity = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    const now = Date.now()
+    const periodMs = periodFilter === '24h'
+      ? 24 * 60 * 60 * 1000
+      : periodFilter === '7d'
+        ? 7 * 24 * 60 * 60 * 1000
+        : periodFilter === '30d'
+          ? 30 * 24 * 60 * 60 * 1000
+          : 0
+
+    return baseActivity.filter((tx) => {
+      if (typeFilter !== 'all' && tx.type !== typeFilter) return false
+      if (statusFilter !== 'all' && tx.status !== statusFilter) return false
+      if (periodMs > 0 && now - tx.timestamp > periodMs) return false
+      if (!normalizedQuery) return true
+
+      const haystack = [
+        tx.id,
+        tx.type,
+        tx.status,
+        tx.asset,
+        tx.amount,
+        tx.from || '',
+        tx.to || '',
+        new Date(tx.timestamp).toLocaleString()
+      ].join(' ').toLowerCase()
+
+      return haystack.includes(normalizedQuery)
+    })
+  }, [baseActivity, periodFilter, query, statusFilter, typeFilter])
 
   const fallbackFromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
@@ -77,6 +115,59 @@ const Activity: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
+      <div className="px-3 py-2.5 border-b border-dark-600/70 bg-dark-900/50 space-y-2">
+        <div className="relative">
+          <IoSearchOutline className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search txid, asset, amount, address, status..."
+            className="w-full bg-dark-700/60 border border-dark-600 rounded-xl pl-9 pr-8 py-2 text-xs font-medium text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary transition-colors"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-dark-600 transition-colors"
+              title="Clear search"
+            >
+              <IoClose className="w-3.5 h-3.5 text-gray-500 hover:text-white" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5">
+          {(['all', 'sent', 'received', 'swap'] as const).map((value) => (
+            <FilterChip
+              key={`type-${value}`}
+              label={value === 'all' ? 'Type: All' : `Type: ${value}`}
+              active={typeFilter === value}
+              onClick={() => setTypeFilter(value)}
+            />
+          ))}
+          {(['all', 'confirmed', 'pending', 'rejected'] as const).map((value) => (
+            <FilterChip
+              key={`status-${value}`}
+              label={value === 'all' ? 'Status: All' : `Status: ${value}`}
+              active={statusFilter === value}
+              onClick={() => setStatusFilter(value)}
+            />
+          ))}
+          {(['all', '24h', '7d', '30d'] as const).map((value) => (
+            <FilterChip
+              key={`period-${value}`}
+              label={value === 'all' ? 'Period: All' : value}
+              active={periodFilter === value}
+              onClick={() => setPeriodFilter(value)}
+            />
+          ))}
+        </div>
+
+        <div className="text-[10px] text-gray-500 px-0.5">
+          Showing {filteredActivity.length} of {baseActivity.length} transaction{baseActivity.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {filteredActivity.length > 0 ? (
           filteredActivity.map((item) => (
@@ -85,6 +176,10 @@ const Activity: React.FC = () => {
               type={item.type}
               amount={item.amount}
               asset={item.asset}
+              isAssetTransfer={
+                activeCaps.features.assetLayer
+                && String(item.asset || '').trim().toUpperCase() !== String(activeNetwork.symbol || '').trim().toUpperCase()
+              }
               address={item.to || item.from}
               status={item.status}
               timestamp={item.timestamp}
@@ -93,7 +188,9 @@ const Activity: React.FC = () => {
           ))
         ) : (
           <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-50">
-            <p className="text-sm font-medium">You have no transactions</p>
+            <p className="text-sm font-medium">
+              {baseActivity.length > 0 ? 'No transactions match your filters' : 'You have no transactions'}
+            </p>
           </div>
         )}
       </div>
@@ -164,6 +261,26 @@ const Activity: React.FC = () => {
     </div>
   )
 }
+
+interface FilterChipProps {
+  label: string
+  active: boolean
+  onClick: () => void
+}
+
+const FilterChip: React.FC<FilterChipProps> = ({ label, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap border transition-colors ${
+      active
+        ? 'bg-primary/20 text-primary border-primary/40'
+        : 'bg-dark-700/50 text-gray-400 border-dark-600 hover:text-gray-200 hover:bg-dark-700'
+    }`}
+  >
+    {label}
+  </button>
+)
 
 interface DetailRowProps {
   label: string

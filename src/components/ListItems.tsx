@@ -1,5 +1,11 @@
 import React from 'react'
-import { IoChevronForward } from 'react-icons/io5'
+import {
+  IoArrowDownOutline,
+  IoArrowUpOutline,
+  IoChevronForward,
+  IoLayersOutline,
+  IoSwapHorizontalOutline
+} from 'react-icons/io5'
 
 interface AssetRowProps {
   name: string
@@ -33,6 +39,7 @@ interface ActivityRowProps {
   address?: string
   status: string
   timestamp?: number
+  isAssetTransfer?: boolean
   onClick?: () => void
 }
 
@@ -43,6 +50,7 @@ export const ActivityRow: React.FC<ActivityRowProps> = ({
   address,
   status,
   timestamp,
+  isAssetTransfer = false,
   onClick
 }) => {
   const typeLabel = type === 'sent' ? 'Sent' : type === 'received' ? 'Received' : 'Swapped'
@@ -70,8 +78,16 @@ export const ActivityRow: React.FC<ActivityRowProps> = ({
       onClick={onClick}
     >
       <div className="flex items-center gap-3">
-        <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center overflow-hidden">
-          <div className="w-full h-full bg-gray-200" />
+        <div className="w-7 h-7 rounded-full border border-dark-600 bg-dark-700/70 flex items-center justify-center overflow-hidden">
+          {isAssetTransfer ? (
+            <IoLayersOutline className="w-4.5 h-4.5 text-yellow-400" />
+          ) : type === 'received' ? (
+            <IoArrowDownOutline className="w-4.5 h-4.5 text-green-400" />
+          ) : type === 'swap' ? (
+            <IoSwapHorizontalOutline className="w-4.5 h-4.5 text-blue-400" />
+          ) : (
+            <IoArrowUpOutline className="w-4.5 h-4.5 text-primary" />
+          )}
         </div>
         <div className="flex flex-col">
           <span className="text-sm font-bold">{typeLabel} {amount} {asset} {actionText}</span>
