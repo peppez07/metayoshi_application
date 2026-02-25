@@ -3,7 +3,6 @@ import { useWalletStore } from '../../store/walletStore'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import {
   IoServerOutline,
-  IoCloudOutline,
   IoCheckmarkCircle,
   IoWarningOutline,
   IoInformationCircleOutline,
@@ -231,7 +230,6 @@ const LocalRpcSettings: React.FC = () => {
     networks,
     useLocalRpc,
     localRpcOverrides,
-    setUseLocalRpc,
     setLocalRpcOverride
   } = useWalletStore()
 
@@ -251,56 +249,7 @@ const LocalRpcSettings: React.FC = () => {
       </header>
 
       <div className="flex flex-col gap-5 p-4">
-
-        {/* ── Mode toggle ── */}
-        <div className="rounded-xl border border-dark-600 bg-dark-700/30 overflow-hidden">
-          {/* Bridge option */}
-          <button
-            onClick={() => setUseLocalRpc(false)}
-            className={`w-full flex items-center gap-4 px-4 py-4 border-b border-dark-600/60 transition-colors ${
-              !useLocalRpc ? 'bg-primary/10' : 'hover:bg-dark-700/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              !useLocalRpc ? 'bg-primary/20 border-2 border-primary' : 'bg-dark-600 border-2 border-dark-500'
-            }`}>
-              <IoCloudOutline className={`w-5 h-5 ${!useLocalRpc ? 'text-primary' : 'text-gray-500'}`} />
-            </div>
-            <div className="flex-1 text-left">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold">MetaYoshi Bridge</span>
-                <span className="text-[9px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase">Recommended</span>
-              </div>
-              <p className="text-[10px] text-gray-500 leading-relaxed mt-0.5">
-                All calls go through the secure MetaYoshi gateway. No local node needed.
-              </p>
-            </div>
-            {!useLocalRpc && <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />}
-          </button>
-
-          {/* Local RPC option */}
-          <button
-            onClick={() => setUseLocalRpc(true)}
-            className={`w-full flex items-center gap-4 px-4 py-4 transition-colors ${
-              useLocalRpc ? 'bg-primary/10' : 'hover:bg-dark-700/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              useLocalRpc ? 'bg-primary/20 border-2 border-primary' : 'bg-dark-600 border-2 border-dark-500'
-            }`}>
-              <IoServerOutline className={`w-5 h-5 ${useLocalRpc ? 'text-primary' : 'text-gray-500'}`} />
-            </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-bold">Local Node RPC</span>
-              <p className="text-[10px] text-gray-500 leading-relaxed mt-0.5">
-                Connect directly to your own locally running node. Advanced users only.
-              </p>
-            </div>
-            {useLocalRpc && <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />}
-          </button>
-        </div>
-
-        {/* ── Warning when local mode active ── */}
+        {/* Warning when local mode active */}
         {useLocalRpc && (
           <div className="flex gap-3 p-3.5 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
             <IoWarningOutline className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
@@ -348,3 +297,4 @@ const LocalRpcSettings: React.FC = () => {
 }
 
 export default LocalRpcSettings
+

@@ -1,6 +1,12 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import { hexToBytes } from '@noble/hashes/utils'
 
+function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
+  const primary = String(rpcUrl || '').trim()
+  const defaults = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+  return Array.from(new Set([primary, ...defaults].filter(Boolean)))
+}
+
 function parseSolAmount(amount: string): bigint {
   const raw = String(amount || '').trim()
   if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid SOL amount')
@@ -12,9 +18,18 @@ function parseSolAmount(amount: string): bigint {
 }
 
 export async function getSolanaBalance(rpcUrl: string, address: string): Promise<string> {
-  const connection = new Connection(rpcUrl, 'confirmed')
-  const lamports = await connection.getBalance(new PublicKey(String(address || '').trim()), 'confirmed')
-  return (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/\.?0+$/, '')
+  const pubkey = new PublicKey(String(address || '').trim())
+  let lastError: unknown = null
+  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
+    try {
+      const connection = new Connection(candidate, 'confirmed')
+      const lamports = await connection.getBalance(pubkey, 'confirmed')
+      return (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/\.?0+$/, '')
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Failed to query Solana balance from configured RPC endpoints')
 }
 
 export async function sendSolanaNonCustodial(params: {

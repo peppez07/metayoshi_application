@@ -913,6 +913,16 @@ export const useWalletStore = create<WalletState>()(
             // Continue to derivation below to canonicalize persisted legacy paths.
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
             if (isAddressForCoinSymbol(existing, net.coinSymbol)) return existing
+          } else if (
+            net.coinType === 'EVM'
+            || net.coinType === 'XRP'
+            || net.id === 'sol'
+            || net.id === 'xlm'
+            || net.id === 'tron'
+          ) {
+            const isValidPersisted = await validateChainAddress(net, undefined, existing).catch(() => false)
+            if (isValidPersisted) return existing
+            console.warn(`[${net.symbol}] persisted address is invalid for ${networkId}; re-deriving canonical address`)
           } else {
             return existing
           }

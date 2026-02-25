@@ -14,7 +14,7 @@ export function createPolygonNetwork(ctx: CoinRuntimeContext): Network {
     coinType: 'EVM',
     coinSymbol: 'MATIC',
     chainId: 137,
-    rpcUrl: import.meta.env.VITE_POLYGON_RPC || 'https://polygon-rpc.com',
+    rpcUrl: import.meta.env.VITE_POLYGON_RPC || 'https://polygon-bor-rpc.publicnode.com',
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_POLYGON_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_POLYGON_RPC_PASSWORD || '',
