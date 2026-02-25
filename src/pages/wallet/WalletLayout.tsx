@@ -19,12 +19,12 @@ import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import {
-  RTM_DONATION_ENABLED_DEFAULT,
-  RTM_DONATION_PERCENT_DEFAULT,
+  DONATION_ENABLED_DEFAULT,
+  DONATION_PERCENT_DEFAULT,
   fetchCoinDonationPolicy,
   supportsCoinDonationPolicy,
   type CoinDonationPolicy
-} from '../../coins/rtm'
+} from '../../coins/donationPolicy'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ const WalletLayout: React.FC = () => {
   const [toAddress, setToAddress] = useState('')
   const [amount,    setAmount]    = useState('')
   const [sendError, setSendError] = useState('')
-  const [donationEnabled, setDonationEnabled] = useState(RTM_DONATION_ENABLED_DEFAULT)
+  const [donationEnabled, setDonationEnabled] = useState(DONATION_ENABLED_DEFAULT)
   const [donationMode, setDonationMode] = useState<'add' | 'deduct'>('add')
   const [donationPolicy, setDonationPolicy] = useState<CoinDonationPolicy | null>(null)
 
@@ -100,7 +100,7 @@ const WalletLayout: React.FC = () => {
   const donationSupported = supportsCoinDonationPolicy(activeNetwork)
   const donationRequired = donationSupported ? donationPolicy?.required === true : false
   const donationPercent = donationSupported
-    ? (donationRequired ? (donationPolicy?.percent ?? RTM_DONATION_PERCENT_DEFAULT) : donationPercentSetting)
+    ? (donationRequired ? (donationPolicy?.percent ?? DONATION_PERCENT_DEFAULT) : donationPercentSetting)
     : 0
   const donationAddress = donationSupported ? String(donationPolicy?.address || '').trim() : ''
   const donationActive = donationSupported && donationEnabled && Boolean(donationAddress)
@@ -135,7 +135,7 @@ const WalletLayout: React.FC = () => {
       setToAddress('')
       setAmount('')
       setSendError('')
-      setDonationEnabled(RTM_DONATION_ENABLED_DEFAULT)
+      setDonationEnabled(DONATION_ENABLED_DEFAULT)
       setDonationMode('add')
       setDonationPolicy(null)
     }
