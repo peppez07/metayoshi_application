@@ -1,6 +1,7 @@
 import * as bip39 from 'bip39'
-import { derivePath } from 'ed25519-hd-key'
 import { keccak_256 } from '@noble/hashes/sha3'
+import { hmac } from '@noble/hashes/hmac'
+import { sha512 } from '@noble/hashes/sha512'
 import { ed25519 } from '@noble/curves/ed25519.js'
 
 const MONERO_B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -11,8 +12,37 @@ function normalizeMnemonic(input: string): string {
   return String(input || '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-function hardened(index: number): string {
-  return `${index}'`
+function ser32be(value: number): Uint8Array {
+  return Uint8Array.of((value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff)
+}
+
+function parseHardenedPath(path: string): number[] {
+  const parts = String(path || '').trim().split('/')
+  if (parts[0] !== 'm') throw new Error(`Invalid derivation path: ${path}`)
+  const out: number[] = []
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i]
+    if (!p.endsWith("'")) throw new Error(`Non-hardened path segment is not supported for ed25519: ${p}`)
+    const n = Number(p.slice(0, -1))
+    if (!Number.isInteger(n) || n < 0 || n > 0x7fffffff) throw new Error(`Invalid path segment: ${p}`)
+    out.push((0x80000000 | n) >>> 0)
+  }
+  return out
+}
+
+function deriveEd25519Slip10(seed: Uint8Array, path: string): Uint8Array {
+  let I = hmac(sha512, new TextEncoder().encode('ed25519 seed'), seed)
+  let key = I.slice(0, 32)
+  let chainCode = I.slice(32)
+
+  const indices = parseHardenedPath(path)
+  for (const idx of indices) {
+    const data = concatBytes(Uint8Array.of(0x00), key, ser32be(idx))
+    I = hmac(sha512, chainCode, data)
+    key = I.slice(0, 32)
+    chainCode = I.slice(32)
+  }
+  return key
 }
 
 function leBytesToBigInt(bytes: Uint8Array): bigint {
@@ -101,10 +131,10 @@ export async function deriveMoneroAddress(
     throw new Error('Invalid account index')
   }
 
-  const seedHex = (await bip39.mnemonicToSeed(normalized)).toString('hex')
-  const path = `m/${hardened(44)}/${hardened(128)}/${hardened(accountIndex)}`
-  const derived = derivePath(path, seedHex)
-  const spendSecret = reduce32(keccak_256(derived.key))
+  const seed = await bip39.mnemonicToSeed(normalized)
+  const path = `m/44'/128'/${accountIndex}'`
+  const slip10Key = deriveEd25519Slip10(Uint8Array.from(seed), path)
+  const spendSecret = reduce32(keccak_256(slip10Key))
   const viewSecret = reduce32(keccak_256(spendSecret))
 
   const spendScalar = leBytesToBigInt(spendSecret)
@@ -123,4 +153,3 @@ export async function deriveMoneroAddress(
 
   return { address, path: `${path}/0/0` }
 }
-
