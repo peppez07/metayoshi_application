@@ -87,6 +87,7 @@ const INJECTION_ALLOWLIST_KEY = 'dapp_injection_allowlist_v1'
 const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app']
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
+const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
 
 let bridgeContextInvalidated = false
 installGlobalErrorMonitor('content-script')
@@ -156,10 +157,30 @@ function isContextInvalidatedMessage(message: string): boolean {
   return CONTEXT_INVALIDATED_RE.test(String(message ?? ''))
 }
 
+function tryAutoReloadAfterContextInvalidation(): boolean {
+  try {
+    if (window.top !== window.self) return false
+    const alreadyReloaded = window.sessionStorage.getItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY) === '1'
+    if (alreadyReloaded) return false
+    window.sessionStorage.setItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY, '1')
+    window.setTimeout(() => {
+      try {
+        window.location.reload()
+      } catch {
+        // ignore reload errors
+      }
+    }, 40)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function markContextInvalidated(message: string): void {
   if (bridgeContextInvalidated) return
   bridgeContextInvalidated = true
   void recordRuntimeError('content-script', message, { kind: 'context-invalidated' })
+  tryAutoReloadAfterContextInvalidation()
   postToPage({
     type: 'bridge_error',
     error: {
@@ -288,6 +309,11 @@ function initEventBridge(): void {
 async function boot(): Promise<void> {
   const enabled = await shouldInjectOnCurrentHost()
   if (!enabled) return
+  try {
+    window.sessionStorage.removeItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY)
+  } catch {
+    // ignore storage errors
+  }
 
   window.addEventListener('message', (event) => {
     if (event.source !== window) return
