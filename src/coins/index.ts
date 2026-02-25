@@ -1,13 +1,21 @@
 import { arrCoin } from './arr'
+import { arbitrumCoin } from './arbitrum'
+import { avaxcCoin } from './avaxc'
+import { baseCoin } from './base'
 import { cardanoCoin } from './cardano'
 import { BTC_ADDRESS_SPEC } from './btc'
+import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
 import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
 import { moneroCoin } from './monero'
+import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
+import { solCoin } from './sol'
 import { tideCoin } from './tide'
+import { tronCoin } from './tron'
+import { xlmCoin } from './xlm'
 import { xrpCoin } from './xrp'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
@@ -32,6 +40,14 @@ export const DEFAULT_UTXO_COIN_SYMBOL = 'RTM'
 export const ALL_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
+  bnbCoin,
+  polygonCoin,
+  arbitrumCoin,
+  baseCoin,
+  avaxcCoin,
+  solCoin,
+  xlmCoin,
+  tronCoin,
   dogeCoin,
   btczCoin,
   tideCoin,

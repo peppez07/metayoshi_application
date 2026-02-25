@@ -1617,6 +1617,17 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
+          } else {
+            // Unsupported runtime family in current build (e.g. SOL/XLM/TRON placeholders).
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: false,
+              syncPercent: null,
+              lowSyncStreak: 0,
+              accounts: state.accounts
+            }))
           }
         } catch (err) {
           const transientBridgeFailure = isTransientBridgeFailure(err)
