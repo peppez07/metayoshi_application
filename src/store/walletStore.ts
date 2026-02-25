@@ -55,6 +55,8 @@ export interface FullBackupV1 {
 export interface Account {
   id: string
   name: string
+  /** Per-network account labels, keyed by network id. */
+  networkNames: Record<string, string>
   /** BIP44 account index used for deterministic derivation. */
   derivationIndex: number
   addresses: Record<CoinType, string>
@@ -155,6 +157,7 @@ interface WalletState {
   addAccount: (name: string, networkId?: string) => Promise<void>
   removeAccount: (id: string) => void
   updateAccount: (id: string, updates: Partial<Account>) => void
+  setNetworkAccountName: (accountId: string, networkId: string, name: string) => void
   setWatchOnlyAddress: (accountId: string, networkId: string, address: string) => void
   
   // Network management
@@ -432,11 +435,13 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
     const candidate = (raw ?? {}) as Partial<Account>
     const addresses = candidate.addresses ?? ({} as Record<CoinType, string>)
     const networkAddresses = candidate.networkAddresses ?? {}
+    const networkNames = candidate.networkNames ?? {}
     const networkBalances = candidate.networkBalances ?? {}
 
     return {
       id: typeof candidate.id === 'string' ? candidate.id : `acc-${index + 1}`,
       name: typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`,
+      networkNames: { ...networkNames },
       derivationIndex: resolveDerivationIndex(candidate, index),
       addresses: {
         EVM: addresses.EVM ?? '',
@@ -605,6 +610,7 @@ export const useWalletStore = create<WalletState>()(
         const initialAccount: Account = {
           id: 'acc-1',
           name: 'Account 1',
+          networkNames: {},
           derivationIndex: 0,
           addresses: derived.addresses,
           networkAddresses: derived.networkAddresses,
@@ -669,6 +675,7 @@ export const useWalletStore = create<WalletState>()(
             : [{
               id: 'acc-1',
               name: 'Account 1',
+              networkNames: {},
               derivationIndex: 0,
               addresses: { EVM: '', UTXO: '', BTC: '', SOL: '', XRP: '' },
               networkAddresses: {},
@@ -1134,7 +1141,8 @@ export const useWalletStore = create<WalletState>()(
 
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
-          name: normalizedName,
+          name: `Account ${derivationIndex + 1}`,
+          networkNames: { [selectedNetwork.id]: normalizedName },
           derivationIndex,
           addresses,
           networkAddresses: { [selectedNetwork.id]: selectedAddress },
@@ -1168,6 +1176,24 @@ export const useWalletStore = create<WalletState>()(
           accounts: state.accounts.map(acc => 
             acc.id === id ? { ...acc, ...updates } : acc
           )
+        }))
+      },
+
+      setNetworkAccountName: (accountId, networkId, name) => {
+        const normalizedName = String(name || '').trim()
+        if (!normalizedName) throw new Error('Account name is required')
+        set((state) => ({
+          accounts: state.accounts.map((acc) => (
+            acc.id === accountId
+              ? {
+                  ...acc,
+                  networkNames: {
+                    ...(acc.networkNames ?? {}),
+                    [networkId]: normalizedName
+                  }
+                }
+              : acc
+          ))
         }))
       },
 

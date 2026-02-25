@@ -6,6 +6,7 @@ import { useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoInformationCircleOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 function formatCoinAmount(v: number): string {
   return v.toFixed(8).replace(/\.?0+$/, '')
@@ -97,7 +98,7 @@ const Send: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-5 h-5 rounded-full bg-yellow-500" />
-                <span className="text-xs font-bold">{activeAccount?.name || 'Account 1'}</span>
+                <span className="text-xs font-bold">{getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')}</span>
               </div>
               <div className="px-2 py-0.5 rounded-full bg-dark-600 border border-dark-600 flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />

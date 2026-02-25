@@ -6,6 +6,7 @@ import { useWalletStore } from '../../store/walletStore'
 import { IoAdd, IoTrashOutline, IoCheckmarkCircle } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 import { validateWatchOnlyAddress } from '../../lib/watchOnlyAddress'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 const AccountManager: React.FC = () => {
   const {
@@ -16,6 +17,7 @@ const AccountManager: React.FC = () => {
     setActiveAccount,
     addAccount,
     removeAccount,
+    setNetworkAccountName,
     setWatchOnlyAddress,
     refreshActiveBalance
   } = useWalletStore()
@@ -26,6 +28,8 @@ const AccountManager: React.FC = () => {
   const [watchOnlyAddress, setWatchOnlyAddressInput] = useState('')
   const [watchOnlyError, setWatchOnlyError] = useState('')
   const [isSavingWatchOnly, setIsSavingWatchOnly] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [isRenaming, setIsRenaming] = useState(false)
   const { showToast } = useToast()
   const navigate = useNavigate()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
@@ -45,6 +49,14 @@ const AccountManager: React.FC = () => {
     setWatchOnlyError('')
   }, [watchOnlyImportEnabled, activeAccount, activeNetwork])
 
+  useEffect(() => {
+    if (!activeAccount || !activeNetwork) {
+      setRenameValue('')
+      return
+    }
+    setRenameValue(getAccountDisplayName(activeAccount, activeNetwork.id, 'Account'))
+  }, [activeAccount, activeNetwork])
+
   const handleAddAccount = async () => {
     setError('')
     
@@ -53,7 +65,7 @@ const AccountManager: React.FC = () => {
       return
     }
 
-    if (accounts.some(a => a.name.toLowerCase() === accountName.toLowerCase())) {
+    if (accounts.some(a => getAccountDisplayName(a, activeNetworkId, '').toLowerCase() === accountName.toLowerCase())) {
       setError('Account with this name already exists')
       return
     }
@@ -103,6 +115,32 @@ const AccountManager: React.FC = () => {
     }
   }
 
+  const handleRenameActive = async () => {
+    if (!activeAccount || !activeNetwork) return
+    const nextName = String(renameValue || '').trim()
+    if (!nextName) {
+      showToast('Account name is required', 'error')
+      return
+    }
+    const duplicate = accounts.some((a) => (
+      a.id !== activeAccount.id
+      && getAccountDisplayName(a, activeNetwork.id, '').toLowerCase() === nextName.toLowerCase()
+    ))
+    if (duplicate) {
+      showToast(`Another ${activeNetwork.symbol} account already uses this name`, 'error')
+      return
+    }
+    setIsRenaming(true)
+    try {
+      setNetworkAccountName(activeAccount.id, activeNetwork.id, nextName)
+      showToast(`${activeNetwork.symbol} account renamed`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setIsRenaming(false)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full bg-dark-800">
       <header className="p-4 bg-dark-900 border-b border-dark-600 text-center flex items-center justify-between">
@@ -130,7 +168,7 @@ const AccountManager: React.FC = () => {
             </p>
             <p className="text-[11px] text-gray-400 leading-relaxed">
               Seed derivation is disabled for {activeNetwork.name} in this build. Import a public address for account{' '}
-              <span className="text-gray-200 font-bold">{activeAccount.name}</span>.
+              <span className="text-gray-200 font-bold">{getAccountDisplayName(activeAccount, activeNetwork.id, activeAccount.name)}</span>.
             </p>
             <Input
               label={`${activeNetwork.name} Address`}
@@ -142,6 +180,20 @@ const AccountManager: React.FC = () => {
             />
             <Button className="w-full" onClick={() => void handleSaveWatchOnly()} isLoading={isSavingWatchOnly}>
               Save Watch-Only Address
+            </Button>
+          </div>
+        )}
+
+        {!showAdd && activeAccount && activeNetwork && (
+          <div className="p-4 border-b border-dark-600 bg-dark-900/30 space-y-3">
+            <Input
+              label={`${activeNetwork.symbol} Account Name`}
+              placeholder="Account name for this coin"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+            />
+            <Button className="w-full" onClick={() => void handleRenameActive()} isLoading={isRenaming}>
+              Save {activeNetwork.symbol} Name
             </Button>
           </div>
         )}
@@ -187,7 +239,7 @@ const AccountManager: React.FC = () => {
                   <div className="w-10 h-10 rounded-full bg-yellow-500 flex-shrink-0" />
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-200">{account.name}</span>
+                      <span className="text-xs font-bold text-gray-200">{getAccountDisplayName(account, activeNetworkId, account.name)}</span>
                       {activeAccountId === account.id && <IoCheckmarkCircle className="text-primary w-4 h-4 flex-shrink-0" />}
                     </div>
                     <span className="text-[10px] text-gray-500 font-mono truncate">

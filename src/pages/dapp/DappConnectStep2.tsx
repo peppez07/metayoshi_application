@@ -10,6 +10,7 @@ import {
   type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -24,13 +25,17 @@ function scopeLabel(scope: DappScope): string {
 
 const DappConnectStep2: React.FC = () => {
   const navigate = useNavigate()
-  const { addAuthorizedSite, accounts, activeAccountId, isLocked } = useWalletStore()
+  const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, isLocked } = useWalletStore()
   const [pendingApproval, setPendingApproval] = useState<DappPendingApproval | null>(null)
   const [loadingApproval, setLoadingApproval] = useState(true)
 
   const activeAccount = useMemo(
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
+  )
+  const activeAccountName = useMemo(
+    () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
+    [activeAccount, activeNetworkId]
   )
 
   useEffect(() => {
@@ -137,7 +142,7 @@ const DappConnectStep2: React.FC = () => {
             <div className="w-8 h-8 bg-blue-500 rounded-full" />
           </div>
           <div className="text-center">
-            <h2 className="text-lg font-bold">Connect to {activeAccount?.name || 'Account'}</h2>
+            <h2 className="text-lg font-bold">Connect to {activeAccountName}</h2>
             <p className="text-xs text-gray-400">{pendingApproval.origin}</p>
           </div>
         </div>

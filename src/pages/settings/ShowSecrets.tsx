@@ -5,6 +5,7 @@ import { IoCopyOutline, IoEyeOutline, IoEyeOffOutline, IoAlertCircleOutline } fr
 import { useToast } from '../../components/Toast'
 import { ethers } from 'ethers'
 import { deriveUtxoAddress } from '../../lib/utxoAddress'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 const ShowSecrets: React.FC = () => {
   const { sessionMnemonic, accounts, activeAccountId, networks, activeNetworkId } = useWalletStore()
@@ -16,6 +17,7 @@ const ShowSecrets: React.FC = () => {
   const decryptedMnemonic = sessionMnemonic ?? ''
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeAccountName = getAccountDisplayName(activeAccount, activeNetworkId, 'Account')
 
   const accountListIndex = useMemo(
     () => accounts.findIndex((a) => a.id === activeAccount?.id),
@@ -63,7 +65,7 @@ const ShowSecrets: React.FC = () => {
   }, [activeNetwork, decryptedMnemonic, derivationIndex])
 
   const privateKeyLabel = activeNetwork
-    ? `Private Key (${activeNetwork.symbol} · ${activeAccount?.name || 'Account'})`
+    ? `Private Key (${activeNetwork.symbol} · ${activeAccountName})`
     : 'Private Key'
 
   const copyToClipboard = (text: string) => {

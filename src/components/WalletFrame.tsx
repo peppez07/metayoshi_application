@@ -6,6 +6,7 @@ import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline } from 'react-icons/io5'
 import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
+import { getAccountDisplayName } from '../lib/accountName'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -211,7 +212,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               onClick={() => setShowAccountMenu(!showAccountMenu)}
             >
               <div className="flex items-center gap-1">
-                <span className="text-sm font-bold">{activeAccount?.name || 'Account 1'}</span>
+                <span className="text-sm font-bold">{getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')}</span>
                 <IoChevronDown className="text-gray-500 w-3 h-3" />
               </div>
               <span className="text-[10px] text-gray-500 font-mono">{shortenedAddress}</span>
@@ -350,7 +351,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                         style={{ background: SESSION_GRADIENT }}
                       />
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold">{acc.name}</span>
+                        <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, acc.name)}</span>
                         <span className="text-[10px] text-gray-400 font-mono">
                           {addr ? `${addr.slice(0, 10)}…` : '—'}
                         </span>

@@ -6,6 +6,7 @@ import { useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInformationCircle } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 interface TxLayoutProps {
   title: string
@@ -66,6 +67,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const safeAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const activeAccountName = getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -224,7 +226,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full bg-yellow-500" />
-              <span className="text-xs font-bold">{activeAccount?.name || 'Account 1'}</span>
+              <span className="text-xs font-bold">{activeAccountName}</span>
             </div>
             <div className="px-2 py-0.5 rounded-full bg-dark-700/50 border border-dark-600 flex items-center gap-1.5">
                <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
@@ -236,7 +238,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
              <span className="text-[11px] font-mono text-gray-400">
                {fromAddress && fromAddress.length > 12
                  ? `${fromAddress.slice(0, 6)}...${fromAddress.slice(-6)}`
-                 : (activeAccount?.name || 'Account 1')}
+                 : activeAccountName}
              </span>
              <IoArrowForward className="text-gray-600 w-3 h-3" />
              <div className="flex items-center gap-1.5">

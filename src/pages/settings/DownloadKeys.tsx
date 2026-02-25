@@ -6,6 +6,7 @@ import { IoDownloadOutline, IoCopyOutline, IoCheckmarkCircle } from 'react-icons
 import { useToast } from '../../components/Toast'
 import { ethers } from 'ethers'
 import { deriveUtxoAddress } from '../../lib/utxoAddress'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 const DownloadKeys: React.FC = () => {
   const { sessionMnemonic, accounts, activeAccountId, networks, activeNetworkId } = useWalletStore()
@@ -16,6 +17,7 @@ const DownloadKeys: React.FC = () => {
   
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeAccountName = getAccountDisplayName(activeAccount, activeNetworkId, 'Account')
   const accountListIndex = useMemo(
     () => accounts.findIndex((a) => a.id === activeAccount?.id),
     [accounts, activeAccount]
@@ -63,7 +65,7 @@ const DownloadKeys: React.FC = () => {
 
   const publicKey = activeAccount?.addresses.EVM || ''
   const privateKeyLabel = activeNetwork
-    ? `Private Key (${activeNetwork.symbol} · ${activeAccount?.name || 'Account'})`
+    ? `Private Key (${activeNetwork.symbol} · ${activeAccountName})`
     : 'Private Key'
 
   const handleDownload = () => {
@@ -71,7 +73,7 @@ const DownloadKeys: React.FC = () => {
       mnemonic: decryptedMnemonic,
       privateKey: derivedPrivKey,
       privateKeyNetwork: activeNetwork?.symbol || '',
-      privateKeyAccount: activeAccount?.name || '',
+      privateKeyAccount: activeAccountName,
       publicKey: publicKey,
       accounts: accounts.map(acc => ({
         name: acc.name,

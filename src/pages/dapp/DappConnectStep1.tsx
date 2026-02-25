@@ -9,6 +9,7 @@ import {
   type DappPendingApproval
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
+import { getAccountDisplayName } from '../../lib/accountName'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -16,7 +17,7 @@ function canUseChromeStorage(): boolean {
 
 const DappConnectStep1: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, isLocked, networks } = useWalletStore()
+  const { accounts, activeAccountId, activeNetworkId, isLocked, networks } = useWalletStore()
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [coinFilter, setCoinFilter] = useState('all')
@@ -92,10 +93,13 @@ const DappConnectStep1: React.FC = () => {
 
     return accounts.filter((account) => {
       const filteredCoinAddress = coinFilter === 'all' ? '' : String(account.networkAddresses[coinFilter] || '').trim()
+      const displayNameNetworkId = coinFilter === 'all' ? activeNetworkId : coinFilter
+      const displayName = getAccountDisplayName(account, displayNameNetworkId, account.name)
       if (coinFilter !== 'all' && !filteredCoinAddress) return false
 
       if (!normalizedQuery) return true
 
+      if (displayName.toLowerCase().includes(normalizedQuery)) return true
       if (account.name.toLowerCase().includes(normalizedQuery)) return true
       if (filteredCoinAddress.toLowerCase().includes(normalizedQuery)) return true
 
@@ -110,7 +114,7 @@ const DappConnectStep1: React.FC = () => {
 
       return false
     })
-  }, [accounts, coinFilter, searchQuery])
+  }, [accounts, coinFilter, searchQuery, activeNetworkId])
 
   const resolvePreviewAddress = (account: typeof accounts[number]): string => {
     if (coinFilter !== 'all') {
@@ -210,6 +214,11 @@ const DappConnectStep1: React.FC = () => {
           <div className="space-y-2">
             {filteredAccounts.map((account) => {
               const previewAddress = resolvePreviewAddress(account)
+              const displayName = getAccountDisplayName(
+                account,
+                coinFilter === 'all' ? activeNetworkId : coinFilter,
+                account.name
+              )
               return (
                 <div
                   key={account.id}
@@ -223,7 +232,7 @@ const DappConnectStep1: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-yellow-500" />
                     <div className="flex flex-col">
-                      <span className="text-sm font-bold">{account.name}</span>
+                      <span className="text-sm font-bold">{displayName}</span>
                       <span className="text-[10px] text-gray-400 font-mono">
                         {previewAddress.startsWith('No address')
                           ? previewAddress
