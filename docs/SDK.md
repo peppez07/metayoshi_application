@@ -1,6 +1,6 @@
 # MetaYoshi DApp SDK
 
-Last updated: 2026-02-21
+Last updated: 2026-02-25
 
 ## Overview
 
@@ -17,6 +17,11 @@ Current network families exposed in this SDK:
 - Dogecoin (`doge`)
 - BitcoinZ (`btcz`)
 - Firo (`firo`)
+- XRP (`xrp`)
+- Tidecoin (`tide`)
+- Pirate (`arr`)
+- Cardano (`ada`)
+- Monero (`xmr`)
 
 ## Injection scope
 
@@ -89,7 +94,7 @@ Alias namespace `metayoshi_*` is supported for the wallet RPC methods below.
 
 - `wallet_sendTransaction` / `metayoshi_sendTransaction`
   - params: `{ to: string, amount: string }`
-  - amount is coin units (decimal string, up to 8 decimals)
+  - amount is coin units (decimal string, chain precision is validated per network)
   - returns: `{ hash: string, txid: string }`
   - flow: wallet popup opens, unlock is required when locked, user must approve/reject, popup closes after completion.
 

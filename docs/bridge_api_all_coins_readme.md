@@ -1,4 +1,4 @@
-# MetaYoshi Bridge API (All UTXO Coins)
+# MetaYoshi Bridge API (All Chains)
 
 Last updated: 2026-02-21
 
@@ -9,6 +9,10 @@ This document describes the bridge endpoints used by the MetaYoshi app for:
 - BitcoinZ mainnet (`bitcoinz/main`)
 - Tidecoin mainnet (`tidecoin/main`)
 - Firo mainnet (`firo/main`)
+- XRP mainnet (`xrp/main`)
+- Pirate mainnet (`arr/main`)
+- Cardano mainnet (`cardano/main`)
+- Monero mainnet (`monero/main`)
 
 ## 1) Route formats
 
@@ -23,6 +27,9 @@ Subdomain shortcuts (when server `BRIDGE_SUBDOMAIN_MAP` is configured):
 - `https://btcz.metayoshi.app/v1/bridge`
 - `https://tide.metayoshi.app/v1/bridge`
 - `https://firo.metayoshi.app/v1/bridge`
+- `https://arrr.metayoshi.app/v1/bridge`
+- `https://ada.metayoshi.app/v1/bridge`
+- `https://xmr.metayoshi.app/v1/bridge`
 
 Coin IDs for strict paths:
 - `raptoreum`
@@ -30,6 +37,10 @@ Coin IDs for strict paths:
 - `bitcoinz`
 - `tidecoin`
 - `firo`
+- `xrp`
+- `arr`
+- `cardano`
+- `monero`
 
 Chain IDs:
 - `main`
@@ -91,6 +102,10 @@ curl -u bridgeuser:BRIDGE_PASSWORD \
 ### Wallet-scoped bridge RPC
 
 `POST /v1/bridge/:coin/:chain/wallet/:wallet`
+
+Compatibility note:
+- `xrp`, `cardano`, and `monero` use non-wallet-path routing in server compatibility mode.
+- Use `POST /v1/bridge/:coin/:chain` for those chains.
 
 ## 5) Send helper endpoints (legacy helper API)
 

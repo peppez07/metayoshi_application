@@ -1,6 +1,6 @@
 # MetaYoshi App Settings and Integration
 
-Last updated: 2026-02-21
+Last updated: 2026-02-25
 
 This file documents runtime connection settings, bridge security model, and DApp SDK integration.
 
@@ -35,6 +35,8 @@ Subdomain endpoints:
 - `https://tide.metayoshi.app/v1/bridge`
 - `https://firo.metayoshi.app/v1/bridge`
 - `https://arrr.metayoshi.app/v1/bridge`
+- `https://ada.metayoshi.app/v1/bridge`
+- `https://xmr.metayoshi.app/v1/bridge`
 
 Strict routes are always valid:
 - `https://rtm.metayoshi.app/v1/bridge/raptoreum/main/wallet/mainwallet`
@@ -111,6 +113,8 @@ Allowed ids:
 - `firo`
 - `xrp`
 - `arr`
+- `ada`
+- `xmr`
 - `all`
 
 If omitted/invalid, app falls back to enabled defaults.
@@ -160,10 +164,20 @@ Helpers:
 - `window.metayoshi.getCapabilities()`
 - `window.metayoshi.switchNetwork(networkId)`
 
-Current implementation status (as of 2026-02-21):
-- UTXO-focused networks for SDK usage: `rtm`, `doge`, `btcz`, `firo`, `arr`
+Current implementation status (as of 2026-02-25):
+- SDK/network usage: `rtm`, `doge`, `btcz`, `firo`, `xrp`, `tide`, `arr`, `ada`, `xmr`
 - `wallet_signMessage`: not supported in DApp SDK (`-32601`)
 - `wallet_sendTransaction`: supported with explicit popup approval
+
+## Runtime architecture notes
+
+- Wallet runtime uses a unified chain RPC adapter layer for:
+  - balance
+  - sync
+  - validate
+  - send
+- Chain-specific handlers are still used underneath where required (for example XRP, Cardano, Monero compatibility mappings).
+- Account names are stored per network (`account.networkNames[networkId]`), so renaming an account on one coin does not rename it on other coins.
 
 ## DApp permission and storage model
 
