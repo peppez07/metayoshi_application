@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethereumLogo from './coinlogos/ethereum.webp'
+import polygonLogo from './coinlogos/polygon.webp'
 
 export const POLYGON_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
@@ -23,7 +23,7 @@ export function createPolygonNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_POLYGON_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_POLYGON_EXPLORER || 'https://polygonscan.com',
     capabilities: POLYGON_CAPABILITIES,
-    logo: ethereumLogo
+    logo: polygonLogo
   }
 }
 
@@ -34,4 +34,3 @@ export const polygonCoin: CoinModule = {
   capabilities: POLYGON_CAPABILITIES,
   createNetwork: createPolygonNetwork
 }
-

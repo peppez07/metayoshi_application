@@ -1,4 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import tronLogo from './coinlogos/tron.webp'
 
 export const TRON_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -12,6 +13,7 @@ export function createTronNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'TRX',
     coinType: 'BTC',
     coinSymbol: 'TRX',
+    logo: tronLogo,
     rpcUrl: import.meta.env.VITE_TRON_RPC || 'https://api.trongrid.io',
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_TRON_RPC_USER || '',

@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethereumLogo from './coinlogos/ethereum.webp'
+import avalancheLogo from './coinlogos/Avalanche.webp'
 
 export const AVAXC_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
@@ -23,7 +23,7 @@ export function createAvaxCNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_AVAXC_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_AVAXC_EXPLORER || 'https://snowtrace.io',
     capabilities: AVAXC_CAPABILITIES,
-    logo: ethereumLogo
+    logo: avalancheLogo
   }
 }
 
@@ -34,4 +34,3 @@ export const avaxcCoin: CoinModule = {
   capabilities: AVAXC_CAPABILITIES,
   createNetwork: createAvaxCNetwork
 }
-

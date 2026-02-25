@@ -1,4 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import xlmLogo from './coinlogos/xlm.jpg'
 
 export const XLM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -21,7 +22,8 @@ export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_XLM_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_XLM_EXPLORER || 'https://stellar.expert/explorer/public',
     capabilities: XLM_CAPABILITIES,
-    derivation: { status: 'supported' }
+    derivation: { status: 'supported' },
+    logo: xlmLogo
   }
 }
 

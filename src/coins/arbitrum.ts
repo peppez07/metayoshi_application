@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethereumLogo from './coinlogos/ethereum.webp'
+import arbitrumLogo from './coinlogos/arb.jpg'
 
 export const ARBITRUM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
@@ -23,7 +23,7 @@ export function createArbitrumNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_ARB_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_ARB_EXPLORER || 'https://arbiscan.io',
     capabilities: ARBITRUM_CAPABILITIES,
-    logo: ethereumLogo
+    logo: arbitrumLogo
   }
 }
 
@@ -34,4 +34,3 @@ export const arbitrumCoin: CoinModule = {
   capabilities: ARBITRUM_CAPABILITIES,
   createNetwork: createArbitrumNetwork
 }
-

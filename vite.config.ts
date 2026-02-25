@@ -245,15 +245,21 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       // Polyfill Node's 'buffer' package for the browser bundle
       buffer: 'buffer',
+      // Polyfill Node core modules pulled by crypto helper deps.
+      stream: 'stream-browserify',
+      events: 'events',
+      process: 'process/browser',
     },
   },
   // Make Buffer available as a global so libraries that reference it directly work
   define: {
+    global: 'globalThis',
+    process: 'globalThis.process',
     'globalThis.Buffer': 'globalThis.Buffer',
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
   },
   optimizeDeps: {
-    include: ['buffer'],
+    include: ['buffer', 'stream-browserify', 'events', 'process'],
   },
   build: {
     rollupOptions: {

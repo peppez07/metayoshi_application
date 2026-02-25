@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethereumLogo from './coinlogos/ethereum.webp'
+import baseLogo from './coinlogos/base.png'
 
 export const BASE_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
@@ -23,7 +23,7 @@ export function createBaseNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_BASE_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_BASE_EXPLORER || 'https://basescan.org',
     capabilities: BASE_CAPABILITIES,
-    logo: ethereumLogo
+    logo: baseLogo
   }
 }
 
@@ -34,4 +34,3 @@ export const baseCoin: CoinModule = {
   capabilities: BASE_CAPABILITIES,
   createNetwork: createBaseNetwork
 }
-
