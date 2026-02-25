@@ -668,7 +668,6 @@ export const useWalletStore = create<WalletState>()(
         try {
           const plain = await decryptVaultV1({ password, vault })
           const normalizedMnemonic = plain.mnemonic.trim()
-          const networks = get().networks
           const existingAccounts = get().accounts
           const sourceAccounts: Account[] = existingAccounts.length > 0
             ? existingAccounts
@@ -683,28 +682,27 @@ export const useWalletStore = create<WalletState>()(
               balance: '0'
             }]
 
-          const nextAccounts: Account[] = []
-          for (let i = 0; i < sourceAccounts.length; i++) {
-            const account = sourceAccounts[i]
+          // Fast unlock path: restore persisted account state immediately.
+          // Missing per-network addresses are derived lazily via ensureNetworkAddress()
+          // when user switches coins/accounts or connecting screen runs.
+          const nextAccounts: Account[] = sourceAccounts.map((account, i) => {
             const derivationIndex = resolveDerivationIndex(account, i)
-            const derived = await deriveAccountAddresses(normalizedMnemonic, networks, derivationIndex)
-
-            nextAccounts.push({
+            return {
               ...account,
               derivationIndex,
               addresses: {
-                EVM: derived.addresses.EVM || account.addresses?.EVM || '',
-                UTXO: derived.addresses.UTXO || account.addresses?.UTXO || '',
+                EVM: account.addresses?.EVM || '',
+                UTXO: account.addresses?.UTXO || '',
                 BTC: account.addresses?.BTC || '',
                 SOL: account.addresses?.SOL || '',
-                XRP: derived.addresses.XRP || account.addresses?.XRP || ''
+                XRP: account.addresses?.XRP || ''
               },
-              networkAddresses: {
-                ...(account.networkAddresses ?? {}),
-                ...derived.networkAddresses
-              }
-            })
-          }
+              networkNames: { ...(account.networkNames ?? {}) },
+              networkAddresses: { ...(account.networkAddresses ?? {}) },
+              networkBalances: { ...(account.networkBalances ?? {}) },
+              balance: String(account.balance ?? '0')
+            }
+          })
 
           const highestDerivationIndex = nextAccounts.reduce(
             (max, account) => Math.max(max, account.derivationIndex),
@@ -726,9 +724,6 @@ export const useWalletStore = create<WalletState>()(
             nextAccountIndex,
             activeAccountId: safeActiveAccountId,
             lastActiveTimestamp: Date.now()
-          })
-          void get().refreshActiveBalance().catch((err) => {
-            console.warn('Unlock balance refresh failed:', err)
           })
           return true
         } catch {

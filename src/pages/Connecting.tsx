@@ -158,7 +158,7 @@ const Connecting: React.FC = () => {
     // ── Step 3: connect to bridge balance sync (NON-FATAL) ─────────────────
     try {
       setStatus(`Connecting to ${activeNetwork?.name ?? activeNetworkId} bridge...`)
-      await refreshActiveBalance()
+      await refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBridgeWarning((prev) =>

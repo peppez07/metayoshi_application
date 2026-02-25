@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
-import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline } from 'react-icons/io5'
+import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline } from 'react-icons/io5'
 import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
@@ -23,6 +23,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     accounts,
     activeAccountId,
     setActiveAccount,
+    setNetworkAccountName,
     setActiveNetwork,
     lock
   } = useWalletStore()
@@ -150,6 +151,25 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     } catch {
       // clipboard not available
     }
+  }
+
+  const editAccountName = (accountId: string) => {
+    const target = accounts.find((a) => a.id === accountId)
+    if (!target) return
+    const currentName = getAccountDisplayName(target, activeNetworkId, target.name)
+    const next = window.prompt(`Rename ${activeNetwork.symbol} account`, currentName)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === currentName) return
+    const duplicate = accounts.some((a) => (
+      a.id !== accountId
+      && getAccountDisplayName(a, activeNetworkId, a.name).toLowerCase() === trimmed.toLowerCase()
+    ))
+    if (duplicate) {
+      window.alert(`Another ${activeNetwork.symbol} account already uses this name.`)
+      return
+    }
+    setNetworkAccountName(accountId, activeNetworkId, trimmed)
   }
 
   return (
@@ -357,18 +377,30 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                         </span>
                       </div>
                     </div>
-                    {/* Copy address */}
-                    <button
-                      className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
-                      onClick={async (e) => {
-                        e.stopPropagation()
-                        if (!addr) return
-                        await navigator.clipboard.writeText(addr)
-                      }}
-                      title="Copy full address"
-                    >
-                      <IoCopyOutline className="w-4 h-4 text-gray-400 hover:text-white" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          editAccountName(acc.id)
+                        }}
+                        title="Edit account name"
+                      >
+                        <IoCreateOutline className="w-4 h-4 text-gray-400 hover:text-white" />
+                      </button>
+                      {/* Copy address */}
+                      <button
+                        className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (!addr) return
+                          await navigator.clipboard.writeText(addr)
+                        }}
+                        title="Copy full address"
+                      >
+                        <IoCopyOutline className="w-4 h-4 text-gray-400 hover:text-white" />
+                      </button>
+                    </div>
                   </div>
                 )
               })}
