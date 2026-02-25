@@ -46,6 +46,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     sendXrpTransaction,
     sendCardanoTransaction,
     sendMoneroTransaction,
+    sendSolanaTransaction,
+    sendStellarTransaction,
+    sendTronTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
     isConnected,
@@ -140,6 +143,12 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         res = await sendCardanoTransaction({ to: toAddress, amount })
       } else if (activeNetwork.id === 'xmr') {
         res = await sendMoneroTransaction({ to: toAddress, amount })
+      } else if (activeNetwork.id === 'sol') {
+        res = await sendSolanaTransaction({ to: toAddress, amount })
+      } else if (activeNetwork.id === 'xlm') {
+        res = await sendStellarTransaction({ to: toAddress, amount })
+      } else if (activeNetwork.id === 'tron') {
+        res = await sendTronTransaction({ to: toAddress, amount })
       } else if (activeNetwork.coinType === 'UTXO') {
         res = await sendUtxoTransaction({
           to: toAddress,

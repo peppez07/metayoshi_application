@@ -19,6 +19,12 @@ import { deriveCardanoAddress } from '../lib/cardanoAddress'
 import { sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
+import { deriveSolanaAddress } from '../lib/solanaAddress'
+import { getSolanaBalance, sendSolanaNonCustodial } from '../lib/solanaNonCustodial'
+import { deriveStellarAddress } from '../lib/stellarAddress'
+import { getStellarBalance, sendStellarNonCustodial } from '../lib/stellarNonCustodial'
+import { deriveTronAddress } from '../lib/tronAddress'
+import { getTronBalance, sendTronNonCustodial } from '../lib/tronNonCustodial'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -209,6 +215,9 @@ interface WalletState {
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendMoneroTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendSolanaTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendStellarTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendTronTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendUtxoTransaction: (params: {
     to: string
     amount: string
@@ -482,6 +491,33 @@ async function deriveAccountAddresses(
       }
     } else if (net.coinType === 'EVM') {
       networkAddresses[net.id] = evmWallet.address
+    } else if (net.id === 'sol') {
+      try {
+        const sol = await deriveSolanaAddress(mnemonic, derivationIndex)
+        networkAddresses[net.id] = sol.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
+      }
+    } else if (net.id === 'xlm') {
+      try {
+        const xlm = await deriveStellarAddress(mnemonic, derivationIndex)
+        networkAddresses[net.id] = xlm.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
+      }
+    } else if (net.id === 'tron') {
+      try {
+        const tron = await deriveTronAddress(mnemonic, derivationIndex)
+        networkAddresses[net.id] = tron.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
+      }
     } else if (net.id === 'ada') {
       try {
         const ada = await deriveCardanoAddress(mnemonic, derivationIndex, net.rpcUrl)
@@ -886,7 +922,14 @@ export const useWalletStore = create<WalletState>()(
           return null
         }
         const requiresMnemonic =
-          net.coinType === 'EVM' || net.coinType === 'XRP' || net.coinType === 'UTXO' || net.id === 'ada' || net.id === 'xmr'
+          net.coinType === 'EVM'
+          || net.coinType === 'XRP'
+          || net.coinType === 'UTXO'
+          || net.id === 'ada'
+          || net.id === 'xmr'
+          || net.id === 'sol'
+          || net.id === 'xlm'
+          || net.id === 'tron'
         if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
@@ -912,6 +955,15 @@ export const useWalletStore = create<WalletState>()(
             address = derived.address
           } else if (net.id === 'xmr') {
             const derived = await deriveMoneroAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
+            address = derived.address
+          } else if (net.id === 'sol') {
+            const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
+            address = derived.address
+          } else if (net.id === 'xlm') {
+            const derived = await deriveStellarAddress(sessionMnemonic!, accountIndex)
+            address = derived.address
+          } else if (net.id === 'tron') {
+            const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           }
           if (address) {
@@ -1257,6 +1309,15 @@ export const useWalletStore = create<WalletState>()(
         } else if (selectedNetwork.id === 'xmr') {
           const derived = await deriveMoneroAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
           selectedAddress = derived.address
+        } else if (selectedNetwork.id === 'sol') {
+          const derived = await deriveSolanaAddress(sessionMnemonic, derivationIndex)
+          selectedAddress = derived.address
+        } else if (selectedNetwork.id === 'xlm') {
+          const derived = await deriveStellarAddress(sessionMnemonic, derivationIndex)
+          selectedAddress = derived.address
+        } else if (selectedNetwork.id === 'tron') {
+          const derived = await deriveTronAddress(sessionMnemonic, derivationIndex)
+          selectedAddress = derived.address
         }
 
         if (!selectedAddress) {
@@ -1267,6 +1328,7 @@ export const useWalletStore = create<WalletState>()(
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
         if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
+        if (selectedNetwork.id === 'sol') addresses.SOL = selectedAddress
 
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
@@ -1617,8 +1679,74 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
+          } else if (net.id === 'sol') {
+            const balance = await getSolanaBalance(net.rpcUrl, address)
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: 100,
+              lowSyncStreak: 0,
+              accounts: state.accounts.map((a) =>
+                a.id === acc.id
+                  ? {
+                      ...a,
+                      balance,
+                      networkBalances: {
+                        ...(a.networkBalances ?? {}),
+                        [activeNetworkId]: balance
+                      }
+                    }
+                  : a
+              )
+            }))
+          } else if (net.id === 'xlm') {
+            const balance = await getStellarBalance(net.rpcUrl, address)
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: 100,
+              lowSyncStreak: 0,
+              accounts: state.accounts.map((a) =>
+                a.id === acc.id
+                  ? {
+                      ...a,
+                      balance,
+                      networkBalances: {
+                        ...(a.networkBalances ?? {}),
+                        [activeNetworkId]: balance
+                      }
+                    }
+                  : a
+              )
+            }))
+          } else if (net.id === 'tron') {
+            const balance = await getTronBalance(net.rpcUrl, address)
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: 100,
+              lowSyncStreak: 0,
+              accounts: state.accounts.map((a) =>
+                a.id === acc.id
+                  ? {
+                      ...a,
+                      balance,
+                      networkBalances: {
+                        ...(a.networkBalances ?? {}),
+                        [activeNetworkId]: balance
+                      }
+                    }
+                  : a
+              )
+            }))
           } else {
-            // Unsupported runtime family in current build (e.g. SOL/XLM/TRON placeholders).
+            // Unsupported runtime family in current build.
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
@@ -1848,6 +1976,69 @@ export const useWalletStore = create<WalletState>()(
           fromAddress,
           toAddress: to,
           amountXmr: amount
+        })
+      },
+
+      sendSolanaTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.id !== 'sol') throw new Error('Active network is not Solana')
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const derived = await deriveSolanaAddress(sessionMnemonic, accountIndex)
+        const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
+        if (fromAddress !== derived.address) {
+          throw new Error(`Active SOL address does not match derived signer address (${fromAddress} != ${derived.address})`)
+        }
+        return await sendSolanaNonCustodial({
+          rpcUrl: net.rpcUrl,
+          fromAddress,
+          toAddress: to,
+          amountSol: amount,
+          privateKeyHex: derived.privHex
+        })
+      },
+
+      sendStellarTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.id !== 'xlm') throw new Error('Active network is not Stellar')
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const derived = await deriveStellarAddress(sessionMnemonic, accountIndex)
+        const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
+        if (fromAddress !== derived.address) {
+          throw new Error(`Active XLM address does not match derived signer address (${fromAddress} != ${derived.address})`)
+        }
+        return await sendStellarNonCustodial({
+          rpcUrl: net.rpcUrl,
+          fromAddress,
+          toAddress: to,
+          amountXlm: amount,
+          privateKeyHex: derived.privHex
+        })
+      },
+
+      sendTronTransaction: async ({ to, amount }) => {
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.id !== 'tron') throw new Error('Active network is not TRON')
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const derived = await deriveTronAddress(sessionMnemonic, accountIndex)
+        const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
+        if (fromAddress !== derived.address) {
+          throw new Error(`Active TRX address does not match derived signer address (${fromAddress} != ${derived.address})`)
+        }
+        return await sendTronNonCustodial({
+          rpcUrl: net.rpcUrl,
+          fromAddress,
+          toAddress: to,
+          amountTrx: amount,
+          privateKeyHex: derived.privHex
         })
       },
 

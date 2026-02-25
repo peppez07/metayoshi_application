@@ -1,8 +1,8 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const TRON_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
 }
 
 export function createTronNetwork(ctx: CoinRuntimeContext): Network {
@@ -21,7 +21,7 @@ export function createTronNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_TRON_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_TRON_EXPLORER || 'https://tronscan.org',
     capabilities: TRON_CAPABILITIES,
-    derivation: { status: 'unsupported', reason: 'Native TRON derivation/signing is not implemented in this build yet' }
+    derivation: { status: 'supported' }
   }
 }
 
@@ -32,4 +32,3 @@ export const tronCoin: CoinModule = {
   capabilities: TRON_CAPABILITIES,
   createNetwork: createTronNetwork
 }
-

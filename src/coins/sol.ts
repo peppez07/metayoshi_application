@@ -1,8 +1,8 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const SOL_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
 }
 
 export function createSolNetwork(ctx: CoinRuntimeContext): Network {
@@ -21,7 +21,7 @@ export function createSolNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword: import.meta.env.VITE_SOL_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_SOL_EXPLORER || 'https://solscan.io',
     capabilities: SOL_CAPABILITIES,
-    derivation: { status: 'unsupported', reason: 'Native Solana derivation/signing is not implemented in this build yet' }
+    derivation: { status: 'supported' }
   }
 }
 
@@ -32,4 +32,3 @@ export const solCoin: CoinModule = {
   capabilities: SOL_CAPABILITIES,
   createNetwork: createSolNetwork
 }
-

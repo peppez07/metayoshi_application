@@ -28,6 +28,9 @@ const DappRequestConfirm: React.FC = () => {
     sendXrpTransaction,
     sendCardanoTransaction,
     sendMoneroTransaction,
+    sendSolanaTransaction,
+    sendStellarTransaction,
+    sendTronTransaction,
     sendUtxoTransaction,
     refreshActiveBalance,
     addActivity,
@@ -169,6 +172,21 @@ const DappRequestConfirm: React.FC = () => {
           })
         : requestNetwork.id === 'xmr'
         ? await sendMoneroTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.id === 'sol'
+        ? await sendSolanaTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.id === 'xlm'
+        ? await sendStellarTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.id === 'tron'
+        ? await sendTronTransaction({
             to: pendingRequest.request.to,
             amount: pendingRequest.request.amount
           })

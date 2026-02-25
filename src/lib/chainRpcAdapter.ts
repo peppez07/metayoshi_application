@@ -16,6 +16,12 @@ import {
 } from './utxoRpc'
 import { getXrpAccountBalance } from './xrpRpc'
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
+import { PublicKey } from '@solana/web3.js'
+import { StrKey } from '@stellar/stellar-sdk'
+import { TronWeb } from 'tronweb'
+import { getSolanaBalance } from './solanaNonCustodial'
+import { getStellarBalance } from './stellarNonCustodial'
+import { getTronBalance } from './tronNonCustodial'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -69,6 +75,7 @@ export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsup
 
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
   const protocol = resolveProtocol(network)
+  if (network.id === 'sol' || network.id === 'xlm' || network.id === 'tron') return 'non-custodial'
   if (network.id === 'ada') return 'non-custodial'
   if (network.id === 'xmr') {
     const enabled = /^(1|true|yes)$/i.test(String((import.meta as any)?.env?.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
@@ -77,7 +84,7 @@ export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyM
   if (network.coinType === 'EVM') return 'non-custodial'
   if (protocol === 'utxo-jsonrpc') return 'non-custodial'
   if (protocol === 'xrp-jsonrpc-compat') return 'non-custodial'
-  if (protocol === 'cardano-wallet-compat' || protocol === 'monero-wallet-compat') return 'custodial-server'
+  if (protocol === 'cardano-wallet-compat' || protocol === 'monero-wallet-compat') return 'unsupported'
   return 'unsupported'
 }
 
@@ -135,6 +142,19 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   const protocol = resolveProtocol(input.network)
   const address = String(input.address || '').trim()
   if (!address) throw new Error('Address is required')
+
+  if (input.network.id === 'sol') {
+    const balance = await getSolanaBalance(input.network.rpcUrl, address)
+    return { balance, syncPercent: 100, isSyncing: false }
+  }
+  if (input.network.id === 'xlm') {
+    const balance = await getStellarBalance(input.network.rpcUrl, address)
+    return { balance, syncPercent: 100, isSyncing: false }
+  }
+  if (input.network.id === 'tron') {
+    const balance = await getTronBalance(input.network.rpcUrl, address)
+    return { balance, syncPercent: 100, isSyncing: false }
+  }
 
   if (input.network.coinType === 'EVM') {
     const provider = new ethers.JsonRpcProvider(input.network.rpcUrl, input.network.chainId)
@@ -194,6 +214,16 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   const protocol = resolveProtocol(network)
   const value = String(address || '').trim()
   if (!value) return false
+  if (network.id === 'sol') {
+    try {
+      void new PublicKey(value)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (network.id === 'xlm') return StrKey.isValidEd25519PublicKey(value)
+  if (network.id === 'tron') return TronWeb.isAddress(value)
   if (network.coinType === 'EVM') return ethers.isAddress(value)
   if (protocol === 'xrp-jsonrpc-compat') {
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
