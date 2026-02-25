@@ -24,7 +24,7 @@ For Chrome Web Store/public distribution:
 Server env example:
 
 ```env
-BRIDGE_SUBDOMAIN_MAP=rtm=raptoreum:main,trtm=raptoreum:test,doge=dogecoin:main,btcz=bitcoinz:main,tide=tidecoin:main,firo=firo:main,arr=arr:main
+BRIDGE_SUBDOMAIN_MAP=rtm=raptoreum:main,trtm=raptoreum:test,doge=dogecoin:main,btcz=bitcoinz:main,tide=tidecoin:main,firo=firo:main,arrr=arr:main
 ```
 
 Subdomain endpoints:
@@ -34,7 +34,7 @@ Subdomain endpoints:
 - `https://btcz.metayoshi.app/v1/bridge`
 - `https://tide.metayoshi.app/v1/bridge`
 - `https://firo.metayoshi.app/v1/bridge`
-- `https://arr.metayoshi.app/v1/bridge`
+- `https://arrr.metayoshi.app/v1/bridge`
 
 Strict routes are always valid:
 - `https://rtm.metayoshi.app/v1/bridge/raptoreum/main/wallet/mainwallet`
@@ -43,7 +43,7 @@ Strict routes are always valid:
 - `https://btcz.metayoshi.app/v1/bridge/bitcoinz/main`
 - `https://tide.metayoshi.app/v1/bridge/tidecoin/main`
 - `https://firo.metayoshi.app/v1/bridge/firo/main`
-- `https://arr.metayoshi.app/v1/bridge/arr/main`
+- `https://arrr.metayoshi.app/v1/bridge/arr/main`
 
 ## Recommended write auth model
 

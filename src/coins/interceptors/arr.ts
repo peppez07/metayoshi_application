@@ -3,7 +3,7 @@ import type { CoinApiInfo } from './types'
 import { ARR_PAYLOADS } from '../payloads'
 
 // ARRR mainnet API profile and transport interceptor.
-const DEFAULT_API_BASE = 'https://arr.metayoshi.app'
+const DEFAULT_API_BASE = 'https://arrr.metayoshi.app'
 
 const apiBaseUrl = String(import.meta.env.VITE_ARR_RPC || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
 const defaultBridgeUrl = String(import.meta.env.VITE_ARR_BRIDGE_URL || `${apiBaseUrl}/v1/bridge`).trim()
@@ -25,4 +25,3 @@ export const ARR_API_INFO: CoinApiInfo = {
 }
 
 export const arrApiInterceptor = createCoinApiInterceptor(ARR_API_INFO)
-
