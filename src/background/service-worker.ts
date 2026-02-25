@@ -25,6 +25,7 @@ import {
   type DappScope
 } from '../lib/dappPermissions'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
+import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
@@ -69,6 +70,17 @@ type SendTransactionParams = {
   amount: string
 }
 
+const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
+const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
+const CAPABILITIES_METHODS = new Set(['wallet_getCapabilities', 'metayoshi_getCapabilities', 'rtm_getCapabilities'])
+const NETWORKS_METHODS = new Set(['wallet_getNetworks', 'metayoshi_getNetworks', 'rtm_getNetworks'])
+const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
+const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
+const SIGN_MESSAGE_METHODS = new Set(['wallet_signMessage', 'metayoshi_signMessage', 'rtm_signMessage'])
+const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
+const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
+const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
+
 // Event ports for broadcasting events to content scripts
 const eventPorts = new Set<chrome.runtime.Port>()
 
@@ -88,14 +100,18 @@ interface WalletState {
 }
 
 function resolveDappNetworks(state: WalletState): Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
-  return (state.networks || []).filter((network) => (
-    (network?.coinType === 'UTXO' || network?.coinType === 'XRP' || network?.coinType === 'BTC') && Boolean(String(network.id || '').trim())
-  ))
+  return (state.networks || []).filter((network) => {
+    const id = String(network?.id || '').trim()
+    if (!id) return false
+    const coinType = String(network?.coinType || '').trim().toUpperCase()
+    return coinType === 'UTXO' || coinType === 'XRP' || coinType === 'BTC' || coinType === 'EVM' || id === 'ada' || id === 'xmr'
+  })
 }
 
 function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?: string }): number {
   const symbol = String(network?.symbol || '').trim().toUpperCase()
   const id = String(network?.id || '').trim().toLowerCase()
+  if (network?.coinType === 'EVM') return 18
   if (network?.coinType === 'XRP') return 6
   if (symbol === 'ADA' || id === 'ada') return 6
   if (symbol === 'XMR' || id === 'xmr') return 12
@@ -845,11 +861,11 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   } = runtime
   
   // Provider state methods
-  if (method === 'wallet_getProviderState' || method === 'metayoshi_getProviderState') {
+  if (PROVIDER_STATE_METHODS.has(method)) {
     return providerState
   }
 
-  if (method === 'wallet_connect' || method === 'metayoshi_connect') {
+  if (CONNECT_METHODS.has(method)) {
     if (origin) {
       const approved = await requestScope(origin, 'read')
       if (!approved) {
@@ -876,13 +892,13 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     return refreshed.providerState
   }
 
-  if (method === 'wallet_getCapabilities' || method === 'metayoshi_getCapabilities') {
-    const nativeSend = network?.coinType === 'UTXO' || network?.id === 'ada' || network?.id === 'xmr'
+  if (CAPABILITIES_METHODS.has(method)) {
+    const netCaps = resolveNetworkCapabilities(network || {})
     const features = {
-      nativeSend,
+      nativeSend: Boolean(netCaps.features.nativeSend),
       signMessage: false,
-      assetLayer: false,
-      assetSend: false
+      assetLayer: Boolean(netCaps.features.assetLayer),
+      assetSend: Boolean(netCaps.features.assetSend)
     }
     return {
       wallet: { isMetaYoshi: true, connected, unlocked },
@@ -901,19 +917,37 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       },
       methods: [
         'wallet_getProviderState',
+        'metayoshi_getProviderState',
+        'rtm_getProviderState',
         'wallet_requestAccounts',
+        'metayoshi_requestAccounts',
+        'rtm_requestAccounts',
         'wallet_accounts',
+        'metayoshi_accounts',
+        'rtm_accounts',
         'wallet_connect',
+        'metayoshi_connect',
+        'rtm_connect',
         'wallet_selectAccount',
+        'metayoshi_selectAccount',
+        'rtm_selectAccount',
         'wallet_switchNetwork',
+        'metayoshi_switchNetwork',
+        'rtm_switchNetwork',
         'wallet_getNetworks',
+        'metayoshi_getNetworks',
+        'rtm_getNetworks',
         'wallet_getCapabilities',
-        'wallet_sendTransaction'
+        'metayoshi_getCapabilities',
+        'rtm_getCapabilities',
+        'wallet_sendTransaction',
+        'metayoshi_sendTransaction',
+        'rtm_sendTransaction'
       ]
     }
   }
 
-  if (method === 'wallet_getNetworks' || method === 'metayoshi_getNetworks') {
+  if (NETWORKS_METHODS.has(method)) {
     return dappNetworks.map((n) => ({
       id: n.id,
       name: n.name,
@@ -925,7 +959,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Request accounts / enable
-  if (method === 'wallet_requestAccounts' || method === 'metayoshi_requestAccounts') {
+  if (REQUEST_ACCOUNTS_METHODS.has(method)) {
     if (origin) {
       const approved = await requestScope(origin, 'read')
       if (!approved) {
@@ -954,7 +988,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Get accounts
-  if (method === 'wallet_accounts' || method === 'metayoshi_accounts') {
+  if (ACCOUNTS_METHODS.has(method)) {
     if ((state.isLocked ?? true) || !(state.isInitialized ?? false)) {
       return []
     }
@@ -963,18 +997,15 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     return currentAddress ? [currentAddress] : []
   }
   
-  if (
-    method === 'wallet_signMessage'
-    || method === 'metayoshi_signMessage'
-  ) {
+  if (SIGN_MESSAGE_METHODS.has(method)) {
     throw { code: -32601, message: `Method not supported: ${method}` }
   }
 
-  if (method === 'wallet_sendTransaction' || method === 'metayoshi_sendTransaction') {
+  if (SEND_TRANSACTION_METHODS.has(method)) {
     if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
-    if (!network || (network.coinType !== 'UTXO' && network.id !== 'ada' && network.id !== 'xmr')) {
+    if (!network || !resolveNetworkCapabilities(network).features.nativeSend) {
       throw { code: -32603, message: 'No supported send-capable network selected' }
     }
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
@@ -1001,7 +1032,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Select account
-  if (method === 'wallet_selectAccount' || method === 'metayoshi_selectAccount') {
+  if (SELECT_ACCOUNT_METHODS.has(method)) {
     const { index } = params || {}
     if (typeof index !== 'number') {
       throw { code: -32602, message: 'Account index is required' }
@@ -1027,7 +1058,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Switch network
-  if (method === 'wallet_switchNetwork' || method === 'metayoshi_switchNetwork') {
+  if (SWITCH_NETWORK_METHODS.has(method)) {
     const { networkId } = params || {}
     if (!networkId) {
       throw { code: -32602, message: 'Network ID is required' }

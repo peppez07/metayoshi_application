@@ -7,11 +7,11 @@ const INIT_EVENT = 'metayoshi#initialized'
 const PROVIDER_STATE_METHOD = 'wallet_getProviderState'
 const PROVIDER_ENABLE_METHOD = 'wallet_requestAccounts'
 
-const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts'])
-const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts'])
-const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect'])
-const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount'])
-const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState'])
+const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
+const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
+const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
+const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
+const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
 
 type Listener = (payload: any) => void
 
@@ -250,6 +250,7 @@ function initState(): void {
 // MetaYoshi provider interface (UTXO-focused)
 const provider = {
   isMetaYoshi: true,
+  isRtm: true,
   isMultiChain: true,
   
   // Coin/Network info
@@ -320,6 +321,14 @@ const provider = {
 // Inject provider into window
 if (!(window as any).metayoshi) {
   Object.defineProperty(window, 'metayoshi', {
+    value: provider,
+    writable: false,
+    configurable: false
+  })
+}
+
+if (!(window as any).rtm) {
+  Object.defineProperty(window, 'rtm', {
     value: provider,
     writable: false,
     configurable: false

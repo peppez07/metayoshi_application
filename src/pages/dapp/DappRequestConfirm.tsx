@@ -24,6 +24,7 @@ const DappRequestConfirm: React.FC = () => {
     activeAccountId,
     setActiveNetwork,
     setActiveAccount,
+    sendEvmTransaction,
     sendXrpTransaction,
     sendCardanoTransaction,
     sendMoneroTransaction,
@@ -151,7 +152,12 @@ const DappRequestConfirm: React.FC = () => {
         setActiveAccount(pendingRequest.accountId)
       }
 
-      const tx = requestNetwork.coinType === 'XRP'
+      const tx = requestNetwork.coinType === 'EVM'
+        ? await sendEvmTransaction({
+            to: pendingRequest.request.to,
+            amount: pendingRequest.request.amount
+          })
+        : requestNetwork.coinType === 'XRP'
         ? await sendXrpTransaction({
             to: pendingRequest.request.to,
             amount: pendingRequest.request.amount
@@ -174,8 +180,10 @@ const DappRequestConfirm: React.FC = () => {
       const latestState = useWalletStore.getState()
       const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]
       const accountForActivity = latestState.accounts.find((a) => a.id === pendingRequest.accountId) || latestState.accounts[0]
-      const senderAddress = accountForActivity?.networkAddresses?.[pendingRequest.networkId]
-        || accountForActivity?.addresses?.UTXO
+      const senderAddress = requestNetwork.coinType === 'EVM'
+        ? (accountForActivity?.addresses?.EVM || '')
+        : accountForActivity?.networkAddresses?.[pendingRequest.networkId]
+        || (requestNetwork.coinType === 'XRP' ? accountForActivity?.addresses?.XRP : accountForActivity?.addresses?.UTXO)
         || ''
 
       if (networkForActivity) {

@@ -75,7 +75,9 @@ All methods are available via:
 await window.metayoshi.request({ method, params })
 ```
 
-Alias namespace `metayoshi_*` is supported for the wallet RPC methods below.
+Alias namespaces supported for wallet RPC methods below:
+- `metayoshi_*`
+- `rtm_*` (legacy compatibility)
 
 ### Account and connection
 
@@ -110,6 +112,9 @@ Alias namespace `metayoshi_*` is supported for the wallet RPC methods below.
 - `window.metayoshi.getNetworks()`
 - `window.metayoshi.getCapabilities()`
 - `window.metayoshi.switchNetwork(networkId)`
+
+Legacy provider alias:
+- `window.rtm` points to the same provider instance as `window.metayoshi`.
 
 ## Events
 

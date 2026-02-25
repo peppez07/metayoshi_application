@@ -149,6 +149,7 @@ Client fallback envs (only when policy endpoint unavailable):
 
 Primary injected object:
 - `window.metayoshi`
+- Legacy alias: `window.rtm` (same provider instance)
 
 Init event:
 - `metayoshi#initialized`
@@ -163,6 +164,10 @@ Helpers:
 - `window.metayoshi.getNetworks()`
 - `window.metayoshi.getCapabilities()`
 - `window.metayoshi.switchNetwork(networkId)`
+
+Legacy RPC alias support:
+- `metayoshi_*`
+- `rtm_*` (backward compatibility)
 
 Current implementation status (as of 2026-02-25):
 - SDK/network usage: `rtm`, `doge`, `btcz`, `firo`, `xrp`, `tide`, `arr`, `ada`, `xmr`
