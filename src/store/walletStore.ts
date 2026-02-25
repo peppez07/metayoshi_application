@@ -5,9 +5,9 @@ import { decryptVaultV1, encryptVaultV1, type EncryptedVaultV1 } from '../lib/va
 import { normalizeDappOrigin } from '../lib/dappPermissions'
 import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import {
-  getUtxoBalance, sendRawTransaction, createRawTransaction, listUtxoUnspent,
-  getAddressUtxos, getAddressMempoolSpentOutpoints, listAssetBalancesByAddress, sendRtmAssetNonCustodial,
-  getBlockchainInfo, scanAddressUnspent, validateAddress, getAssetDetailsByName, sendToAddress,
+  listAssetBalancesByAddress,
+  sendRtmAssetNonCustodial,
+  getAssetDetailsByName,
   type RtmAssetDetails,
   type UtxoRpcConfig
 } from '../lib/utxoRpc'
@@ -16,11 +16,10 @@ import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } 
 import { deriveXrpAddress } from '../lib/xrpAddress'
 import { deriveCardanoAddress } from '../lib/cardanoAddress'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
-import { getXrpAccountBalance } from '../lib/xrpRpc'
-import { signLegacyP2pkhTransaction, signBtczTransparentTransaction, type UnsignedTxInput } from '../lib/utxoSign'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
+import { fetchChainBalanceAndSync, sendChainTransaction, sendUtxoNonCustodialTransaction } from '../lib/chainRpcAdapter'
 import {
   DEFAULT_ACTIVE_NETWORK_ID,
   DEFAULT_NETWORK_ID,
@@ -233,17 +232,6 @@ function isTransientBridgeFailure(error: unknown): boolean {
   )
 }
 
-function isClientSignerFormatError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  return (
-    /offset is outside the bounds of the dataview/i.test(message)
-    || /failed to parse unsigned legacy transaction/i.test(message)
-    || /unsupported varint size/i.test(message)
-    || /invalid typed array length/i.test(message)
-    || /input count mismatch/i.test(message)
-  )
-}
-
 async function createUtxoRpcConfig(
   net: Network,
   opts: {
@@ -295,46 +283,11 @@ function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeW
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
 }
 
-function supportsAddressIndex(coinSymbol?: string): boolean {
-  const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
-}
-
 // Balance refresh should avoid noisy address-index probes on bridges that do not
 // support them reliably for unfunded addresses.
 function supportsAddressIndexBalance(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
   return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE'
-}
-
-function resolveSyncStateFromChainInfo(chainInfo: any): { syncPercent: number | null; isChainSyncing: boolean } {
-  let syncPercent: number | null = null
-  let isChainSyncing = false
-  const vpRaw = Number(chainInfo?.verificationprogress)
-  const fallbackFromBlocks =
-    Number(chainInfo?.headers) > 0
-      ? (Number(chainInfo?.blocks) / Number(chainInfo?.headers))
-      : NaN
-  const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
-  if (Number.isFinite(progress01) && progress01 >= 0) {
-    syncPercent = Math.max(0, Math.min(100, progress01 * 100))
-  }
-  if (typeof chainInfo?.initialblockdownload === 'boolean') {
-    isChainSyncing = chainInfo.initialblockdownload
-  } else if (syncPercent !== null) {
-    isChainSyncing = syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-  }
-  return { syncPercent, isChainSyncing }
-}
-
-function parseCoinAmount(amount: string, decimals: number, symbol: string): number {
-  const raw = String(amount || '').trim()
-  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error(`Invalid ${symbol} amount`)
-  const [whole, fraction = ''] = raw.split('.')
-  if (fraction.length > decimals) throw new Error(`${symbol} supports up to ${decimals} decimals`)
-  const numeric = Number(raw)
-  if (!Number.isFinite(numeric) || numeric <= 0) throw new Error(`Amount must be greater than 0`)
-  return Number(`${whole}.${fraction.padEnd(decimals, '0').slice(0, decimals)}`)
 }
 
 function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
@@ -1331,8 +1284,10 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           if (net.coinType === 'EVM') {
-            const provider = new ethers.JsonRpcProvider(net.rpcUrl, net.chainId)
-            const bal = await provider.getBalance(address)
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
@@ -1344,10 +1299,10 @@ export const useWalletStore = create<WalletState>()(
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance: ethers.formatEther(bal),
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: ethers.formatEther(bal)
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
@@ -1360,50 +1315,33 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: localRpcOverrides[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
-          let xrpSyncPercent: number | null = null
-          let xrpIsSyncing = false
-          try {
-            const chainInfo = await getBlockchainInfo(rpcConfig)
-            const vpRaw = Number(chainInfo?.verificationprogress)
-            const fallbackFromBlocks =
-              Number(chainInfo?.headers) > 0
-                ? (Number(chainInfo?.blocks) / Number(chainInfo?.headers))
-                : NaN
-            const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
-            if (Number.isFinite(progress01) && progress01 >= 0) {
-              xrpSyncPercent = Math.max(0, Math.min(100, progress01 * 100))
-            }
-            if (typeof chainInfo?.initialblockdownload === 'boolean') {
-              xrpIsSyncing = chainInfo.initialblockdownload
-            } else if (xrpSyncPercent !== null) {
-              xrpIsSyncing = xrpSyncPercent < MIN_SYNC_PERCENT_FOR_SEND
-            }
-          } catch (err) {
-            console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
-          }
-          const balance = await getXrpAccountBalance(rpcConfig, address)
+          const snapshot = await fetchChainBalanceAndSync({
+            network: net,
+            address,
+            rpcConfig
+          })
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set((state) => ({
-            isSyncing: xrpIsSyncing,
+            isSyncing: snapshot.isSyncing,
             isConnected: true,
-            syncPercent: xrpSyncPercent,
+            syncPercent: snapshot.syncPercent,
             lowSyncStreak: (() => {
               const syncPercentIsLow =
-                typeof xrpSyncPercent === 'number'
-                && Number.isFinite(xrpSyncPercent)
-                && xrpSyncPercent < MIN_SYNC_PERCENT_FOR_SEND
-              const lowSyncCheck = xrpIsSyncing || syncPercentIsLow
+                typeof snapshot.syncPercent === 'number'
+                && Number.isFinite(snapshot.syncPercent)
+                && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+              const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
               return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
             })(),
             accounts: state.accounts.map((a) =>
               a.id === acc.id
                 ? {
                     ...a,
-                    balance: balance.balance,
+                    balance: snapshot.balance,
                     networkBalances: {
                       ...(a.networkBalances ?? {}),
-                      [activeNetworkId]: balance.balance
+                      [activeNetworkId]: snapshot.balance
                     }
                   }
                 : a
@@ -1416,72 +1354,37 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: localRpcOverrides[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
-        let syncPercent: number | null = null
-        let isChainSyncing = false
         const isBtczBridgeMode =
           String(net.coinSymbol || '').trim().toUpperCase() === 'BTCZ' && !useLocalRpc
-
-        // BTCZ bridge deployments are frequently missing a healthy chain RPC backend
-        // even when explorer data can still provide balances. Skip noisy chain probe.
-        if (!isBtczBridgeMode) {
-          try {
-            const chainInfo = await getBlockchainInfo(rpcConfig)
-            const vpRaw = Number(chainInfo.verificationprogress)
-            const fallbackFromBlocks =
-              Number(chainInfo.headers) > 0
-                ? (Number(chainInfo.blocks) / Number(chainInfo.headers))
-                : NaN
-            const progress01 = Number.isFinite(vpRaw) && vpRaw > 0 ? vpRaw : fallbackFromBlocks
-            if (Number.isFinite(progress01) && progress01 >= 0) {
-              syncPercent = Math.max(0, Math.min(100, progress01 * 100))
-            }
-            if (typeof chainInfo.initialblockdownload === 'boolean') {
-              isChainSyncing = chainInfo.initialblockdownload
-            } else if (syncPercent !== null) {
-              isChainSyncing = syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-            }
-          } catch (err) {
-            console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
-          }
-        }
-
-            const balanceOptions = {
-              // RTM/BTCZ/TIDE support non-wallet address balance via address-index
-              // or configured explorer fallback (BTCZ).
-              preferAddressIndex: supportsAddressIndexBalance(net.coinSymbol)
-            }
-            let balance = await getUtxoBalance(rpcConfig, address, balanceOptions)
-            if (balance.total <= 0 && !skipZeroBalanceRecheck && !fastMode) {
-              await delay(UTXO_ZERO_BALANCE_RECHECK_MS)
-              if (isStaleRequest()) return
-              try {
-                const secondRead = await getUtxoBalance(rpcConfig, address, balanceOptions)
-                if (secondRead.total > balance.total) balance = secondRead
-              } catch {
-                // Keep initial read when recheck fails.
-              }
-            }
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig,
+              skipChainSyncProbe: isBtczBridgeMode,
+              preferAddressIndexBalance: supportsAddressIndexBalance(net.coinSymbol),
+              zeroBalanceRecheckMs: !skipZeroBalanceRecheck && !fastMode ? UTXO_ZERO_BALANCE_RECHECK_MS : 0
+            })
             console.info(`[${net.symbol}] connected via bridge`)
 
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
               lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
                 return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
               })(),
-              isSyncing: isChainSyncing,
+              isSyncing: snapshot.isSyncing,
               isConnected: true,
-              syncPercent,
+              syncPercent: snapshot.syncPercent,
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance: String(balance.total),
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: String(balance.total)
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
@@ -1494,36 +1397,30 @@ export const useWalletStore = create<WalletState>()(
               localRpcOverride: localRpcOverrides[net.id],
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            let syncPercent: number | null = null
-            let isChainSyncing = false
-            try {
-              const chainInfo = await getBlockchainInfo(rpcConfig)
-              const parsed = resolveSyncStateFromChainInfo(chainInfo)
-              syncPercent = parsed.syncPercent
-              isChainSyncing = parsed.isChainSyncing
-            } catch (err) {
-              console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
-            }
-            const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
-              isSyncing: isChainSyncing,
+              isSyncing: snapshot.isSyncing,
               isConnected: true,
-              syncPercent,
+              syncPercent: snapshot.syncPercent,
               lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
                 return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
               })(),
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance: String(balance.total),
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: String(balance.total)
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
@@ -1536,36 +1433,30 @@ export const useWalletStore = create<WalletState>()(
               localRpcOverride: localRpcOverrides[net.id],
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            let syncPercent: number | null = null
-            let isChainSyncing = false
-            try {
-              const chainInfo = await getBlockchainInfo(rpcConfig)
-              const parsed = resolveSyncStateFromChainInfo(chainInfo)
-              syncPercent = parsed.syncPercent
-              isChainSyncing = parsed.isChainSyncing
-            } catch (err) {
-              console.warn(`[${net.symbol}] getblockchaininfo failed:`, err)
-            }
-            const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
-              isSyncing: isChainSyncing,
+              isSyncing: snapshot.isSyncing,
               isConnected: true,
-              syncPercent,
+              syncPercent: snapshot.syncPercent,
               lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof syncPercent === 'number' && Number.isFinite(syncPercent) && syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = isChainSyncing || syncPercentIsLow
+                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
+                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
                 return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
               })(),
               accounts: state.accounts.map((a) =>
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance: String(balance.total),
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: String(balance.total)
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
@@ -1606,22 +1497,26 @@ export const useWalletStore = create<WalletState>()(
         if (!net || net.coinType !== 'EVM') throw new Error('Active network is not EVM')
         if (!acc?.addresses?.EVM) throw new Error('No active account')
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
-
-        const provider = new ethers.JsonRpcProvider(net.rpcUrl, net.chainId)
-        const wallet = deriveEvmWallet(sessionMnemonic, accountIndex).connect(provider)
-
-        const tx = await wallet.sendTransaction({
-          to: to.trim(),
-          value: ethers.parseEther(String(amount))
+        return await sendChainTransaction({
+          network: net,
+          to,
+          amount,
+          evm: {
+            mnemonic: sessionMnemonic,
+            accountIndex
+          }
         })
-
-        return { hash: tx.hash }
       },
 
       sendXrpTransaction: async ({ to, amount }) => {
-        void to
-        void amount
-        throw new Error('XRP send is disabled by strict non-custodial policy')
+        const { networks, activeNetworkId } = get()
+        const net = networks.find((n) => n.id === activeNetworkId)
+        if (!net || net.coinType !== 'XRP') throw new Error('Active network is not XRP')
+        return await sendChainTransaction({
+          network: net,
+          to,
+          amount
+        })
       },
 
       sendCardanoTransaction: async ({ to, amount }) => {
@@ -1633,11 +1528,12 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: localRpcOverrides[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
-        const toAddress = String(to || '').trim()
-        if (!toAddress) throw new Error('Destination address is required')
-        const amountValue = parseCoinAmount(amount, 6, 'ADA')
-        const txid = await sendToAddress(rpcConfig, toAddress, amountValue)
-        return { hash: String(txid) }
+        return await sendChainTransaction({
+          network: net,
+          rpcConfig,
+          to,
+          amount
+        })
       },
 
       sendMoneroTransaction: async ({ to, amount }) => {
@@ -1649,11 +1545,12 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: localRpcOverrides[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
-        const toAddress = String(to || '').trim()
-        if (!toAddress) throw new Error('Destination address is required')
-        const amountValue = parseCoinAmount(amount, 12, 'XMR')
-        const txid = await sendToAddress(rpcConfig, toAddress, amountValue)
-        return { hash: String(txid) }
+        return await sendChainTransaction({
+          network: net,
+          rpcConfig,
+          to,
+          amount
+        })
       },
 
       sendUtxoTransaction: async ({ to, amount, donation }) => {
@@ -1676,233 +1573,23 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: lro3[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
-        const validation = await validateAddress(rpcConfig, senderAddress)
-        if (!validation?.isvalid) {
-          throw new Error(`Active sender address is invalid for ${net.symbol}: ${senderAddress}`)
-        }
-
-        // â”€â”€ Fetch confirmed UTXOs â€” three-tier strategy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        // Tier 1 (RTM/BTCZ/TIDE/FIRO): getaddressutxos â€” uses address index, works for
-        //   any HD-derived address without wallet import when supported.
-        // Tier 2: listunspent â€” wallet-scoped, works if address is in the wallet.
-        // Tier 3: scantxoutset â€” full chainstate scan (slow ~45 s), last resort.
-        let unspent: Awaited<ReturnType<typeof listUtxoUnspent>> = []
-
-        if (supportsAddressIndex(net.coinSymbol)) {
-          try {
-            const byIndex = await getAddressUtxos(rpcConfig, senderAddress, 1)
-            if (byIndex.length > 0) unspent = byIndex
-          } catch {
-            // address index not available â€” fall through
-          }
-        }
-
-        if (unspent.length === 0) {
-          try {
-            const byWallet = await listUtxoUnspent(rpcConfig, senderAddress, 1)
-            if (byWallet.length > 0) unspent = byWallet
-          } catch {
-            // wallet doesn't hold address â€” fall through
-          }
-        }
-
-        if (unspent.length === 0) {
-          const scanned = await scanAddressUnspent(rpcConfig, senderAddress)
-          if (scanned.length > 0) unspent = scanned
-        }
-
-        // Address-index UTXO methods read chainstate and can be stale vs mempool.
-        // Exclude outpoints already spent by unconfirmed mempool transactions.
-        if (unspent.length > 0 && supportsAddressIndex(net.coinSymbol)) {
-          try {
-            const mempoolSpent = await getAddressMempoolSpentOutpoints(rpcConfig, senderAddress)
-            if (mempoolSpent.size > 0) {
-              unspent = unspent.filter((utxo) => !mempoolSpent.has(`${utxo.txid}:${utxo.vout}`))
-            }
-          } catch {
-            // getaddressmempool may be unavailable on some nodes; ignore
-          }
-        }
-
-        // Defensive filter: bridge/index responses can occasionally include
-        // non-sender rows. Never sign foreign-address inputs with this key.
-        if (unspent.length > 0) {
-          const normalizedSender = String(senderAddress).trim()
-          const before = unspent.length
-          unspent = unspent.filter((utxo) => String(utxo.address || normalizedSender).trim() === normalizedSender)
-          if (unspent.length !== before) {
-            console.warn(`[${net.symbol}] filtered ${before - unspent.length} non-sender UTXOs before signing`)
-          }
-        }
-
-        if (unspent.length === 0) {
-          const balanceHint = await getUtxoBalance(rpcConfig, senderAddress, {
-            preferAddressIndex: supportsAddressIndex(net.coinSymbol)
-          }).catch(() => null)
-          if (balanceHint && balanceHint.total > 0 && balanceHint.confirmed <= 0) {
-            throw new Error(`Funds are present but not yet spendable (unconfirmed). Confirmed: ${balanceHint.confirmed}, total: ${balanceHint.total}`)
-          }
-          if (balanceHint && balanceHint.total > 0) {
-            throw new Error('Detected pending unconfirmed spend from this address (mempool conflict). Wait for confirmation, then retry.')
-          }
-          throw new Error(`No confirmed spendable UTXOs found for address ${senderAddress}`)
-        }
-
-        const amountToSend = parseFloat(String(amount))
-        const sat = (coins: number): number => Math.round(Number(coins) * 1e8)
-        const coins8 = (sats: number): number => Number((sats / 1e8).toFixed(8))
-        const donationAddress = String(donation?.address || '').trim()
-        const donationAmountCoins = Number(donation?.amount ?? 0)
-        const donationAmountSats = Number.isFinite(donationAmountCoins) && donationAmountCoins > 0
-          ? sat(donationAmountCoins)
-          : 0
-        if (donation?.required && donationAmountSats <= 0) {
-          throw new Error('Donation is required by bridge policy')
-        }
-        if ((donationAmountSats > 0 || donation?.required) && !donationAddress) {
-          throw new Error('Donation address is missing from bridge policy')
-        }
-        if (donationAmountSats > 0) {
-          const donationValidation = await validateAddress(rpcConfig, donationAddress)
-          if (!donationValidation?.isvalid) {
-            throw new Error(`Donation address is invalid for ${net.symbol}: ${donationAddress}`)
-          }
-        }
-
-        // â”€â”€ Greedy UTXO selection with size-based fee estimate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        // P2PKH sizes: 10 base + 148/input + 34/output (send + change = 2 outputs)
-        const rawFeePerByteCoins = net.feePerByte ?? estimateNetworkFee(net.id, 1) ?? 0.0000002
-        let feePerByteSats = Math.max(1, sat(rawFeePerByteCoins))
-        // If configured fee looks absurdly high for "per byte", treat it as "per kB".
-        if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-        const OVERHEAD_BYTES = 10
-        const INPUT_BYTES = 148
-        const OUTPUT_BYTES = 34
-        const MAX_REASONABLE_FEE_SATS = 10_000_000 // mirrors node absurd-fee guard
-        const DUST_THRESHOLD_SATS = 1_000
-        const amountToSendSats = sat(amountToSend)
-        const outputsWithoutChange = 1 + (donationAmountSats > 0 ? 1 : 0)
-
-        // Sort descending by amount for efficient greedy selection
-        const sorted = [...unspent].sort((a, b) => b.amount - a.amount)
-        const selectedUtxos: typeof unspent = []
-        let accumulatedSats = 0
-
-        for (const utxo of sorted) {
-          selectedUtxos.push(utxo)
-          accumulatedSats += sat(utxo.amount)
-          const txBytes = OVERHEAD_BYTES + INPUT_BYTES * selectedUtxos.length + OUTPUT_BYTES * (outputsWithoutChange + 1)
-          const estimatedFeeSats = txBytes * feePerByteSats
-          if (accumulatedSats >= amountToSendSats + donationAmountSats + estimatedFeeSats) break
-          if (selectedUtxos.length >= 25) break // safety cap
-        }
-
-        const txBytes = OVERHEAD_BYTES + INPUT_BYTES * selectedUtxos.length + OUTPUT_BYTES * (outputsWithoutChange + 1)
-        const estimatedFeeSats = txBytes * feePerByteSats
-        const totalAvailableSats = selectedUtxos.reduce((sum, utxo) => sum + sat(utxo.amount), 0)
-
-        if (estimatedFeeSats > MAX_REASONABLE_FEE_SATS) {
-          throw new Error(`Estimated fee too high: ${coins8(estimatedFeeSats)} ${net.coinSymbol}. Check fee settings / UTXO fragmentation.`)
-        }
-
-        if (amountToSendSats + donationAmountSats + estimatedFeeSats > totalAvailableSats) {
-          throw new Error(
-            `Insufficient balance: need ${coins8(amountToSendSats + donationAmountSats + estimatedFeeSats).toFixed(8)}, have ${coins8(totalAvailableSats).toFixed(8)}`
-          )
-        }
-
-        const changeAmountSats = totalAvailableSats - amountToSendSats - donationAmountSats - estimatedFeeSats
-
-        // Derive private key for signing
-        const derived = await deriveSigningKeyForSenderAddress(
-          sessionMnemonic,
-          net,
-          accountIndex,
-          senderAddress
-        )
-
-        // Create transaction inputs (for createrawtransaction)
-        const inputs = selectedUtxos.map(utxo => ({
-          txid: utxo.txid,
-          vout: utxo.vout
-        }))
-
-        // Create transaction outputs
-        const toAddress = to.trim()
-        const outputsSats: Record<string, number> = {}
-        const addOutputSats = (address: string, satsValue: number) => {
-          if (!address || satsValue <= 0) return
-          outputsSats[address] = (outputsSats[address] || 0) + satsValue
-        }
-        addOutputSats(toAddress, amountToSendSats)
-        addOutputSats(donationAddress, donationAmountSats)
-
-        // Add change output if needed
-        if (changeAmountSats > DUST_THRESHOLD_SATS) {
-          addOutputSats(senderAddress, changeAmountSats)
-        }
-        const outputs = Object.fromEntries(
-          Object.entries(outputsSats).map(([address, satsValue]) => [address, coins8(satsValue)])
-        )
-
-        const coinSymbol = String(net.coinSymbol || '').trim().toUpperCase()
-        const isSaplingTransparent = coinSymbol === 'BTCZ' || coinSymbol === 'ARRR'
-        let saplingBranchId: number | undefined
-        if (isSaplingTransparent) {
-          try {
-            const chainInfo = await getBlockchainInfo(rpcConfig)
-            const branchRaw = String(
-              (chainInfo as any)?.consensus?.chaintip
-              ?? (chainInfo as any)?.consensus?.nextblock
-              ?? ''
-            ).trim()
-            if (/^[0-9a-fA-F]{8}$/.test(branchRaw)) {
-              saplingBranchId = Number.parseInt(branchRaw, 16) >>> 0
-            }
-          } catch (err) {
-            console.warn(`[${net.symbol}] could not resolve consensus branch id, using Sapling signer default`, err)
-          }
-        }
-
-        // Create raw transaction
-        const rawHex = await createRawTransaction(rpcConfig, inputs, outputs)
-
-        // Prepare inputs for signing (with scriptPubKey and amount in sats)
-        const signingInputs: UnsignedTxInput[] = selectedUtxos.map(utxo => ({
-          txid: utxo.txid,
-          vout: utxo.vout,
-          scriptPubKeyHex: utxo.scriptPubKey,
-          amountSats: sat(utxo.amount)
-        }))
-
-        let signedHex = ''
-        try {
-          // Strict non-custodial policy: sign only client-side.
-          signedHex = isSaplingTransparent
-            ? await signBtczTransparentTransaction(rawHex, signingInputs, derived.privHex, { consensusBranchId: saplingBranchId })
-            : await signLegacyP2pkhTransaction(rawHex, signingInputs, derived.privHex)
-        } catch (signErr) {
-          if (isSaplingTransparent && isClientSignerFormatError(signErr)) {
-            throw new Error(
-              `${net.symbol} client-side signing failed while parsing transaction format. ` +
-              'Only transparent Overwinter/Sapling transactions are supported.'
+        return await sendUtxoNonCustodialTransaction({
+          network: net,
+          rpcConfig,
+          senderAddress,
+          to,
+          amount,
+          donation,
+          deriveSigningKey: async (resolvedSenderAddress) => {
+            const derived = await deriveSigningKeyForSenderAddress(
+              sessionMnemonic,
+              net,
+              accountIndex,
+              resolvedSenderAddress
             )
+            return { privHex: derived.privHex }
           }
-          throw signErr
-        }
-
-        // Broadcast transaction
-        let txid = ''
-        try {
-          txid = await sendRawTransaction(rpcConfig, signedHex)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          if (/txn-mempool-conflict|\(code\s*18\)|code\s*18/i.test(message)) {
-            throw new Error('Transaction conflicts with a pending mempool transaction from this wallet. Wait for at least 1 confirmation and try again.')
-          }
-          throw error
-        }
-        return { hash: txid }
+        })
       }
     }),
     {
