@@ -89,12 +89,17 @@ interface WalletState {
 
 function resolveDappNetworks(state: WalletState): Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
   return (state.networks || []).filter((network) => (
-    (network?.coinType === 'UTXO' || network?.coinType === 'XRP') && Boolean(String(network.id || '').trim())
+    (network?.coinType === 'UTXO' || network?.coinType === 'XRP' || network?.coinType === 'BTC') && Boolean(String(network.id || '').trim())
   ))
 }
 
-function resolveCoinDecimals(network?: { coinType?: string }): number {
-  return network?.coinType === 'XRP' ? 6 : 8
+function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?: string }): number {
+  const symbol = String(network?.symbol || '').trim().toUpperCase()
+  const id = String(network?.id || '').trim().toLowerCase()
+  if (network?.coinType === 'XRP') return 6
+  if (symbol === 'ADA' || id === 'ada') return 6
+  if (symbol === 'XMR' || id === 'xmr') return 12
+  return 8
 }
 
 installGlobalErrorMonitor('background-sw')
@@ -614,7 +619,7 @@ async function waitForRequestDecision(
   })
 }
 
-function parseSendTransactionParams(params: unknown): SendTransactionParams {
+function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTransactionParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
     throw { code: -32602, message: 'wallet_sendTransaction requires params { to, amount }' }
@@ -636,8 +641,8 @@ function parseSendTransactionParams(params: unknown): SendTransactionParams {
   if (!/^\d+(\.\d+)?$/.test(amount)) {
     throw { code: -32602, message: 'wallet_sendTransaction amount must be a positive decimal string' }
   }
-  if (amount.includes('.') && amount.split('.')[1].length > 8) {
-    throw { code: -32602, message: 'wallet_sendTransaction supports up to 8 decimal places' }
+  if (amount.includes('.') && amount.split('.')[1].length > maxDecimals) {
+    throw { code: -32602, message: `wallet_sendTransaction supports up to ${maxDecimals} decimal places` }
   }
   if (Number(amount) <= 0) {
     throw { code: -32602, message: 'wallet_sendTransaction amount must be greater than zero' }
@@ -985,7 +990,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       await touchLastConnected(origin)
     }
 
-    const parsedSend = parseSendTransactionParams(params)
+    const parsedSend = parseSendTransactionParams(params, resolveCoinDecimals(network))
     const result = await requestTransactionApproval(
       origin || 'unknown',
       network.id,
@@ -1169,7 +1174,7 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
           // Network changed
           if (newState.activeNetworkId !== oldState.activeNetworkId) {
             const network = newState.networks?.find((n) => n.id === newState.activeNetworkId)
-            if (network && (network.coinType === 'UTXO' || network.coinType === 'XRP') && String(network.id || '').trim()) {
+            if (network && (network.coinType === 'UTXO' || network.coinType === 'XRP' || network.coinType === 'BTC') && String(network.id || '').trim()) {
               broadcastEvent('networkChanged', {
                 networkId: network.id,
                 networkLabel: network.name,

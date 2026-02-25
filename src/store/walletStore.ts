@@ -765,7 +765,9 @@ export const useWalletStore = create<WalletState>()(
         const { networks, accounts, activeAccountId, sessionMnemonic } = get()
         const net = networks.find(n => n.id === networkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
-        if (!net || !acc || !sessionMnemonic) return null
+        if (!net || !acc) return null
+        const requiresMnemonic = net.coinType === 'EVM' || net.coinType === 'XRP' || net.coinType === 'UTXO'
+        if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
 
@@ -785,12 +787,12 @@ export const useWalletStore = create<WalletState>()(
         try {
           let address = ''
           if (net.coinType === 'EVM') {
-            address = deriveEvmWallet(sessionMnemonic, accountIndex).address
+            address = deriveEvmWallet(sessionMnemonic!, accountIndex).address
           } else if (net.coinType === 'XRP') {
-            const derived = await deriveXrpAddress(sessionMnemonic, accountIndex)
+            const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
-            const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
+            const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
             address = derived.address
             if (forceCanonicalUtxoAddress && existing && existing !== address) {
               console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
@@ -1430,30 +1432,9 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendXrpTransaction: async ({ to, amount }) => {
-        const { networks, activeNetworkId, isLocked, useLocalRpc: ulrXrp, localRpcOverrides: lroXrp } = get()
-        if (isLocked) throw new Error('Wallet is locked')
-
-        const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.coinType !== 'XRP') throw new Error('Active network is not XRP')
-
-        const rpcConfig = await createUtxoRpcConfig(net, {
-          useLocalRpc: ulrXrp,
-          localRpcOverride: lroXrp[net.id],
-          secureBridgeSigner: get().signBackendAuthMessage
-        })
-
-        const toAddress = String(to || '').trim()
-        const amountValue = Number(amount)
-        if (!toAddress) throw new Error('Recipient address is required')
-        if (!Number.isFinite(amountValue) || amountValue <= 0) throw new Error('Amount must be greater than 0')
-
-        const recipientValidation = await validateAddress(rpcConfig, toAddress)
-        if (!recipientValidation?.isvalid) {
-          throw new Error(`Recipient address is invalid for XRP: ${toAddress}`)
-        }
-
-        const txid = await sendToAddress(rpcConfig, toAddress, Number(amountValue.toFixed(6)))
-        return { hash: txid }
+        void to
+        void amount
+        throw new Error('XRP send is disabled by strict non-custodial policy')
       },
 
       sendUtxoTransaction: async ({ to, amount, donation }) => {
