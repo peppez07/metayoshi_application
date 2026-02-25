@@ -1,29 +1,32 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { IoCubeOutline, IoFunnelOutline, IoGitCompareOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
 import { ModelRuntimeStatus } from './ModelRuntimeStatus'
 import { useChainModelLiveData } from './useChainModelLiveData'
 
-const ASSET_ROWS: Array<{ symbol: string; amount: string }> = [
-  { symbol: 'YOSHI', amount: '482.10' },
-  { symbol: 'RTM-LP', amount: '51.44' },
-  { symbol: 'META', amount: '2200.00' },
-  { symbol: 'GEM', amount: '97.75' },
-  { symbol: 'NODE', amount: '13.02' }
-]
-
 const UtxoAssetsModelPage: React.FC = () => {
-  const { accounts, activeAccountId, activeNetworkId } = useWalletStore()
+  const { accounts, activeAccountId, activeNetworkId, networkAssets, fetchNetworkAssets } = useWalletStore()
   const [query, setQuery] = useState('')
   const [composer, setComposer] = useState<'single' | 'batch'>('single')
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const { snapshot, loading, refresh } = useChainModelLiveData()
+  const assetsMap = networkAssets?.[activeNetworkId] || {}
+  const assetRows = useMemo(
+    () => Object.entries(assetsMap).map(([symbol, rawAmount]) => ({ symbol, amount: Number(rawAmount) })),
+    [assetsMap]
+  )
 
   const filteredAssets = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return ASSET_ROWS
-    return ASSET_ROWS.filter((a) => a.symbol.toLowerCase().includes(q))
-  }, [query])
+    if (!q) return assetRows
+    return assetRows.filter((a) => a.symbol.toLowerCase().includes(q))
+  }, [assetRows, query])
+
+  useEffect(() => {
+    void fetchNetworkAssets().catch(() => {
+      // Keep UI stable when asset index is unavailable.
+    })
+  }, [fetchNetworkAssets, activeNetworkId])
 
   const address = activeAccount?.networkAddresses?.[activeNetworkId] || ''
 
@@ -45,17 +48,21 @@ const UtxoAssetsModelPage: React.FC = () => {
           placeholder="Filter asset symbols..."
           className="w-full bg-dark-700/60 border border-dark-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary"
         />
-        <div className="grid grid-cols-2 gap-2">
-          {filteredAssets.map((asset) => (
-            <div key={asset.symbol} className="rounded-lg border border-dark-600 bg-dark-700/40 p-2">
-              <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                <IoCubeOutline className="w-3 h-3" />
-                {asset.symbol}
+        {filteredAssets.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            {filteredAssets.map((asset) => (
+              <div key={asset.symbol} className="rounded-lg border border-dark-600 bg-dark-700/40 p-2">
+                <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                  <IoCubeOutline className="w-3 h-3" />
+                  {asset.symbol}
+                </div>
+                <p className="text-sm font-bold text-gray-200">{String(asset.amount)}</p>
               </div>
-              <p className="text-sm font-bold text-gray-200">{asset.amount}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-500">No live asset balances returned for this address/network.</p>
+        )}
       </section>
 
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">

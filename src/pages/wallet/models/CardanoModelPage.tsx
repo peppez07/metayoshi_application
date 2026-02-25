@@ -34,40 +34,29 @@ const CardanoModelPage: React.FC = () => {
       </section>
 
       {view === 'utxo' && (
-        <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3">
-          <p className="text-xs font-bold uppercase text-gray-300 mb-2">EUTXO Lens</p>
-          <div className="grid grid-cols-2 gap-2 text-[11px]">
-            <StatCard label="Spendable UTXOs" value="27" />
-            <StatCard label="Locked Outputs" value="3" />
-            <StatCard label="Change Fragments" value="9" />
-            <StatCard label="Avg Output ADA" value="18.6" />
-          </div>
+        <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
+          <p className="text-xs font-bold uppercase text-gray-300">EUTXO Lens</p>
+          <p className="text-[11px] text-gray-500">
+            UTXO-level Cardano breakdown is not yet exposed by current adapter/node response. Use runtime panel for live balance/sync.
+          </p>
         </section>
       )}
 
       {view === 'staking' && (
         <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
           <p className="text-xs font-bold uppercase text-gray-300">Stake Posture</p>
-          <div className="rounded-lg border border-dark-600 bg-dark-700/40 p-2 text-[11px] text-gray-300">
-            Delegation status preview for this account model page.
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-gray-500">Current pool:</span>
-            <span className="font-bold text-gray-200">None selected</span>
-          </div>
+          <p className="text-[11px] text-gray-500">
+            Delegation/pool data is not yet returned by the current Cardano adapter route.
+          </p>
         </section>
       )}
 
       {view === 'policies' && (
         <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
           <p className="text-xs font-bold uppercase text-gray-300">Policy Assets</p>
-          <div className="space-y-2">
-            {['Policy A1...2F', 'Policy B4...90', 'Policy C8...11'].map((p) => (
-              <div key={p} className="rounded-lg border border-dark-600 bg-dark-700/40 px-2 py-1.5 text-[10px] font-mono text-gray-300">
-                {p}
-              </div>
-            ))}
-          </div>
+          <p className="text-[11px] text-gray-500">
+            No policy-token payload is currently available from Cardano runtime endpoints.
+          </p>
         </section>
       )}
 
@@ -91,13 +80,6 @@ const ModelTab: React.FC<{ icon: React.ReactNode; label: string; active: boolean
     {icon}
     {label}
   </button>
-)
-
-const StatCard: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-lg border border-dark-600 bg-dark-700/30 p-2">
-    <p className="text-[10px] text-gray-500">{label}</p>
-    <p className="text-sm font-bold text-gray-200">{value}</p>
-  </div>
 )
 
 export default CardanoModelPage

@@ -60,13 +60,9 @@ const EvmModelPage: React.FC = () => {
           <IoLayersOutline className="w-4 h-4 text-primary" />
           Token Field
         </div>
-        <div className="flex flex-wrap gap-2">
-          {['ETH', 'USDT', 'SHIB', 'WBTC', 'UNI'].map((token) => (
-            <span key={token} className="px-2 py-1 rounded-full border border-dark-600 bg-dark-700/50 text-[10px] font-bold text-gray-300">
-              {token}
-            </span>
-          ))}
-        </div>
+        <p className="text-[11px] text-gray-500">
+          Token balances are not injected in this model page yet. Runtime panel below shows live chain/account status.
+        </p>
         <p className="text-[10px] text-gray-500 font-mono break-all">{evmAddress || 'No EVM address available'}</p>
       </section>
 

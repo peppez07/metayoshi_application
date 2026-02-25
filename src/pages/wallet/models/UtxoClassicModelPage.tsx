@@ -57,7 +57,7 @@ const UtxoClassicModelPage: React.FC = () => {
       </section>
 
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 text-[11px] text-gray-300">
-        Estimated profile: <span className="font-bold uppercase">{feePreset}</span> fee, <span className="font-bold">{coinControl ? 'manual' : 'automatic'}</span> input strategy.
+        Local preference only: <span className="font-bold uppercase">{feePreset}</span> preset, <span className="font-bold">{coinControl ? 'manual' : 'automatic'}</span> input strategy.
       </section>
 
       <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />

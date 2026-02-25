@@ -20,10 +20,9 @@ const XrpModelPage: React.FC = () => {
           <IoTimerOutline className="w-4 h-4 text-primary" />
           Reserve Snapshot
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <ValueChip label="Base Reserve" value="1 XRP" />
-          <ValueChip label="Owner Reserve" value="0.2 XRP" />
-        </div>
+        <p className="text-[11px] text-gray-500">
+          Reserve values are not available from current XRP adapter payloads.
+        </p>
       </section>
 
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
@@ -52,12 +51,5 @@ const XrpModelPage: React.FC = () => {
     </div>
   )
 }
-
-const ValueChip: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-lg border border-dark-600 bg-dark-700/40 p-2">
-    <p className="text-[10px] text-gray-500">{label}</p>
-    <p className="text-sm font-bold text-gray-200">{value}</p>
-  </div>
-)
 
 export default XrpModelPage
