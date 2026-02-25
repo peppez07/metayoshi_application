@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import ethereumLogo from './coinlogos/ethereum.webp'
 
 export const ETH_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 
 export function createEthNetwork(ctx: CoinRuntimeContext): Network {

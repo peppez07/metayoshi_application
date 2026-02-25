@@ -99,6 +99,7 @@ const Assets: React.FC = () => {
 
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  const supportsPreview = activeNetwork.coinType === 'UTXO'
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
@@ -127,6 +128,7 @@ const Assets: React.FC = () => {
   const previewNames = useMemo(() => preview.map(([name]) => name), [preview])
 
   useEffect(() => {
+    if (!supportsPreview) return
     let cancelled = false
     const checkPreviewability = async () => {
       for (const assetName of previewNames) {
@@ -150,7 +152,7 @@ const Assets: React.FC = () => {
     }
     if (previewNames.length > 0) void checkPreviewability()
     return () => { cancelled = true }
-  }, [previewNames, fetchAssetDetails, previewByAsset])
+  }, [previewNames, fetchAssetDetails, previewByAsset, supportsPreview])
 
   if (total === 0) {
     return (
@@ -175,8 +177,11 @@ const Assets: React.FC = () => {
             name={name}
             rawAmount={raw}
             onClick={() => navigate('/assets')}
-            onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
-            previewAvailable={previewByAsset[name] === true}
+            onPreview={() => {
+              if (!supportsPreview) return
+              navigate('/assets/preview', { state: { assetId: name } })
+            }}
+            previewAvailable={supportsPreview && previewByAsset[name] === true}
           />
         ))}
 

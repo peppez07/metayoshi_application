@@ -14,6 +14,7 @@ import {
 import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
 import { deriveXrpAddress } from '../lib/xrpAddress'
+import { sendXrpNonCustodial } from '../lib/xrpNonCustodial'
 import { deriveCardanoAddress } from '../lib/cardanoAddress'
 import { sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
@@ -312,6 +313,65 @@ function evmDerivationPath(accountIndex: number): string {
 
 function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeWallet {
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
+}
+
+const EVM_ERC20_MIN_ABI = [
+  'function balanceOf(address) view returns (uint256)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)'
+]
+
+type EvmTrackedToken = {
+  address: string
+  symbol: string
+  decimals: number
+}
+
+const DEFAULT_ETH_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
+  { address: '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6 },
+  { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 },
+  { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', symbol: 'SHIB', decimals: 18 }
+]
+
+function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
+  const entries = String(raw || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  const parsed: EvmTrackedToken[] = []
+  const seen = new Set<string>()
+
+  for (const entry of entries) {
+    const [addressRaw, symbolRaw = '', decimalsRaw = '18'] = entry.split(':').map((part) => part.trim())
+    if (!ethers.isAddress(addressRaw)) continue
+    const checksum = ethers.getAddress(addressRaw)
+    if (seen.has(checksum)) continue
+    const symbol = symbolRaw || checksum.slice(0, 6)
+    const decimals = Number(decimalsRaw)
+    parsed.push({
+      address: checksum,
+      symbol: symbol.toUpperCase(),
+      decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
+    })
+    seen.add(checksum)
+  }
+
+  return parsed
+}
+
+function resolveTrackedEvmTokens(networkId: string): EvmTrackedToken[] {
+  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${String(networkId || '').toUpperCase()}_TRACKED_TOKENS`] || ''))
+  if (byNetwork.length > 0) return byNetwork
+  if (String(networkId || '').trim().toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
+  return []
+}
+
+function toAssetDisplaySats(balanceRaw: bigint, decimals: number): number {
+  const denom = 10n ** BigInt(Math.max(0, decimals))
+  const scaled = (balanceRaw * 100000000n) / denom
+  return Number(scaled)
 }
 
 // Balance refresh should avoid noisy address-index probes on bridges that do not
@@ -901,6 +961,52 @@ export const useWalletStore = create<WalletState>()(
 
         const address = acc.networkAddresses?.[activeNetworkId] || ''
         if (!address) return
+
+        if (net.coinType === 'EVM') {
+          const trackedTokens = resolveTrackedEvmTokens(net.id)
+          if (trackedTokens.length === 0) {
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: {}
+              }
+            }))
+            return
+          }
+
+          try {
+            const provider = new ethers.JsonRpcProvider(net.rpcUrl, net.chainId)
+            const balances = await Promise.all(
+              trackedTokens.map(async (token) => {
+                const contract = new ethers.Contract(token.address, EVM_ERC20_MIN_ABI, provider)
+                const [rawBalance, symbolRaw, decimalsRaw] = await Promise.all([
+                  contract.balanceOf(address) as Promise<bigint>,
+                  contract.symbol().catch(() => token.symbol) as Promise<string>,
+                  contract.decimals().catch(() => token.decimals) as Promise<number>
+                ])
+                const decimals = Number.isInteger(Number(decimalsRaw)) ? Number(decimalsRaw) : token.decimals
+                const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
+                const symbol = String(symbolRaw || token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
+                return [symbol, displaySats] as const
+              })
+            )
+
+            const assets = Object.fromEntries(
+              balances.filter((row): row is readonly [string, number] => Boolean(row))
+            ) as Record<string, number>
+
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
+          }
+          return
+        }
 
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
@@ -1659,13 +1765,39 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendXrpTransaction: async ({ to, amount }) => {
-        const { networks, activeNetworkId } = get()
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked, useLocalRpc, localRpcOverrides } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net || net.coinType !== 'XRP') throw new Error('Active network is not XRP')
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        if (!acc) throw new Error('No active account')
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const derived = await deriveXrpAddress(sessionMnemonic, accountIndex)
+        const activeAddress = String(
+          acc.networkAddresses?.[activeNetworkId]
+          || acc.addresses?.XRP
+          || derived.address
+        ).trim()
+        if (activeAddress !== derived.address) {
+          throw new Error(`Active XRP address does not match derived signer address (${activeAddress} != ${derived.address})`)
+        }
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          useLocalRpc,
+          localRpcOverride: localRpcOverrides[net.id],
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
         return await sendChainTransaction({
           network: net,
           to,
-          amount
+          amount,
+          xrpSend: () => sendXrpNonCustodial({
+            rpcConfig,
+            fromAddress: activeAddress,
+            toAddress: to,
+            amountXrp: amount,
+            privateKeyHex: derived.privHex,
+            publicKeyHex: derived.pubHex
+          })
         })
       },
 

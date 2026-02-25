@@ -42,6 +42,7 @@ export interface SendChainTransactionInput {
     accountIndex: number
   }
   utxoSend?: () => Promise<{ hash: string }>
+  xrpSend?: () => Promise<{ hash: string }>
 }
 
 export interface UtxoDonationInput {
@@ -75,7 +76,7 @@ export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyM
   }
   if (network.coinType === 'EVM') return 'non-custodial'
   if (protocol === 'utxo-jsonrpc') return 'non-custodial'
-  if (protocol === 'xrp-jsonrpc-compat') return 'unsupported'
+  if (protocol === 'xrp-jsonrpc-compat') return 'non-custodial'
   if (protocol === 'cardano-wallet-compat' || protocol === 'monero-wallet-compat') return 'custodial-server'
   return 'unsupported'
 }
@@ -207,7 +208,8 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
   const to = String(input.to || '').trim()
   if (!to) throw new Error('Destination address is required')
   if (protocol === 'xrp-jsonrpc-compat') {
-    throw new Error('XRP send is disabled by strict non-custodial policy')
+    if (!input.xrpSend) throw new Error('XRP sender is not configured')
+    return input.xrpSend()
   }
   if (input.network.coinType === 'EVM') {
     const ctx = input.evm

@@ -55,7 +55,7 @@ export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabil
     }
   }
 
-  return {
+  const merged: NetworkCapabilitySet = {
     features: {
       ...defaults.features,
       ...(net.capabilities?.features ?? {})
@@ -65,5 +65,15 @@ export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabil
       ...(net.capabilities?.ui ?? {})
     }
   }
+
+  // EVM chains must always expose asset listing UI, even if a stale persisted
+  // capability object still has legacy false flags.
+  if (net.coinType === 'EVM') {
+    merged.features.assetLayer = true
+    merged.ui.showAssetsTab = true
+    merged.ui.showAssetsAction = true
+  }
+
+  return merged
 }
 

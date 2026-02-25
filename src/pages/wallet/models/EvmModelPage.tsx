@@ -1,22 +1,14 @@
-import React, { useMemo, useState } from 'react'
-import { IoFlashOutline, IoLayersOutline, IoSparklesOutline } from 'react-icons/io5'
-import { useWalletStore } from '../../../store/walletStore'
+import React, { useState } from 'react'
+import { IoFlashOutline, IoSparklesOutline } from 'react-icons/io5'
 import { ModelRuntimeStatus } from './ModelRuntimeStatus'
 import { useChainModelLiveData } from './useChainModelLiveData'
 
 type GasLane = 'economy' | 'balanced' | 'priority'
 
 const EvmModelPage: React.FC = () => {
-  const { accounts, activeAccountId, activeNetworkId } = useWalletStore()
-  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const [gasLane, setGasLane] = useState<GasLane>('balanced')
   const [intent, setIntent] = useState<'swap' | 'send' | 'approve'>('send')
   const { snapshot, loading, refresh } = useChainModelLiveData()
-
-  const evmAddress = useMemo(
-    () => activeAccount?.networkAddresses?.[activeNetworkId] || activeAccount?.addresses?.EVM || '',
-    [activeAccount, activeNetworkId]
-  )
 
   const gasPalette: Record<GasLane, string> = {
     economy: 'border-blue-500/40 bg-blue-900/10 text-blue-200',
@@ -53,17 +45,6 @@ const EvmModelPage: React.FC = () => {
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-300 uppercase">
-          <IoLayersOutline className="w-4 h-4 text-primary" />
-          Token Field
-        </div>
-        <p className="text-[11px] text-gray-500">
-          Token balances are not injected in this model page yet. Runtime panel below shows live chain/account status.
-        </p>
-        <p className="text-[10px] text-gray-500 font-mono break-all">{evmAddress || 'No EVM address available'}</p>
       </section>
 
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">

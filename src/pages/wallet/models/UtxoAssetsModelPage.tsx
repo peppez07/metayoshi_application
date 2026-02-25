@@ -37,33 +37,35 @@ const UtxoAssetsModelPage: React.FC = () => {
         <p className="text-[11px] text-gray-400 mt-2">Coin + asset orchestration page for RTM-like multi-layer chains.</p>
       </section>
 
-      <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase text-gray-300">
-          <IoFunnelOutline className="w-4 h-4 text-primary" />
-          Asset Filter
-        </div>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter asset symbols..."
-          className="w-full bg-dark-700/60 border border-dark-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary"
-        />
-        {filteredAssets.length > 0 ? (
-          <div className="grid grid-cols-2 gap-2">
-            {filteredAssets.map((asset) => (
-              <div key={asset.symbol} className="rounded-lg border border-dark-600 bg-dark-700/40 p-2">
-                <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                  <IoCubeOutline className="w-3 h-3" />
-                  {asset.symbol}
-                </div>
-                <p className="text-sm font-bold text-gray-200">{String(asset.amount)}</p>
-              </div>
-            ))}
+      {activeNetworkId !== 'rtm' && (
+        <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase text-gray-300">
+            <IoFunnelOutline className="w-4 h-4 text-primary" />
+            Asset Filter
           </div>
-        ) : (
-          <p className="text-[11px] text-gray-500">No live asset balances returned for this address/network.</p>
-        )}
-      </section>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter asset symbols..."
+            className="w-full bg-dark-700/60 border border-dark-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary"
+          />
+          {filteredAssets.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {filteredAssets.map((asset) => (
+                <div key={asset.symbol} className="rounded-lg border border-dark-600 bg-dark-700/40 p-2">
+                  <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <IoCubeOutline className="w-3 h-3" />
+                    {asset.symbol}
+                  </div>
+                  <p className="text-sm font-bold text-gray-200">{String(asset.amount)}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-500">No live asset balances returned for this address/network.</p>
+          )}
+        </section>
+      )}
 
       <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
         <div className="flex items-center gap-2 text-xs font-bold uppercase text-gray-300">

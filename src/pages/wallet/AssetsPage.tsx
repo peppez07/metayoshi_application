@@ -122,6 +122,8 @@ const AssetsPage: React.FC = () => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  const supportsPreview = activeNetwork.coinType === 'UTXO'
+  const canSendAssets = caps.features.assetSend
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -158,6 +160,7 @@ const AssetsPage: React.FC = () => {
   }, [filtered, isSearching, sorted])
 
   useEffect(() => {
+    if (!supportsPreview) return
     let cancelled = false
     const checkPreviewability = async () => {
       for (const assetName of visibleAssetNames) {
@@ -181,7 +184,7 @@ const AssetsPage: React.FC = () => {
     }
     if (visibleAssetNames.length > 0) void checkPreviewability()
     return () => { cancelled = true }
-  }, [visibleAssetNames, fetchAssetDetails, previewByAsset])
+  }, [visibleAssetNames, fetchAssetDetails, previewByAsset, supportsPreview])
 
   const estimatedFeeCoin = useMemo(() => {
     const rawFeePerByteCoins = Number(activeNetwork?.feePerByte ?? 0.0000002)
@@ -338,9 +341,12 @@ const AssetsPage: React.FC = () => {
                 key={name}
                 name={name}
                 rawAmount={raw}
-                onClick={() => openSend(name)}
-                onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
-                previewAvailable={previewByAsset[name] === true}
+                onClick={() => { if (canSendAssets) openSend(name) }}
+                onPreview={() => {
+                  if (!supportsPreview) return
+                  navigate('/assets/preview', { state: { assetId: name } })
+                }}
+                previewAvailable={supportsPreview && previewByAsset[name] === true}
               />
             ))}
           </>
@@ -358,9 +364,12 @@ const AssetsPage: React.FC = () => {
                 key={name}
                 name={name}
                 rawAmount={raw}
-                onClick={() => openSend(name)}
-                onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
-                previewAvailable={previewByAsset[name] === true}
+                onClick={() => { if (canSendAssets) openSend(name) }}
+                onPreview={() => {
+                  if (!supportsPreview) return
+                  navigate('/assets/preview', { state: { assetId: name } })
+                }}
+                previewAvailable={supportsPreview && previewByAsset[name] === true}
               />
             ))}
           </>
@@ -378,9 +387,12 @@ const AssetsPage: React.FC = () => {
                 key={name}
                 name={name}
                 rawAmount={raw}
-                onClick={() => openSend(name)}
-                onPreview={() => navigate('/assets/preview', { state: { assetId: name } })}
-                previewAvailable={previewByAsset[name] === true}
+                onClick={() => { if (canSendAssets) openSend(name) }}
+                onPreview={() => {
+                  if (!supportsPreview) return
+                  navigate('/assets/preview', { state: { assetId: name } })
+                }}
+                previewAvailable={supportsPreview && previewByAsset[name] === true}
               />
             ))}
           </>
