@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware'
 import { ethers } from 'ethers'
 import { decryptVaultV1, encryptVaultV1, type EncryptedVaultV1 } from '../lib/vaultCrypto'
@@ -14,10 +14,13 @@ import {
 import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
 import { deriveXrpAddress } from '../lib/xrpAddress'
+import { deriveCardanoAddress } from '../lib/cardanoAddress'
+import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { getXrpAccountBalance } from '../lib/xrpRpc'
 import { signLegacyP2pkhTransaction, signBtczTransparentTransaction, type UnsignedTxInput } from '../lib/utxoSign'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
 import {
   DEFAULT_ACTIVE_NETWORK_ID,
   DEFAULT_NETWORK_ID,
@@ -30,7 +33,7 @@ import { useApiMonitorStore } from './apiMonitorStore'
 
 export type { CoinType, Network } from '../coins'
 
-// ── Full backup format ────────────────────────────────────────────────────────
+// â”€â”€ Full backup format â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface FullBackupV1 {
   type: 'metayoshi-full-backup'
@@ -110,7 +113,7 @@ interface WalletState {
   lastActiveTimestamp: number
   activity: Activity[]
 
-  // Local RPC mode — bypasses the MetaYoshi bridge when enabled
+  // Local RPC mode â€” bypasses the MetaYoshi bridge when enabled
   useLocalRpc: boolean
   /** Per-network local node settings, keyed by network id. */
   localRpcOverrides: Record<string, {
@@ -153,6 +156,7 @@ interface WalletState {
   addAccount: (name: string, networkId?: string) => Promise<void>
   removeAccount: (id: string) => void
   updateAccount: (id: string, updates: Partial<Account>) => void
+  setWatchOnlyAddress: (accountId: string, networkId: string, address: string) => void
   
   // Network management
   addNetwork: (network: Network) => void
@@ -263,7 +267,7 @@ async function createUtxoRpcConfig(
     networkId: net.id,
     coinSymbol: net.symbol,
     apiInterceptor: getCoinApiInterceptor(net.id),
-    // Local RPC fields — use user override if set, otherwise fall back to network defaults
+    // Local RPC fields â€” use user override if set, otherwise fall back to network defaults
     rpcUrl:      (override?.rpcUrl?.trim())      || net.rpcUrl,
     rpcWallet:   (override?.rpcWallet?.trim())   || net.rpcWallet,
     rpcUsername: (override?.rpcUsername?.trim()) || net.rpcUsername,
@@ -374,6 +378,12 @@ async function deriveAccountAddresses(
   let firstXrpAddress = ''
 
   for (const net of networks) {
+    if (net.derivation?.status === 'unsupported') {
+      const reason = net.derivation.reason || `${net.name} derivation is not supported in this build`
+      derivationErrors.push(`${net.symbol}: ${reason}`)
+      continue
+    }
+
     if (net.coinType === 'UTXO' && net.coinSymbol) {
       try {
         const utxo = await deriveUtxoAddress(mnemonic, net.coinSymbol, derivationIndex, 0, 0)
@@ -396,6 +406,24 @@ async function deriveAccountAddresses(
       }
     } else if (net.coinType === 'EVM') {
       networkAddresses[net.id] = evmWallet.address
+    } else if (net.id === 'ada') {
+      try {
+        const ada = await deriveCardanoAddress(mnemonic, derivationIndex, net.rpcUrl)
+        networkAddresses[net.id] = ada.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
+      }
+    } else if (net.id === 'xmr') {
+      try {
+        const xmr = await deriveMoneroAddress(mnemonic, derivationIndex, net.rpcUrl)
+        networkAddresses[net.id] = xmr.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
+      }
     }
   }
 
@@ -766,14 +794,10 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === networkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return null
-        const requiresMnemonic = net.coinType === 'EVM' || net.coinType === 'XRP' || net.coinType === 'UTXO'
-        if (requiresMnemonic && !sessionMnemonic) return null
-        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
-        const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
-
-        // Return already-stored address if present
         const existing = acc.networkAddresses?.[networkId]
         if (existing) {
+          if (net.derivation?.status === 'unsupported') return existing
+          const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
           if (forceCanonicalUtxoAddress) {
             // Continue to derivation below to canonicalize persisted legacy paths.
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
@@ -782,6 +806,15 @@ export const useWalletStore = create<WalletState>()(
             return existing
           }
         }
+        if (net.derivation?.status === 'unsupported') {
+          console.warn(`[${net.symbol}] Derivation disabled: ${net.derivation.reason || 'unsupported in this build'}`)
+          return null
+        }
+        const requiresMnemonic =
+          net.coinType === 'EVM' || net.coinType === 'XRP' || net.coinType === 'UTXO' || net.id === 'ada' || net.id === 'xmr'
+        if (requiresMnemonic && !sessionMnemonic) return null
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
 
         // Derive address on demand
         try {
@@ -797,8 +830,14 @@ export const useWalletStore = create<WalletState>()(
             if (forceCanonicalUtxoAddress && existing && existing !== address) {
               console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
             } else {
-              console.log(`✓ Derived ${net.symbol} address on demand: ${address}`)
+              console.log(`âœ“ Derived ${net.symbol} address on demand: ${address}`)
             }
+          } else if (net.id === 'ada') {
+            const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
+            address = derived.address
+          } else if (net.id === 'xmr') {
+            const derived = await deriveMoneroAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
+            address = derived.address
           }
           if (address) {
             if (existing !== address) {
@@ -1091,6 +1130,12 @@ export const useWalletStore = create<WalletState>()(
         } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
           const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
           selectedAddress = derived.address
+        } else if (selectedNetwork.id === 'ada') {
+          const derived = await deriveCardanoAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
+          selectedAddress = derived.address
+        } else if (selectedNetwork.id === 'xmr') {
+          const derived = await deriveMoneroAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
+          selectedAddress = derived.address
         }
 
         if (!selectedAddress) {
@@ -1139,6 +1184,32 @@ export const useWalletStore = create<WalletState>()(
             acc.id === id ? { ...acc, ...updates } : acc
           )
         }))
+      },
+
+      setWatchOnlyAddress: (accountId, networkId, address) => {
+        const { accounts, networks } = get()
+        const net = networks.find((n) => n.id === networkId)
+        if (!net) throw new Error(`Unknown network: ${networkId}`)
+        if (net.derivation?.status !== 'unsupported') {
+          throw new Error(`${net.name} does not require watch-only import`)
+        }
+
+        const validation = validateWatchOnlyAddress(net, address)
+        if (!validation.ok) throw new Error(validation.error || 'Invalid watch-only address')
+
+        set({
+          accounts: accounts.map((acc) => (
+            acc.id === accountId
+              ? {
+                  ...acc,
+                  networkAddresses: {
+                    ...(acc.networkAddresses ?? {}),
+                    [networkId]: validation.normalized
+                  }
+                }
+              : acc
+          ))
+        })
       },
 
       addNetwork: (network) => {
@@ -1205,8 +1276,8 @@ export const useWalletStore = create<WalletState>()(
           accounts: state.accounts
         }))
 
-        // ── Resolve the correct per-network address ──────────────────────────
-        // NEVER fall back to acc.addresses.UTXO — that slot holds the FIRST UTXO
+        // â”€â”€ Resolve the correct per-network address â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // NEVER fall back to acc.addresses.UTXO â€” that slot holds the FIRST UTXO
         // network's address (RTM) and would show a wrong address on other coins.
         let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
         if (address && net.coinType === 'UTXO' && net.coinSymbol && !isAddressForCoinSymbol(address, net.coinSymbol)) {
@@ -1219,7 +1290,7 @@ export const useWalletStore = create<WalletState>()(
         }
 
         if (!address) {
-          console.warn(`No address for ${activeNetworkId} — skipping balance refresh`)
+          console.warn(`No address for ${activeNetworkId} â€” skipping balance refresh`)
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set({ isSyncing: false, isConnected: false, syncPercent: null, lowSyncStreak: 0 })
@@ -1384,6 +1455,62 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
+          } else if (net.id === 'ada') {
+            const { useLocalRpc, localRpcOverrides } = get()
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              useLocalRpc,
+              localRpcOverride: localRpcOverrides[net.id],
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: null,
+              lowSyncStreak: 0,
+              accounts: state.accounts.map((a) =>
+                a.id === acc.id
+                  ? {
+                      ...a,
+                      balance: String(balance.total),
+                      networkBalances: {
+                        ...(a.networkBalances ?? {}),
+                        [activeNetworkId]: String(balance.total)
+                      }
+                    }
+                  : a
+              )
+            }))
+          } else if (net.id === 'xmr') {
+            const { useLocalRpc, localRpcOverrides } = get()
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              useLocalRpc,
+              localRpcOverride: localRpcOverrides[net.id],
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const balance = await getUtxoBalance(rpcConfig, address, { preferAddressIndex: false })
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: null,
+              lowSyncStreak: 0,
+              accounts: state.accounts.map((a) =>
+                a.id === acc.id
+                  ? {
+                      ...a,
+                      balance: String(balance.total),
+                      networkBalances: {
+                        ...(a.networkBalances ?? {}),
+                        [activeNetworkId]: String(balance.total)
+                      }
+                    }
+                  : a
+              )
+            }))
           }
         } catch (err) {
           const transientBridgeFailure = isTransientBridgeFailure(err)
@@ -1402,7 +1529,7 @@ export const useWalletStore = create<WalletState>()(
             return
           }
 
-          // Non-transient failure → mark disconnected.
+          // Non-transient failure â†’ mark disconnected.
           console.error(`[${net?.symbol}] all RPC attempts failed:`, err)
           await waitForUiStabilize()
           if (isStaleRequest()) return
@@ -1462,11 +1589,11 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Active sender address is invalid for ${net.symbol}: ${senderAddress}`)
         }
 
-        // ── Fetch confirmed UTXOs — three-tier strategy ───────────────────
-        // Tier 1 (RTM/BTCZ/TIDE/FIRO): getaddressutxos — uses address index, works for
+        // â”€â”€ Fetch confirmed UTXOs â€” three-tier strategy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Tier 1 (RTM/BTCZ/TIDE/FIRO): getaddressutxos â€” uses address index, works for
         //   any HD-derived address without wallet import when supported.
-        // Tier 2: listunspent — wallet-scoped, works if address is in the wallet.
-        // Tier 3: scantxoutset — full chainstate scan (slow ~45 s), last resort.
+        // Tier 2: listunspent â€” wallet-scoped, works if address is in the wallet.
+        // Tier 3: scantxoutset â€” full chainstate scan (slow ~45 s), last resort.
         let unspent: Awaited<ReturnType<typeof listUtxoUnspent>> = []
 
         if (supportsAddressIndex(net.coinSymbol)) {
@@ -1474,7 +1601,7 @@ export const useWalletStore = create<WalletState>()(
             const byIndex = await getAddressUtxos(rpcConfig, senderAddress, 1)
             if (byIndex.length > 0) unspent = byIndex
           } catch {
-            // address index not available — fall through
+            // address index not available â€” fall through
           }
         }
 
@@ -1483,7 +1610,7 @@ export const useWalletStore = create<WalletState>()(
             const byWallet = await listUtxoUnspent(rpcConfig, senderAddress, 1)
             if (byWallet.length > 0) unspent = byWallet
           } catch {
-            // wallet doesn't hold address — fall through
+            // wallet doesn't hold address â€” fall through
           }
         }
 
@@ -1550,7 +1677,7 @@ export const useWalletStore = create<WalletState>()(
           }
         }
 
-        // ── Greedy UTXO selection with size-based fee estimate ────────────────
+        // â”€â”€ Greedy UTXO selection with size-based fee estimate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // P2PKH sizes: 10 base + 148/input + 34/output (send + change = 2 outputs)
         const rawFeePerByteCoins = net.feePerByte ?? estimateNetworkFee(net.id, 1) ?? 0.0000002
         let feePerByteSats = Math.max(1, sat(rawFeePerByteCoins))
@@ -1746,3 +1873,4 @@ export const useWalletStore = create<WalletState>()(
     }
   )
 )
+

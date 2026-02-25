@@ -22,6 +22,7 @@ export function createMoneroNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: import.meta.env.VITE_XMR_BRIDGE_URL || XMR_API_INFO.defaultBridgeUrl,
     explorerUrl: import.meta.env.VITE_XMR_EXPLORER || XMR_API_INFO.defaultExplorerUrl || 'https://xmrchain.net',
     capabilities: XMR_CAPABILITIES,
+    derivation: { status: 'supported' },
     logo: moneroLogo
   }
 }

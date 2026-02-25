@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
 import { useWalletStore } from '../../store/walletStore'
 import { IoAdd, IoTrashOutline, IoCheckmarkCircle } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
+import { validateWatchOnlyAddress } from '../../lib/watchOnlyAddress'
 
 const AccountManager: React.FC = () => {
   const {
@@ -14,15 +15,35 @@ const AccountManager: React.FC = () => {
     networks,
     setActiveAccount,
     addAccount,
-    removeAccount
+    removeAccount,
+    setWatchOnlyAddress,
+    refreshActiveBalance
   } = useWalletStore()
   const [showAdd, setShowAdd] = useState(false)
   const [accountName, setAccountName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState('')
+  const [watchOnlyAddress, setWatchOnlyAddressInput] = useState('')
+  const [watchOnlyError, setWatchOnlyError] = useState('')
+  const [isSavingWatchOnly, setIsSavingWatchOnly] = useState(false)
   const { showToast } = useToast()
   const navigate = useNavigate()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeAccount = useMemo(
+    () => accounts.find((a) => a.id === activeAccountId) || accounts[0],
+    [accounts, activeAccountId]
+  )
+  const watchOnlyImportEnabled = activeNetwork?.derivation?.status === 'unsupported'
+
+  useEffect(() => {
+    if (!watchOnlyImportEnabled || !activeAccount || !activeNetwork) {
+      setWatchOnlyAddressInput('')
+      setWatchOnlyError('')
+      return
+    }
+    setWatchOnlyAddressInput(activeAccount.networkAddresses?.[activeNetwork.id] || '')
+    setWatchOnlyError('')
+  }, [watchOnlyImportEnabled, activeAccount, activeNetwork])
 
   const handleAddAccount = async () => {
     setError('')
@@ -60,6 +81,28 @@ const AccountManager: React.FC = () => {
     showToast('Account removed', 'success')
   }
 
+  const handleSaveWatchOnly = async () => {
+    if (!activeAccount || !activeNetwork || !watchOnlyImportEnabled) return
+    setWatchOnlyError('')
+    const validation = validateWatchOnlyAddress(activeNetwork, watchOnlyAddress)
+    if (!validation.ok) {
+      setWatchOnlyError(validation.error || 'Invalid address')
+      return
+    }
+    setIsSavingWatchOnly(true)
+    try {
+      setWatchOnlyAddress(activeAccount.id, activeNetwork.id, validation.normalized)
+      setWatchOnlyAddressInput(validation.normalized)
+      await refreshActiveBalance()
+      showToast(`${activeNetwork.symbol} watch-only address saved`, 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setWatchOnlyError(message)
+    } finally {
+      setIsSavingWatchOnly(false)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full bg-dark-800">
       <header className="p-4 bg-dark-900 border-b border-dark-600 text-center flex items-center justify-between">
@@ -80,6 +123,29 @@ const AccountManager: React.FC = () => {
       </header>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {watchOnlyImportEnabled && activeAccount && activeNetwork && (
+          <div className="p-4 border-b border-dark-600 bg-dark-900/40 space-y-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+              {activeNetwork.symbol} Watch-Only Import
+            </p>
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              Seed derivation is disabled for {activeNetwork.name} in this build. Import a public address for account{' '}
+              <span className="text-gray-200 font-bold">{activeAccount.name}</span>.
+            </p>
+            <Input
+              label={`${activeNetwork.name} Address`}
+              placeholder={activeNetwork.id === 'ada' ? 'addr1...' : '4...'}
+              value={watchOnlyAddress}
+              onChange={(e) => setWatchOnlyAddressInput(e.target.value)}
+              className="font-mono text-xs"
+              error={watchOnlyError || undefined}
+            />
+            <Button className="w-full" onClick={() => void handleSaveWatchOnly()} isLoading={isSavingWatchOnly}>
+              Save Watch-Only Address
+            </Button>
+          </div>
+        )}
+
         {showAdd ? (
           <div className="p-6 space-y-6">
             <h3 className="text-sm font-bold text-gray-200">Create New Account</h3>

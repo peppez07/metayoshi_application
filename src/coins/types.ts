@@ -3,6 +3,12 @@ export type { NetworkCapabilitiesInput } from '../lib/networkCapabilities'
 
 export type CoinType = 'EVM' | 'UTXO' | 'BTC' | 'SOL' | 'XRP'
 
+export interface NetworkDerivationSupport {
+  status: 'supported' | 'unsupported'
+  /** Human-readable reason shown in UI when derivation is unavailable. */
+  reason?: string
+}
+
 export interface Network {
   id: string
   name: string
@@ -27,6 +33,8 @@ export interface Network {
   capabilities?: NetworkCapabilitiesInput
   /** Coin logo URL/path (public path or imported asset URL). */
   logo?: string
+  /** Per-network seed-derivation support status. */
+  derivation?: NetworkDerivationSupport
 
   // UTXO fee estimate in coin units per byte.
   feePerByte?: number

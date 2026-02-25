@@ -126,9 +126,14 @@ const Connecting: React.FC = () => {
       const address = await ensureNetworkAddress(activeNetworkId)
 
       if (!address) {
+        const unsupportedReason =
+          activeNetwork?.derivation?.status === 'unsupported'
+            ? activeNetwork.derivation.reason || `${activeNetwork?.name ?? activeNetworkId} derivation is not supported in this build.`
+            : null
         throw new Error(
-          `Could not derive an address for "${activeNetwork?.name ?? activeNetworkId}".\n` +
-          'Your recovery phrase may be invalid.'
+          unsupportedReason
+            ? `Could not derive an address for "${activeNetwork?.name ?? activeNetworkId}".\n${unsupportedReason}`
+            : `Could not derive an address for "${activeNetwork?.name ?? activeNetworkId}".\nYour recovery phrase may be invalid.`
         )
       }
     } catch (err) {

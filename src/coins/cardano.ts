@@ -22,6 +22,7 @@ export function createCardanoNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: import.meta.env.VITE_ADA_BRIDGE_URL || ADA_API_INFO.defaultBridgeUrl,
     explorerUrl: import.meta.env.VITE_ADA_EXPLORER || ADA_API_INFO.defaultExplorerUrl || 'https://cardanoscan.io',
     capabilities: ADA_CAPABILITIES,
+    derivation: { status: 'supported' },
     logo: cardanoLogo
   }
 }
