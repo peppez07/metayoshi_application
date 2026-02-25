@@ -1,5 +1,6 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
+import { XRP_PAYLOADS } from '../payloads'
 
 const DEFAULT_API_BASE = 'https://xrp.metayoshi.app'
 const DEFAULT_WALLET = 'mainwallet'
@@ -16,6 +17,7 @@ export const XRP_API_INFO: CoinApiInfo = {
   symbol: 'XRP',
   coinId: 'xrp',
   chain: 'main',
+  protocol: 'xrp-jsonrpc-compat',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
@@ -24,7 +26,8 @@ export const XRP_API_INFO: CoinApiInfo = {
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/xrp`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/xrp/main/:wallet',
-  sendAssetPathTemplate: '/v1/bridge/send/asset/xrp/main/:wallet'
+  sendAssetPathTemplate: '/v1/bridge/send/asset/xrp/main/:wallet',
+  payloads: XRP_PAYLOADS
 }
 
 export const xrpApiInterceptor = createCoinApiInterceptor(XRP_API_INFO)

@@ -18,6 +18,7 @@ export const RTM_API_INFO: CoinApiInfo = {
   symbol: 'RTM',
   coinId: 'raptoreum',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,

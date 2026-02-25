@@ -1,5 +1,6 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
+import { XMR_PAYLOADS } from '../payloads'
 
 const DEFAULT_API_BASE = 'https://xmr.metayoshi.app'
 
@@ -11,6 +12,7 @@ export const XMR_API_INFO: CoinApiInfo = {
   symbol: 'XMR',
   coinId: 'monero',
   chain: 'main',
+  protocol: 'monero-wallet-compat',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
@@ -19,8 +21,8 @@ export const XMR_API_INFO: CoinApiInfo = {
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/monero`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/monero/main/:wallet',
-  sendAssetPathTemplate: '/v1/bridge/send/asset/monero/main/:wallet'
+  sendAssetPathTemplate: '/v1/bridge/send/asset/monero/main/:wallet',
+  payloads: XMR_PAYLOADS
 }
 
 export const xmrApiInterceptor = createCoinApiInterceptor(XMR_API_INFO)
-

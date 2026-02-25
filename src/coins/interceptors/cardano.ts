@@ -1,5 +1,6 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
+import { ADA_PAYLOADS } from '../payloads'
 
 const DEFAULT_API_BASE = 'https://ada.metayoshi.app'
 
@@ -11,6 +12,7 @@ export const ADA_API_INFO: CoinApiInfo = {
   symbol: 'ADA',
   coinId: 'cardano',
   chain: 'main',
+  protocol: 'cardano-wallet-compat',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
@@ -19,8 +21,8 @@ export const ADA_API_INFO: CoinApiInfo = {
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/cardano`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/cardano/main/:wallet',
-  sendAssetPathTemplate: '/v1/bridge/send/asset/cardano/main/:wallet'
+  sendAssetPathTemplate: '/v1/bridge/send/asset/cardano/main/:wallet',
+  payloads: ADA_PAYLOADS
 }
 
 export const adaApiInterceptor = createCoinApiInterceptor(ADA_API_INFO)
-

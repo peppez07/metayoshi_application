@@ -13,6 +13,7 @@ export const TIDE_API_INFO: CoinApiInfo = {
   symbol: 'TIDE',
   coinId: 'tidecoin',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,

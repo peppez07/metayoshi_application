@@ -11,6 +11,7 @@ import { xrpCoin } from './xrp'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
 export type { CoinType, Network } from './types'
+export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://rtm.metayoshi.app').trim().replace(/\/+$/, '')
 

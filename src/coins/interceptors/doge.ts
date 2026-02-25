@@ -13,6 +13,7 @@ export const DOGE_API_INFO: CoinApiInfo = {
   symbol: 'DOGE',
   coinId: 'dogecoin',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,

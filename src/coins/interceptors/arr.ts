@@ -13,6 +13,7 @@ export const ARR_API_INFO: CoinApiInfo = {
   symbol: 'ARRR',
   coinId: 'arr',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,

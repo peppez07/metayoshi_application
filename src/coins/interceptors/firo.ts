@@ -13,6 +13,7 @@ export const FIRO_API_INFO: CoinApiInfo = {
   symbol: 'FIRO',
   coinId: 'firo',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,

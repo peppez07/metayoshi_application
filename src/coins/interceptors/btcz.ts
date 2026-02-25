@@ -13,6 +13,7 @@ export const BTCZ_API_INFO: CoinApiInfo = {
   symbol: 'BTCZ',
   coinId: 'bitcoinz',
   chain: 'main',
+  protocol: 'utxo-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
