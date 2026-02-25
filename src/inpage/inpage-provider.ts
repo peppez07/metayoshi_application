@@ -313,7 +313,7 @@ const provider = {
   // Metadata
   _metayoshi: {
     hardwareWallet: false,
-    version: import.meta.env.VITE_APP_VERSION ?? '0.0.2-beta',
+    version: import.meta.env.VITE_APP_VERSION ?? '0.1.0-beta',
     multiChain: true
   }
 }

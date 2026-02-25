@@ -5,7 +5,7 @@ import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { useWalletStore } from '../store/walletStore'
 
-const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? '0.0.2-beta'
+const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? '0.1.0-beta'
 
 const Unlock: React.FC = () => {
   const [password, setPassword] = useState('')
