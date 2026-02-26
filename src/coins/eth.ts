@@ -2,7 +2,7 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import ethereumLogo from './coinlogos/ethereum.webp'
 
 export const ETH_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
+  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
   ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 

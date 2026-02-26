@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { WalletFrame } from '../../components/WalletFrame'
@@ -63,6 +63,7 @@ const WalletLayout: React.FC = () => {
     activeAccountId,
     networks,
     activeNetworkId,
+    activity,
     setActiveAccount,
     setActiveNetwork,
     refreshActiveBalance,
@@ -99,6 +100,26 @@ const WalletLayout: React.FC = () => {
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const rankedNetworks = useMemo(() => {
+    const usageByNetwork = new Map<string, number>()
+    for (const row of activity) {
+      const networkId = String(row?.networkId || '').trim()
+      if (!networkId) continue
+      usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
+    }
+    return [...networks].sort((a, b) => {
+      const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
+      if (usageDelta !== 0) return usageDelta
+      return a.name.localeCompare(b.name)
+    })
+  }, [activity, networks])
+  const visibleNetworks = useMemo(() => {
+    const query = networkSearch.trim().toLowerCase()
+    if (!query) return rankedNetworks
+    return rankedNetworks.filter((net) =>
+      net.name.toLowerCase().includes(query) || net.symbol.toLowerCase().includes(query)
+    )
+  }, [networkSearch, rankedNetworks])
   const donationSupported = supportsCoinDonationPolicy(activeNetwork)
   const donationRequired = donationSupported ? donationPolicy?.required === true : false
   const donationPercent = donationSupported
@@ -408,12 +429,7 @@ const WalletLayout: React.FC = () => {
 
             {/* List */}
             <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-              {networks
-                .filter(net =>
-                  networkSearch.trim() === '' ||
-                  net.name.toLowerCase().includes(networkSearch.toLowerCase()) ||
-                  net.symbol.toLowerCase().includes(networkSearch.toLowerCase())
-                )
+              {visibleNetworks
                 .map(net => (
                   <button
                     key={net.id}
@@ -440,11 +456,7 @@ const WalletLayout: React.FC = () => {
                   </button>
                 ))
               }
-              {networks.filter(net =>
-                networkSearch.trim() === '' ||
-                net.name.toLowerCase().includes(networkSearch.toLowerCase()) ||
-                net.symbol.toLowerCase().includes(networkSearch.toLowerCase())
-              ).length === 0 && (
+              {visibleNetworks.length === 0 && (
                 <p className="text-xs text-gray-600 text-center py-4">No networks match "{networkSearch}"</p>
               )}
             </div>

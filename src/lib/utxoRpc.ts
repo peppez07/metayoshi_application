@@ -2075,6 +2075,118 @@ export async function sendRtmAsset(
   throw new Error(lastError || 'Asset send failed: no compatible bridge endpoint found')
 }
 
+export async function sendBridgeTokenTransfer(
+  config: UtxoRpcConfig,
+  input: {
+    tokenId: string
+    toAddress: string
+    amount: string | number
+    signedTxHex: string
+    fromAddress?: string
+    coin?: string
+    chain?: string
+  }
+): Promise<{ txid: string; relayed?: boolean }> {
+  if (!config.bridgeUrl) throw new Error('Bridge URL is required for token transfer')
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) throw new Error('Bridge API base URL is not available')
+
+  const hinted = resolveBridgeCoinChainHint(config)
+  const coin = String(input.coin || hinted.coin || '').trim()
+  const chain = String(input.chain || hinted.chain || 'main').trim()
+  const tokenId = String(input.tokenId || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const signedTxHex = String(input.signedTxHex || '').trim()
+  const amountNum = Number(input.amount)
+
+  if (!coin) throw new Error('Bridge coin is required for token transfer')
+  if (!chain) throw new Error('Bridge chain is required for token transfer')
+  if (!tokenId) throw new Error('Token id is required for token transfer')
+  if (!toAddress) throw new Error('Destination address is required for token transfer')
+  if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Token amount must be a positive number')
+  if (!/^0x[0-9a-f]+$/i.test(signedTxHex)) throw new Error('Signed token transaction must be 0x-prefixed hex')
+
+  const url = `${apiBase}/v1/bridge/token/transfer/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
+  const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.bridgeUsername && config.bridgePassword) {
+    baseHeaders['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
+  }
+
+  const txKeyCandidates = dedupeStringList([
+    ...(config.bridgeTxKeyCandidates || []),
+    config.bridgeTxKey
+  ])
+  const txKeyAttempts = txKeyCandidates.length > 0 ? txKeyCandidates : ['']
+
+  let lastError = 'Token transfer failed'
+  for (let i = 0; i < txKeyAttempts.length; i += 1) {
+    const txKey = txKeyAttempts[i]
+    const headers: Record<string, string> = { ...baseHeaders }
+    if (txKey) headers['X-Bridge-Tx-Key'] = txKey
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: `tok-${Date.now()}`,
+          transfer: {
+            fromAddress: String(input.fromAddress || '').trim(),
+            toAddress,
+            tokenId,
+            amount: amountNum,
+            signed: {
+              format: 'evm-raw-hex',
+              payload: signedTxHex
+            }
+          }
+        }),
+        signal: controller.signal
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      lastError = `Token transfer request failed: ${err instanceof Error ? err.message : String(err)}`
+      continue
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const rawText = await res.text().catch(() => '')
+    const json = (() => {
+      try { return rawText ? JSON.parse(rawText) : null } catch { return null }
+    })()
+
+    if (res.ok) {
+      if (json?.error) {
+        const errText = compactErrorText(String(json?.error?.message || json?.error || 'Token transfer failed'))
+        throw new Error(`Token transfer failed: ${errText}`)
+      }
+      const txid = String(json?.result?.txid || json?.txid || '').trim()
+      if (!txid) throw new Error('Token transfer succeeded but no txid returned from bridge')
+      return { txid, relayed: Boolean(json?.result?.relayed) }
+    }
+
+    const detail = compactErrorText(String(
+      json?.error?.message
+      || json?.error
+      || json?.message
+      || rawText
+      || res.statusText
+      || `HTTP ${res.status}`
+    ))
+    lastError = `Token transfer failed [HTTP ${res.status}]: ${detail}`
+    const shouldRetryTxKey = txKeyAttempts.length > i + 1
+      && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
+    if (shouldRetryTxKey) continue
+    throw new Error(lastError)
+  }
+
+  throw new Error(lastError)
+}
+
 /** Quick reachability probe — resolves true if node responds, false otherwise. */
 export async function pingRpc(config: UtxoRpcConfig): Promise<boolean> {
   try {

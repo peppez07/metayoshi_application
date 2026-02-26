@@ -104,7 +104,7 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
 // ── main ─────────────────────────────────────────────────────────────────────
 
 const Assets: React.FC = () => {
-  const { networks, activeNetworkId, networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails } = useWalletStore()
+  const { networks, activeNetworkId, networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, activity } = useWalletStore()
   const navigate = useNavigate()
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
@@ -132,10 +132,25 @@ const Assets: React.FC = () => {
 
   const rawAssets = networkAssets[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
+  const assetUsage = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const row of activity) {
+      if (String(row?.networkId || '').trim() !== activeNetworkId) continue
+      const name = String(row?.asset || '').trim().toLowerCase()
+      if (!name) continue
+      out.set(name, (out.get(name) || 0) + 1)
+    }
+    return out
+  }, [activity, activeNetworkId])
+  const byUsageThenName = (a: string, b: string): number => {
+    const delta = (assetUsage.get(b.toLowerCase()) || 0) - (assetUsage.get(a.toLowerCase()) || 0)
+    if (delta !== 0) return delta
+    return a.localeCompare(b)
+  }
 
   // roots first, then subs, each group sorted alphabetically → take top 3
-  const roots = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
-  const subs  = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
+  const roots = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
+  const subs  = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const sorted = [...roots, ...subs]
   const preview = sorted.slice(0, 3)
   const total   = sorted.length

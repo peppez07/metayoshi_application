@@ -20,6 +20,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     syncPercent,
     activeNetworkId,
     networks,
+    activity,
     accounts,
     activeAccountId,
     setActiveAccount,
@@ -48,6 +49,26 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
+  const rankedNetworks = React.useMemo(() => {
+    const usageByNetwork = new Map<string, number>()
+    for (const row of activity) {
+      const networkId = String(row?.networkId || '').trim()
+      if (!networkId) continue
+      usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
+    }
+    return [...networks].sort((a, b) => {
+      const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
+      if (usageDelta !== 0) return usageDelta
+      return a.name.localeCompare(b.name)
+    })
+  }, [activity, networks])
+  const visibleNetworks = React.useMemo(() => {
+    const query = networkSearch.trim().toLowerCase()
+    if (!query) return rankedNetworks
+    return rankedNetworks.filter((n) =>
+      n.name.toLowerCase().includes(query) || n.symbol.toLowerCase().includes(query)
+    )
+  }, [networkSearch, rankedNetworks])
 
   const rawAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : undefined)
@@ -295,12 +316,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
             {/* List */}
             <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
-              {networks
-                .filter(n =>
-                  networkSearch.trim() === '' ||
-                  n.name.toLowerCase().includes(networkSearch.toLowerCase()) ||
-                  n.symbol.toLowerCase().includes(networkSearch.toLowerCase())
-                )
+              {visibleNetworks
                 .map(n => (
                   <div
                     key={n.id}
@@ -323,11 +339,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   </div>
                 ))
               }
-              {networks.filter(n =>
-                networkSearch.trim() === '' ||
-                n.name.toLowerCase().includes(networkSearch.toLowerCase()) ||
-                n.symbol.toLowerCase().includes(networkSearch.toLowerCase())
-              ).length === 0 && (
+              {visibleNetworks.length === 0 && (
                 <p className="text-xs text-gray-600 text-center py-4">No networks match "{networkSearch}"</p>
               )}
             </div>

@@ -7,6 +7,7 @@ import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import {
   callBridgeMethod,
   listAssetBalancesByAddress,
+  sendBridgeTokenTransfer,
   sendRtmAssetNonCustodial,
   getAssetDetailsByName,
   type RtmAssetDetails,
@@ -336,6 +337,10 @@ function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeW
 }
 
 const EVM_ERC20_BALANCE_IFACE = new ethers.Interface(['function balanceOf(address) view returns (uint256)'])
+const EVM_ERC20_TRANSFER_IFACE = new ethers.Interface([
+  'function transfer(address to, uint256 value) returns (bool)',
+  'function decimals() view returns (uint8)'
+])
 const EVM_ERC165_IFACE = new ethers.Interface(['function supportsInterface(bytes4 interfaceId) view returns (bool)'])
 const EVM_ERC721_IFACE = new ethers.Interface([
   'function ownerOf(uint256 tokenId) view returns (address)',
@@ -1656,7 +1661,7 @@ export const useWalletStore = create<WalletState>()(
       sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts, activeAccountId, serverCoinCatalog, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
@@ -1673,6 +1678,98 @@ export const useWalletStore = create<WalletState>()(
         const senderAddress = acc.networkAddresses?.[activeNetworkId]
           || await get().ensureNetworkAddress(activeNetworkId)
         if (!senderAddress) throw new Error(`No address derived for ${net.name}`)
+
+        if (net.coinType === 'EVM') {
+          const recipient = String(toAddress || '').trim()
+          if (!ethers.isAddress(recipient)) throw new Error('Invalid EVM recipient address')
+
+          const normalizedAssetId = String(assetId || '').trim()
+          if (!normalizedAssetId) throw new Error('Token id is required')
+          const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
+          const trackedDefaults = resolveTrackedEvmTokens(net)
+          const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+          const trackedTokens = [...trackedDefaults, ...trackedFromCatalog]
+
+          const exactAddress = ethers.isAddress(normalizedAssetId)
+            ? ethers.getAddress(normalizedAssetId)
+            : ''
+          let tokenAddress = exactAddress
+          if (!tokenAddress) {
+            const matches = trackedTokens.filter((token) =>
+              String(token.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase()
+            )
+            if (matches.length === 0) {
+              throw new Error(`No tracked token contract found for "${normalizedAssetId}" on ${net.name}`)
+            }
+            if (matches.length > 1) {
+              throw new Error(`Multiple token contracts match "${normalizedAssetId}". Use contract address instead.`)
+            }
+            tokenAddress = ethers.getAddress(matches[0].address)
+          }
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+
+          let decimals = 18
+          try {
+            const data = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('decimals', [])
+            const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: tokenAddress, data }, 'latest'])
+            const [value] = EVM_ERC20_TRANSFER_IFACE.decodeFunctionResult('decimals', String(raw || '0x'))
+            const n = Number(value)
+            if (Number.isFinite(n) && n >= 0 && n <= 30) decimals = Math.trunc(n)
+          } catch {
+            // Keep default 18
+          }
+
+          const amountRaw = ethers.parseUnits(String(qty || '').trim(), decimals)
+          if (amountRaw <= 0n) throw new Error('Token amount must be greater than 0')
+
+          const wallet = deriveEvmWallet(sessionMnemonic, accountIndex)
+          const fromAddress = wallet.address
+          const nonceHex = await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
+          const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
+          let gasPriceHex = '0x3b9aca00'
+          try {
+            gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
+          } catch {
+            // Keep fallback gas price.
+          }
+          const transferData = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('transfer', [recipient, amountRaw])
+          let gasLimitHex = '0x186a0'
+          try {
+            gasLimitHex = await callBridgeMethod(rpcConfig, 'eth_estimateGas', [{
+              from: fromAddress,
+              to: tokenAddress,
+              data: transferData,
+              value: '0x0'
+            }])
+          } catch {
+            // Keep fallback gas limit.
+          }
+
+          const signedTx = await wallet.signTransaction({
+            to: tokenAddress,
+            value: 0n,
+            nonce: Number(BigInt(String(nonceHex || '0x0'))),
+            gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
+            gasLimit: BigInt(String(gasLimitHex || '0x186a0')),
+            chainId: Number(BigInt(String(chainIdHex || net.chainId || 1))),
+            data: transferData
+          })
+
+          const sent = await sendBridgeTokenTransfer(rpcConfig, {
+            tokenId: tokenAddress,
+            toAddress: recipient,
+            fromAddress,
+            amount: qty,
+            signedTxHex: signedTx
+          })
+          await get().fetchNetworkAssets()
+          return { txid: sent.txid }
+        }
 
         const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
 

@@ -129,6 +129,7 @@ const AssetsPage: React.FC = () => {
     networks, activeNetworkId,
     serverCoinCatalog,
     networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
+    activity,
     isConnected,
     isSyncing, syncPercent, lowSyncStreak
   } = useWalletStore()
@@ -139,7 +140,7 @@ const AssetsPage: React.FC = () => {
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
   const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
   const canOpenAssetSend = caps.features.assetLayer
-  const canSubmitAssetSend = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
+  const canSubmitAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -160,10 +161,25 @@ const AssetsPage: React.FC = () => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
   }, [activeNetworkId, fetchNetworkAssets, caps.features.assetLayer])
 
+  const assetUsage = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const row of activity) {
+      if (String(row?.networkId || '').trim() !== activeNetworkId) continue
+      const name = String(row?.asset || '').trim().toLowerCase()
+      if (!name) continue
+      out.set(name, (out.get(name) || 0) + 1)
+    }
+    return out
+  }, [activity, activeNetworkId])
+  const byUsageThenName = (a: string, b: string): number => {
+    const delta = (assetUsage.get(b.toLowerCase()) || 0) - (assetUsage.get(a.toLowerCase()) || 0)
+    if (delta !== 0) return delta
+    return a.localeCompare(b)
+  }
   const rawAssets  = networkAssets[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
-  const roots      = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
-  const subs       = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
+  const roots      = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
+  const subs       = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const sorted     = [...roots, ...subs]
   const catalogForModel = useMemo(
     () => serverCoinCatalog.filter((item) => String(item.runtimeModelId || '').trim().toLowerCase() === activeModelId),
@@ -226,6 +242,7 @@ const AssetsPage: React.FC = () => {
   }, [visibleAssetNames, fetchAssetDetails, previewByAsset, supportsPreview])
 
   const estimatedFeeCoin = useMemo(() => {
+    if (activeNetwork.coinType === 'EVM') return 0
     const rawFeePerByteCoins = Number(activeNetwork?.feePerByte ?? 0.0000002)
     let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
     if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
@@ -601,7 +618,9 @@ const AssetsPage: React.FC = () => {
                 <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
                   <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
                   <p className="text-[10px] text-gray-600 leading-relaxed">
-                    Estimated required fee: ~{formatCoinAmount(estimatedFeeCoin)} {activeNetwork.symbol}. Change is returned automatically.
+                    {activeNetwork.coinType === 'EVM'
+                      ? 'Network gas is estimated automatically at signing.'
+                      : `Estimated required fee: ~${formatCoinAmount(estimatedFeeCoin)} ${activeNetwork.symbol}. Change is returned automatically.`}
                   </p>
                 </div>
 
