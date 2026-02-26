@@ -18,7 +18,7 @@ export function createAvaxCNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_AVAXC_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_AVAXC_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_AVAXC_BRIDGE_URL || ctx.buildBridgeUrl('avalanche', 'main'),
+    bridgeUrl: import.meta.env.VITE_AVAXC_BRIDGE_URL || ctx.buildBridgeUrl('avalanche-c-chain', 'main'),
     bridgeUsername: import.meta.env.VITE_AVAXC_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_AVAXC_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_AVAXC_EXPLORER || 'https://snowtrace.io',

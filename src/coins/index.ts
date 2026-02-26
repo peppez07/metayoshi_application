@@ -136,6 +136,7 @@ type ServerCoinRow = {
   symbol?: string
   enabled?: boolean
   features?: { bridge?: boolean }
+  methodGroups?: Record<string, string[]>
   networks?: ServerCoinNetworkRow[]
 }
 
@@ -167,11 +168,106 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   'avalanche-fuji-c-chain': 'avaxc',
   solana: 'sol',
   'solana-testnet': 'sol',
-  tron: 'tron'
+  tron: 'tron',
+  // Additional enabled server EVM chains mapped to app EVM runtime.
+  blast: 'eth',
+  berachain: 'eth',
+  celo: 'eth',
+  cronos: 'eth',
+  fraxtal: 'eth',
+  haqq: 'eth',
+  mantle: 'eth',
+  moonbeam: 'eth',
+  moonriver: 'eth',
+  optimism: 'base',
+  pulsechain: 'eth',
+  scroll: 'eth',
+  somnia: 'eth',
+  soneium: 'eth',
+  sonic: 'eth',
+  taiko: 'eth',
+  unichain: 'base',
+  'tron-evm': 'eth'
 }
 
 const DEFAULT_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
 const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+
+const FORCE_DOGE_UTXO_COMPAT_IDS = new Set([
+  'bitcoin',
+  'bitcoin-testnet',
+  'dash',
+  'defichain',
+  'pivx'
+])
+
+const FORCE_AVAXC_COMPAT_IDS = new Set([
+  'avalanche-p-chain',
+  'avalanche-x-chain',
+  'avalanche-fuji-p-chain',
+  'avalanche-fuji-x-chain'
+])
+
+const FORCE_POLYGON_COMPAT_IDS = new Set([
+  'polygon-heimdall',
+  'polygon-amoy-heimdall'
+])
+
+const FORCE_ETH_COMPAT_IDS = new Set([
+  '0g',
+  '0g-beacon',
+  'akash',
+  'analog',
+  'asset-mantle',
+  'atomone',
+  'axelar',
+  'babylon',
+  'bitcanna',
+  'bitway',
+  'celer',
+  'celestia',
+  'cheqd',
+  'chihuahua',
+  'chiliz',
+  'chiliz-spicy',
+  'comdex',
+  'coreum',
+  'cosmos',
+  'dora',
+  'dydx',
+  'elys',
+  'elys-testnet',
+  'fetch',
+  'injective',
+  'injective-testnet',
+  'juno',
+  'kujira',
+  'kusama',
+  'lava',
+  'lumera',
+  'manta-atlantic',
+  'medibloc',
+  'neutron',
+  'nolus',
+  'oraichain',
+  'osmosis',
+  'passage',
+  'persistence',
+  'polkadot',
+  'quicksilver',
+  'rebus',
+  'regen',
+  'rizon',
+  'saga',
+  'sentinel',
+  'shentu',
+  'sifchain',
+  'stargaze',
+  'stride',
+  'teritori',
+  'terra',
+  'terra-classic'
+])
 
 function mapServerCoinIdToNetworkId(coinId: string): string | null {
   const normalized = String(coinId || '').trim().toLowerCase()
@@ -185,18 +281,41 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized.startsWith('base-')) return 'base'
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
   if (normalized === 'bsc' || normalized.startsWith('bsc-')) return 'bnb'
-  if (normalized.startsWith('polygon-')) return 'polygon'
+  if (normalized === 'polygon' || normalized === 'polygon-bor' || normalized === 'polygon-amoy-bor') return 'polygon'
   if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
   if (normalized === 'solana' || normalized.startsWith('solana-')) return 'sol'
-  if (normalized === 'tron' || normalized.startsWith('tron-')) return 'tron'
+  if (normalized === 'tron') return 'tron'
+  if (normalized === 'tron-evm') return 'eth'
   if (normalized === 'optimism' || normalized.startsWith('optimism-')) return 'base'
+  if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
+  if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
+  if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
+  if (normalized === 'cronos' || normalized.startsWith('cronos-')) return 'eth'
+  if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
+  if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
   if (normalized === 'linea' || normalized.startsWith('linea-')) return 'eth'
+  if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'eth'
   if (normalized === 'metis' || normalized.startsWith('metis-')) return 'eth'
+  if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'eth'
+  if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'eth'
+  if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'eth'
   if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'eth'
+  if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'eth'
   if (normalized === 'taiko' || normalized.startsWith('taiko-')) return 'eth'
   if (normalized === 'unichain' || normalized.startsWith('unichain-')) return 'base'
   if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
   if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
+  // Forced compatibility mappings:
+  // These chains have dedicated app modules missing, so we force them through
+  // the existing EVM runtime model for bridge-based connectivity.
+  if (normalized === 'evmos' || normalized.startsWith('evmos-')) return 'eth'
+  if (normalized === 'dymension' || normalized.startsWith('dymension-')) return 'eth'
+  if (normalized === 'kava' || normalized.startsWith('kava-')) return 'eth'
+  if (normalized === 'iris' || normalized.startsWith('iris-')) return 'eth'
+  if (normalized === 'nibiru' || normalized.startsWith('nibiru-')) return 'eth'
+  if (normalized === 'tenet' || normalized.startsWith('tenet-')) return 'eth'
+  if (normalized === 'xpla' || normalized.startsWith('xpla-')) return 'eth'
+  if (normalized === 'warden' || normalized.startsWith('warden-')) return 'eth'
   if (normalized === 'syscoin-evm' || normalized.startsWith('syscoin-')) return 'eth'
   if (normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'eth'
   if (normalized === 'sei-evm' || normalized.startsWith('sei-evm')) return 'eth'
@@ -209,6 +328,10 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'eth'
   if (normalized === 'evmos-evm' || normalized.startsWith('evmos-evm')) return 'eth'
   if (normalized === 'warden-evm' || normalized.startsWith('warden-evm')) return 'eth'
+  if (FORCE_DOGE_UTXO_COMPAT_IDS.has(normalized)) return 'doge'
+  if (FORCE_AVAXC_COMPAT_IDS.has(normalized)) return 'avaxc'
+  if (FORCE_POLYGON_COMPAT_IDS.has(normalized)) return 'polygon'
+  if (FORCE_ETH_COMPAT_IDS.has(normalized)) return 'eth'
 
   return null
 }
@@ -251,6 +374,27 @@ type NetworkCandidate = {
   network: Network
   chain: 'main' | 'test'
   isPublicnode: boolean
+}
+
+const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
+
+function flattenServerMethodGroups(methodGroups: Record<string, string[]> | undefined): string[] {
+  if (!methodGroups || typeof methodGroups !== 'object') return []
+  const out: string[] = []
+  for (const methods of Object.values(methodGroups)) {
+    if (!Array.isArray(methods)) continue
+    for (const method of methods) {
+      const normalized = String(method || '').trim().toLowerCase()
+      if (normalized) out.push(normalized)
+    }
+  }
+  return out
+}
+
+function supportsEvmBridgeMethods(methodGroups: Record<string, string[]> | undefined): boolean {
+  const methods = flattenServerMethodGroups(methodGroups)
+  if (methods.length === 0) return false
+  return methods.some((m) => m.startsWith('eth_') || m === 'web3_clientversion' || m === 'net_version')
 }
 
 function scoreCandidate(candidate: NetworkCandidate): number {
@@ -300,6 +444,9 @@ export async function loadNetworksFromServerRegistry(): Promise<Network[] | null
     if (!coinId) continue
     const networkId = mapServerCoinIdToNetworkId(coinId)
     if (!networkId) continue
+    if (EVM_MODEL_NETWORK_IDS.has(networkId) && !supportsEvmBridgeMethods(coin.methodGroups)) {
+      continue
+    }
 
     const base = moduleById.get(networkId)
     if (!base) continue

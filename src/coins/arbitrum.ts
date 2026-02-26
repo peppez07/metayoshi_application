@@ -18,7 +18,7 @@ export function createArbitrumNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_ARB_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_ARB_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_ARB_BRIDGE_URL || ctx.buildBridgeUrl('arbitrum', 'main'),
+    bridgeUrl: import.meta.env.VITE_ARB_BRIDGE_URL || ctx.buildBridgeUrl('arbitrum-one', 'main'),
     bridgeUsername: import.meta.env.VITE_ARB_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_ARB_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_ARB_EXPLORER || 'https://arbiscan.io',

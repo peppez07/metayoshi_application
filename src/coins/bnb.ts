@@ -18,7 +18,7 @@ export function createBnbNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_BNB_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_BNB_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_BNB_BRIDGE_URL || ctx.buildBridgeUrl('bnb', 'main'),
+    bridgeUrl: import.meta.env.VITE_BNB_BRIDGE_URL || ctx.buildBridgeUrl('bsc', 'main'),
     bridgeUsername: import.meta.env.VITE_BNB_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_BNB_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_BNB_EXPLORER || 'https://bscscan.com',
