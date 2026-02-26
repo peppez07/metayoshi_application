@@ -112,7 +112,7 @@ const Assets: React.FC = () => {
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
-  const canSendAssets = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
+  const canOpenAssetSend = caps.features.assetLayer
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
 
   useEffect(() => {
@@ -193,7 +193,7 @@ const Assets: React.FC = () => {
             nft={isEvmNftAssetKey(name)}
             rawAmount={raw}
             onClick={() => {
-              if (canSendAssets && !isEvmNftAssetKey(name)) {
+              if (canOpenAssetSend && !isEvmNftAssetKey(name)) {
                 navigate('/assets', { state: { sendAsset: name } })
                 return
               }

@@ -138,7 +138,8 @@ const AssetsPage: React.FC = () => {
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
   const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
-  const canSendAssets = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
+  const canOpenAssetSend = caps.features.assetLayer
+  const canSubmitAssetSend = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -185,7 +186,7 @@ const AssetsPage: React.FC = () => {
   const deepLinkedSendAsset = String((location.state as { sendAsset?: string } | null)?.sendAsset || '').trim()
 
   useEffect(() => {
-    if (!canSendAssets || !deepLinkedSendAsset) return
+    if (!canOpenAssetSend || !deepLinkedSendAsset) return
     if (isEvmNftAssetKey(deepLinkedSendAsset)) return
     if (deepLinkHandledRef.current === deepLinkedSendAsset) return
     if (!sorted.some(([name]) => name === deepLinkedSendAsset)) return
@@ -195,7 +196,7 @@ const AssetsPage: React.FC = () => {
     setSendError('')
     setTxid(null)
     deepLinkHandledRef.current = deepLinkedSendAsset
-  }, [canSendAssets, deepLinkedSendAsset, sorted])
+  }, [canOpenAssetSend, deepLinkedSendAsset, sorted])
 
   useEffect(() => {
     if (!supportsPreview) return
@@ -259,6 +260,10 @@ const AssetsPage: React.FC = () => {
     e.preventDefault()
     setSendError('')
     if (!selectedAsset) return
+    if (!canSubmitAssetSend) {
+      setSendError(`${activeNetwork.name} does not support token asset sends yet.`)
+      return
+    }
     if (sendBlockedBySync) { setSendError(syncBlockedReason); return }
     if (!toAddress.trim()) { setSendError('Recipient address is required'); return }
     if (!qty || parseFloat(qty) <= 0) { setSendError('Quantity must be greater than 0'); return }
@@ -420,7 +425,7 @@ const AssetsPage: React.FC = () => {
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })
@@ -445,7 +450,7 @@ const AssetsPage: React.FC = () => {
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })
@@ -470,7 +475,7 @@ const AssetsPage: React.FC = () => {
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })
@@ -611,12 +616,19 @@ const AssetsPage: React.FC = () => {
                     <p className="text-xs font-bold text-yellow-200 text-center">{syncBlockedReason}</p>
                   </div>
                 )}
+                {!sendError && !canSubmitAssetSend && (
+                  <div className="p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl">
+                    <p className="text-xs font-bold text-yellow-200 text-center">
+                      {activeNetwork.name} supports viewing token assets, but sending them is not enabled yet.
+                    </p>
+                  </div>
+                )}
 
                 <Button
                   type="submit"
                   className="w-full btn-primary flex items-center justify-center gap-2"
                   isLoading={sending}
-                  disabled={sendBlockedBySync || !toAddress.trim() || !qty || parseFloat(qty) <= 0 || sending}
+                  disabled={!canSubmitAssetSend || sendBlockedBySync || !toAddress.trim() || !qty || parseFloat(qty) <= 0 || sending}
                 >
                   <IoArrowUpOutline className="w-4 h-4" />
                   Send {parseAssetName(selectedAsset).sub || parseAssetName(selectedAsset).root}
