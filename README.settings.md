@@ -19,6 +19,23 @@ For Chrome Web Store/public distribution:
 - Local mode: direct RPC to local nodes (`useLocalRpc=true`)
 - Bridge mode (default): all UTXO calls through MetaYoshi bridge gateway
 
+## Dynamic coin registry from server
+
+At startup, the app now syncs network availability from:
+
+- `GET /v1/coins` on `VITE_API_BASE_URL`
+
+Behavior:
+- only server-enabled bridge coins are shown in app
+- app support is limited to built-in network models; unknown server coin families are ignored
+- bridge routes are generated from server coinId/chain (app never calls provider endpoints directly)
+
+If your server requires API-key auth on `/v1/coins`, set:
+
+```env
+VITE_APP_API_KEY=<APP_API_KEY>
+```
+
 ## Bridge subdomain map
 
 Server env example:

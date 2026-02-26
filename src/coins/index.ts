@@ -23,6 +23,7 @@ export type { CoinType, Network } from './types'
 export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://rtm.metayoshi.app').trim().replace(/\/+$/, '')
+const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
 export function buildBridgeUrl(coin: string, chain: 'main' | 'test', wallet?: string): string {
   const base = `${API_BASE_URL}/v1/bridge/${coin}/${chain}`
@@ -115,4 +116,233 @@ export function getAllUtxoAddressSpecs(): Record<string, UtxoAddressSpec> {
 export function estimateNetworkFee(networkId: string, txBytes: number): number | undefined {
   const module = MODULE_BY_NETWORK_ID.get(networkId)
   return module?.estimateFee ? module.estimateFee(txBytes) : undefined
+}
+
+type ServerCoinNetworkRow = {
+  chain?: string
+  rpcUrl?: string
+  rpcWallet?: string
+  rpcUser?: string
+  isActive?: boolean
+  metadata?: {
+    provider?: string
+    [key: string]: unknown
+  }
+}
+
+type ServerCoinRow = {
+  coinId?: string
+  name?: string
+  symbol?: string
+  enabled?: boolean
+  features?: { bridge?: boolean }
+  networks?: ServerCoinNetworkRow[]
+}
+
+const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
+  raptoreum: 'rtm',
+  dogecoin: 'doge',
+  bitcoinz: 'btcz',
+  tidecoin: 'tide',
+  firo: 'firo',
+  xrp: 'xrp',
+  arr: 'arr',
+  cardano: 'ada',
+  monero: 'xmr',
+  stellar: 'xlm',
+  xlm: 'xlm',
+  ethereum: 'eth',
+  'ethereum-sepolia': 'eth',
+  'ethereum-hoodi': 'eth',
+  'arbitrum-one': 'arb',
+  'arbitrum-nova': 'arb',
+  'arbitrum-sepolia': 'arb',
+  base: 'base',
+  'base-sepolia': 'base',
+  bsc: 'bnb',
+  'bsc-testnet': 'bnb',
+  'polygon-bor': 'polygon',
+  'polygon-amoy-bor': 'polygon',
+  'avalanche-c-chain': 'avaxc',
+  'avalanche-fuji-c-chain': 'avaxc',
+  solana: 'sol',
+  'solana-testnet': 'sol',
+  tron: 'tron'
+}
+
+const DEFAULT_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
+const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+
+function mapServerCoinIdToNetworkId(coinId: string): string | null {
+  const normalized = String(coinId || '').trim().toLowerCase()
+  const direct = SERVER_COIN_TO_NETWORK_ID[normalized]
+  if (direct) return direct
+
+  // Pattern mapping for additional server coin IDs:
+  // map many chain variants/testnets into the closest app network model.
+  if (normalized.startsWith('ethereum-')) return 'eth'
+  if (normalized.startsWith('arbitrum-')) return 'arb'
+  if (normalized.startsWith('base-')) return 'base'
+  if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
+  if (normalized === 'bsc' || normalized.startsWith('bsc-')) return 'bnb'
+  if (normalized.startsWith('polygon-')) return 'polygon'
+  if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
+  if (normalized === 'solana' || normalized.startsWith('solana-')) return 'sol'
+  if (normalized === 'tron' || normalized.startsWith('tron-')) return 'tron'
+  if (normalized === 'optimism' || normalized.startsWith('optimism-')) return 'base'
+  if (normalized === 'linea' || normalized.startsWith('linea-')) return 'eth'
+  if (normalized === 'metis' || normalized.startsWith('metis-')) return 'eth'
+  if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'eth'
+  if (normalized === 'taiko' || normalized.startsWith('taiko-')) return 'eth'
+  if (normalized === 'unichain' || normalized.startsWith('unichain-')) return 'base'
+  if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
+  if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
+  if (normalized === 'syscoin-evm' || normalized.startsWith('syscoin-')) return 'eth'
+  if (normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'eth'
+  if (normalized === 'sei-evm' || normalized.startsWith('sei-evm')) return 'eth'
+  if (normalized === 'nibiru-evm' || normalized.startsWith('nibiru-evm')) return 'eth'
+  if (normalized === 'haqq-evm' || normalized.startsWith('haqq-evm')) return 'eth'
+  if (normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'eth'
+  if (normalized === 'kava-evm' || normalized.startsWith('kava-evm')) return 'eth'
+  if (normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'eth'
+  if (normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'eth'
+  if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'eth'
+  if (normalized === 'evmos-evm' || normalized.startsWith('evmos-evm')) return 'eth'
+  if (normalized === 'warden-evm' || normalized.startsWith('warden-evm')) return 'eth'
+
+  return null
+}
+
+function resolveActiveServerNetwork(networks: ServerCoinNetworkRow[] | undefined): ServerCoinNetworkRow | null {
+  const rows = Array.isArray(networks) ? networks.filter((n) => n && n.isActive !== false) : []
+  if (rows.length === 0) return null
+  const main = rows.find((n) => String(n.chain || '').trim().toLowerCase() === 'main')
+  return main || rows[0] || null
+}
+
+function safeHost(value: string): string {
+  try {
+    return new URL(value).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+function isLoopbackOrPrivateHost(value: string): boolean {
+  const host = safeHost(value)
+  if (!host) return false
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+  if (host.startsWith('10.')) return true
+  if (host.startsWith('192.168.')) return true
+  if (host.startsWith('172.16.') || host.startsWith('172.17.') || host.startsWith('172.18.') || host.startsWith('172.19.')) return true
+  if (host.startsWith('172.2')) return true
+  return false
+}
+
+function isPublicnodeNetworkRow(row: ServerCoinNetworkRow): boolean {
+  const provider = String(row?.metadata?.provider || '').trim().toLowerCase()
+  if (provider === 'publicnode') return true
+  const url = String(row?.rpcUrl || '').trim().toLowerCase()
+  return url.includes('publicnode.com')
+}
+
+type NetworkCandidate = {
+  networkId: string
+  network: Network
+  chain: 'main' | 'test'
+  isPublicnode: boolean
+}
+
+function scoreCandidate(candidate: NetworkCandidate): number {
+  const rpcUrl = String(candidate.network.rpcUrl || '').trim().toLowerCase()
+  const isHttps = rpcUrl.startsWith('https://')
+  const isLocal = isLoopbackOrPrivateHost(rpcUrl)
+  let score = 0
+  if (candidate.isPublicnode) score += 120
+  if (candidate.chain === 'main') score += 40
+  if (isHttps) score += 20
+  if (!isLocal) score += 15
+  if (candidate.chain === 'test') score -= 10
+  if (isLocal) score -= 25
+  return score
+}
+
+function resolveBridgeUrlForNetwork(
+  networkId: string,
+  coinId: string,
+  chain: 'main' | 'test',
+  rpcWallet: string | undefined
+): string {
+  if (networkId === 'rtm' || networkId === 'xrp') {
+    const wallet = String(rpcWallet || '').trim() || 'mainwallet'
+    return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}/wallet/${encodeURIComponent(wallet)}`
+  }
+  return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}`
+}
+
+export async function loadNetworksFromServerRegistry(): Promise<Network[] | null> {
+  const headers: Record<string, string> = {}
+  if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+  const response = await fetch(`${API_BASE_URL}/v1/coins`, { method: 'GET', headers })
+  if (!response.ok) {
+    throw new Error(`Server coin registry fetch failed: HTTP ${response.status}`)
+  }
+  const json = await response.json().catch(() => null)
+  const coins = Array.isArray(json?.coins) ? (json.coins as ServerCoinRow[]) : []
+  if (coins.length === 0) return null
+
+  const moduleById = new Map<string, Network>(ALL_NETWORKS.map((n) => [n.id, n]))
+  const candidatesByNetworkId = new Map<string, NetworkCandidate[]>()
+  for (const coin of coins) {
+    if (!coin?.enabled) continue
+    if (coin?.features?.bridge === false) continue
+    const coinId = String(coin.coinId || '').trim().toLowerCase()
+    if (!coinId) continue
+    const networkId = mapServerCoinIdToNetworkId(coinId)
+    if (!networkId) continue
+
+    const base = moduleById.get(networkId)
+    if (!base) continue
+    const selectedNetwork = resolveActiveServerNetwork(coin.networks)
+    if (!selectedNetwork?.rpcUrl) continue
+    const chain = String(selectedNetwork.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+    const rpcWallet = String(selectedNetwork.rpcWallet || '').trim()
+
+    const mappedNetwork: Network = {
+      ...base,
+      name: String(coin.name || base.name).trim() || base.name,
+      symbol: String(coin.symbol || base.symbol).trim().toUpperCase() || base.symbol,
+      rpcUrl: String(selectedNetwork.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
+      rpcWallet: rpcWallet || base.rpcWallet || '',
+      rpcUsername: String(selectedNetwork.rpcUser || base.rpcUsername || '').trim(),
+      bridgeUrl: resolveBridgeUrlForNetwork(networkId, coinId, chain, rpcWallet),
+      // Always use runtime-configured bridge credentials for server-synced networks.
+      // Base modules may contain placeholder defaults (e.g. "bridgepass").
+      bridgeUsername: DEFAULT_BRIDGE_USER,
+      bridgePassword: DEFAULT_BRIDGE_PASSWORD
+    }
+    const row = candidatesByNetworkId.get(networkId) || []
+    row.push({
+      networkId,
+      network: mappedNetwork,
+      chain,
+      isPublicnode: isPublicnodeNetworkRow(selectedNetwork)
+    })
+    candidatesByNetworkId.set(networkId, row)
+  }
+
+  if (candidatesByNetworkId.size === 0) return null
+
+  const bestByNetworkId = new Map<string, Network>()
+  for (const [networkId, rows] of candidatesByNetworkId.entries()) {
+    if (!rows || rows.length === 0) continue
+    const sorted = [...rows].sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
+    bestByNetworkId.set(networkId, sorted[0].network)
+  }
+
+  const selectedIds = new Set(bestByNetworkId.keys())
+  const ordered = ALL_NETWORKS.filter((n) => selectedIds.has(n.id)).map((n) => (
+    bestByNetworkId.get(n.id) || n
+  ))
+  return ordered.length > 0 ? ordered : null
 }

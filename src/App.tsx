@@ -83,7 +83,19 @@ const TxRouteGate = ({ element }: { element: ReactElement }) => {
 }
 
 function App() {
-  const { isLocked, isInitialized, hasVault, checkAutolock, sessionMnemonic, lock } = useWalletStore()
+  const {
+    isLocked,
+    isInitialized,
+    hasVault,
+    checkAutolock,
+    sessionMnemonic,
+    lock,
+    syncNetworksFromServer
+  } = useWalletStore()
+
+  useEffect(() => {
+    void syncNetworksFromServer()
+  }, [syncNetworksFromServer])
 
   // Force lock on every popup open when there is no in-memory session.
   // sessionMnemonic is never persisted to localStorage, so it is always null

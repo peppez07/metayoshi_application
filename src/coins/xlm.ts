@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import xlmLogo from './coinlogos/xlm.jpg'
+import xlmLogo from './coinlogos/xlm.png'
 
 export const XLM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },

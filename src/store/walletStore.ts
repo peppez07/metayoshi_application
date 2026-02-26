@@ -40,7 +40,8 @@ import {
   DEFAULT_NETWORK_ID,
   getCoinRuntimeProfile,
   INITIAL_NETWORKS,
-  estimateNetworkFee
+  estimateNetworkFee,
+  loadNetworksFromServerRegistry
 } from '../coins'
 import { getCoinApiInterceptor } from '../coins/interceptors'
 import type { CoinType, Network } from '../coins'
@@ -207,6 +208,7 @@ interface WalletState {
     rpcPassword: string
     rpcWallet: string
   }) => void
+  syncNetworksFromServer: () => Promise<void>
 
   // RPC
   refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
@@ -312,7 +314,8 @@ async function createUtxoRpcConfig(
     secureBridgeApiBaseUrl: secureBridgeApiBaseUrl || undefined,
     secureBridgeWritesEnabled,
     secureBridgeSigner: opts.secureBridgeSigner,
-    useLocalRpc: opts.useLocalRpc ?? false
+    // Enforce bridge-first transport for app <-> server communication.
+    useLocalRpc: false
   }
 }
 
@@ -1458,6 +1461,28 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverrides: { ...state.localRpcOverrides, [networkId]: override }
         })),
 
+      syncNetworksFromServer: async () => {
+        let serverNetworks: Network[] | null = null
+        try {
+          serverNetworks = await loadNetworksFromServerRegistry()
+        } catch (error) {
+          console.warn('Failed to sync networks from /v1/coins:', error)
+          return
+        }
+        if (!serverNetworks || serverNetworks.length === 0) return
+        const syncedNetworks = serverNetworks
+
+        set((state) => {
+          const activeNetworkId = syncedNetworks.some((n) => n.id === state.activeNetworkId)
+            ? state.activeNetworkId
+            : (syncedNetworks[0]?.id || DEFAULT_ACTIVE_NETWORK_ID)
+          return {
+            networks: syncedNetworks,
+            activeNetworkId
+          }
+        })
+      },
+
       refreshActiveBalance: async (options) => {
         const fastMode = options?.fast === true
         const skipZeroBalanceRecheck = options?.skipZeroBalanceRecheck === true
@@ -1511,9 +1536,13 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           if (net.coinType === 'EVM') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
             const snapshot = await fetchChainBalanceAndSync({
               network: net,
-              address
+              address,
+              rpcConfig
             })
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -1838,10 +1867,14 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           if (net.coinType === 'EVM') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
             const [snapshot, addressValid] = await Promise.all([
               fetchChainBalanceAndSync({
                 network: net,
-                address: resolvedAddress
+                address: resolvedAddress,
+                rpcConfig
               }),
               validateChainAddress(net, undefined, resolvedAddress)
             ])
@@ -1902,10 +1935,14 @@ export const useWalletStore = create<WalletState>()(
         if (!net || net.coinType !== 'EVM') throw new Error('Active network is not EVM')
         if (!acc?.addresses?.EVM) throw new Error('No active account')
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
         return await sendChainTransaction({
           network: net,
           to,
           amount,
+          rpcConfig,
           evm: {
             mnemonic: sessionMnemonic,
             accountIndex

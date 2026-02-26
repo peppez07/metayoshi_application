@@ -3,6 +3,7 @@ import type { Network } from '../coins'
 import { estimateNetworkFee, getCoinRuntimeProfile } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
 import {
+  callBridgeMethod,
   createRawTransaction,
   getAddressMempoolSpentOutpoints,
   getAddressUtxos,
@@ -157,9 +158,12 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   }
 
   if (input.network.coinType === 'EVM') {
-    const provider = new ethers.JsonRpcProvider(input.network.rpcUrl, input.network.chainId)
-    const bal = await provider.getBalance(address)
-    return { balance: ethers.formatEther(bal), syncPercent: 100, isSyncing: false }
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for EVM networks')
+    }
+    const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
+    const balanceWei = BigInt(String(balHex || '0x0'))
+    return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
   }
 
   if (!input.rpcConfig) {
@@ -244,10 +248,41 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
   if (input.network.coinType === 'EVM') {
     const ctx = input.evm
     if (!ctx?.mnemonic) throw new Error('Wallet is locked')
-    const provider = new ethers.JsonRpcProvider(input.network.rpcUrl, input.network.chainId)
-    const wallet = deriveEvmWallet(ctx.mnemonic, ctx.accountIndex).connect(provider)
-    const tx = await wallet.sendTransaction({ to, value: ethers.parseEther(String(input.amount)) })
-    return { hash: tx.hash }
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for EVM networks')
+    }
+    const wallet = deriveEvmWallet(ctx.mnemonic, ctx.accountIndex)
+    const from = wallet.address
+    const valueWei = ethers.parseEther(String(input.amount))
+    const valueHex = ethers.toQuantity(valueWei)
+    const chainIdHex = await callBridgeMethod(input.rpcConfig, 'eth_chainId', [])
+    const nonceHex = await callBridgeMethod(input.rpcConfig, 'eth_getTransactionCount', [from, 'pending'])
+    let gasPriceHex = '0x0'
+    try {
+      gasPriceHex = await callBridgeMethod(input.rpcConfig, 'eth_gasPrice', [])
+    } catch {
+      gasPriceHex = '0x3b9aca00' // 1 gwei fallback
+    }
+    let gasLimitHex = '0x5208' // 21000
+    try {
+      gasLimitHex = await callBridgeMethod(input.rpcConfig, 'eth_estimateGas', [
+        { from, to, value: valueHex }
+      ])
+    } catch {
+      gasLimitHex = '0x5208'
+    }
+
+    const tx = {
+      to,
+      value: valueWei,
+      nonce: Number(BigInt(String(nonceHex || '0x0'))),
+      gasPrice: BigInt(String(gasPriceHex || '0x0')),
+      gasLimit: BigInt(String(gasLimitHex || '0x5208')),
+      chainId: Number(BigInt(String(chainIdHex || input.network.chainId || 1)))
+    }
+    const signed = await wallet.signTransaction(tx)
+    const hash = await callBridgeMethod(input.rpcConfig, 'eth_sendRawTransaction', [signed])
+    return { hash: String(hash) }
   }
   if (protocol === 'utxo-jsonrpc') {
     if (!input.utxoSend) throw new Error('UTXO sender is not configured')
