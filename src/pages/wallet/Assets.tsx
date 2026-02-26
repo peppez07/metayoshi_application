@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useWalletStore } from '../../store/walletStore'
 import { IoLayersOutline, IoChevronForward, IoEyeOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
+import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ interface AssetPreviewRowProps {
 const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, rawAmount, onClick, onPreview, previewAvailable = false }) => {
   const { root, sub } = parseAssetName(name)
   const isRootAsset = !sub
+  const logoSrc = getTokenLogoForAsset(name)
 
   return (
     <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700 transition-colors">
@@ -45,7 +47,11 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, rawAmount, onCl
           <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
             isRootAsset ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-blue-500/10 border border-blue-500/30'
           }`}>
-            <IoLayersOutline className={`w-4.5 h-4.5 ${isRootAsset ? 'text-yellow-400' : 'text-blue-400'}`} />
+            {logoSrc ? (
+              <img src={logoSrc} alt={`${name} logo`} className="w-full h-full rounded-full object-cover" />
+            ) : (
+              <IoLayersOutline className={`w-4.5 h-4.5 ${isRootAsset ? 'text-yellow-400' : 'text-blue-400'}`} />
+            )}
           </div>
 
           {/* name + badge */}
