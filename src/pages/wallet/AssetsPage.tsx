@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useWalletStore } from '../../store/walletStore'
 import {
   IoArrowBackOutline,
@@ -43,21 +43,27 @@ function parseAssetName(name: string): { root: string; sub: string | null } {
 }
 
 function isRoot(name: string) { return !parseAssetName(name).sub }
+function isEvmNftAssetKey(name: string): boolean {
+  return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(String(name || '').trim())
+}
 
 // ── AssetRow ──────────────────────────────────────────────────────────────────
 
 interface AssetRowProps {
   name: string
+  displayName?: string
+  nft?: boolean
   rawAmount: number
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
 }
 
-const AssetRow: React.FC<AssetRowProps> = ({ name, rawAmount, onClick, onPreview, previewAvailable = false }) => {
-  const { root, sub } = parseAssetName(name)
+const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+  const effectiveName = displayName || name
+  const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
-  const logoSrc = getTokenLogoForAsset(name)
+  const logoSrc = getTokenLogoForAsset(effectiveName)
 
   return (
     <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700/40 transition-colors">
@@ -84,7 +90,7 @@ const AssetRow: React.FC<AssetRowProps> = ({ name, rawAmount, onClick, onPreview
             )}
           </div>
           <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-            {isRootAsset ? 'Root Asset' : `Sub of ${root}`}
+            {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`)}
           </span>
           {previewAvailable && (
             <span className="text-[9px] font-bold uppercase text-primary">Preview</span>
@@ -117,11 +123,12 @@ const AssetRow: React.FC<AssetRowProps> = ({ name, rawAmount, onClick, onPreview
 
 const AssetsPage: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const {
     accounts, activeAccountId,
     networks, activeNetworkId,
     serverCoinCatalog,
-    networkAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
+    networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
     isConnected,
     isSyncing, syncPercent, lowSyncStreak
   } = useWalletStore()
@@ -130,8 +137,9 @@ const AssetsPage: React.FC = () => {
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
-  const supportsPreview = activeNetwork.coinType === 'UTXO'
-  const canSendAssets = caps.features.assetSend
+  const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
+  const canSendAssets = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
+  const nftLookup = evmNftAssets[activeNetworkId] ?? {}
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -145,6 +153,7 @@ const AssetsPage: React.FC = () => {
   const [txid,         setTxid]         = useState<string | null>(null)
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
+  const deepLinkHandledRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
@@ -173,6 +182,21 @@ const AssetsPage: React.FC = () => {
     return rows.map(([name]) => name)
   }, [filtered, isSearching, sorted])
 
+  const deepLinkedSendAsset = String((location.state as { sendAsset?: string } | null)?.sendAsset || '').trim()
+
+  useEffect(() => {
+    if (!canSendAssets || !deepLinkedSendAsset) return
+    if (isEvmNftAssetKey(deepLinkedSendAsset)) return
+    if (deepLinkHandledRef.current === deepLinkedSendAsset) return
+    if (!sorted.some(([name]) => name === deepLinkedSendAsset)) return
+    setSelectedAsset(deepLinkedSendAsset)
+    setToAddress('')
+    setQty('')
+    setSendError('')
+    setTxid(null)
+    deepLinkHandledRef.current = deepLinkedSendAsset
+  }, [canSendAssets, deepLinkedSendAsset, sorted])
+
   useEffect(() => {
     if (!supportsPreview) return
     let cancelled = false
@@ -183,7 +207,7 @@ const AssetsPage: React.FC = () => {
         checkingRef.current.add(assetName)
         try {
           const details = await fetchAssetDetails(assetName)
-          const hasPreview = Boolean(String(details?.ipfs_hash || '').trim())
+          const hasPreview = Boolean(String(details?.preview_url || details?.ipfs_hash || details?.metadata_url || '').trim())
           if (!cancelled) {
             setPreviewByAsset((prev) => ({ ...prev, [assetName]: hasPreview }))
           }
@@ -393,8 +417,10 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
+                displayName={nftLookup[name]?.label}
+                nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets) openSend(name) }}
+                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })
@@ -416,8 +442,10 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
+                displayName={nftLookup[name]?.label}
+                nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets) openSend(name) }}
+                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })
@@ -439,8 +467,10 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
+                displayName={nftLookup[name]?.label}
+                nft={isEvmNftAssetKey(name)}
                 rawAmount={raw}
-                onClick={() => { if (canSendAssets) openSend(name) }}
+                onClick={() => { if (canSendAssets && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
                   if (!supportsPreview) return
                   navigate('/assets/preview', { state: { assetId: name } })

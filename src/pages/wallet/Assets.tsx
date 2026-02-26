@@ -20,21 +20,27 @@ function parseAssetName(name: string): { root: string; sub: string | null } {
 }
 
 function isRoot(name: string) { return !parseAssetName(name).sub }
+function isEvmNftAssetKey(name: string): boolean {
+  return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(String(name || '').trim())
+}
 
 // ── compact asset row (mirrors ActivityRow look) ───────────────────────────
 
 interface AssetPreviewRowProps {
   name: string
+  displayName?: string
+  nft?: boolean
   rawAmount: number
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
 }
 
-const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, rawAmount, onClick, onPreview, previewAvailable = false }) => {
-  const { root, sub } = parseAssetName(name)
+const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+  const effectiveName = displayName || name
+  const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
-  const logoSrc = getTokenLogoForAsset(name)
+  const logoSrc = getTokenLogoForAsset(effectiveName)
 
   return (
     <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700 transition-colors">
@@ -64,7 +70,7 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, rawAmount, onCl
               )}
             </div>
             <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-              {isRootAsset ? 'Root Asset' : `Sub · ${root}`}
+              {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub · ${root}`)}
             </span>
             {previewAvailable && (
               <span className="text-[9px] font-bold uppercase text-primary">Preview</span>
@@ -98,14 +104,16 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, rawAmount, onCl
 // ── main ─────────────────────────────────────────────────────────────────────
 
 const Assets: React.FC = () => {
-  const { networks, activeNetworkId, networkAssets, fetchNetworkAssets, fetchAssetDetails } = useWalletStore()
+  const { networks, activeNetworkId, networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails } = useWalletStore()
   const navigate = useNavigate()
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
 
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const supportsPreview = activeNetwork.coinType === 'UTXO'
+  const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
+  const canSendAssets = caps.features.assetSend && activeNetwork.coinType === 'UTXO'
+  const nftLookup = evmNftAssets[activeNetworkId] ?? {}
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
@@ -143,7 +151,7 @@ const Assets: React.FC = () => {
         checkingRef.current.add(assetName)
         try {
           const details = await fetchAssetDetails(assetName)
-          const hasPreview = Boolean(String(details?.ipfs_hash || '').trim())
+          const hasPreview = Boolean(String(details?.preview_url || details?.ipfs_hash || details?.metadata_url || '').trim())
           if (!cancelled) {
             setPreviewByAsset((prev) => ({ ...prev, [assetName]: hasPreview }))
           }
@@ -181,8 +189,16 @@ const Assets: React.FC = () => {
           <AssetPreviewRow
             key={name}
             name={name}
+            displayName={nftLookup[name]?.label}
+            nft={isEvmNftAssetKey(name)}
             rawAmount={raw}
-            onClick={() => navigate('/assets')}
+            onClick={() => {
+              if (canSendAssets && !isEvmNftAssetKey(name)) {
+                navigate('/assets', { state: { sendAsset: name } })
+                return
+              }
+              navigate('/assets')
+            }}
             onPreview={() => {
               if (!supportsPreview) return
               navigate('/assets/preview', { state: { assetId: name } })

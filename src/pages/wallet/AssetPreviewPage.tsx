@@ -5,11 +5,28 @@ import { useWalletStore } from '../../store/walletStore'
 
 type PreviewKind = 'image' | 'pdf' | 'json' | 'text' | 'binary' | 'none'
 
-function normalizeIpfsValue(value: string): string {
+function normalizePreviewValue(value: string): string {
   const v = String(value || '').trim()
   if (!v) return ''
   if (v.startsWith('ipfs://')) return v.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '').replace(/^\/+/, '')
   return v
+}
+
+function buildSourceUrls(value: string): string[] {
+  const v = String(value || '').trim()
+  if (!v) return []
+  if (/^https?:\/\//i.test(v)) return [v]
+  if (/^data:/i.test(v)) return [v]
+  if (/^ipfs:\/\//i.test(v) || /^ipfs\//i.test(v)) {
+    const cid = normalizePreviewValue(v)
+    if (!cid) return []
+    return [
+      `https://gateway.pinata.cloud/ipfs/${cid}`,
+      `https://ipfs.io/ipfs/${cid}`,
+      `https://cloudflare-ipfs.com/ipfs/${cid}`
+    ]
+  }
+  return [v]
 }
 
 function inferKind(contentType: string): PreviewKind {
@@ -30,22 +47,14 @@ const AssetPreviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [assetName, setAssetName] = useState(assetId)
-  const [ipfsHash, setIpfsHash] = useState('')
+  const [sourceRef, setSourceRef] = useState('')
   const [contentType, setContentType] = useState('')
   const [kind, setKind] = useState<PreviewKind>('none')
   const [textContent, setTextContent] = useState('')
   const [blobUrl, setBlobUrl] = useState('')
   const [activeSourceUrl, setActiveSourceUrl] = useState('')
 
-  const gatewayUrls = useMemo(() => {
-    const cid = normalizeIpfsValue(ipfsHash)
-    if (!cid) return []
-    return [
-      `https://gateway.pinata.cloud/ipfs/${cid}`,
-      `https://ipfs.io/ipfs/${cid}`,
-      `https://cloudflare-ipfs.com/ipfs/${cid}`
-    ]
-  }, [ipfsHash])
+  const gatewayUrls = useMemo(() => buildSourceUrls(sourceRef), [sourceRef])
 
   const loadPreview = async () => {
     setLoading(true)
@@ -53,6 +62,7 @@ const AssetPreviewPage: React.FC = () => {
     setTextContent('')
     setContentType('')
     setKind('none')
+    setSourceRef('')
     setActiveSourceUrl('')
     if (blobUrl) {
       URL.revokeObjectURL(blobUrl)
@@ -68,20 +78,15 @@ const AssetPreviewPage: React.FC = () => {
     try {
       const details = await fetchAssetDetails(assetId)
       setAssetName(details?.name || assetId)
-      const hash = String(details?.ipfs_hash || '').trim()
-      setIpfsHash(hash)
-      if (!hash) {
-        setError('No file metadata found (IPFS hash missing) for this asset.')
+      const previewRef = String(details?.preview_url || details?.ipfs_hash || details?.metadata_url || '').trim()
+      setSourceRef(previewRef)
+      if (!previewRef) {
+        setError('No preview source metadata found for this asset.')
         setLoading(false)
         return
       }
 
-      const cid = normalizeIpfsValue(hash)
-      const urls = [
-        `https://gateway.pinata.cloud/ipfs/${cid}`,
-        `https://ipfs.io/ipfs/${cid}`,
-        `https://cloudflare-ipfs.com/ipfs/${cid}`
-      ]
+      const urls = buildSourceUrls(previewRef)
 
       let loaded = false
       for (const url of urls) {
@@ -172,8 +177,8 @@ const AssetPreviewPage: React.FC = () => {
           <div className="p-3 rounded-xl border border-dark-600 bg-dark-700/30 space-y-1">
             <p className="text-[10px] text-gray-500 uppercase font-bold">Asset</p>
             <p className="text-xs font-mono break-all">{assetName || '—'}</p>
-            <p className="text-[10px] text-gray-500 uppercase font-bold mt-2">IPFS</p>
-            <p className="text-xs font-mono break-all">{ipfsHash || '—'}</p>
+            <p className="text-[10px] text-gray-500 uppercase font-bold mt-2">Source</p>
+            <p className="text-xs font-mono break-all">{sourceRef || '—'}</p>
             {contentType && (
               <>
                 <p className="text-[10px] text-gray-500 uppercase font-bold mt-2">Content type</p>

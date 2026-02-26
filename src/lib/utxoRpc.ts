@@ -1241,6 +1241,11 @@ export interface RtmAssetDetails {
   reissuable: boolean
   has_ipfs: boolean
   ipfs_hash?: string
+  preview_url?: string
+  metadata_url?: string
+  token_id?: string
+  contract_address?: string
+  token_standard?: 'erc721' | 'erc1155'
   txid_or_longname: string
   ownership_address?: string
   Asset_id?: string

@@ -145,6 +145,8 @@ interface WalletState {
   balanceRefreshNonce: number
   /** Per-network asset balances. Key = networkId, value = { assetName: rawAmount (sats) } */
   networkAssets: Record<string, Record<string, number>>
+  /** EVM NFT metadata key lookup by network id and asset key. */
+  evmNftAssets: Record<string, Record<string, EvmNftHolding>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
   serverCoinCatalog: ServerCoinCatalogItem[]
   authorizedSites: string[]
@@ -334,11 +336,47 @@ function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeW
 }
 
 const EVM_ERC20_BALANCE_IFACE = new ethers.Interface(['function balanceOf(address) view returns (uint256)'])
+const EVM_ERC165_IFACE = new ethers.Interface(['function supportsInterface(bytes4 interfaceId) view returns (bool)'])
+const EVM_ERC721_IFACE = new ethers.Interface([
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function tokenURI(uint256 tokenId) view returns (string)',
+  'function symbol() view returns (string)',
+  'function name() view returns (string)'
+])
+const EVM_ERC1155_IFACE = new ethers.Interface([
+  'function balanceOf(address owner, uint256 id) view returns (uint256)',
+  'function uri(uint256 id) view returns (string)',
+  'function name() view returns (string)'
+])
+const EVM_ERC721_ENUMERABLE_IFACE = new ethers.Interface([
+  'function balanceOf(address owner) view returns (uint256)',
+  'function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)'
+])
+const ERC721_INTERFACE_ID = '0x80ac58cd'
+const ERC1155_INTERFACE_ID = '0xd9b67a26'
+const MAX_TRACKED_EVM_NFTS = 120
 
 type EvmTrackedToken = {
   address: string
   symbol: string
   decimals: number
+}
+
+type EvmNftStandard = 'erc721' | 'erc1155'
+
+type EvmTrackedNft = {
+  address: string
+  tokenId: string
+  standard: EvmNftStandard | 'auto'
+  label?: string
+}
+
+type EvmNftHolding = {
+  address: string
+  tokenId: string
+  standard: EvmNftStandard
+  label: string
+  quantityRaw: string
 }
 
 const DEFAULT_ETH_TRACKED_TOKENS: EvmTrackedToken[] = [
@@ -407,6 +445,167 @@ function resolveCatalogEvmTrackedTokens(
     })
   }
   return [...byAddress.values()]
+}
+
+function parseTrackedEvmNfts(raw: string): EvmTrackedNft[] {
+  const entries = String(raw || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  const out: EvmTrackedNft[] = []
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    const [addressRaw, tokenIdRaw = '', standardRaw = 'auto', ...labelParts] = entry.split(':')
+    if (!ethers.isAddress(addressRaw)) continue
+    const tokenId = String(tokenIdRaw || '').trim()
+    if (!tokenId) continue
+    const standardNormalized = String(standardRaw || '').trim().toLowerCase()
+    const standard: EvmNftStandard | 'auto' = standardNormalized === 'erc721'
+      ? 'erc721'
+      : standardNormalized === 'erc1155'
+        ? 'erc1155'
+        : 'auto'
+    const address = ethers.getAddress(addressRaw)
+    const key = `${address}:${tokenId.toLowerCase()}`
+    if (seen.has(key)) continue
+    const label = labelParts.join(':').trim() || undefined
+    out.push({ address, tokenId, standard, label })
+    seen.add(key)
+  }
+  return out
+}
+
+function resolveTrackedEvmNfts(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedNft[] {
+  const networkId = String(network?.id || '').trim()
+  const modelId = String(network?.runtimeModelId || networkId).trim()
+  const byNetwork = parseTrackedEvmNfts(String((import.meta as any)?.env?.[`VITE_${networkId.toUpperCase()}_TRACKED_NFTS`] || ''))
+  if (byNetwork.length > 0) return byNetwork
+  const byModel = parseTrackedEvmNfts(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_NFTS`] || ''))
+  if (byModel.length > 0) return byModel
+  return []
+}
+
+function resolveCatalogEvmTrackedNfts(
+  catalog: ServerCoinCatalogItem[],
+  modelId: string
+): EvmTrackedNft[] {
+  const normalizedModel = String(modelId || '').trim().toLowerCase()
+  if (!normalizedModel) return []
+  const out: EvmTrackedNft[] = []
+  const seen = new Set<string>()
+
+  for (const item of catalog) {
+    if (item.kind !== 'asset') continue
+    if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
+    const address = String(item.contractAddress || '').trim()
+    if (!ethers.isAddress(address)) continue
+
+    const source = `${String(item.coinId || '')} ${String(item.name || '')}`
+    const tokenIdMatch = source.match(/(?:tokenid|token|id)\D*(0x[0-9a-f]+|\d+)/i) || source.match(/[#:/](0x[0-9a-f]+|\d+)/i)
+    const tokenId = String(tokenIdMatch?.[1] || '').trim()
+    if (!tokenId) continue
+
+    const standardHint: EvmNftStandard | 'auto' = /1155/i.test(source)
+      ? 'erc1155'
+      : /721/i.test(source)
+        ? 'erc721'
+        : 'auto'
+    const checksum = ethers.getAddress(address)
+    const key = `${checksum}:${tokenId.toLowerCase()}`
+    if (seen.has(key)) continue
+    out.push({
+      address: checksum,
+      tokenId,
+      standard: standardHint,
+      label: String(item.symbol || item.name || '').trim() || undefined
+    })
+    seen.add(key)
+  }
+
+  return out
+}
+
+function tokenIdToBigInt(tokenId: string): bigint {
+  const raw = String(tokenId || '').trim()
+  if (!raw) return 0n
+  if (/^0x[0-9a-f]+$/i.test(raw)) return BigInt(raw)
+  return BigInt(raw)
+}
+
+function tokenIdHex64(tokenId: string): string {
+  const hex = tokenIdToBigInt(tokenId).toString(16)
+  return hex.padStart(64, '0')
+}
+
+function normalizeAssetUri(value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (/^data:/i.test(raw)) return raw
+  if (/^ipfs:\/\//i.test(raw)) {
+    const rest = raw.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '').replace(/^\/+/, '')
+    return `ipfs://${rest}`
+  }
+  if (/^ipfs\//i.test(raw)) return `ipfs://${raw.replace(/^ipfs\//i, '')}`
+  return raw
+}
+
+function renderEip1155Template(uri: string, tokenId: string): string {
+  const normalized = normalizeAssetUri(uri)
+  if (!normalized) return ''
+  const idHex = tokenIdHex64(tokenId)
+  return normalized
+    .replace(/\{id\}/gi, idHex)
+    .replace(/\{ID\}/g, idHex.toUpperCase())
+    .replace(/\{tokenid\}/gi, tokenId)
+}
+
+function formatTokenIdForLabel(tokenId: string): string {
+  try {
+    return tokenIdToBigInt(tokenId).toString(10)
+  } catch {
+    return String(tokenId || '').trim()
+  }
+}
+
+function shortAddress(value: string): string {
+  const checksum = ethers.getAddress(value)
+  return `${checksum.slice(0, 6)}...${checksum.slice(-4)}`
+}
+
+function buildEvmNftAssetKey(address: string, tokenId: string, standard: EvmNftStandard): string {
+  return `EVMNFT:${standard}:${ethers.getAddress(address)}:${String(tokenId || '').trim()}`
+}
+
+function parseEvmNftAssetKey(assetId: string): { standard: EvmNftStandard; address: string; tokenId: string } | null {
+  const m = String(assetId || '').trim().match(/^EVMNFT:(erc721|erc1155):(0x[a-fA-F0-9]{40}):(.+)$/)
+  if (!m) return null
+  return {
+    standard: m[1] as EvmNftStandard,
+    address: ethers.getAddress(m[2]),
+    tokenId: m[3]
+  }
+}
+
+async function detectEvmNftStandard(
+  rpcConfig: UtxoRpcConfig,
+  address: string
+): Promise<EvmNftStandard | null> {
+  const contract = ethers.getAddress(address)
+  const checkInterface = async (interfaceId: string): Promise<boolean> => {
+    try {
+      const data = EVM_ERC165_IFACE.encodeFunctionData('supportsInterface', [interfaceId])
+      const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: contract, data }, 'latest'])
+      const [supported] = EVM_ERC165_IFACE.decodeFunctionResult('supportsInterface', String(raw || '0x'))
+      return Boolean(supported)
+    } catch {
+      return false
+    }
+  }
+  if (await checkInterface(ERC721_INTERFACE_ID)) return 'erc721'
+  if (await checkInterface(ERC1155_INTERFACE_ID)) return 'erc1155'
+  return null
 }
 
 function toAssetDisplaySats(balanceRaw: bigint, decimals: number): number {
@@ -759,6 +958,7 @@ export const useWalletStore = create<WalletState>()(
       lowSyncStreak: 0,
       balanceRefreshNonce: 0,
       networkAssets: {},
+      evmNftAssets: {},
       serverCoinCatalog: [],
       authorizedSites: [],
       autolockMinutes: 5,
@@ -962,6 +1162,10 @@ export const useWalletStore = create<WalletState>()(
           networkAssets: {
             ...state.networkAssets,
             [activeNetworkId]: {}
+          },
+          evmNftAssets: {
+            ...state.evmNftAssets,
+            [activeNetworkId]: {}
           }
         }))
         void (async () => {
@@ -1116,15 +1320,6 @@ export const useWalletStore = create<WalletState>()(
             trackedByAddress.set(checksum, { ...token, address: checksum })
           }
           const trackedTokens = [...trackedByAddress.values()]
-          if (trackedTokens.length === 0) {
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: {}
-              }
-            }))
-            return
-          }
 
           try {
             const rpcConfig = await createUtxoRpcConfig(net, {
@@ -1132,7 +1327,7 @@ export const useWalletStore = create<WalletState>()(
             })
 
             // Bridge-first: keep app->server transport consistent with wallet policy.
-            let balances = await Promise.all(
+            const balances = await Promise.all(
               trackedTokens.map(async (token) => {
                 const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
                 const rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
@@ -1144,12 +1339,102 @@ export const useWalletStore = create<WalletState>()(
               })
             )
 
-            const assets = Object.fromEntries(balances.filter((row): row is readonly [string, number] => Boolean(row))) as Record<string, number>
+            const fungibleAssets = Object.fromEntries(balances.filter((row): row is readonly [string, number] => Boolean(row))) as Record<string, number>
+
+            const trackedNfts = [...resolveTrackedEvmNfts(net), ...resolveCatalogEvmTrackedNfts(serverCoinCatalog, modelId)]
+            const nftByKey = new Map<string, EvmTrackedNft>()
+            for (const nft of trackedNfts.slice(0, MAX_TRACKED_EVM_NFTS)) {
+              if (!ethers.isAddress(nft.address)) continue
+              const checksum = ethers.getAddress(nft.address)
+              const tokenId = String(nft.tokenId || '').trim()
+              if (!tokenId) continue
+              const key = `${checksum}:${tokenId.toLowerCase()}`
+              if (nftByKey.has(key)) continue
+              nftByKey.set(key, { ...nft, address: checksum })
+            }
+
+            const standardCache = new Map<string, EvmNftStandard | null>()
+            const collectionCache = new Map<string, string>()
+            const nftAssets: Record<string, number> = {}
+            const nftLookup: Record<string, EvmNftHolding> = {}
+
+            const readCollectionName = async (contract: string, standard: EvmNftStandard): Promise<string> => {
+              const cached = collectionCache.get(contract)
+              if (cached) return cached
+              const iface = standard === 'erc721' ? EVM_ERC721_IFACE : EVM_ERC1155_IFACE
+              for (const fn of ['symbol', 'name'] as const) {
+                try {
+                  const data = iface.encodeFunctionData(fn, [])
+                  const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: contract, data }, 'latest'])
+                  const [value] = iface.decodeFunctionResult(fn, String(raw || '0x'))
+                  const out = String(value || '').trim()
+                  if (out) {
+                    collectionCache.set(contract, out)
+                    return out
+                  }
+                } catch {
+                  // try next accessor
+                }
+              }
+              return 'NFT'
+            }
+
+            const resolveStandard = async (nft: EvmTrackedNft): Promise<EvmNftStandard | null> => {
+              if (nft.standard === 'erc721' || nft.standard === 'erc1155') return nft.standard
+              if (standardCache.has(nft.address)) return standardCache.get(nft.address) ?? null
+              const detected = await detectEvmNftStandard(rpcConfig, nft.address)
+              standardCache.set(nft.address, detected)
+              return detected
+            }
+
+            for (const nft of nftByKey.values()) {
+              const standard = await resolveStandard(nft)
+              if (!standard) continue
+              let quantityRaw = 0n
+              try {
+                if (standard === 'erc721') {
+                  const ownerData = EVM_ERC721_IFACE.encodeFunctionData('ownerOf', [tokenIdToBigInt(nft.tokenId)])
+                  const ownerRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data: ownerData }, 'latest'])
+                  const [owner] = EVM_ERC721_IFACE.decodeFunctionResult('ownerOf', String(ownerRaw || '0x'))
+                  if (String(owner || '').trim().toLowerCase() !== address.toLowerCase()) continue
+                  quantityRaw = 1n
+                } else {
+                  const balanceData = EVM_ERC1155_IFACE.encodeFunctionData('balanceOf', [address, tokenIdToBigInt(nft.tokenId)])
+                  const balanceRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data: balanceData }, 'latest'])
+                  const [ownedRaw] = EVM_ERC1155_IFACE.decodeFunctionResult('balanceOf', String(balanceRaw || '0x'))
+                  quantityRaw = BigInt(String(ownedRaw || '0'))
+                  if (quantityRaw <= 0n) continue
+                }
+              } catch {
+                continue
+              }
+
+              const collection = nft.label || await readCollectionName(nft.address, standard)
+              const tokenIdLabel = formatTokenIdForLabel(nft.tokenId)
+              const displayLabel = `${collection} #${tokenIdLabel} · ${shortAddress(nft.address)}`
+              const assetKey = buildEvmNftAssetKey(nft.address, nft.tokenId, standard)
+              const quantitySats = Number(quantityRaw > 9999999999n ? 9999999999n : quantityRaw) * 1e8
+              if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
+              nftAssets[assetKey] = quantitySats
+              nftLookup[assetKey] = {
+                address: nft.address,
+                tokenId: nft.tokenId,
+                standard,
+                label: displayLabel,
+                quantityRaw: quantityRaw.toString()
+              }
+            }
+
+            const assets = { ...fungibleAssets, ...nftAssets }
 
             set((state) => ({
               networkAssets: {
                 ...state.networkAssets,
                 [activeNetworkId]: assets
+              },
+              evmNftAssets: {
+                ...state.evmNftAssets,
+                [activeNetworkId]: nftLookup
               }
             }))
           } catch (err) {
@@ -1185,11 +1470,150 @@ export const useWalletStore = create<WalletState>()(
         const normalizedAssetId = String(assetId || '').trim()
         if (!normalizedAssetId) throw new Error('Asset id is required')
 
-        const { networks, activeNetworkId, useLocalRpc: ulr, localRpcOverrides: lro } = get()
+        const {
+          networks,
+          activeNetworkId,
+          useLocalRpc: ulr,
+          localRpcOverrides: lro,
+          evmNftAssets
+        } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net) throw new Error('Active network not found')
         if (!resolveNetworkCapabilities(net).features.assetLayer) {
           throw new Error('Active network does not support assets')
+        }
+
+        if (net.coinType === 'EVM') {
+          const nftLookup = evmNftAssets?.[activeNetworkId] || {}
+          const direct = nftLookup[normalizedAssetId]
+          const parsedKey = parseEvmNftAssetKey(normalizedAssetId)
+          const fallback = parsedKey
+            ? {
+                address: parsedKey.address,
+                tokenId: parsedKey.tokenId,
+                standard: parsedKey.standard,
+                label: `${parsedKey.standard.toUpperCase()} #${formatTokenIdForLabel(parsedKey.tokenId)} · ${shortAddress(parsedKey.address)}`,
+                quantityRaw: '1'
+              }
+            : null
+          const nft = direct || fallback
+          if (!nft) {
+            throw new Error(`No EVM NFT metadata entry found for "${normalizedAssetId}". Add it to tracked NFTs.`)
+          }
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+
+          const resolveSourceUrls = (uri: string): string[] => {
+            const normalized = normalizeAssetUri(uri)
+            if (!normalized) return []
+            if (/^https?:\/\//i.test(normalized)) return [normalized]
+            if (/^data:/i.test(normalized)) return [normalized]
+            if (/^ipfs:\/\//i.test(normalized)) {
+              const cid = normalized.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '').replace(/^\/+/, '')
+              return [
+                `https://gateway.pinata.cloud/ipfs/${cid}`,
+                `https://ipfs.io/ipfs/${cid}`,
+                `https://cloudflare-ipfs.com/ipfs/${cid}`
+              ]
+            }
+            return [normalized]
+          }
+
+          const decodeDataJson = (uri: string): Record<string, any> | null => {
+            const raw = String(uri || '').trim()
+            const m = raw.match(/^data:application\/json(?:;charset=[^;,]+)?(?:;(base64))?,(.*)$/i)
+            if (!m) return null
+            const payload = String(m[2] || '')
+            try {
+              const text = m[1] ? atob(payload) : decodeURIComponent(payload)
+              const json = JSON.parse(text)
+              return json && typeof json === 'object' ? json : null
+            } catch {
+              return null
+            }
+          }
+
+          const readUriFromContract = async (): Promise<string> => {
+            if (nft.standard === 'erc721') {
+              try {
+                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(nft.tokenId)])
+                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+                const [uri] = EVM_ERC721_IFACE.decodeFunctionResult('tokenURI', String(raw || '0x'))
+                return normalizeAssetUri(String(uri || ''))
+              } catch {
+                // fallback below
+              }
+            }
+            try {
+              const data = EVM_ERC1155_IFACE.encodeFunctionData('uri', [tokenIdToBigInt(nft.tokenId)])
+              const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+              const [uri] = EVM_ERC1155_IFACE.decodeFunctionResult('uri', String(raw || '0x'))
+              return renderEip1155Template(String(uri || ''), nft.tokenId)
+            } catch {
+              // fallback below
+            }
+            if (nft.standard === 'erc1155') {
+              try {
+                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(nft.tokenId)])
+                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+                const [uri] = EVM_ERC721_IFACE.decodeFunctionResult('tokenURI', String(raw || '0x'))
+                return normalizeAssetUri(String(uri || ''))
+              } catch {
+                // no-op
+              }
+            }
+            return ''
+          }
+
+          const metadataUri = await readUriFromContract()
+          let metadata: Record<string, any> | null = decodeDataJson(metadataUri)
+
+          if (!metadata && metadataUri) {
+            for (const url of resolveSourceUrls(metadataUri)) {
+              try {
+                const res = await fetch(url)
+                if (!res.ok) continue
+                const text = await res.text()
+                const parsed = JSON.parse(text)
+                if (parsed && typeof parsed === 'object') {
+                  metadata = parsed as Record<string, any>
+                  break
+                }
+              } catch {
+                // try next URL
+              }
+            }
+          }
+
+          const imageUriRaw = String(
+            metadata?.image
+            || metadata?.image_url
+            || metadata?.animation_url
+            || metadata?.imageUrl
+            || ''
+          ).trim()
+          const previewUrl = renderEip1155Template(imageUriRaw, nft.tokenId) || metadataUri
+          const nameFromMetadata = String(metadata?.name || '').trim()
+          const metadataIpfs = /^ipfs:\/\//i.test(metadataUri) ? metadataUri : ''
+          const previewIpfs = /^ipfs:\/\//i.test(previewUrl) ? previewUrl : ''
+
+          return {
+            name: nameFromMetadata || nft.label,
+            amount: Number(nft.quantityRaw || '0'),
+            units: 0,
+            reissuable: false,
+            has_ipfs: Boolean(previewIpfs || metadataIpfs),
+            ipfs_hash: previewIpfs || metadataIpfs || undefined,
+            preview_url: previewUrl || undefined,
+            metadata_url: metadataUri || undefined,
+            token_id: nft.tokenId,
+            contract_address: nft.address,
+            token_standard: nft.standard,
+            txid_or_longname: normalizedAssetId,
+            ownership_address: ''
+          }
         }
 
         const rpcConfig = await createUtxoRpcConfig(net, {
