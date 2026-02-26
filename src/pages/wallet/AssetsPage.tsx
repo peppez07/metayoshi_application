@@ -114,6 +114,7 @@ const AssetsPage: React.FC = () => {
   const {
     accounts, activeAccountId,
     networks, activeNetworkId,
+    serverCoinCatalog,
     networkAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
     isConnected,
     isSyncing, syncPercent, lowSyncStreak
@@ -122,6 +123,7 @@ const AssetsPage: React.FC = () => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
   const supportsPreview = activeNetwork.coinType === 'UTXO'
   const canSendAssets = caps.features.assetSend
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -147,6 +149,12 @@ const AssetsPage: React.FC = () => {
   const roots      = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
   const subs       = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => a.localeCompare(b))
   const sorted     = [...roots, ...subs]
+  const catalogForModel = useMemo(
+    () => serverCoinCatalog.filter((item) => String(item.runtimeModelId || '').trim().toLowerCase() === activeModelId),
+    [serverCoinCatalog, activeModelId]
+  )
+  const catalogMainCount = catalogForModel.filter((item) => item.kind === 'main').length
+  const catalogAssetRows = catalogForModel.filter((item) => item.kind === 'asset')
 
   const isSearching = search.trim().length > 0
   const filtered = useMemo(() => {
@@ -298,6 +306,45 @@ const AssetsPage: React.FC = () => {
 
       {/* ── scrollable content ── */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {catalogForModel.length > 0 && (
+          <div className="px-4 pt-3 pb-2 border-b border-dark-600/40">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+              Server Catalog · Main {catalogMainCount} · Assets {catalogAssetRows.length}
+            </p>
+            {catalogAssetRows.length > 0 && (
+              <p className="text-[10px] text-gray-500 mt-1">
+                Token/asset entries from server configuration are catalogued here while blockchains stay in coin selector.
+              </p>
+            )}
+          </div>
+        )}
+
+        {catalogAssetRows.length > 0 && (
+          <>
+            <div className="px-4 pt-3 pb-1 flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
+                Catalogued Token/Assets ({catalogAssetRows.length})
+              </p>
+            </div>
+            {catalogAssetRows.slice(0, 50).map((item) => (
+              <div key={`catalog-${item.coinId}`} className="px-4 py-2 border-b border-dark-600/30 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-200 truncate">{item.name}</p>
+                  <p className="text-[10px] text-gray-500 font-mono truncate">{item.coinId}</p>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full border border-blue-500/40 text-blue-300 uppercase font-bold">
+                  {item.symbol || 'ASSET'}
+                </span>
+              </div>
+            ))}
+            {catalogAssetRows.length > 50 && (
+              <p className="px-4 py-2 text-[10px] text-gray-500">
+                Showing first 50 catalogued assets for this chain model.
+              </p>
+            )}
+          </>
+        )}
 
         {/* not supported */}
         {!caps.features.assetLayer && (

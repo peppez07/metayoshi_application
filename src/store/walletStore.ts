@@ -5,6 +5,7 @@ import { decryptVaultV1, encryptVaultV1, type EncryptedVaultV1 } from '../lib/va
 import { normalizeDappOrigin } from '../lib/dappPermissions'
 import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import {
+  callBridgeMethod,
   listAssetBalancesByAddress,
   sendRtmAssetNonCustodial,
   getAssetDetailsByName,
@@ -20,11 +21,11 @@ import { sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { deriveSolanaAddress } from '../lib/solanaAddress'
-import { getSolanaBalance, sendSolanaNonCustodial } from '../lib/solanaNonCustodial'
+import { sendSolanaNonCustodial } from '../lib/solanaNonCustodial'
 import { deriveStellarAddress } from '../lib/stellarAddress'
-import { getStellarBalance, sendStellarNonCustodial } from '../lib/stellarNonCustodial'
+import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
-import { getTronBalance, sendTronNonCustodial } from '../lib/tronNonCustodial'
+import { sendTronNonCustodial } from '../lib/tronNonCustodial'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -41,10 +42,11 @@ import {
   getCoinRuntimeProfile,
   INITIAL_NETWORKS,
   estimateNetworkFee,
-  loadNetworksFromServerRegistry
+  loadServerRegistrySnapshot
 } from '../coins'
 import { getCoinApiInterceptor } from '../coins/interceptors'
 import type { CoinType, Network } from '../coins'
+import type { ServerCoinCatalogItem } from '../coins'
 import { useApiMonitorStore } from './apiMonitorStore'
 
 export type { CoinType, Network } from '../coins'
@@ -143,6 +145,8 @@ interface WalletState {
   balanceRefreshNonce: number
   /** Per-network asset balances. Key = networkId, value = { assetName: rawAmount (sats) } */
   networkAssets: Record<string, Record<string, number>>
+  /** Full server registry catalog, classified as main blockchain vs token/asset. */
+  serverCoinCatalog: ServerCoinCatalogItem[]
   authorizedSites: string[]
   autolockMinutes: number
   donationPercent: number
@@ -151,6 +155,8 @@ interface WalletState {
 
   // Local RPC mode â€” bypasses the MetaYoshi bridge when enabled
   useLocalRpc: boolean
+  /** Last generated /v1/coins mapping report (server coin -> app network id). */
+  lastServerCoinSyncReport: string
   /** Per-network local node settings, keyed by network id. */
   localRpcOverrides: Record<string, {
     rpcUrl: string
@@ -327,11 +333,7 @@ function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeW
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
 }
 
-const EVM_ERC20_MIN_ABI = [
-  'function balanceOf(address) view returns (uint256)',
-  'function symbol() view returns (string)',
-  'function decimals() view returns (uint8)'
-]
+const EVM_ERC20_BALANCE_IFACE = new ethers.Interface(['function balanceOf(address) view returns (uint256)'])
 
 type EvmTrackedToken = {
   address: string
@@ -373,11 +375,38 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   return parsed
 }
 
-function resolveTrackedEvmTokens(networkId: string): EvmTrackedToken[] {
-  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${String(networkId || '').toUpperCase()}_TRACKED_TOKENS`] || ''))
+function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedToken[] {
+  const networkId = String(network?.id || '').trim()
+  const modelId = String(network?.runtimeModelId || networkId).trim()
+  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${networkId.toUpperCase()}_TRACKED_TOKENS`] || ''))
   if (byNetwork.length > 0) return byNetwork
-  if (String(networkId || '').trim().toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
+  const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_TOKENS`] || ''))
+  if (byModel.length > 0) return byModel
+  if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   return []
+}
+
+function resolveCatalogEvmTrackedTokens(
+  catalog: ServerCoinCatalogItem[],
+  modelId: string
+): EvmTrackedToken[] {
+  const normalizedModel = String(modelId || '').trim().toLowerCase()
+  if (!normalizedModel) return []
+  const byAddress = new Map<string, EvmTrackedToken>()
+  for (const item of catalog) {
+    if (item.kind !== 'asset') continue
+    if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
+    const candidate = String(item.contractAddress || '').trim()
+    if (!ethers.isAddress(candidate)) continue
+    const address = ethers.getAddress(candidate)
+    if (byAddress.has(address)) continue
+    byAddress.set(address, {
+      address,
+      symbol: String(item.symbol || '').trim().toUpperCase() || address.slice(0, 6),
+      decimals: 18
+    })
+  }
+  return [...byAddress.values()]
 }
 
 function toAssetDisplaySats(balanceRaw: bigint, decimals: number): number {
@@ -398,6 +427,42 @@ function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
   // Tide was previously derived with a legacy coin-type path; always re-derive
   // from the current canonical path when network address resolution runs.
   return symbol === 'TIDE'
+}
+
+function resolveNetworkModelId(network?: Partial<Network>): string {
+  return String(network?.runtimeModelId || network?.id || '').trim().toLowerCase()
+}
+
+const SERVER_COIN_SYNC_REPORT_STORAGE_KEY = 'metayoshi:last-server-coin-sync-report'
+
+function buildServerCoinSyncReport(networks: Network[]): string {
+  const nowIso = new Date().toISOString()
+  const rows = [...networks]
+    .filter((n) => String(n.serverCoinId || '').trim())
+    .map((n) => ({
+      serverCoinId: String(n.serverCoinId || '').trim().toLowerCase(),
+      appNetworkId: String(n.id || '').trim(),
+      runtimeModelId: String(n.runtimeModelId || n.id || '').trim(),
+      chain: String(n.serverChain || 'main').trim().toLowerCase(),
+      symbol: String(n.symbol || '').trim().toUpperCase()
+    }))
+    .sort((a, b) => a.serverCoinId.localeCompare(b.serverCoinId))
+
+  const lines: string[] = [
+    '# Server Coin Sync Report',
+    '',
+    `Generated: ${nowIso}`,
+    `Total mapped networks: ${rows.length}`,
+    '',
+    '| serverCoinId | appNetworkId | runtimeModelId | chain | symbol |',
+    '| --- | --- | --- | --- | --- |'
+  ]
+
+  for (const row of rows) {
+    lines.push(`| ${row.serverCoinId} | ${row.appNetworkId} | ${row.runtimeModelId} | ${row.chain} | ${row.symbol} |`)
+  }
+
+  return lines.join('\n')
 }
 
 const TIDE_LEGACY_ADDRESS_SPEC = {
@@ -466,6 +531,7 @@ async function deriveAccountAddresses(
   let firstXrpAddress = ''
 
   for (const net of networks) {
+    const modelId = resolveNetworkModelId(net)
     if (net.derivation?.status === 'unsupported') {
       const reason = net.derivation.reason || `${net.name} derivation is not supported in this build`
       derivationErrors.push(`${net.symbol}: ${reason}`)
@@ -494,7 +560,7 @@ async function deriveAccountAddresses(
       }
     } else if (net.coinType === 'EVM') {
       networkAddresses[net.id] = evmWallet.address
-    } else if (net.id === 'sol') {
+    } else if (modelId === 'sol') {
       try {
         const sol = await deriveSolanaAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = sol.address
@@ -503,7 +569,7 @@ async function deriveAccountAddresses(
         derivationErrors.push(`${net.symbol}: ${msg}`)
         console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
       }
-    } else if (net.id === 'xlm') {
+    } else if (modelId === 'xlm') {
       try {
         const xlm = await deriveStellarAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = xlm.address
@@ -512,7 +578,7 @@ async function deriveAccountAddresses(
         derivationErrors.push(`${net.symbol}: ${msg}`)
         console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
       }
-    } else if (net.id === 'tron') {
+    } else if (modelId === 'tron') {
       try {
         const tron = await deriveTronAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = tron.address
@@ -521,7 +587,7 @@ async function deriveAccountAddresses(
         derivationErrors.push(`${net.symbol}: ${msg}`)
         console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
       }
-    } else if (net.id === 'ada') {
+    } else if (modelId === 'ada') {
       try {
         const ada = await deriveCardanoAddress(mnemonic, derivationIndex, net.rpcUrl)
         networkAddresses[net.id] = ada.address
@@ -530,7 +596,7 @@ async function deriveAccountAddresses(
         derivationErrors.push(`${net.symbol}: ${msg}`)
         console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
       }
-    } else if (net.id === 'xmr') {
+    } else if (modelId === 'xmr') {
       try {
         const xmr = await deriveMoneroAddress(mnemonic, derivationIndex, net.rpcUrl)
         networkAddresses[net.id] = xmr.address
@@ -693,11 +759,13 @@ export const useWalletStore = create<WalletState>()(
       lowSyncStreak: 0,
       balanceRefreshNonce: 0,
       networkAssets: {},
+      serverCoinCatalog: [],
       authorizedSites: [],
       autolockMinutes: 5,
       donationPercent: MIN_DONATION_PERCENT,
       lastActiveTimestamp: Date.now(),
       useLocalRpc: false,
+      lastServerCoinSyncReport: '',
       localRpcOverrides: {},
       activity: [
         {
@@ -908,6 +976,7 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === networkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return null
+        const modelId = resolveNetworkModelId(net)
         const existing = acc.networkAddresses?.[networkId]
         if (existing) {
           if (net.derivation?.status === 'unsupported') return existing
@@ -919,9 +988,9 @@ export const useWalletStore = create<WalletState>()(
           } else if (
             net.coinType === 'EVM'
             || net.coinType === 'XRP'
-            || net.id === 'sol'
-            || net.id === 'xlm'
-            || net.id === 'tron'
+            || modelId === 'sol'
+            || modelId === 'xlm'
+            || modelId === 'tron'
           ) {
             const isValidPersisted = await validateChainAddress(net, undefined, existing).catch(() => false)
             if (isValidPersisted) return existing
@@ -938,11 +1007,11 @@ export const useWalletStore = create<WalletState>()(
           net.coinType === 'EVM'
           || net.coinType === 'XRP'
           || net.coinType === 'UTXO'
-          || net.id === 'ada'
-          || net.id === 'xmr'
-          || net.id === 'sol'
-          || net.id === 'xlm'
-          || net.id === 'tron'
+          || modelId === 'ada'
+          || modelId === 'xmr'
+          || modelId === 'sol'
+          || modelId === 'xlm'
+          || modelId === 'tron'
         if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
@@ -963,19 +1032,19 @@ export const useWalletStore = create<WalletState>()(
             } else {
               console.log(`âœ“ Derived ${net.symbol} address on demand: ${address}`)
             }
-          } else if (net.id === 'ada') {
+          } else if (modelId === 'ada') {
             const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
             address = derived.address
-          } else if (net.id === 'xmr') {
+          } else if (modelId === 'xmr') {
             const derived = await deriveMoneroAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
             address = derived.address
-          } else if (net.id === 'sol') {
+          } else if (modelId === 'sol') {
             const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
             address = derived.address
-          } else if (net.id === 'xlm') {
+          } else if (modelId === 'xlm') {
             const derived = await deriveStellarAddress(sessionMnemonic!, accountIndex)
             address = derived.address
-          } else if (net.id === 'tron') {
+          } else if (modelId === 'tron') {
             const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           }
@@ -1018,7 +1087,15 @@ export const useWalletStore = create<WalletState>()(
       setSyncing: (syncing) => set({ isSyncing: syncing }),
 
       fetchNetworkAssets: async () => {
-        const { networks, activeNetworkId, accounts, activeAccountId, useLocalRpc: ulr, localRpcOverrides: lro } = get()
+        const {
+          networks,
+          activeNetworkId,
+          accounts,
+          activeAccountId,
+          serverCoinCatalog,
+          useLocalRpc: ulr,
+          localRpcOverrides: lro
+        } = get()
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
@@ -1028,7 +1105,17 @@ export const useWalletStore = create<WalletState>()(
         if (!address) return
 
         if (net.coinType === 'EVM') {
-          const trackedTokens = resolveTrackedEvmTokens(net.id)
+          const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
+          const trackedDefaults = resolveTrackedEvmTokens(net)
+          const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+          const trackedByAddress = new Map<string, EvmTrackedToken>()
+          for (const token of [...trackedDefaults, ...trackedFromCatalog]) {
+            if (!ethers.isAddress(token.address)) continue
+            const checksum = ethers.getAddress(token.address)
+            if (trackedByAddress.has(checksum)) continue
+            trackedByAddress.set(checksum, { ...token, address: checksum })
+          }
+          const trackedTokens = [...trackedByAddress.values()]
           if (trackedTokens.length === 0) {
             set((state) => ({
               networkAssets: {
@@ -1040,26 +1127,24 @@ export const useWalletStore = create<WalletState>()(
           }
 
           try {
-            const provider = new ethers.JsonRpcProvider(net.rpcUrl, net.chainId)
-            const balances = await Promise.all(
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+
+            // Bridge-first: keep app->server transport consistent with wallet policy.
+            let balances = await Promise.all(
               trackedTokens.map(async (token) => {
-                const contract = new ethers.Contract(token.address, EVM_ERC20_MIN_ABI, provider)
-                const [rawBalance, symbolRaw, decimalsRaw] = await Promise.all([
-                  contract.balanceOf(address) as Promise<bigint>,
-                  contract.symbol().catch(() => token.symbol) as Promise<string>,
-                  contract.decimals().catch(() => token.decimals) as Promise<number>
-                ])
-                const decimals = Number.isInteger(Number(decimalsRaw)) ? Number(decimalsRaw) : token.decimals
-                const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
+                const rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
+                const rawBalance = BigInt(String(rawHex || '0x0'))
+                const displaySats = toAssetDisplaySats(rawBalance, token.decimals)
                 if (!Number.isFinite(displaySats) || displaySats <= 0) return null
-                const symbol = String(symbolRaw || token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
+                const symbol = String(token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
                 return [symbol, displaySats] as const
               })
             )
 
-            const assets = Object.fromEntries(
-              balances.filter((row): row is readonly [string, number] => Boolean(row))
-            ) as Record<string, number>
+            const assets = Object.fromEntries(balances.filter((row): row is readonly [string, number] => Boolean(row))) as Record<string, number>
 
             set((state) => ({
               networkAssets: {
@@ -1068,7 +1153,11 @@ export const useWalletStore = create<WalletState>()(
               }
             }))
           } catch (err) {
-            console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
+            console.warn(
+              `[${net.symbol}] fetchNetworkAssets failed for ${activeNetworkId} (${address}). `
+              + 'Bridge token reads require eth_call to be allowed for this chain.',
+              err
+            )
           }
           return
         }
@@ -1304,6 +1393,7 @@ export const useWalletStore = create<WalletState>()(
         const selectedNetworkId = networkId || activeNetworkId
         const selectedNetwork = networks.find((n) => n.id === selectedNetworkId)
         if (!selectedNetwork) throw new Error(`Selected network not found: ${selectedNetworkId}`)
+        const selectedModelId = resolveNetworkModelId(selectedNetwork)
 
         const derivationIndex = nextAccountIndex >= 0 ? nextAccountIndex : accounts.length
         let selectedAddress = ''
@@ -1316,19 +1406,19 @@ export const useWalletStore = create<WalletState>()(
         } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
           const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
           selectedAddress = derived.address
-        } else if (selectedNetwork.id === 'ada') {
+        } else if (selectedModelId === 'ada') {
           const derived = await deriveCardanoAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
           selectedAddress = derived.address
-        } else if (selectedNetwork.id === 'xmr') {
+        } else if (selectedModelId === 'xmr') {
           const derived = await deriveMoneroAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
           selectedAddress = derived.address
-        } else if (selectedNetwork.id === 'sol') {
+        } else if (selectedModelId === 'sol') {
           const derived = await deriveSolanaAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
-        } else if (selectedNetwork.id === 'xlm') {
+        } else if (selectedModelId === 'xlm') {
           const derived = await deriveStellarAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
-        } else if (selectedNetwork.id === 'tron') {
+        } else if (selectedModelId === 'tron') {
           const derived = await deriveTronAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
         }
@@ -1341,7 +1431,7 @@ export const useWalletStore = create<WalletState>()(
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
         if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
-        if (selectedNetwork.id === 'sol') addresses.SOL = selectedAddress
+        if (selectedModelId === 'sol') addresses.SOL = selectedAddress
 
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
@@ -1463,22 +1553,30 @@ export const useWalletStore = create<WalletState>()(
 
       syncNetworksFromServer: async () => {
         let serverNetworks: Network[] | null = null
+        let serverCatalog: ServerCoinCatalogItem[] = []
         try {
-          serverNetworks = await loadNetworksFromServerRegistry()
+          const snapshot = await loadServerRegistrySnapshot()
+          serverNetworks = snapshot.networks
+          serverCatalog = Array.isArray(snapshot.catalog) ? snapshot.catalog : []
         } catch (error) {
           console.warn('Failed to sync networks from /v1/coins:', error)
           return
         }
-        if (!serverNetworks || serverNetworks.length === 0) return
-        const syncedNetworks = serverNetworks
+        if ((!serverNetworks || serverNetworks.length === 0) && serverCatalog.length === 0) return
+        const syncedNetworks = serverNetworks || []
+        const syncReport = buildServerCoinSyncReport(syncedNetworks)
+        writeLocalStorageSafe(SERVER_COIN_SYNC_REPORT_STORAGE_KEY, syncReport)
+        console.info('[coins-sync] generated report:\n' + syncReport)
 
         set((state) => {
-          const activeNetworkId = syncedNetworks.some((n) => n.id === state.activeNetworkId)
+          const activeNetworkId = syncedNetworks.length > 0 && syncedNetworks.some((n) => n.id === state.activeNetworkId)
             ? state.activeNetworkId
-            : (syncedNetworks[0]?.id || DEFAULT_ACTIVE_NETWORK_ID)
+            : (syncedNetworks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
           return {
-            networks: syncedNetworks,
-            activeNetworkId
+            networks: syncedNetworks.length > 0 ? syncedNetworks : state.networks,
+            activeNetworkId,
+            serverCoinCatalog: serverCatalog,
+            lastServerCoinSyncReport: syncReport
           }
         })
       },
@@ -1490,6 +1588,7 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
+        const modelId = resolveNetworkModelId(net)
         const requestStartedAt = Date.now()
         const requestNonce = get().balanceRefreshNonce + 1
         const isStaleRequest = () => {
@@ -1646,7 +1745,7 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
-          } else if (net.id === 'ada') {
+          } else if (modelId === 'ada') {
             const { useLocalRpc, localRpcOverrides } = get()
             const rpcConfig = await createUtxoRpcConfig(net, {
               useLocalRpc,
@@ -1682,7 +1781,7 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
-          } else if (net.id === 'xmr') {
+          } else if (modelId === 'xmr') {
             const { useLocalRpc, localRpcOverrides } = get()
             const rpcConfig = await createUtxoRpcConfig(net, {
               useLocalRpc,
@@ -1718,8 +1817,15 @@ export const useWalletStore = create<WalletState>()(
                   : a
               )
             }))
-          } else if (net.id === 'sol') {
-            const balance = await getSolanaBalance(net.rpcUrl, address)
+          } else if (modelId === 'sol') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
@@ -1731,17 +1837,24 @@ export const useWalletStore = create<WalletState>()(
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance,
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: balance
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
               )
             }))
-          } else if (net.id === 'xlm') {
-            const balance = await getStellarBalance(net.rpcUrl, address)
+          } else if (modelId === 'xlm') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
@@ -1753,17 +1866,24 @@ export const useWalletStore = create<WalletState>()(
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance,
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: balance
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
               )
             }))
-          } else if (net.id === 'tron') {
-            const balance = await getTronBalance(net.rpcUrl, address)
+          } else if (modelId === 'tron') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
@@ -1775,10 +1895,10 @@ export const useWalletStore = create<WalletState>()(
                 a.id === acc.id
                   ? {
                       ...a,
-                      balance,
+                      balance: snapshot.balance,
                       networkBalances: {
                         ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: balance
+                        [activeNetworkId]: snapshot.balance
                       }
                     }
                   : a
@@ -1826,8 +1946,9 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) throw new Error('No active account/network')
+        const modelId = resolveNetworkModelId(net)
 
-        const profile = getCoinRuntimeProfile(net.id)
+        const profile = getCoinRuntimeProfile(modelId || net.id)
         const sendCustodyMode = resolveChainSendCustodyMode(net)
         const backendMode: ChainModelLiveSnapshot['backendMode'] =
           net.coinType === 'EVM'
@@ -1991,7 +2112,8 @@ export const useWalletStore = create<WalletState>()(
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.id !== 'ada') throw new Error('Active network is not Cardano')
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'ada') throw new Error('Active network is not Cardano')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
@@ -2011,7 +2133,8 @@ export const useWalletStore = create<WalletState>()(
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.id !== 'xmr') throw new Error('Active network is not Monero')
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'xmr') throw new Error('Active network is not Monero')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
@@ -2030,7 +2153,8 @@ export const useWalletStore = create<WalletState>()(
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.id !== 'sol') throw new Error('Active network is not Solana')
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'sol') throw new Error('Active network is not Solana')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const derived = await deriveSolanaAddress(sessionMnemonic, accountIndex)
@@ -2051,7 +2175,8 @@ export const useWalletStore = create<WalletState>()(
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.id !== 'xlm') throw new Error('Active network is not Stellar')
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'xlm') throw new Error('Active network is not Stellar')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const derived = await deriveStellarAddress(sessionMnemonic, accountIndex)
@@ -2072,7 +2197,8 @@ export const useWalletStore = create<WalletState>()(
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
-        if (!net || net.id !== 'tron') throw new Error('Active network is not TRON')
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'tron') throw new Error('Active network is not TRON')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const derived = await deriveTronAddress(sessionMnemonic, accountIndex)
@@ -2146,11 +2272,13 @@ export const useWalletStore = create<WalletState>()(
         isConnected: state.isConnected,
         isSyncing: state.isSyncing,
         syncPercent: state.syncPercent,
+        serverCoinCatalog: state.serverCoinCatalog,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
         lastActiveTimestamp: state.lastActiveTimestamp,
-        activity: state.activity
+        activity: state.activity,
+        lastServerCoinSyncReport: state.lastServerCoinSyncReport
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
@@ -2182,7 +2310,15 @@ export const useWalletStore = create<WalletState>()(
           activeAccountId,
           networks: INITIAL_NETWORKS,
           activeNetworkId,
-          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
+          serverCoinCatalog: Array.isArray((persisted as any).serverCoinCatalog)
+            ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
+            : [],
+          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT)),
+          lastServerCoinSyncReport: String(
+            merged.lastServerCoinSyncReport
+            || readLocalStorageSafe(SERVER_COIN_SYNC_REPORT_STORAGE_KEY)
+            || ''
+          )
         }
       }
     }

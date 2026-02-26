@@ -20,8 +20,9 @@ export type CoinModelRouteKey =
   | 'generic'
 
 export function resolveCoinModelFamily(network: Network): CoinModelFamily {
-  if (network.id === 'ada') return 'cardano'
-  if (network.id === 'xmr') return 'monero'
+  const modelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
+  if (modelId === 'ada') return 'cardano'
+  if (modelId === 'xmr') return 'monero'
   if (network.coinType === 'EVM') return 'evm'
   if (network.coinType === 'XRP') return 'xrp-ledger'
 

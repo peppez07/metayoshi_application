@@ -20,9 +20,6 @@ import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type Unsign
 import { PublicKey } from '@solana/web3.js'
 import { StrKey } from '@stellar/stellar-sdk'
 import { TronWeb } from 'tronweb'
-import { getSolanaBalance } from './solanaNonCustodial'
-import { getStellarBalance } from './stellarNonCustodial'
-import { getTronBalance } from './tronNonCustodial'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -69,16 +66,22 @@ export interface SendUtxoNonCustodialInput {
 }
 
 function resolveProtocol(network: Network): string {
-  return getCoinRuntimeProfile(network.id)?.protocol || 'utxo-jsonrpc'
+  const modelId = String(network.runtimeModelId || network.id || '').trim()
+  return getCoinRuntimeProfile(modelId)?.protocol || 'utxo-jsonrpc'
+}
+
+function resolveModelId(network: Network): string {
+  return String(network.runtimeModelId || network.id || '').trim().toLowerCase()
 }
 
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
 
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
+  const modelId = resolveModelId(network)
   const protocol = resolveProtocol(network)
-  if (network.id === 'sol' || network.id === 'xlm' || network.id === 'tron') return 'non-custodial'
-  if (network.id === 'ada') return 'non-custodial'
-  if (network.id === 'xmr') {
+  if (modelId === 'sol' || modelId === 'xlm' || modelId === 'tron') return 'non-custodial'
+  if (modelId === 'ada') return 'non-custodial'
+  if (modelId === 'xmr') {
     const enabled = /^(1|true|yes)$/i.test(String((import.meta as any)?.env?.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
     return enabled ? 'non-custodial' : 'unsupported'
   }
@@ -119,6 +122,102 @@ function parseCoinAmount(amount: string, decimals: number, symbol: string): numb
   return Number(`${whole}.${fraction.padEnd(decimals, '0').slice(0, decimals)}`)
 }
 
+function formatDecimalUnits(value: bigint, decimals: number): string {
+  const negative = value < 0n
+  const abs = negative ? -value : value
+  const base = 10n ** BigInt(decimals)
+  const whole = abs / base
+  const fraction = abs % base
+  const fractionText = fraction.toString().padStart(decimals, '0').replace(/0+$/, '')
+  const out = fractionText ? `${whole.toString()}.${fractionText}` : whole.toString()
+  return negative ? `-${out}` : out
+}
+
+function asNumberLike(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function asDecimalString(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  return /^\d+(\.\d+)?$/.test(raw) ? raw : ''
+}
+
+async function getSolanaBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
+  const calls: Array<() => Promise<any>> = [
+    () => callBridgeMethod(rpcConfig, 'getBalance', [address, { commitment: 'confirmed' }]),
+    () => callBridgeMethod(rpcConfig, 'getBalance', [address]),
+    () => callBridgeMethod(rpcConfig, 'getbalance', [address])
+  ]
+  let lastError: unknown = null
+  for (const invoke of calls) {
+    try {
+      const result = await invoke()
+      const lamports = asNumberLike((result as any)?.value ?? result)
+      if (lamports !== null) {
+        return formatDecimalUnits(BigInt(Math.trunc(lamports)), 9)
+      }
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Bridge Solana balance query failed')
+}
+
+async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
+  const calls: Array<() => Promise<any>> = [
+    () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
+    () => callBridgeMethod(rpcConfig, 'getbalance', []),
+    () => callBridgeMethod(rpcConfig, 'getAccount', [address])
+  ]
+  let lastError: unknown = null
+  for (const invoke of calls) {
+    try {
+      const result = await invoke()
+      const scalar = asDecimalString((result as any)?.balance ?? result)
+      if (scalar) return scalar
+      const balances = Array.isArray((result as any)?.balances) ? (result as any).balances : []
+      const native = balances.find((b: any) => String(b?.asset_type || '').toLowerCase() === 'native')
+      const nativeBalance = asDecimalString(native?.balance)
+      if (nativeBalance) return nativeBalance
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Bridge Stellar balance query failed')
+}
+
+async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
+  const tronHex = (() => {
+    try {
+      return TronWeb.address.toHex(address)
+    } catch {
+      return ''
+    }
+  })()
+  const calls: Array<() => Promise<any>> = [
+    () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
+    () => callBridgeMethod(rpcConfig, 'getBalance', [address]),
+    () => (tronHex ? callBridgeMethod(rpcConfig, 'eth_getBalance', [tronHex, 'latest']) : Promise.reject(new Error('Invalid TRON address')))
+  ]
+  let lastError: unknown = null
+  for (const invoke of calls) {
+    try {
+      const result = await invoke()
+      const decimal = asDecimalString((result as any)?.balance ?? result)
+      if (decimal) return decimal
+      const hex = String(result ?? '').trim()
+      if (/^0x[0-9a-f]+$/i.test(hex)) {
+        // EVM-style balance fallback; most providers expose 18-decimal unit.
+        return formatDecimalUnits(BigInt(hex), 18)
+      }
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Bridge TRON balance query failed')
+}
+
 function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeWallet {
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, `m/44'/60'/${accountIndex}'/0/0`)
 }
@@ -140,20 +239,30 @@ function isClientSignerFormatError(error: unknown): boolean {
 }
 
 export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): Promise<ChainBalanceSyncResult> {
+  const modelId = resolveModelId(input.network)
   const protocol = resolveProtocol(input.network)
   const address = String(input.address || '').trim()
   if (!address) throw new Error('Address is required')
 
-  if (input.network.id === 'sol') {
-    const balance = await getSolanaBalance(input.network.rpcUrl, address)
+  if (modelId === 'sol') {
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for SOL')
+    }
+    const balance = await getSolanaBalanceViaBridge(input.rpcConfig, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
-  if (input.network.id === 'xlm') {
-    const balance = await getStellarBalance(input.network.rpcUrl, address)
+  if (modelId === 'xlm') {
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for XLM')
+    }
+    const balance = await getStellarBalanceViaBridge(input.rpcConfig, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
-  if (input.network.id === 'tron') {
-    const balance = await getTronBalance(input.network.rpcUrl, address)
+  if (modelId === 'tron') {
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for TRON')
+    }
+    const balance = await getTronBalanceViaBridge(input.rpcConfig, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
 
@@ -215,10 +324,11 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
 }
 
 export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcConfig | undefined, address: string): Promise<boolean> {
+  const modelId = resolveModelId(network)
   const protocol = resolveProtocol(network)
   const value = String(address || '').trim()
   if (!value) return false
-  if (network.id === 'sol') {
+  if (modelId === 'sol') {
     try {
       void new PublicKey(value)
       return true
@@ -226,8 +336,8 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
       return false
     }
   }
-  if (network.id === 'xlm') return StrKey.isValidEd25519PublicKey(value)
-  if (network.id === 'tron') return TronWeb.isAddress(value)
+  if (modelId === 'xlm') return StrKey.isValidEd25519PublicKey(value)
+  if (modelId === 'tron') return TronWeb.isAddress(value)
   if (network.coinType === 'EVM') return ethers.isAddress(value)
   if (protocol === 'xrp-jsonrpc-compat') {
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)

@@ -30,12 +30,6 @@ const MainSettings: React.FC = () => {
       ]
     },
     {
-      title: 'NODE / RPC',
-      items: [
-        { label: 'Local node RPC', path: '/settings/local-rpc' },
-      ]
-    },
-    {
       title: 'DAPP AUTH CONNECTOR MANAGER',
       items: [
         { label: 'Show authorized websites', path: '/settings/authorized-sites' },

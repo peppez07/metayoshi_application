@@ -11,6 +11,12 @@ export interface NetworkDerivationSupport {
 
 export interface Network {
   id: string
+  /** Canonical app runtime model id (e.g. eth, doge, xmr) for dynamic server-mapped networks. */
+  runtimeModelId?: string
+  /** Original server coin id from /v1/coins when network was loaded dynamically. */
+  serverCoinId?: string
+  /** Original server chain id from /v1/coins (main/test). */
+  serverChain?: 'main' | 'test'
   name: string
   symbol: string
   coinType: CoinType

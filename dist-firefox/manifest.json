@@ -32,6 +32,7 @@
   "host_permissions": [
     "https://metayoshi.app/*",
     "https://*.metayoshi.app/*",
+    "https://*.publicnode.com/*",
     "https://explorer.btcz.rocks/*",
     "https://gateway.pinata.cloud/*",
     "https://ipfs.io/*",

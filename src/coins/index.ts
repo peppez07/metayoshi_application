@@ -140,6 +140,46 @@ type ServerCoinRow = {
   networks?: ServerCoinNetworkRow[]
 }
 
+export type ServerCoinCatalogKind = 'main' | 'asset'
+
+export type ServerCoinCatalogItem = {
+  coinId: string
+  name: string
+  symbol: string
+  kind: ServerCoinCatalogKind
+  contractAddress?: string
+  runtimeModelId: string | null
+  appNetworkId: string | null
+  chain: 'main' | 'test'
+}
+
+const TOKEN_MARKERS = new Set([
+  'token',
+  'erc20',
+  'bep20',
+  'trc20',
+  'spl',
+  'usdt',
+  'usdc',
+  'dai'
+])
+
+function isLikelyTokenServerCoin(coin: ServerCoinRow): boolean {
+  const coinId = String(coin?.coinId || '').trim().toLowerCase()
+  const name = String(coin?.name || '').trim().toLowerCase()
+  const symbol = String(coin?.symbol || '').trim().toLowerCase()
+  const haystack = `${coinId} ${name} ${symbol}`
+
+  if (/^0x[0-9a-f]{40}$/i.test(coinId)) return true
+  if (coinId.includes('/token/') || coinId.includes('-token-') || coinId.endsWith('-token')) return true
+  if (coinId.includes('contract')) return true
+
+  for (const marker of TOKEN_MARKERS) {
+    if (haystack.includes(marker)) return true
+  }
+  return false
+}
+
 const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   raptoreum: 'rtm',
   dogecoin: 'doge',
@@ -276,33 +316,33 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
 
   // Pattern mapping for additional server coin IDs:
   // map many chain variants/testnets into the closest app network model.
-  if (normalized.startsWith('ethereum-')) return 'eth'
-  if (normalized.startsWith('arbitrum-')) return 'arb'
-  if (normalized.startsWith('base-')) return 'base'
+  if (normalized === 'ethereum-holesky') return 'eth'
+  if (normalized === 'arbitrum-sepolia') return 'arb'
+  if (normalized === 'base-sepolia') return 'base'
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
-  if (normalized === 'bsc' || normalized.startsWith('bsc-')) return 'bnb'
+  if (normalized === 'bsc' || normalized === 'bsc-testnet') return 'bnb'
   if (normalized === 'polygon' || normalized === 'polygon-bor' || normalized === 'polygon-amoy-bor') return 'polygon'
   if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
   if (normalized === 'solana' || normalized.startsWith('solana-')) return 'sol'
   if (normalized === 'tron') return 'tron'
   if (normalized === 'tron-evm') return 'eth'
-  if (normalized === 'optimism' || normalized.startsWith('optimism-')) return 'base'
+  if (normalized === 'optimism' || normalized === 'optimism-sepolia') return 'base'
   if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
   if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
   if (normalized === 'cronos' || normalized.startsWith('cronos-')) return 'eth'
   if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
   if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
-  if (normalized === 'linea' || normalized.startsWith('linea-')) return 'eth'
+  if (normalized === 'linea' || normalized === 'linea-sepolia') return 'eth'
   if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'eth'
-  if (normalized === 'metis' || normalized.startsWith('metis-')) return 'eth'
+  if (normalized === 'metis' || normalized === 'metis-sepolia') return 'eth'
   if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'eth'
   if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'eth'
   if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'eth'
   if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'eth'
   if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'eth'
-  if (normalized === 'taiko' || normalized.startsWith('taiko-')) return 'eth'
-  if (normalized === 'unichain' || normalized.startsWith('unichain-')) return 'base'
+  if (normalized === 'taiko' || normalized === 'taiko-hoodi') return 'eth'
+  if (normalized === 'unichain' || normalized === 'unichain-sepolia') return 'base'
   if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
   if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
   // Forced compatibility mappings:
@@ -370,13 +410,33 @@ function isPublicnodeNetworkRow(row: ServerCoinNetworkRow): boolean {
 }
 
 type NetworkCandidate = {
-  networkId: string
+  appNetworkId: string
   network: Network
   chain: 'main' | 'test'
   isPublicnode: boolean
 }
 
 const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
+const PRIMARY_SERVER_COIN_BY_MODEL_ID: Record<string, string> = {
+  rtm: 'raptoreum',
+  doge: 'dogecoin',
+  btcz: 'bitcoinz',
+  tide: 'tidecoin',
+  firo: 'firo',
+  xrp: 'xrp',
+  arr: 'arr',
+  ada: 'cardano',
+  xmr: 'monero',
+  xlm: 'stellar',
+  sol: 'solana',
+  tron: 'tron',
+  eth: 'ethereum',
+  arb: 'arbitrum-one',
+  base: 'base',
+  bnb: 'bsc',
+  polygon: 'polygon-bor',
+  avaxc: 'avalanche-c-chain'
+}
 
 function flattenServerMethodGroups(methodGroups: Record<string, string[]> | undefined): string[] {
   if (!methodGroups || typeof methodGroups !== 'object') return []
@@ -424,7 +484,99 @@ function resolveBridgeUrlForNetwork(
   return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}`
 }
 
-export async function loadNetworksFromServerRegistry(): Promise<Network[] | null> {
+function sanitizeServerCoinId(coinId: string): string {
+  return String(coinId || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): string {
+  const normalizedServerCoinId = String(serverCoinId || '').trim().toLowerCase()
+  const normalizedBaseNetworkId = String(baseNetworkId || '').trim().toLowerCase()
+  const primary = PRIMARY_SERVER_COIN_BY_MODEL_ID[normalizedBaseNetworkId]
+  if (primary && normalizedServerCoinId === primary) return normalizedBaseNetworkId
+  const suffix = sanitizeServerCoinId(normalizedServerCoinId)
+  if (!suffix || suffix === normalizedBaseNetworkId) return normalizedBaseNetworkId
+  return `${normalizedBaseNetworkId}--${suffix}`
+}
+
+function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | null {
+  const normalized = String(coinId || '').trim().toLowerCase()
+  if (!normalized) return null
+  if (normalized.includes('arbitrum')) return 'arb'
+  if (normalized.includes('polygon')) return 'polygon'
+  if (normalized.includes('avalanche')) return 'avaxc'
+  if (normalized.includes('base')) return 'base'
+  if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
+  if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'
+  if (normalized.includes('solana') || normalized.includes('spl')) return 'sol'
+  if (normalized.includes('tron') || normalized.includes('trc20')) return 'tron'
+  return null
+}
+
+function buildServerCoinCatalog(coins: ServerCoinRow[]): ServerCoinCatalogItem[] {
+  const findHexAddressInValue = (value: unknown): string => {
+    const text = String(value ?? '').trim()
+    const m = text.match(/0x[a-fA-F0-9]{40}/)
+    return m ? m[0] : ''
+  }
+  const findContractAddress = (coin: ServerCoinRow): string => {
+    const direct = findHexAddressInValue(coin.coinId) || findHexAddressInValue(coin.name)
+    if (direct) return direct
+    const networks = Array.isArray(coin.networks) ? coin.networks : []
+    for (const row of networks) {
+      const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : null
+      if (!metadata) continue
+      for (const value of Object.values(metadata)) {
+        const fromMeta = findHexAddressInValue(value)
+        if (fromMeta) return fromMeta
+      }
+    }
+    return ''
+  }
+
+  const out: ServerCoinCatalogItem[] = []
+  for (const coin of coins) {
+    if (!coin?.enabled) continue
+    if (coin?.features?.bridge === false) continue
+    const coinId = String(coin.coinId || '').trim().toLowerCase()
+    if (!coinId) continue
+
+    const selectedNetwork = resolveActiveServerNetwork(coin.networks)
+    const chain = String(selectedNetwork?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+    const tokenLike = isLikelyTokenServerCoin(coin)
+    const mappedModel = mapServerCoinIdToNetworkId(coinId)
+    const runtimeModelId = tokenLike ? (inferRuntimeModelFromTokenLikeCoinId(coinId) || mappedModel) : mappedModel
+    const appNetworkId = runtimeModelId
+      ? (tokenLike ? runtimeModelId : resolveAppNetworkId(runtimeModelId, coinId))
+      : null
+
+    out.push({
+      coinId,
+      name: String(coin.name || coinId).trim() || coinId,
+      symbol: String(coin.symbol || '').trim().toUpperCase(),
+      kind: tokenLike ? 'asset' : 'main',
+      contractAddress: tokenLike ? (findContractAddress(coin) || undefined) : undefined,
+      runtimeModelId: runtimeModelId || null,
+      appNetworkId,
+      chain
+    })
+  }
+
+  return out.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'main' ? -1 : 1
+    const left = `${a.name}|${a.coinId}`.toLowerCase()
+    const right = `${b.name}|${b.coinId}`.toLowerCase()
+    return left.localeCompare(right)
+  })
+}
+
+export async function loadServerRegistrySnapshot(): Promise<{
+  networks: Network[] | null
+  catalog: ServerCoinCatalogItem[]
+}> {
   const headers: Record<string, string> = {}
   if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
   const response = await fetch(`${API_BASE_URL}/v1/coins`, { method: 'GET', headers })
@@ -433,63 +585,90 @@ export async function loadNetworksFromServerRegistry(): Promise<Network[] | null
   }
   const json = await response.json().catch(() => null)
   const coins = Array.isArray(json?.coins) ? (json.coins as ServerCoinRow[]) : []
-  if (coins.length === 0) return null
-
+  if (coins.length === 0) return { networks: null, catalog: [] }
+  const catalog = buildServerCoinCatalog(coins)
   const moduleById = new Map<string, Network>(ALL_NETWORKS.map((n) => [n.id, n]))
-  const candidatesByNetworkId = new Map<string, NetworkCandidate[]>()
+  const candidatesByAppNetworkId = new Map<string, NetworkCandidate[]>()
   for (const coin of coins) {
     if (!coin?.enabled) continue
     if (coin?.features?.bridge === false) continue
     const coinId = String(coin.coinId || '').trim().toLowerCase()
     if (!coinId) continue
-    const networkId = mapServerCoinIdToNetworkId(coinId)
-    if (!networkId) continue
-    if (EVM_MODEL_NETWORK_IDS.has(networkId) && !supportsEvmBridgeMethods(coin.methodGroups)) {
+    if (isLikelyTokenServerCoin(coin)) continue
+    const modelNetworkId = mapServerCoinIdToNetworkId(coinId)
+    if (!modelNetworkId) continue
+    if (EVM_MODEL_NETWORK_IDS.has(modelNetworkId) && !supportsEvmBridgeMethods(coin.methodGroups)) {
       continue
     }
 
-    const base = moduleById.get(networkId)
+    const base = moduleById.get(modelNetworkId)
     if (!base) continue
     const selectedNetwork = resolveActiveServerNetwork(coin.networks)
     if (!selectedNetwork?.rpcUrl) continue
     const chain = String(selectedNetwork.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
     const rpcWallet = String(selectedNetwork.rpcWallet || '').trim()
 
+    const appNetworkId = resolveAppNetworkId(modelNetworkId, coinId)
     const mappedNetwork: Network = {
       ...base,
+      id: appNetworkId,
+      runtimeModelId: modelNetworkId,
+      serverCoinId: coinId,
+      serverChain: chain,
       name: String(coin.name || base.name).trim() || base.name,
       symbol: String(coin.symbol || base.symbol).trim().toUpperCase() || base.symbol,
       rpcUrl: String(selectedNetwork.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
       rpcWallet: rpcWallet || base.rpcWallet || '',
       rpcUsername: String(selectedNetwork.rpcUser || base.rpcUsername || '').trim(),
-      bridgeUrl: resolveBridgeUrlForNetwork(networkId, coinId, chain, rpcWallet),
+      bridgeUrl: resolveBridgeUrlForNetwork(modelNetworkId, coinId, chain, rpcWallet),
       // Always use runtime-configured bridge credentials for server-synced networks.
       // Base modules may contain placeholder defaults (e.g. "bridgepass").
       bridgeUsername: DEFAULT_BRIDGE_USER,
       bridgePassword: DEFAULT_BRIDGE_PASSWORD
     }
-    const row = candidatesByNetworkId.get(networkId) || []
+    const row = candidatesByAppNetworkId.get(appNetworkId) || []
     row.push({
-      networkId,
+      appNetworkId,
       network: mappedNetwork,
       chain,
       isPublicnode: isPublicnodeNetworkRow(selectedNetwork)
     })
-    candidatesByNetworkId.set(networkId, row)
+    candidatesByAppNetworkId.set(appNetworkId, row)
   }
 
-  if (candidatesByNetworkId.size === 0) return null
+  if (candidatesByAppNetworkId.size === 0) {
+    return {
+      networks: null,
+      catalog
+    }
+  }
 
   const bestByNetworkId = new Map<string, Network>()
-  for (const [networkId, rows] of candidatesByNetworkId.entries()) {
+  for (const [appNetworkId, rows] of candidatesByAppNetworkId.entries()) {
     if (!rows || rows.length === 0) continue
     const sorted = [...rows].sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
-    bestByNetworkId.set(networkId, sorted[0].network)
+    bestByNetworkId.set(appNetworkId, sorted[0].network)
   }
 
   const selectedIds = new Set(bestByNetworkId.keys())
-  const ordered = ALL_NETWORKS.filter((n) => selectedIds.has(n.id)).map((n) => (
+  const canonical = ALL_NETWORKS.filter((n) => selectedIds.has(n.id)).map((n) => (
     bestByNetworkId.get(n.id) || n
   ))
-  return ordered.length > 0 ? ordered : null
+  const extra = [...bestByNetworkId.values()]
+    .filter((n) => !ALL_COIN_IDS.has(n.id))
+    .sort((a, b) => {
+      const left = `${a.name}|${a.id}`.toLowerCase()
+      const right = `${b.name}|${b.id}`.toLowerCase()
+      return left.localeCompare(right)
+    })
+  const ordered = [...canonical, ...extra]
+  return {
+    networks: ordered.length > 0 ? ordered : null,
+    catalog
+  }
+}
+
+export async function loadNetworksFromServerRegistry(): Promise<Network[] | null> {
+  const snapshot = await loadServerRegistrySnapshot()
+  return snapshot.networks
 }
