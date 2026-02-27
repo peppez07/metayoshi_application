@@ -2416,7 +2416,7 @@ export async function sendBridgeTokenTransfer(
     coin?: string
     chain?: string
     wallet?: string
-    signedFormat?: 'evm-raw-hex' | 'cardano-cbor-hex'
+    signedFormat?: 'evm-raw-hex' | 'cardano-cbor-hex' | 'cosmos-tx-base64'
   }
 ): Promise<{ txid: string; relayed?: boolean }> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for token transfer')
@@ -2431,7 +2431,12 @@ export async function sendBridgeTokenTransfer(
   const signedTxHex = String(input.signedTxHex || '').trim()
   const amountNum = Number(input.amount)
   const wallet = String(input.wallet || '').trim()
-  const signedFormat = String(input.signedFormat || (coin === 'cardano' ? 'cardano-cbor-hex' : 'evm-raw-hex')).trim().toLowerCase()
+  const signedFormat = String(
+    input.signedFormat
+    || (coin === 'cardano'
+      ? 'cardano-cbor-hex'
+      : (coin === 'cosmos' ? 'cosmos-tx-base64' : 'evm-raw-hex'))
+  ).trim().toLowerCase()
 
   if (!coin) throw new Error('Bridge coin is required for token transfer')
   if (!chain) throw new Error('Bridge chain is required for token transfer')
@@ -2443,6 +2448,10 @@ export async function sendBridgeTokenTransfer(
   } else if (signedFormat === 'cardano-cbor-hex') {
     if (!/^[0-9a-f]+$/i.test(signedTxHex)) throw new Error('Signed Cardano transaction must be CBOR hex')
     if (!wallet) throw new Error('wallet is required for Cardano token transfer')
+  } else if (signedFormat === 'cosmos-tx-base64') {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signedTxHex)) {
+      throw new Error('Signed Cosmos transaction must be base64')
+    }
   } else {
     throw new Error(`Unsupported token signed format: ${signedFormat}`)
   }

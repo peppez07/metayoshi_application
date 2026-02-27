@@ -2,7 +2,7 @@
 import utxoLogo from './coinlogos/cosmos.png'
 
 export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
+  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
   ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 

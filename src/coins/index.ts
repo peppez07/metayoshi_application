@@ -3,7 +3,6 @@ import { arbitrumCoin } from './arbitrum'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
 import { cardanoCoin } from './cardano'
-import { croCoin } from './cronos'
 import { BTC_ADDRESS_SPEC } from './btc'
 import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
@@ -49,7 +48,6 @@ export const DEFAULT_UTXO_COIN_SYMBOL = 'RTM'
 export const ALL_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
-  croCoin,
   bnbCoin,
   polygonCoin,
   arbitrumCoin,

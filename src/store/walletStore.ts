@@ -29,6 +29,7 @@ import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
 import { sendTronNonCustodial } from '../lib/tronNonCustodial'
 import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
+import { signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -2500,7 +2501,50 @@ export const useWalletStore = create<WalletState>()(
         }
 
         if (modelId === 'cosmos') {
-          throw new Error('Cosmos token transfers are not enabled in this build yet')
+          const recipient = String(toAddress || '').trim()
+          const denom = String(assetId || '').trim()
+          if (!recipient) throw new Error('Cosmos recipient address is required')
+          if (!denom) throw new Error('Cosmos token denom is required')
+          const cosmosCfg = resolveCosmosNetworkConfig(net)
+          if (!isCosmosAddressForHrp(recipient, cosmosCfg.hrp)) {
+            throw new Error(`Destination address must be a valid ${cosmosCfg.hrp}1... address`)
+          }
+
+          const amountRawText = String(qty || '').trim()
+          if (!/^\d+$/.test(amountRawText) || BigInt(amountRawText) <= 0n) {
+            throw new Error('Cosmos token send quantity must be a positive integer in raw denom units')
+          }
+
+          const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)
+          if (String(senderAddress || '').trim() !== derived.address) {
+            throw new Error(`Active COSMOS address does not match derived signer address (${senderAddress} != ${derived.address})`)
+          }
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const signedTxBase64 = await signCosmosTokenTransferTxBase64({
+            rpcUrl: net.rpcUrl,
+            fromAddress: derived.address,
+            toAddress: recipient,
+            denom,
+            amountRaw: amountRawText,
+            privateKeyHex: derived.privHex
+          })
+          const sent = await sendBridgeTokenTransfer(rpcConfig, {
+            coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+            chain: String(net.serverChain || 'main').trim() || 'main',
+            tokenId: denom,
+            toAddress: recipient,
+            fromAddress: derived.address,
+            amount: amountRawText,
+            signedTxHex: signedTxBase64,
+            signedFormat: 'cosmos-tx-base64'
+          })
+          await get().fetchNetworkAssets()
+          return { txid: sent.txid }
         }
 
         const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
