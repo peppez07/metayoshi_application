@@ -464,7 +464,17 @@ const WalletLayout: React.FC = () => {
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
                       }
                       <div className="flex flex-col items-start">
-                        <span className="text-sm font-bold">{net.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold">{net.name}</span>
+                          {networkCapabilities(net).features.assetLayer && (
+                            <span
+                              title="Supports assets/tokens"
+                              className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200"
+                            >
+                              Assets
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-gray-500 uppercase font-mono">{net.symbol}</span>
                       </div>
                     </div>
