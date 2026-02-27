@@ -2,8 +2,8 @@
 
 export const COSMOS_PAYLOADS = createModelPayloadCatalog({
   networkId: 'srv--cosmos',
-  symbol: 'COSMOS',
+  symbol: 'ATOM',
   coinId: 'cosmos',
   chain: 'main',
-  model: 'utxo'
+  model: 'cosmos'
 })

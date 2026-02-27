@@ -7,7 +7,7 @@ const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAUL
 
 export const COSMOS_API_INFO: CoinApiInfo = {
   networkId: 'srv--cosmos',
-  symbol: 'COSMOS',
+  symbol: 'ATOM',
   coinId: 'cosmos',
   chain: 'main',
   protocol: 'utxo-jsonrpc',

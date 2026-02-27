@@ -2,8 +2,8 @@
 import utxoLogo from './coinlogos/cosmos.png'
 
 export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 
 export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
@@ -11,13 +11,13 @@ export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
   const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
   return {
     id: 'srv--cosmos',
-    runtimeModelId: 'utxo',
+    runtimeModelId: 'cosmos',
     serverCoinId: 'cosmos',
     serverChain: 'main',
     name: 'Cosmos',
-    symbol: 'COSMOS',
+    symbol: 'ATOM',
     coinType: 'UTXO',
-    coinSymbol: 'COSMOS',
+    coinSymbol: 'ATOM',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
     rpcUsername: '',
@@ -26,17 +26,14 @@ export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: COSMOS_CAPABILITIES,
-    derivation: {
-      status: 'unsupported',
-      reason: 'cosmos address derivation is not supported in this build'
-    },    logo: utxoLogo
+    logo: utxoLogo
   }
 }
 
 export const cosmosCoin: CoinModule = {
   id: 'srv--cosmos',
-  symbol: 'COSMOS',
-  coinSymbol: 'COSMOS',
+  symbol: 'ATOM',
+  coinSymbol: 'ATOM',
   capabilities: COSMOS_CAPABILITIES,
   createNetwork: createCosmosNetwork
 }

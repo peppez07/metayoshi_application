@@ -28,7 +28,7 @@ import { deriveStellarAddress } from '../lib/stellarAddress'
 import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
 import { sendTronNonCustodial } from '../lib/tronNonCustodial'
-import { deriveCosmosAddress, isCroCosmosAddress } from '../lib/cosmosAddress'
+import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -961,7 +961,16 @@ function resolveNetworkModelId(network?: Partial<Network>): string {
 
 function isCroCosmosModel(network?: Partial<Network>): boolean {
   const modelId = resolveNetworkModelId(network)
-  return modelId === 'crocosmos' || modelId === 'cro'
+  return modelId === 'crocosmos' || modelId === 'cro' || modelId === 'cosmos'
+}
+
+function resolveCosmosNetworkConfig(network?: Partial<Network>): { hrp: string; coinType: number } {
+  const cfg = resolveCosmosAddressConfig({
+    runtimeModelId: String(network?.runtimeModelId || '').trim(),
+    serverCoinId: String(network?.serverCoinId || '').trim(),
+    id: String(network?.id || '').trim()
+  })
+  return { hrp: cfg.hrp, coinType: cfg.coinType }
 }
 
 function normalizeNetworkSymbol(network: Network): Network {
@@ -1105,8 +1114,9 @@ async function deriveAccountAddresses(
 
     if (isCroCosmosModel(net)) {
       try {
-        const cro = await deriveCosmosAddress(mnemonic, derivationIndex)
-        networkAddresses[net.id] = cro.address
+        const cosmosCfg = resolveCosmosNetworkConfig(net)
+        const cosmosAddr = await deriveCosmosAddress(mnemonic, derivationIndex, cosmosCfg)
+        networkAddresses[net.id] = cosmosAddr.address
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         derivationErrors.push(`${net.symbol}: ${msg}`)
@@ -1578,7 +1588,7 @@ export const useWalletStore = create<WalletState>()(
             || modelId === 'sol'
             || modelId === 'xlm'
             || modelId === 'tron'
-            || modelId === 'crocosmos'
+            || isCroCosmosModel(net)
           ) {
             const isValidPersisted = await validateChainAddress(net, undefined, existing).catch(() => false)
             if (isValidPersisted) return existing
@@ -1620,7 +1630,7 @@ export const useWalletStore = create<WalletState>()(
           || modelId === 'sol'
           || modelId === 'xlm'
           || modelId === 'tron'
-          || modelId === 'crocosmos'
+          || isCroCosmosModel(net)
         if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
@@ -1633,8 +1643,9 @@ export const useWalletStore = create<WalletState>()(
           } else if (net.coinType === 'XRP') {
             const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
             address = derived.address
-          } else if (modelId === 'crocosmos') {
-            const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex)
+          } else if (isCroCosmosModel(net)) {
+            const cosmosCfg = resolveCosmosNetworkConfig(net)
+            const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
             address = derived.address
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
             const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
@@ -2025,6 +2036,44 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
+        if (activeModelId === 'cosmos') {
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          try {
+            const rows = await fetchBridgeTokenBalances(rpcConfig, {
+              coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+              chain: String(net.serverChain || 'main').trim() || 'main',
+              owner: address
+            })
+            const assets: Record<string, number> = {}
+            for (const row of rows) {
+              const tokenId = String(row.tokenId || '').trim()
+              if (!tokenId) continue
+              const rawQtyText = String(row.balanceRaw || row.balance || '0').trim()
+              if (!/^\d+(\.\d+)?$/.test(rawQtyText)) continue
+              const qty = Number(rawQtyText)
+              if (!Number.isFinite(qty) || qty <= 0) continue
+              assets[tokenId] = Math.round(qty * 1e8)
+            }
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: {}
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (Cosmos) failed:`, err)
+          }
+          return
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2239,6 +2288,44 @@ export const useWalletStore = create<WalletState>()(
           } as RtmAssetDetails
         }
 
+        if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'cosmos') {
+          const {
+            accounts,
+            activeAccountId,
+            networkAssets
+          } = get()
+          const activeAcc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+          const owner = String(activeAcc?.networkAddresses?.[activeNetworkId] || '').trim()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const rows = await fetchBridgeTokenBalances(rpcConfig, {
+            coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+            chain: String(net.serverChain || 'main').trim() || 'main',
+            owner: owner || undefined,
+            tokenId: normalizedAssetId
+          })
+          const row = rows.find((r) => String(r.tokenId || '').trim() === normalizedAssetId)
+          const knownRaw = Number((networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0))
+          const amountUi = knownRaw > 0 ? (knownRaw / 1e8) : Number(String(row?.balanceRaw || row?.balance || '0'))
+          return {
+            name: String(row?.name || row?.symbol || normalizedAssetId).trim(),
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: undefined,
+            metadata_url: undefined,
+            token_id: normalizedAssetId,
+            contract_address: '',
+            txid_or_longname: normalizedAssetId,
+            ownership_address: String(row?.issuer || '').trim()
+          } as RtmAssetDetails
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2410,6 +2497,10 @@ export const useWalletStore = create<WalletState>()(
           })
           await get().fetchNetworkAssets()
           return { txid: tx.hash }
+        }
+
+        if (modelId === 'cosmos') {
+          throw new Error('Cosmos token transfers are not enabled in this build yet')
         }
 
         const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
@@ -3398,8 +3489,11 @@ export const useWalletStore = create<WalletState>()(
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
-        if (isCroCosmosModel(net) && !isCroCosmosAddress(to)) {
-          throw new Error('Destination address must be a valid CRO Cosmos address (cro1...)')
+        if (isCroCosmosModel(net)) {
+          const cosmosCfg = resolveCosmosNetworkConfig(net)
+          if (!isCosmosAddressForHrp(to, cosmosCfg.hrp)) {
+            throw new Error(`Destination address must be a valid ${cosmosCfg.hrp}1... address`)
+          }
         }
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
 

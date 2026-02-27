@@ -22,7 +22,7 @@ import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 import { StrKey } from '@stellar/stellar-sdk'
 import { TronWeb } from 'tronweb'
 import { getTronBalance } from './tronNonCustodial'
-import { isCroCosmosAddress } from './cosmosAddress'
+import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -78,7 +78,16 @@ function resolveModelId(network: Network): string {
 }
 
 function isCroCosmosLikeModel(modelId: string): boolean {
-  return modelId === 'crocosmos' || modelId === 'cro'
+  return modelId === 'crocosmos' || modelId === 'cro' || modelId === 'cosmos'
+}
+
+function resolveCosmosNetworkConfig(network: Network): { hrp: string; decimals: number } {
+  const cfg = resolveCosmosAddressConfig({
+    runtimeModelId: resolveModelId(network),
+    serverCoinId: String(network.serverCoinId || '').trim(),
+    id: String(network.id || '').trim()
+  })
+  return { hrp: cfg.hrp, decimals: cfg.decimals }
 }
 
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
@@ -376,7 +385,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     return { balance, syncPercent: 100, isSyncing: false }
   }
   if (isCroCosmosLikeModel(modelId)) {
-    if (!input.rpcConfig) throw new Error('Bridge RPC config is required for CRO Cosmos')
+    if (!input.rpcConfig) throw new Error('Bridge RPC config is required for Cosmos-like networks')
     let syncPercent: number | null = null
     let isSyncing = false
     try {
@@ -493,7 +502,10 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   }
   if (modelId === 'xlm') return StrKey.isValidEd25519PublicKey(value)
   if (modelId === 'tron') return TronWeb.isAddress(value)
-  if (isCroCosmosLikeModel(modelId)) return isCroCosmosAddress(value)
+  if (isCroCosmosLikeModel(modelId)) {
+    const { hrp } = resolveCosmosNetworkConfig(network)
+    return isCosmosAddressForHrp(value, hrp)
+  }
   if (network.coinType === 'EVM') return ethers.isAddress(value)
   if (protocol === 'xrp-jsonrpc-compat') {
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
@@ -578,15 +590,16 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const rpcConfig = input.rpcConfig
   if (net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
   if (isCroCosmosLikeModel(resolveModelId(net))) {
+    const { hrp, decimals } = resolveCosmosNetworkConfig(net)
     const to = String(input.to || '').trim()
-    if (!isCroCosmosAddress(to)) {
-      throw new Error('Destination address must be a valid CRO Cosmos address (cro1...)')
+    if (!isCosmosAddressForHrp(to, hrp)) {
+      throw new Error(`Destination address must be a valid ${hrp}1... address`)
     }
     const amount = Number(String(input.amount || '').trim())
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Amount must be greater than 0')
     }
-    const txid = await sendToAddress(rpcConfig, to, Number(amount.toFixed(8)))
+    const txid = await sendToAddress(rpcConfig, to, Number(amount.toFixed(decimals)))
     return { hash: String(txid) }
   }
   if (!net.coinSymbol) throw new Error('Network missing coinSymbol')

@@ -65,7 +65,7 @@ export function createUtxoPayloadCatalog(input: {
   }
 }
 
-export type ScaffoldPayloadModel = 'evm' | 'sol' | 'xrp' | 'utxo'
+export type ScaffoldPayloadModel = 'evm' | 'sol' | 'xrp' | 'cosmos' | 'utxo'
 
 function modelHelperSendCoin(model: ScaffoldPayloadModel) {
   if (model === 'evm') {
@@ -86,6 +86,13 @@ function modelHelperSendCoin(model: ScaffoldPayloadModel) {
     return {
       to: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
       amount: 1,
+      subtractFeeFromAmount: false
+    }
+  }
+  if (model === 'cosmos') {
+    return {
+      to: 'cosmos1skjwj5whet0l6v8j6r8f8v9h99h4m9es7r5s9h',
+      amount: 0.1,
       subtractFeeFromAmount: false
     }
   }
@@ -120,6 +127,15 @@ function modelHelperSendAsset(model: ScaffoldPayloadModel) {
       assetId: 'XRP',
       qty: 1,
       toAddress: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+      changeAddress: '',
+      assetChangeAddress: ''
+    }
+  }
+  if (model === 'cosmos') {
+    return {
+      assetId: 'ibc/0000000000000000000000000000000000000000000000000000000000000000',
+      qty: 1,
+      toAddress: 'cosmos1skjwj5whet0l6v8j6r8f8v9h99h4m9es7r5s9h',
       changeAddress: '',
       assetChangeAddress: ''
     }

@@ -13,8 +13,30 @@ export interface CosmosAddressResult {
   privHex: string
 }
 
+export interface CosmosAddressConfig {
+  hrp: string
+  coinType: number
+  decimals: number
+}
+
 const CRO_COIN_TYPE = 394
 const CRO_HRP = 'cro'
+const CRO_DECIMALS = 8
+const COSMOS_COIN_TYPE = 118
+const COSMOS_HRP = 'cosmos'
+const COSMOS_DECIMALS = 6
+
+const CRO_CONFIG: CosmosAddressConfig = {
+  hrp: CRO_HRP,
+  coinType: CRO_COIN_TYPE,
+  decimals: CRO_DECIMALS
+}
+
+const COSMOS_CONFIG: CosmosAddressConfig = {
+  hrp: COSMOS_HRP,
+  coinType: COSMOS_COIN_TYPE,
+  decimals: COSMOS_DECIMALS
+}
 
 function toCosmosAddress(hrp: string, compressedPubKey: Uint8Array): string {
   const sha = sha256(compressedPubKey)
@@ -44,13 +66,31 @@ export async function deriveCosmosAddress(
   }
 }
 
-export function isCroCosmosAddress(value: string): boolean {
+export function resolveCosmosAddressConfig(input?: {
+  runtimeModelId?: string
+  serverCoinId?: string
+  id?: string
+} | null): CosmosAddressConfig {
+  const modelId = String(input?.runtimeModelId || '').trim().toLowerCase()
+  const serverCoinId = String(input?.serverCoinId || '').trim().toLowerCase()
+  const networkId = String(input?.id || '').trim().toLowerCase()
+  const tags = `${modelId} ${serverCoinId} ${networkId}`
+  const isCro = tags.includes('cro') || tags.includes('cronos-pos')
+  return isCro ? CRO_CONFIG : COSMOS_CONFIG
+}
+
+export function isCosmosAddressForHrp(value: string, hrp: string): boolean {
   const input = String(value || '').trim()
-  if (!input) return false
+  const expectedHrp = String(hrp || '').trim().toLowerCase()
+  if (!input || !expectedHrp) return false
   try {
     const decoded = bech32.decode(input as `${string}1${string}`)
-    return decoded.prefix === CRO_HRP && decoded.words.length > 0
+    return decoded.prefix === expectedHrp && decoded.words.length > 0
   } catch {
     return false
   }
+}
+
+export function isCroCosmosAddress(value: string): boolean {
+  return isCosmosAddressForHrp(value, CRO_HRP)
 }
