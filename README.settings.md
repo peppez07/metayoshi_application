@@ -122,17 +122,26 @@ Autoload is opt-in and intended for local/private builds only.
 VITE_ENABLED_COINS=rtm
 ```
 
-Allowed ids:
+Allowed ids include currently bundled runtime networks such as:
 - `rtm`
+- `eth`
+- `bnb`
+- `polygon`
+- `arb`
+- `base`
+- `avaxc`
+- `sol`
+- `xlm`
+- `tron`
 - `doge`
 - `btcz`
 - `tide`
 - `firo`
 - `xrp`
 - `arr`
-- `eth`
-- `ada`
 - `xmr`
+- `ada`
+- `srv--cosmos`
 - `all`
 
 If omitted/invalid, app falls back to enabled defaults.
@@ -187,11 +196,11 @@ Legacy RPC alias support:
 - `metayoshi_*`
 - `rtm_*` (backward compatibility)
 
-Current implementation status (as of 2026-02-25):
-- SDK/network usage: `rtm`, `doge`, `btcz`, `firo`, `xrp`, `tide`, `arr`, `ada`, `xmr`
-- Ethereum (`eth`) is available in UI concept mode with runtime send disabled by capability flags.
-- `wallet_signMessage`: not supported in DApp SDK (`-32601`)
-- `wallet_sendTransaction`: supported with explicit popup approval
+Current implementation status (as of 2026-02-27):
+- SDK/network usage is dynamic from current enabled wallet networks.
+- `wallet_getNetworks` returns per-network capability flags (`nativeSend`, `assetLayer`, `assetSend`, `activity`).
+- `wallet_sendTransaction` and `wallet_sendAsset` are supported with explicit popup approval.
+- `wallet_signMessage`: not supported in DApp SDK (`-32601`).
 
 ## Runtime architecture notes
 
@@ -254,9 +263,9 @@ Approval flow:
 4. Approvals persist by normalized origin
 5. Rejection/timeout returns `4001`
 
-Transaction request flow (`wallet_sendTransaction`):
-1. DApp sends params `{ to, amount }` (decimal coin units)
-2. Background ensures `read` + `send_coin` scopes
+Transaction request flow:
+1. DApp sends `wallet_sendTransaction` (`{ to, amount }`) or `wallet_sendAsset` (`{ assetId, qty, toAddress }`)
+2. Background ensures `read` + operation scope (`send_coin` or `send_asset`)
 3. Background opens popup `#/dapp/request/confirm`
 4. If wallet is locked, popup asks for password unlock first
 5. User approves or rejects transaction

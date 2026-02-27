@@ -1,28 +1,23 @@
 # MetaYoshi DApp SDK
 
-Last updated: 2026-02-25
+Last updated: 2026-02-27
 
 ## Overview
 
 MetaYoshi injects a provider into approved pages:
 
-- `window.metayoshi` (primary and only provider interface)
+- `window.metayoshi` (primary)
+- `window.rtm` (legacy alias to same provider)
 
 Initialization event:
 
 - `window` event: `metayoshi#initialized`
 
-Current network families exposed in this SDK:
-- Raptoreum (`rtm`)
-- Dogecoin (`doge`)
-- BitcoinZ (`btcz`)
-- Firo (`firo`)
-- XRP (`xrp`)
-- Tidecoin (`tide`)
-- Pirate (`arr`)
-- Ethereum (`eth`, concept mode)
-- Cardano (`ada`)
-- Monero (`xmr`)
+## Supported network families
+
+The SDK is multi-chain and follows the currently enabled wallet networks/runtime models (for example EVM, UTXO, XRP, Solana, Stellar, TRON, Cardano, Monero, Cosmos model mappings).
+
+Use `wallet_getNetworks` and `wallet_getCapabilities` at runtime instead of hardcoding a static coin list.
 
 ## Injection scope
 
@@ -77,6 +72,7 @@ await window.metayoshi.request({ method, params })
 ```
 
 Alias namespaces supported for wallet RPC methods below:
+
 - `metayoshi_*`
 - `rtm_*` (legacy compatibility)
 
@@ -87,20 +83,25 @@ Alias namespaces supported for wallet RPC methods below:
 - `wallet_accounts`: returns `[activeAddress]` when unlocked, otherwise `[]`.
 - `wallet_selectAccount` with `params: { index: number }`: switches active account.
 
-### Network
+### Network and capabilities
 
-- `wallet_getNetworks`: returns configured networks.
+- `wallet_getNetworks`: returns enabled networks including:
+  - `id`, `runtimeModelId`, `name`, `symbol`, `coinType`, `chainId`, `active`
+  - `capabilities`: `nativeSend`, `assetLayer`, `assetSend`, `activity`
 - `wallet_switchNetwork` with `params: { networkId: string }`: switches active network.
-- `wallet_getCapabilities`: returns wallet/network capability object.
+- `wallet_getCapabilities`: returns active network capabilities and method availability.
 
 ### Transactions
 
 - `wallet_sendTransaction` / `metayoshi_sendTransaction`
   - params: `{ to: string, amount: string }`
-  - amount is coin units (decimal string, chain precision is validated per network)
+  - amount is coin units (decimal string, precision validated per active network)
   - returns: `{ hash: string, txid: string }`
-  - flow: wallet popup opens, unlock is required when locked, user must approve/reject, popup closes after completion.
-  - note: `eth` concept mode currently reports send as unsupported (disabled by network capability flags).
+
+- `wallet_sendAsset` / `metayoshi_sendAsset`
+  - params: `{ assetId: string, qty: string, toAddress: string }`
+  - returns: `{ hash: string, txid: string }`
+  - actual support depends on active network capability flags (`assetSend=true`)
 
 ### Not supported
 
@@ -114,9 +115,9 @@ Alias namespaces supported for wallet RPC methods below:
 - `window.metayoshi.getNetworks()`
 - `window.metayoshi.getCapabilities()`
 - `window.metayoshi.switchNetwork(networkId)`
-
-Legacy provider alias:
-- `window.rtm` points to the same provider instance as `window.metayoshi`.
+- `window.metayoshi.sendTransaction({ to, amount })`
+- `window.metayoshi.sendAsset({ assetId, qty, toAddress })`
+- `window.metayoshi.sdkInfo()` -> combined `{ provider, state, capabilities, networks }`
 
 ## Events
 
@@ -129,14 +130,6 @@ Subscribe with `on`, remove with `removeListener`/`off`.
 - `lockChanged` payload:
   - `{ unlocked: boolean }`
 
-Example:
-
-```js
-window.metayoshi.on('accountsChanged', (p) => console.log('accountsChanged', p))
-window.metayoshi.on('networkChanged', (p) => console.log('networkChanged', p))
-window.metayoshi.on('lockChanged', (p) => console.log('lockChanged', p))
-```
-
 ## Permission model
 
 Scopes:
@@ -146,17 +139,19 @@ Scopes:
 - `send_coin`
 - `send_asset`
 
-Current DApp SDK flow uses:
+Current SDK flow uses:
+
 - `read` for connect/accounts/provider state
 - `send_coin` for `wallet_sendTransaction`
+- `send_asset` for `wallet_sendAsset`
 
 First request for a scope from an origin may open approval UI (`#/dapp/connect/1`).
-Each `wallet_sendTransaction` call opens a dedicated transaction approval popup (`#/dapp/request/confirm`).
+Each send request opens a dedicated transaction approval popup (`#/dapp/request/confirm`).
 On rejection or timeout, the request fails with code `4001`.
 
 ## Error codes
 
-Common errors you should handle:
+Common errors to handle:
 
 - `4001`: user rejected request (or approval timeout)
 - `4900`: provider/extension context disconnected

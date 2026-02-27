@@ -87,6 +87,38 @@ const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_s
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
+const DAPP_SDK_METHODS = [
+  'wallet_getProviderState',
+  'metayoshi_getProviderState',
+  'rtm_getProviderState',
+  'wallet_requestAccounts',
+  'metayoshi_requestAccounts',
+  'rtm_requestAccounts',
+  'wallet_accounts',
+  'metayoshi_accounts',
+  'rtm_accounts',
+  'wallet_connect',
+  'metayoshi_connect',
+  'rtm_connect',
+  'wallet_selectAccount',
+  'metayoshi_selectAccount',
+  'rtm_selectAccount',
+  'wallet_switchNetwork',
+  'metayoshi_switchNetwork',
+  'rtm_switchNetwork',
+  'wallet_getNetworks',
+  'metayoshi_getNetworks',
+  'rtm_getNetworks',
+  'wallet_getCapabilities',
+  'metayoshi_getCapabilities',
+  'rtm_getCapabilities',
+  'wallet_sendTransaction',
+  'metayoshi_sendTransaction',
+  'rtm_sendTransaction',
+  'wallet_sendAsset',
+  'metayoshi_sendAsset',
+  'rtm_sendAsset'
+] as const
 
 // Event ports for broadcasting events to content scripts
 const eventPorts = new Set<chrome.runtime.Port>()
@@ -103,10 +135,47 @@ interface WalletState {
   activeAccountId?: string | null
   activeNetworkId?: string
   authorizedSites?: string[]
-  networks?: Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
+  networks?: Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
 }
 
-function resolveDappNetworks(state: WalletState): Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
+type DappNetworkDescriptor = {
+  id: string
+  runtimeModelId: string | null
+  name: string
+  symbol: string
+  coinType: string
+  chainId: number | null
+  capabilities: {
+    nativeSend: boolean
+    assetLayer: boolean
+    assetSend: boolean
+    activity: boolean
+  }
+}
+
+function buildDappNetworkDescriptor(
+  network: { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any },
+  active: boolean
+): DappNetworkDescriptor & { active: boolean } {
+  const caps = resolveNetworkCapabilities(network || {})
+  return {
+    id: String(network?.id || '').trim(),
+    runtimeModelId: String(network?.runtimeModelId || '').trim() || null,
+    name: String(network?.name || '').trim(),
+    symbol: String(network?.symbol || '').trim(),
+    coinType: String(network?.coinType || '').trim(),
+    chainId: typeof network?.chainId === 'number' ? network.chainId : null,
+    active,
+    capabilities: {
+      nativeSend: Boolean(caps.features.nativeSend),
+      assetLayer: Boolean(caps.features.assetLayer),
+      assetSend: Boolean(caps.features.assetSend),
+      activity: Boolean(caps.features.activity)
+    }
+  }
+}
+
+function resolveDappNetworks(state: WalletState): Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
   return (state.networks || []).filter((network) => {
     const id = String(network?.id || '').trim()
     return Boolean(id)
@@ -936,6 +1005,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       wallet: { isMetaYoshi: true, connected, unlocked },
       network: {
         id: network?.id || null,
+        runtimeModelId: String((network as any)?.runtimeModelId || '').trim() || null,
         name: network?.name || null,
         symbol: network?.symbol || null,
         coinType: network?.coinType || null
@@ -947,50 +1017,13 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
         send_coin: features.nativeSend,
         send_asset: features.assetSend
       },
-      methods: [
-        'wallet_getProviderState',
-        'metayoshi_getProviderState',
-        'rtm_getProviderState',
-        'wallet_requestAccounts',
-        'metayoshi_requestAccounts',
-        'rtm_requestAccounts',
-        'wallet_accounts',
-        'metayoshi_accounts',
-        'rtm_accounts',
-        'wallet_connect',
-        'metayoshi_connect',
-        'rtm_connect',
-        'wallet_selectAccount',
-        'metayoshi_selectAccount',
-        'rtm_selectAccount',
-        'wallet_switchNetwork',
-        'metayoshi_switchNetwork',
-        'rtm_switchNetwork',
-        'wallet_getNetworks',
-        'metayoshi_getNetworks',
-        'rtm_getNetworks',
-        'wallet_getCapabilities',
-        'metayoshi_getCapabilities',
-        'rtm_getCapabilities',
-        'wallet_sendTransaction',
-        'metayoshi_sendTransaction',
-        'rtm_sendTransaction',
-        'wallet_sendAsset',
-        'metayoshi_sendAsset',
-        'rtm_sendAsset'
-      ]
+      methods: [...DAPP_SDK_METHODS],
+      networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
     }
   }
 
   if (NETWORKS_METHODS.has(method)) {
-    return dappNetworks.map((n) => ({
-      id: n.id,
-      name: n.name,
-      symbol: n.symbol,
-      coinType: n.coinType,
-      chainId: n.chainId ?? null,
-      active: n.id === state.activeNetworkId
-    }))
+    return dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
   }
   
   // Request accounts / enable
@@ -1271,8 +1304,8 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
           
           // Network changed
           if (newState.activeNetworkId !== oldState.activeNetworkId) {
-            const network = newState.networks?.find((n) => n.id === newState.activeNetworkId)
-            if (network && (network.coinType === 'UTXO' || network.coinType === 'XRP' || network.coinType === 'BTC') && String(network.id || '').trim()) {
+            const network = resolveDappNetworks(newState).find((n) => n.id === newState.activeNetworkId)
+            if (network && String(network.id || '').trim()) {
               broadcastEvent('networkChanged', {
                 networkId: network.id,
                 networkLabel: network.name,

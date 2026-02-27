@@ -30,6 +30,8 @@ import { deriveTronAddress } from '../lib/tronAddress'
 import { sendTronNonCustodial } from '../lib/tronNonCustodial'
 import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
+import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
+import { isCroCosmosNetwork, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -339,6 +341,10 @@ function evmDerivationPath(accountIndex: number): string {
 
 function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeWallet {
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
+}
+
+function isExternalEvmSignerEnabled(): boolean {
+  return resolveEvmExternalSignerMode() !== 'local'
 }
 
 const EVM_ERC20_BALANCE_IFACE = new ethers.Interface(['function balanceOf(address) view returns (uint256)'])
@@ -1007,13 +1013,8 @@ function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
   return symbol === 'TIDE'
 }
 
-function resolveNetworkModelId(network?: Partial<Network>): string {
-  return String(network?.runtimeModelId || network?.id || '').trim().toLowerCase()
-}
-
 function isCroCosmosModel(network?: Partial<Network>): boolean {
-  const modelId = resolveNetworkModelId(network)
-  return modelId === 'crocosmos' || modelId === 'cro' || modelId === 'cosmos'
+  return isCroCosmosNetwork(network)
 }
 
 function resolveCosmosNetworkConfig(network?: Partial<Network>): { hrp: string; coinType: number } {
@@ -1023,6 +1024,21 @@ function resolveCosmosNetworkConfig(network?: Partial<Network>): { hrp: string; 
     id: String(network?.id || '').trim()
   })
   return { hrp: cfg.hrp, coinType: cfg.coinType }
+}
+
+function resolveCosmosNativeDenom(): string {
+  return String((import.meta as any)?.env?.VITE_COSMOS_NATIVE_DENOM || 'uatom').trim() || 'uatom'
+}
+
+function parseDecimalToAtomicUnits(value: string, decimals: number, label: string): bigint {
+  const raw = String(value || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error(`Invalid ${label} amount`)
+  const [whole, fraction = ''] = raw.split('.')
+  if (fraction.length > decimals) throw new Error(`${label} supports up to ${decimals} decimals`)
+  const atomic = `${whole}${fraction.padEnd(decimals, '0')}`
+  const n = BigInt(atomic)
+  if (n <= 0n) throw new Error(`${label} amount must be greater than 0`)
+  return n
 }
 
 function normalizeNetworkSymbol(network: Network): Network {
@@ -1483,6 +1499,13 @@ export const useWalletStore = create<WalletState>()(
 
       signBackendAuthMessage: async (message) => {
         const { isLocked, sessionMnemonic, accounts, activeAccountId } = get()
+        if (isExternalEvmSignerEnabled()) {
+          const signer = await resolveEvmExternalSigner()
+          if (!signer) throw new Error('External EVM signer is not available')
+          const address = await signer.getAddress()
+          const signature = await signer.signMessage(String(message || ''))
+          return { address, signature }
+        }
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
         const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
@@ -1673,16 +1696,7 @@ export const useWalletStore = create<WalletState>()(
           console.warn(`[${net.symbol}] Derivation disabled: ${net.derivation.reason || 'unsupported in this build'}`)
           return null
         }
-        const requiresMnemonic =
-          net.coinType === 'EVM'
-          || net.coinType === 'XRP'
-          || net.coinType === 'UTXO'
-          || modelId === 'ada'
-          || modelId === 'xmr'
-          || modelId === 'sol'
-          || modelId === 'xlm'
-          || modelId === 'tron'
-          || isCroCosmosModel(net)
+        const requiresMnemonic = requiresMnemonicForNetwork(net)
         if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
@@ -2463,11 +2477,15 @@ export const useWalletStore = create<WalletState>()(
           networks, activeNetworkId, isLocked, sessionMnemonic,
           accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
-        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net) throw new Error('Active network not found')
+        if (net.coinType === 'EVM') {
+          if (!isExternalEvmSignerEnabled() && (isLocked || !sessionMnemonic)) throw new Error('Wallet is locked')
+        } else if (isLocked || !sessionMnemonic) {
+          throw new Error('Wallet is locked')
+        }
         if (!acc) throw new Error('No active account')
         const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
@@ -2492,15 +2510,26 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: lro2[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
-          const wallet = deriveEvmWallet(sessionMnemonic, accountIndex)
-          const fromAddress = wallet.address
-          const nonceHex = await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
+          const externalSigner = isExternalEvmSignerEnabled() ? await resolveEvmExternalSigner() : null
+          if (isExternalEvmSignerEnabled() && !externalSigner) {
+            throw new Error('External EVM signer is not available')
+          }
+          const wallet = externalSigner ? null : deriveEvmWallet(sessionMnemonic!, accountIndex)
+          const fromAddress = externalSigner
+            ? await externalSigner.getAddress()
+            : String(wallet!.address || '').trim()
           const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
+          const resolvedChainId = Number(BigInt(String(chainIdHex || net.chainId || 1)))
+          const nonceHex = externalSigner
+            ? '0x0'
+            : await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
           let gasPriceHex = '0x3b9aca00'
-          try {
-            gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
-          } catch {
-            // Keep fallback gas price.
+          if (!externalSigner) {
+            try {
+              gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
+            } catch {
+              // Keep fallback gas price.
+            }
           }
 
           if (nft) {
@@ -2560,13 +2589,25 @@ export const useWalletStore = create<WalletState>()(
               // Keep fallback gas limit.
             }
 
-            const signedTx = await wallet.signTransaction({
+            if (externalSigner) {
+              const sent = await externalSigner.sendTransaction({
+                chainId: resolvedChainId,
+                to: tokenAddress,
+                valueWei: 0n,
+                data: transferData,
+                gasLimit: BigInt(String(gasLimitHex || '0x30d40'))
+              })
+              await get().fetchNetworkAssets()
+              return { txid: sent.hash }
+            }
+
+            const signedTx = await wallet!.signTransaction({
               to: tokenAddress,
               value: 0n,
               nonce: Number(BigInt(String(nonceHex || '0x0'))),
               gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
               gasLimit: BigInt(String(gasLimitHex || '0x30d40')),
-              chainId: Number(BigInt(String(chainIdHex || net.chainId || 1))),
+              chainId: resolvedChainId,
               data: transferData
             })
             const sent = await sendBridgeTokenTransfer(rpcConfig, {
@@ -2632,14 +2673,25 @@ export const useWalletStore = create<WalletState>()(
           } catch {
             // Keep fallback gas limit.
           }
+          if (externalSigner) {
+            const sent = await externalSigner.sendTransaction({
+              chainId: resolvedChainId,
+              to: tokenAddress,
+              valueWei: 0n,
+              data: transferData,
+              gasLimit: BigInt(String(gasLimitHex || '0x186a0'))
+            })
+            await get().fetchNetworkAssets()
+            return { txid: sent.hash }
+          }
 
-          const signedTx = await wallet.signTransaction({
+          const signedTx = await wallet!.signTransaction({
             to: tokenAddress,
             value: 0n,
             nonce: Number(BigInt(String(nonceHex || '0x0'))),
             gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
             gasLimit: BigInt(String(gasLimitHex || '0x186a0')),
-            chainId: Number(BigInt(String(chainIdHex || net.chainId || 1))),
+            chainId: resolvedChainId,
             data: transferData
           })
 
@@ -2664,7 +2716,7 @@ export const useWalletStore = create<WalletState>()(
           }
           const tx = await sendCardanoAssetNonCustodial({
             network: net,
-            mnemonic: sessionMnemonic,
+            mnemonic: sessionMnemonic!,
             accountIndex,
             fromAddress: senderAddress,
             toAddress: String(toAddress || '').trim(),
@@ -2692,7 +2744,7 @@ export const useWalletStore = create<WalletState>()(
             throw new Error('Cosmos token send quantity must be a positive integer in raw denom units')
           }
 
-          const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)
+          const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
           if (String(senderAddress || '').trim() !== derived.address) {
             throw new Error(`Active COSMOS address does not match derived signer address (${senderAddress} != ${derived.address})`)
           }
@@ -2763,7 +2815,7 @@ export const useWalletStore = create<WalletState>()(
           return { txid: sent.txid }
         }
 
-        const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
+        const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
 
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr2,
@@ -3575,12 +3627,23 @@ export const useWalletStore = create<WalletState>()(
 
       sendEvmTransaction: async ({ to, amount }) => {
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
-        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || net.coinType !== 'EVM') throw new Error('Active network is not EVM')
-        if (!acc?.addresses?.EVM) throw new Error('No active account')
+        if (!acc?.addresses?.EVM && !isExternalEvmSignerEnabled()) throw new Error('No active account')
+
+        if (isExternalEvmSignerEnabled()) {
+          const signer = await resolveEvmExternalSigner()
+          if (!signer) throw new Error('External EVM signer is not available')
+          const sent = await signer.sendTransaction({
+            chainId: net.chainId,
+            to,
+            valueWei: ethers.parseEther(String(amount))
+          })
+          return { hash: sent.hash }
+        }
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const rpcConfig = await createUtxoRpcConfig(net, {
           secureBridgeSigner: get().signBackendAuthMessage
@@ -3746,6 +3809,7 @@ export const useWalletStore = create<WalletState>()(
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
         const net = networks.find((n) => n.id === activeNetworkId)
+        const modelId = resolveNetworkModelId(net)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
@@ -3767,6 +3831,36 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: lro3[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
+
+        if (modelId === 'cosmos') {
+          const cosmosCfg = resolveCosmosNetworkConfig(net)
+          const nativeDenom = resolveCosmosNativeDenom()
+          const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), 6, net.symbol)
+          const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)
+          if (String(senderAddress || '').trim() !== derived.address) {
+            throw new Error(`Active COSMOS address does not match derived signer address (${senderAddress} != ${derived.address})`)
+          }
+          const signedTxBase64 = await signCosmosTokenTransferTxBase64({
+            rpcUrl: net.rpcUrl,
+            fromAddress: derived.address,
+            toAddress: String(to || '').trim(),
+            denom: nativeDenom,
+            amountRaw: amountRaw.toString(),
+            privateKeyHex: derived.privHex
+          })
+          const sent = await sendBridgeTokenTransfer(rpcConfig, {
+            coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+            chain: String(net.serverChain || 'main').trim() || 'main',
+            tokenId: nativeDenom,
+            toAddress: String(to || '').trim(),
+            fromAddress: derived.address,
+            amount: amountRaw.toString(),
+            signedTxHex: signedTxBase64,
+            signedFormat: 'cosmos-tx-base64'
+          })
+          return { hash: sent.txid }
+        }
+
         return await sendUtxoNonCustodialTransaction({
           network: net,
           rpcConfig,

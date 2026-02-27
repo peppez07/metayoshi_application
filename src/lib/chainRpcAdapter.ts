@@ -23,6 +23,7 @@ import { StrKey } from '@stellar/stellar-sdk'
 import { TronWeb } from 'tronweb'
 import { getTronBalance } from './tronNonCustodial'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
+import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -74,11 +75,7 @@ function resolveProtocol(network: Network): string {
 }
 
 function resolveModelId(network: Network): string {
-  return String(network.runtimeModelId || network.id || '').trim().toLowerCase()
-}
-
-function isCroCosmosLikeModel(modelId: string): boolean {
-  return modelId === 'crocosmos' || modelId === 'cro' || modelId === 'cosmos'
+  return resolveRuntimeModelId(network)
 }
 
 function resolveCosmosNetworkConfig(network: Network): { hrp: string; decimals: number } {
@@ -95,7 +92,8 @@ export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsup
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
   const modelId = resolveModelId(network)
   const protocol = resolveProtocol(network)
-  if (isCroCosmosLikeModel(modelId)) return 'custodial-server'
+  if (modelId === 'cosmos') return 'non-custodial'
+  if (isCroCosmosModelId(modelId)) return 'custodial-server'
   if (modelId === 'sol' || modelId === 'xlm' || modelId === 'tron') return 'non-custodial'
   if (modelId === 'ada') return 'non-custodial'
   if (modelId === 'xmr') {
@@ -384,7 +382,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     const balance = await getSolanaBalanceDirectRpc(rpcUrl, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
-  if (isCroCosmosLikeModel(modelId)) {
+  if (isCosmosLikeModelId(modelId)) {
     if (!input.rpcConfig) throw new Error('Bridge RPC config is required for Cosmos-like networks')
     let syncPercent: number | null = null
     let isSyncing = false
@@ -502,7 +500,7 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   }
   if (modelId === 'xlm') return StrKey.isValidEd25519PublicKey(value)
   if (modelId === 'tron') return TronWeb.isAddress(value)
-  if (isCroCosmosLikeModel(modelId)) {
+  if (isCosmosLikeModelId(modelId)) {
     const { hrp } = resolveCosmosNetworkConfig(network)
     return isCosmosAddressForHrp(value, hrp)
   }
@@ -589,7 +587,7 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const net = input.network
   const rpcConfig = input.rpcConfig
   if (net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
-  if (isCroCosmosLikeModel(resolveModelId(net))) {
+  if (isCroCosmosModelId(resolveModelId(net))) {
     const { hrp, decimals } = resolveCosmosNetworkConfig(net)
     const to = String(input.to || '').trim()
     if (!isCosmosAddressForHrp(to, hrp)) {

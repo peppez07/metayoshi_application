@@ -28,6 +28,51 @@ type ProviderState = {
   selectedAddress: string | null
 }
 
+type ProviderNetwork = {
+  id: string
+  runtimeModelId: string | null
+  name: string
+  symbol: string
+  coinType: string
+  chainId: number | null
+  active: boolean
+  capabilities: {
+    nativeSend: boolean
+    assetLayer: boolean
+    assetSend: boolean
+    activity: boolean
+  }
+}
+
+type ProviderCapabilities = {
+  wallet: {
+    isMetaYoshi: boolean
+    connected: boolean
+    unlocked: boolean
+  }
+  network: {
+    id: string | null
+    runtimeModelId: string | null
+    name: string | null
+    symbol: string | null
+    coinType: string | null
+  }
+  features: {
+    nativeSend: boolean
+    signMessage: boolean
+    assetLayer: boolean
+    assetSend: boolean
+  }
+  scopes: {
+    read: boolean
+    sign: boolean
+    send_coin: boolean
+    send_asset: boolean
+  }
+  methods: string[]
+  networks: ProviderNetwork[]
+}
+
 const listeners = new Map<string, Set<Listener>>()
 const pending = new Map<number, { method: string; resolve: (value: any) => void; reject: (err: any) => void }>()
 let nextId = 1
@@ -296,12 +341,25 @@ const provider = {
   enable: () => request({ method: PROVIDER_ENABLE_METHOD }),
   connect: () => request({ method: 'wallet_connect' }),
   getProviderState: () => request({ method: PROVIDER_STATE_METHOD }),
-  getNetworks: () => request({ method: 'wallet_getNetworks' }),
-  getCapabilities: () => request({ method: 'wallet_getCapabilities' }),
+  getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
+  getCapabilities: (): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities' }),
   sendTransaction: (params: { to: string; amount: string }) =>
     request({ method: 'wallet_sendTransaction', params }),
   sendAsset: (params: { assetId: string; qty: string; toAddress: string }) =>
     request({ method: 'wallet_sendAsset', params }),
+  sdkInfo: async () => {
+    const [stateSnapshot, capabilities, networks] = await Promise.all([
+      request({ method: PROVIDER_STATE_METHOD }),
+      request({ method: 'wallet_getCapabilities' }),
+      request({ method: 'wallet_getNetworks' })
+    ])
+    return {
+      provider: 'metayoshi',
+      state: stateSnapshot,
+      capabilities,
+      networks
+    }
+  },
   
   // Event methods
   on,
@@ -316,7 +374,7 @@ const provider = {
   
   // Metadata
   _metayoshi: {
-    hardwareWallet: false,
+    hardwareWallet: String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || '').trim().toLowerCase() === 'hardware',
     version: import.meta.env.VITE_APP_VERSION ?? '0.1.0-beta',
     multiChain: true
   }

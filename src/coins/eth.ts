@@ -1,36 +1,25 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { createEvmCoinModule } from './factories'
 import ethereumLogo from './coinlogos/ethereum.png'
 
-export const ETH_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
-
-export function createEthNetwork(ctx: CoinRuntimeContext): Network {
-  return {
-    id: 'eth',
-    name: 'Ethereum',
-    symbol: 'ETH',
-    coinType: 'EVM',
-    coinSymbol: 'ETH',
-    chainId: 1,
-    rpcUrl: import.meta.env.VITE_ETH_RPC || 'https://ethereum-rpc.publicnode.com',
-    rpcWallet: '',
-    rpcUsername: import.meta.env.VITE_ETH_RPC_USER || '',
-    rpcPassword: import.meta.env.VITE_ETH_RPC_PASSWORD || '',
-    bridgeUrl: ctx.buildBridgeUrl('ethereum', 'main'),
-    bridgeUsername: import.meta.env.VITE_ETH_BRIDGE_USER || 'bridgeuser',
-    bridgePassword: import.meta.env.VITE_ETH_BRIDGE_PASSWORD || 'bridgepass',
-    explorerUrl: import.meta.env.VITE_ETH_EXPLORER || 'https://etherscan.io',
-    capabilities: ETH_CAPABILITIES,
-    logo: ethereumLogo
-  }
-}
-
-export const ethCoin: CoinModule = {
+const ethModule = createEvmCoinModule({
   id: 'eth',
+  name: 'Ethereum',
   symbol: 'ETH',
   coinSymbol: 'ETH',
-  capabilities: ETH_CAPABILITIES,
-  createNetwork: createEthNetwork
-}
+  chainId: 1,
+  bridgeCoinId: 'ethereum',
+  logo: ethereumLogo,
+  rpcEnvKey: 'VITE_ETH_RPC',
+  rpcUserEnvKey: 'VITE_ETH_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_ETH_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_ETH_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_ETH_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_ETH_EXPLORER',
+  defaultRpcUrl: 'https://ethereum-rpc.publicnode.com',
+  defaultExplorerUrl: 'https://etherscan.io'
+})
+
+export const ETH_CAPABILITIES: NetworkCapabilitiesInput = ethModule.capabilities
+export const createEthNetwork: (ctx: CoinRuntimeContext) => Network = ethModule.createNetwork
+export const ethCoin: CoinModule = ethModule.coin

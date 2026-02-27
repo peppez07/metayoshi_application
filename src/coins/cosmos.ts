@@ -1,14 +1,11 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import utxoLogo from './coinlogos/cosmos.png'
 
-export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
+export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
 
 export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
-  const bridgeUser = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-  const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
     id: 'srv--cosmos',
     runtimeModelId: 'cosmos',
@@ -23,8 +20,8 @@ export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
     rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('cosmos', 'main'),
-    bridgeUsername: bridgeUser,
-    bridgePassword: bridgePass,
+    bridgeUsername,
+    bridgePassword,
     capabilities: COSMOS_CAPABILITIES,
     logo: utxoLogo
   }
@@ -37,4 +34,3 @@ export const cosmosCoin: CoinModule = {
   capabilities: COSMOS_CAPABILITIES,
   createNetwork: createCosmosNetwork
 }
-

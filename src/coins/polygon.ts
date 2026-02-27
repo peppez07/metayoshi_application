@@ -1,36 +1,25 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { createEvmCoinModule } from './factories'
 import polygonLogo from './coinlogos/polygon.png'
 
-export const POLYGON_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
-
-export function createPolygonNetwork(ctx: CoinRuntimeContext): Network {
-  return {
-    id: 'polygon',
-    name: 'Polygon',
-    symbol: 'MATIC',
-    coinType: 'EVM',
-    coinSymbol: 'MATIC',
-    chainId: 137,
-    rpcUrl: import.meta.env.VITE_POLYGON_RPC || 'https://polygon-bor-rpc.publicnode.com',
-    rpcWallet: '',
-    rpcUsername: import.meta.env.VITE_POLYGON_RPC_USER || '',
-    rpcPassword: import.meta.env.VITE_POLYGON_RPC_PASSWORD || '',
-    bridgeUrl: ctx.buildBridgeUrl('polygon-bor', 'main'),
-    bridgeUsername: import.meta.env.VITE_POLYGON_BRIDGE_USER || 'bridgeuser',
-    bridgePassword: import.meta.env.VITE_POLYGON_BRIDGE_PASSWORD || 'bridgepass',
-    explorerUrl: import.meta.env.VITE_POLYGON_EXPLORER || 'https://polygonscan.com',
-    capabilities: POLYGON_CAPABILITIES,
-    logo: polygonLogo
-  }
-}
-
-export const polygonCoin: CoinModule = {
+const polygonModule = createEvmCoinModule({
   id: 'polygon',
+  name: 'Polygon',
   symbol: 'MATIC',
   coinSymbol: 'MATIC',
-  capabilities: POLYGON_CAPABILITIES,
-  createNetwork: createPolygonNetwork
-}
+  chainId: 137,
+  bridgeCoinId: 'polygon-bor',
+  logo: polygonLogo,
+  rpcEnvKey: 'VITE_POLYGON_RPC',
+  rpcUserEnvKey: 'VITE_POLYGON_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_POLYGON_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_POLYGON_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_POLYGON_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_POLYGON_EXPLORER',
+  defaultRpcUrl: 'https://polygon-bor-rpc.publicnode.com',
+  defaultExplorerUrl: 'https://polygonscan.com'
+})
+
+export const POLYGON_CAPABILITIES: NetworkCapabilitiesInput = polygonModule.capabilities
+export const createPolygonNetwork: (ctx: CoinRuntimeContext) => Network = polygonModule.createNetwork
+export const polygonCoin: CoinModule = polygonModule.coin

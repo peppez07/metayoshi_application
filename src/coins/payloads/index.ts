@@ -8,6 +8,7 @@ import { XMR_PAYLOADS } from './monero'
 import { RTM_PAYLOADS } from './rtm'
 import { TIDE_PAYLOADS } from './tide'
 import { XRP_PAYLOADS } from './xrp'
+import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
 import type { CoinPayloadCatalog } from './types'
 
@@ -32,33 +33,6 @@ export const PAYLOADS_BY_NETWORK_ID = Object.fromEntries(
   PAYLOAD_CATALOG_REGISTRY.map((entry) => [entry.networkId, entry.catalog])
 ) as Record<(typeof PAYLOAD_CATALOG_ORDER)[number], CoinPayloadCatalog>
 
-type StandardPayloadMeta = {
-  symbol: string
-  coinId: string
-}
-
-const STANDARD_PAYLOAD_META: Record<string, StandardPayloadMeta> = {
-  rtm: { symbol: 'RTM', coinId: 'raptoreum' },
-  doge: { symbol: 'DOGE', coinId: 'dogecoin' },
-  btcz: { symbol: 'BTCZ', coinId: 'bitcoinz' },
-  tide: { symbol: 'TIDE', coinId: 'tidecoin' },
-  firo: { symbol: 'FIRO', coinId: 'firo' },
-  xrp: { symbol: 'XRP', coinId: 'xrp' },
-  arr: { symbol: 'ARRR', coinId: 'arr' },
-  xmr: { symbol: 'XMR', coinId: 'monero' },
-  ada: { symbol: 'ADA', coinId: 'cardano' },
-  eth: { symbol: 'ETH', coinId: 'ethereum' },
-  arb: { symbol: 'ETH', coinId: 'arbitrum-one' },
-  base: { symbol: 'ETH', coinId: 'base' },
-  bnb: { symbol: 'BNB', coinId: 'bsc' },
-  cro: { symbol: 'CRO', coinId: 'cronos' },
-  polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
-  avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
-  sol: { symbol: 'SOL', coinId: 'solana' },
-  xlm: { symbol: 'XLM', coinId: 'stellar' },
-  tron: { symbol: 'TRX', coinId: 'tron' }
-}
-
 const dynamicPayloadCatalogCache = new Map<string, CoinPayloadCatalog>()
 
 function normalizePayloadNetworkId(networkId?: string): string {
@@ -77,7 +51,7 @@ function normalizePayloadNetworkId(networkId?: string): string {
 }
 
 function createStandardPayloadCatalog(networkId: string): CoinPayloadCatalog | undefined {
-  const meta = STANDARD_PAYLOAD_META[networkId]
+  const meta = STANDARD_RUNTIME_META[networkId]
   if (!meta) return undefined
   return createUtxoPayloadCatalog({
     networkId,

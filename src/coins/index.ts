@@ -445,28 +445,6 @@ type NetworkCandidate = {
 }
 
 const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
-const PRIMARY_SERVER_COIN_BY_MODEL_ID: Record<string, string> = {
-  rtm: 'raptoreum',
-  doge: 'dogecoin',
-  btcz: 'bitcoinz',
-  tide: 'tidecoin',
-  firo: 'firo',
-  xrp: 'xrp',
-  arr: 'arr',
-  ada: 'cardano',
-  xmr: 'monero',
-  xlm: 'stellar',
-  sol: 'solana',
-  tron: 'tron',
-  eth: 'ethereum',
-  cro: 'cronos',
-  arb: 'arbitrum-one',
-  base: 'base',
-  bnb: 'bsc',
-  polygon: 'polygon-bor',
-  avaxc: 'avalanche-c-chain'
-}
-
 function flattenServerMethodGroups(methodGroups: Record<string, string[]> | undefined): string[] {
   if (!methodGroups || typeof methodGroups !== 'object') return []
   const out: string[] = []
@@ -646,18 +624,15 @@ function normalizeServerCoinSymbol(coinId: string, symbol: string, fallback?: st
 }
 
 function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): string {
-  const normalizedServerCoinId = String(serverCoinId || '').trim().toLowerCase()
   const normalizedBaseNetworkId = String(baseNetworkId || '').trim().toLowerCase()
   if (normalizedBaseNetworkId.startsWith('srv--')) {
     const parts = normalizedBaseNetworkId.split('--')
     if (parts.length >= 2 && parts[1]) return `srv--${parts[1]}`
     return normalizedBaseNetworkId
   }
-  const primary = PRIMARY_SERVER_COIN_BY_MODEL_ID[normalizedBaseNetworkId]
-  if (primary && normalizedServerCoinId === primary) return normalizedBaseNetworkId
-  const suffix = sanitizeServerCoinId(normalizedServerCoinId)
-  if (!suffix || suffix === normalizedBaseNetworkId) return normalizedBaseNetworkId
-  return `${normalizedBaseNetworkId}--${suffix}`
+  // Collapse server aliases (e.g. eth--linea, eth--mantle) into canonical
+  // menu network IDs to keep the selectable network set minimal.
+  return normalizedBaseNetworkId
 }
 
 function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | null {

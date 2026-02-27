@@ -1,36 +1,25 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { createEvmCoinModule } from './factories'
 import avalancheLogo from './coinlogos/avalanche.png'
 
-export const AVAXC_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
-
-export function createAvaxCNetwork(ctx: CoinRuntimeContext): Network {
-  return {
-    id: 'avaxc',
-    name: 'Avalanche C-Chain',
-    symbol: 'AVAX',
-    coinType: 'EVM',
-    coinSymbol: 'AVAX',
-    chainId: 43114,
-    rpcUrl: import.meta.env.VITE_AVAXC_RPC || 'https://api.avax.network/ext/bc/C/rpc',
-    rpcWallet: '',
-    rpcUsername: import.meta.env.VITE_AVAXC_RPC_USER || '',
-    rpcPassword: import.meta.env.VITE_AVAXC_RPC_PASSWORD || '',
-    bridgeUrl: ctx.buildBridgeUrl('avalanche-c-chain', 'main'),
-    bridgeUsername: import.meta.env.VITE_AVAXC_BRIDGE_USER || 'bridgeuser',
-    bridgePassword: import.meta.env.VITE_AVAXC_BRIDGE_PASSWORD || 'bridgepass',
-    explorerUrl: import.meta.env.VITE_AVAXC_EXPLORER || 'https://snowtrace.io',
-    capabilities: AVAXC_CAPABILITIES,
-    logo: avalancheLogo
-  }
-}
-
-export const avaxcCoin: CoinModule = {
+const avaxcModule = createEvmCoinModule({
   id: 'avaxc',
+  name: 'Avalanche C-Chain',
   symbol: 'AVAX',
   coinSymbol: 'AVAX',
-  capabilities: AVAXC_CAPABILITIES,
-  createNetwork: createAvaxCNetwork
-}
+  chainId: 43114,
+  bridgeCoinId: 'avalanche-c-chain',
+  logo: avalancheLogo,
+  rpcEnvKey: 'VITE_AVAXC_RPC',
+  rpcUserEnvKey: 'VITE_AVAXC_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_AVAXC_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_AVAXC_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_AVAXC_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_AVAXC_EXPLORER',
+  defaultRpcUrl: 'https://api.avax.network/ext/bc/C/rpc',
+  defaultExplorerUrl: 'https://snowtrace.io'
+})
+
+export const AVAXC_CAPABILITIES: NetworkCapabilitiesInput = avaxcModule.capabilities
+export const createAvaxCNetwork: (ctx: CoinRuntimeContext) => Network = avaxcModule.createNetwork
+export const avaxcCoin: CoinModule = avaxcModule.coin

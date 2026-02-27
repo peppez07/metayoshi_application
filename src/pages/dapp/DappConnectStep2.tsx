@@ -18,9 +18,9 @@ function canUseChromeStorage(): boolean {
 
 function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'View your wallet address and balances'
-  if (scope === 'sign') return 'Request message signatures'
+  if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
   if (scope === 'send_coin') return 'Suggest native coin transactions'
-  return 'Suggest asset transfer transactions'
+  return 'Suggest token and NFT transfer transactions'
 }
 
 const DappConnectStep2: React.FC = () => {
@@ -158,7 +158,7 @@ const DappConnectStep2: React.FC = () => {
           </div>
 
           <p className="text-[10px] text-gray-500 leading-tight">
-            Only connect with sites you trust. Approval grants this origin access only to the selected capabilities.
+            Only connect with trusted sites. Asset scope includes ERC20/ERC721/ERC1155 on EVM, Cosmos denom/CW20/CW721 where enabled, and other network-native asset layers.
           </p>
         </div>
       </div>

@@ -1,36 +1,25 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { createEvmCoinModule } from './factories'
 import baseLogo from './coinlogos/base.png'
 
-export const BASE_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
-
-export function createBaseNetwork(ctx: CoinRuntimeContext): Network {
-  return {
-    id: 'base',
-    name: 'Base',
-    symbol: 'BASE',
-    coinType: 'EVM',
-    coinSymbol: 'ETH',
-    chainId: 8453,
-    rpcUrl: import.meta.env.VITE_BASE_RPC || 'https://mainnet.base.org',
-    rpcWallet: '',
-    rpcUsername: import.meta.env.VITE_BASE_RPC_USER || '',
-    rpcPassword: import.meta.env.VITE_BASE_RPC_PASSWORD || '',
-    bridgeUrl: ctx.buildBridgeUrl('base', 'main'),
-    bridgeUsername: import.meta.env.VITE_BASE_BRIDGE_USER || 'bridgeuser',
-    bridgePassword: import.meta.env.VITE_BASE_BRIDGE_PASSWORD || 'bridgepass',
-    explorerUrl: import.meta.env.VITE_BASE_EXPLORER || 'https://basescan.org',
-    capabilities: BASE_CAPABILITIES,
-    logo: baseLogo
-  }
-}
-
-export const baseCoin: CoinModule = {
+const baseModule = createEvmCoinModule({
   id: 'base',
+  name: 'Base',
   symbol: 'BASE',
   coinSymbol: 'ETH',
-  capabilities: BASE_CAPABILITIES,
-  createNetwork: createBaseNetwork
-}
+  chainId: 8453,
+  bridgeCoinId: 'base',
+  logo: baseLogo,
+  rpcEnvKey: 'VITE_BASE_RPC',
+  rpcUserEnvKey: 'VITE_BASE_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_BASE_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_BASE_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_BASE_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_BASE_EXPLORER',
+  defaultRpcUrl: 'https://mainnet.base.org',
+  defaultExplorerUrl: 'https://basescan.org'
+})
+
+export const BASE_CAPABILITIES: NetworkCapabilitiesInput = baseModule.capabilities
+export const createBaseNetwork: (ctx: CoinRuntimeContext) => Network = baseModule.createNetwork
+export const baseCoin: CoinModule = baseModule.coin

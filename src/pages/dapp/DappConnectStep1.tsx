@@ -6,13 +6,21 @@ import { PasswordGate } from '../../components/PasswordGate'
 import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
   parseDappPendingApproval,
-  type DappPendingApproval
+  type DappPendingApproval,
+  type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
+}
+
+function scopeLabel(scope: DappScope): string {
+  if (scope === 'read') return 'Read wallet addresses and balances'
+  if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
+  if (scope === 'send_coin') return 'Request native coin transfers'
+  return 'Request token/NFT transfers (ERC20/721/1155, CW20/721, denom assets where supported)'
 }
 
 const DappConnectStep1: React.FC = () => {
@@ -84,7 +92,7 @@ const DappConnectStep1: React.FC = () => {
     () => networks.map((network) => ({
       id: network.id,
       label: `${network.symbol} (${network.name})`
-    })),
+    })).sort((a, b) => a.label.localeCompare(b.label)),
     [networks]
   )
 
@@ -186,6 +194,14 @@ const DappConnectStep1: React.FC = () => {
         </div>
 
         <div className="space-y-4">
+          <div className="p-3 rounded-xl border border-dark-600 bg-dark-700/40">
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Requested scopes</p>
+            <div className="space-y-1">
+              {pendingApproval.scopes.map((scope) => (
+                <p key={scope} className="text-[11px] text-gray-300">{scopeLabel(scope)}</p>
+              ))}
+            </div>
+          </div>
           <p className="text-xs font-bold text-gray-400 uppercase">Select the account(s) to use on this site</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
@@ -209,7 +225,7 @@ const DappConnectStep1: React.FC = () => {
             </select>
           </div>
           <p className="text-[10px] text-gray-500">
-            {selectedAccounts.length} selected
+            {selectedAccounts.length} selected · {coinOptions.length} enabled networks available in SDK
           </p>
           <div className="space-y-2">
             {filteredAccounts.map((account) => {

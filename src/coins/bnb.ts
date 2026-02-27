@@ -1,36 +1,25 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { createEvmCoinModule } from './factories'
 import bnbLogo from './coinlogos/bnb.png'
 
-export const BNB_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
-}
-
-export function createBnbNetwork(ctx: CoinRuntimeContext): Network {
-  return {
-    id: 'bnb',
-    name: 'BNB Smart Chain',
-    symbol: 'BNB',
-    coinType: 'EVM',
-    coinSymbol: 'BNB',
-    chainId: 56,
-    rpcUrl: import.meta.env.VITE_BNB_RPC || 'https://bsc-dataseed.binance.org',
-    rpcWallet: '',
-    rpcUsername: import.meta.env.VITE_BNB_RPC_USER || '',
-    rpcPassword: import.meta.env.VITE_BNB_RPC_PASSWORD || '',
-    bridgeUrl: ctx.buildBridgeUrl('bsc', 'main'),
-    bridgeUsername: import.meta.env.VITE_BNB_BRIDGE_USER || 'bridgeuser',
-    bridgePassword: import.meta.env.VITE_BNB_BRIDGE_PASSWORD || 'bridgepass',
-    explorerUrl: import.meta.env.VITE_BNB_EXPLORER || 'https://bscscan.com',
-    capabilities: BNB_CAPABILITIES,
-    logo: bnbLogo
-  }
-}
-
-export const bnbCoin: CoinModule = {
+const bnbModule = createEvmCoinModule({
   id: 'bnb',
+  name: 'BNB Smart Chain',
   symbol: 'BNB',
   coinSymbol: 'BNB',
-  capabilities: BNB_CAPABILITIES,
-  createNetwork: createBnbNetwork
-}
+  chainId: 56,
+  bridgeCoinId: 'bsc',
+  logo: bnbLogo,
+  rpcEnvKey: 'VITE_BNB_RPC',
+  rpcUserEnvKey: 'VITE_BNB_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_BNB_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_BNB_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_BNB_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_BNB_EXPLORER',
+  defaultRpcUrl: 'https://bsc-dataseed.binance.org',
+  defaultExplorerUrl: 'https://bscscan.com'
+})
+
+export const BNB_CAPABILITIES: NetworkCapabilitiesInput = bnbModule.capabilities
+export const createBnbNetwork: (ctx: CoinRuntimeContext) => Network = bnbModule.createNetwork
+export const bnbCoin: CoinModule = bnbModule.coin

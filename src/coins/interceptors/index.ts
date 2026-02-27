@@ -9,6 +9,7 @@ import { TIDE_API_INFO, tideApiInterceptor } from './tide'
 import { XRP_API_INFO, xrpApiInterceptor } from './xrp'
 import { createCoinApiInterceptor } from './factory'
 import { getCoinPayloadCatalog } from '../payloads'
+import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import {
   SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID,
   SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID
@@ -41,33 +42,6 @@ const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = Object.fromEntries(
   COIN_API_REGISTRY.map((entry) => [entry.networkId, entry.info])
 )
 
-type StandardApiMeta = {
-  symbol: string
-  coinId: string
-}
-
-const STANDARD_API_META: Record<string, StandardApiMeta> = {
-  rtm: { symbol: 'RTM', coinId: 'raptoreum' },
-  doge: { symbol: 'DOGE', coinId: 'dogecoin' },
-  btcz: { symbol: 'BTCZ', coinId: 'bitcoinz' },
-  tide: { symbol: 'TIDE', coinId: 'tidecoin' },
-  firo: { symbol: 'FIRO', coinId: 'firo' },
-  xrp: { symbol: 'XRP', coinId: 'xrp' },
-  arr: { symbol: 'ARRR', coinId: 'arr' },
-  xmr: { symbol: 'XMR', coinId: 'monero' },
-  ada: { symbol: 'ADA', coinId: 'cardano' },
-  eth: { symbol: 'ETH', coinId: 'ethereum' },
-  arb: { symbol: 'ETH', coinId: 'arbitrum-one' },
-  base: { symbol: 'ETH', coinId: 'base' },
-  bnb: { symbol: 'BNB', coinId: 'bsc' },
-  cro: { symbol: 'CRO', coinId: 'cronos' },
-  polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
-  avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
-  sol: { symbol: 'SOL', coinId: 'solana' },
-  xlm: { symbol: 'XLM', coinId: 'stellar' },
-  tron: { symbol: 'TRX', coinId: 'tron' }
-}
-
 const DYNAMIC_API_INFO_CACHE = new Map<string, CoinApiInfo>()
 const DYNAMIC_INTERCEPTOR_CACHE = new Map<string, CoinApiInterceptor>()
 
@@ -92,7 +66,7 @@ function resolveDefaultBridgePath(coinId: string): string {
 }
 
 function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
-  const meta = STANDARD_API_META[networkId]
+  const meta = STANDARD_RUNTIME_META[networkId]
   if (!meta) return undefined
   const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
   const bridgePath = resolveDefaultBridgePath(meta.coinId)
