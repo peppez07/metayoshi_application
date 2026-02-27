@@ -792,6 +792,28 @@ function parseEvmNftAssetKey(assetId: string): { standard: EvmNftStandard; addre
   }
 }
 
+function parseEvmFungibleAssetAlias(assetId: string): { symbol: string; ordinal: number } {
+  const raw = String(assetId || '').trim()
+  if (!raw) return { symbol: '', ordinal: 1 }
+  const withoutHint = raw.split('@')[0]
+  const m = withoutHint.match(/^(.*?)-(\d+)$/)
+  if (!m) return { symbol: withoutHint.toUpperCase(), ordinal: 1 }
+  const symbol = String(m[1] || '').trim().toUpperCase()
+  const ordinal = Number(m[2])
+  if (!symbol || !Number.isInteger(ordinal) || ordinal <= 0) {
+    return { symbol: withoutHint.toUpperCase(), ordinal: 1 }
+  }
+  return { symbol, ordinal }
+}
+
+function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
+  const raw = String(logoUri || '').trim()
+  if (!raw) return ''
+  const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
+  if (!m) return ''
+  return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
+}
+
 async function detectEvmNftStandard(
   rpcConfig: UtxoRpcConfig,
   address: string
@@ -2107,7 +2129,10 @@ export const useWalletStore = create<WalletState>()(
           activeNetworkId,
           useLocalRpc: ulr,
           localRpcOverrides: lro,
-          evmNftAssets
+          evmNftAssets,
+          networkAssets,
+          networkAssetLogos,
+          serverCoinCatalog
         } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net) throw new Error('Active network not found')
@@ -2130,7 +2155,47 @@ export const useWalletStore = create<WalletState>()(
             : null
           const nft = direct || fallback
           if (!nft) {
-            throw new Error(`No EVM NFT metadata entry found for "${normalizedAssetId}". Add it to tracked NFTs.`)
+            const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
+            const trackedDefaults = await resolveTrackedEvmTokens(net)
+            const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+            const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
+            const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
+            const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+            const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+            const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+
+            let tokenAddress = ''
+            if (ethers.isAddress(normalizedAssetId)) {
+              tokenAddress = ethers.getAddress(normalizedAssetId)
+            } else {
+              tokenAddress = extractEvmTokenAddressFromLogoUri(logoUri)
+            }
+            if (!tokenAddress && alias.symbol) {
+              const matches = trackedTokens.filter((token) => String(token.symbol || '').trim().toUpperCase() === alias.symbol)
+              if (matches.length > 0) {
+                const idx = Math.min(Math.max(alias.ordinal, 1), matches.length) - 1
+                tokenAddress = ethers.getAddress(matches[idx].address)
+              }
+            }
+
+            const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
+            const tokenRef = tokenAddress
+              ? (explorerBase ? `${explorerBase}/token/${tokenAddress}` : undefined)
+              : undefined
+            return {
+              name: alias.symbol || normalizedAssetId,
+              amount: Number.isFinite(amountUi) ? amountUi : 0,
+              units: 0,
+              reissuable: false,
+              has_ipfs: false,
+              ipfs_hash: undefined,
+              preview_url: tokenRef || logoUri || undefined,
+              metadata_url: tokenRef || undefined,
+              token_id: normalizedAssetId,
+              contract_address: tokenAddress || '',
+              txid_or_longname: normalizedAssetId,
+              ownership_address: ''
+            }
           }
 
           const rpcConfig = await createUtxoRpcConfig(net, {
@@ -2367,7 +2432,7 @@ export const useWalletStore = create<WalletState>()(
       sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, serverCoinCatalog, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
@@ -2392,26 +2457,31 @@ export const useWalletStore = create<WalletState>()(
 
           const normalizedAssetId = String(assetId || '').trim()
           if (!normalizedAssetId) throw new Error('Token id is required')
+          const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
           const trackedTokens = [...trackedDefaults, ...trackedFromCatalog]
+          const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 
           const exactAddress = ethers.isAddress(normalizedAssetId)
             ? ethers.getAddress(normalizedAssetId)
             : ''
-          let tokenAddress = exactAddress
+          let tokenAddress = exactAddress || extractEvmTokenAddressFromLogoUri(logoUri)
           if (!tokenAddress) {
             const matches = trackedTokens.filter((token) =>
-              String(token.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase()
+              String(token.symbol || '').trim().toUpperCase() === alias.symbol
             )
             if (matches.length === 0) {
               throw new Error(`No tracked token contract found for "${normalizedAssetId}" on ${net.name}`)
             }
-            if (matches.length > 1) {
-              throw new Error(`Multiple token contracts match "${normalizedAssetId}". Use contract address instead.`)
+            if (alias.ordinal > matches.length) {
+              throw new Error(`No tracked token contract found for "${normalizedAssetId}" on ${net.name}`)
             }
-            tokenAddress = ethers.getAddress(matches[0].address)
+            if (matches.length > 1 && alias.ordinal === 1 && !/-\d+$/.test(normalizedAssetId)) {
+              throw new Error(`Multiple token contracts match "${normalizedAssetId}". Use contract address or the asset key suffix (e.g. -2).`)
+            }
+            tokenAddress = ethers.getAddress(matches[Math.max(0, alias.ordinal - 1)].address)
           }
 
           const rpcConfig = await createUtxoRpcConfig(net, {
