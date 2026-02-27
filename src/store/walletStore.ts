@@ -41,6 +41,7 @@ import { isCroCosmosNetwork, requiresMnemonicForNetwork, resolveRuntimeModelId a
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
+import { getTokenLogoForAsset } from '../coins/tokenlogos'
 import {
   fetchChainBalanceAndSync,
   resolveChainSendCustodyMode,
@@ -2130,7 +2131,7 @@ export const useWalletStore = create<WalletState>()(
               usedKeys.add(key)
               assets[key] = row.displaySats
               const baseLogo = getTokenLogoForAsset(baseSymbol)
-              logos[key] = encodeTronContractLogoHint(baseLogo, row.token.contract)
+              logos[key] = encodeTronContractLogoHint(baseLogo || '', row.token.contract)
             }
 
             set((state) => ({
@@ -2726,6 +2727,40 @@ export const useWalletStore = create<WalletState>()(
         const senderAddress = acc.networkAddresses?.[activeNetworkId]
           || await get().ensureNetworkAddress(activeNetworkId)
         if (!senderAddress) throw new Error(`No address derived for ${net.name}`)
+
+        if (modelId === 'tron') {
+          const recipient = String(toAddress || '').trim()
+          const normalizedAssetId = String(assetId || '').trim()
+          if (!normalizedAssetId) throw new Error('Token id is required')
+
+          const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+          const hint = extractTronContractFromLogoHint(logoUri)
+          const tracked = resolveTrackedTronTokens()
+          const trackedMatch = tracked.find((t) => String(t.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase())
+          const contract = String(hint || trackedMatch?.contract || '').trim()
+          if (!contract) {
+            throw new Error(`Unknown TRC20 contract for ${normalizedAssetId}. Configure VITE_TRON_TRACKED_TOKENS.`)
+          }
+
+          const meta = await readTrc20TokenMetadata(net.rpcUrl, contract)
+          const amountRaw = parseTrc20UiAmountToRaw(String(qty || '').trim(), meta.decimals)
+
+          const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
+          if (String(senderAddress || '').trim() !== derived.address) {
+            throw new Error(`Active TRX address does not match derived signer address (${senderAddress} != ${derived.address})`)
+          }
+
+          const sent = await sendTrc20NonCustodial({
+            rpcUrl: net.rpcUrl,
+            contractAddress: contract,
+            fromAddress: derived.address,
+            toAddress: recipient,
+            amountRaw,
+            privateKeyHex: derived.privHex
+          })
+          await get().fetchNetworkAssets()
+          return { txid: sent.hash }
+        }
 
         if (net.coinType === 'EVM') {
           const recipient = String(toAddress || '').trim()
