@@ -18,7 +18,7 @@ export function createPolygonNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_POLYGON_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_POLYGON_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_POLYGON_BRIDGE_URL || ctx.buildBridgeUrl('polygon-bor', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('polygon-bor', 'main'),
     bridgeUsername: import.meta.env.VITE_POLYGON_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_POLYGON_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_POLYGON_EXPLORER || 'https://polygonscan.com',

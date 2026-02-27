@@ -290,46 +290,46 @@ const WalletLayout: React.FC = () => {
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <WalletFrame>
-      <div className="flex flex-col items-center pt-4 pb-6 shrink-0">
+      <div className="flex flex-col items-center pt-3 pb-4 shrink-0">
         {/* Coin logo */}
-        <div className="w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/40 shadow-[0_0_16px_rgba(245,132,31,0.22)] flex items-center justify-center overflow-hidden mb-4">
+        <div className="w-14 h-14 rounded-full bg-primary/10 border-2 border-primary/40 shadow-[0_0_14px_rgba(245,132,31,0.2)] flex items-center justify-center overflow-hidden mb-3">
           {activeNetwork.logo
-            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-12 h-12 object-contain" />
-            : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-12 h-12 object-contain object-center scale-[1.08] translate-y-[2px]" />
+            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-10 h-10 object-contain" />
+            : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-10 h-10 object-contain object-center scale-[1.05] translate-y-[1px]" />
           }
         </div>
 
         {/* Balance */}
-        <div className="mb-4 w-full px-4">
+        <div className="mb-3 w-full px-4">
           <div className="mx-auto max-w-full text-center">
-            <p className="text-[clamp(1.55rem,8.6vw,2.25rem)] font-bold leading-tight tracking-tight break-words">
+            <p className="text-[clamp(1.3rem,7.1vw,1.95rem)] font-bold leading-tight tracking-tight break-words">
               {displayBalance}
             </p>
-            <p className="text-lg font-semibold uppercase tracking-wide text-gray-300 mt-0.5">
+            <p className="text-base font-semibold uppercase tracking-wide text-gray-300 mt-0.5">
               {activeNetwork.symbol}
             </p>
           </div>
         </div>
 
         {/* Quick-action buttons */}
-        <div className={`flex justify-center gap-10 w-full px-8 mb-4 ${(caps.ui.showAssetsAction || caps.ui.showSendAction) ? '' : 'gap-0 justify-center'}`}>
+        <div className={`flex justify-center gap-6 w-full px-6 mb-3 ${(caps.ui.showAssetsAction || caps.ui.showSendAction) ? '' : 'gap-0 justify-center'}`}>
           {caps.ui.showAssetsAction && (
             <QuickAction
-              icon={<IoLayersOutline className="w-6 h-6" />}
+              icon={<IoLayersOutline className="w-5 h-5" />}
               label="Assets"
               onClick={() => navigate('/assets')}
             />
           )}
           {caps.ui.showSendAction && (
             <QuickAction
-              icon={<IoArrowUpOutline className="w-6 h-6" />}
+              icon={<IoArrowUpOutline className="w-5 h-5" />}
               label="Send"
               onClick={() => setShowSendSheet(true)}
               disabled={sendBlockedBySync}
             />
           )}
           <QuickAction
-            icon={<IoSearchOutline className="w-6 h-6" />}
+            icon={<IoSearchOutline className="w-5 h-5" />}
             label="Model"
             onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
           />
@@ -666,11 +666,11 @@ interface QuickActionProps {
 
 const QuickAction: React.FC<QuickActionProps> = ({ icon, label, onClick, disabled = false }) => (
   <button
-    className="flex flex-col items-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
+    className="flex flex-col items-center gap-1.5 group disabled:opacity-50 disabled:cursor-not-allowed"
     onClick={onClick}
     disabled={disabled}
   >
-    <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center transition-transform group-active:scale-90 shadow-lg shadow-primary/20">
+    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center transition-transform group-active:scale-90 shadow-lg shadow-primary/20">
       {icon}
     </div>
     <span className="text-xs font-bold text-gray-300 group-hover:text-white transition-colors">{label}</span>

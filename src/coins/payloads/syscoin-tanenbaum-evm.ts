@@ -2,7 +2,7 @@
 
 export const SYSCOINTANENBAUMEVM_PAYLOADS = createModelPayloadCatalog({
   networkId: 'srv--syscoin-tanenbaum-evm',
-  symbol: 'SYSCOI',
+  symbol: 'SYS',
   coinId: 'syscoin-tanenbaum-evm',
   chain: 'main',
   model: 'evm'

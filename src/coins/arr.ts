@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { ARR_API_INFO } from './interceptors'
-import arrLogo from './coinlogos/Pirate_Chain.webp'
+import arrLogo from './coinlogos/pirate-chain.png'
 
 export const ARR_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -26,17 +26,16 @@ export function estimateArrFee(txBytes: number): number {
 }
 
 export function createArrNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'arr',
     name: 'Pirate Chain',
     symbol: 'ARRR',
     coinType: 'UTXO',
     coinSymbol: 'ARRR',
-    rpcUrl: import.meta.env.VITE_ARR_RPC || ARR_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_ARR_BRIDGE_URL || ARR_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('arr', 'main'),
     explorerUrl: import.meta.env.VITE_ARR_EXPLORER || ARR_API_INFO.defaultExplorerUrl || 'https://arrr.explorer.dexstats.info',
     capabilities: ARR_CAPABILITIES,
     feePerByte: ARR_FEE_PER_BYTE,
@@ -53,4 +52,3 @@ export const arrCoin: CoinModule = {
   createNetwork: createArrNetwork,
   estimateFee: estimateArrFee
 }
-

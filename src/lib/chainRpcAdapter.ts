@@ -12,15 +12,17 @@ import {
   listUtxoUnspent,
   scanAddressUnspent,
   sendRawTransaction,
+  sendToAddress,
   validateAddress,
   type UtxoUnspent
 } from './utxoRpc'
 import { getXrpAccountBalance } from './xrpRpc'
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
-import { PublicKey } from '@solana/web3.js'
+import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 import { StrKey } from '@stellar/stellar-sdk'
 import { TronWeb } from 'tronweb'
 import { getTronBalance } from './tronNonCustodial'
+import { isCroCosmosAddress } from './cosmosAddress'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -75,11 +77,16 @@ function resolveModelId(network: Network): string {
   return String(network.runtimeModelId || network.id || '').trim().toLowerCase()
 }
 
+function isCroCosmosLikeModel(modelId: string): boolean {
+  return modelId === 'crocosmos' || modelId === 'cro'
+}
+
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
 
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
   const modelId = resolveModelId(network)
   const protocol = resolveProtocol(network)
+  if (isCroCosmosLikeModel(modelId)) return 'custodial-server'
   if (modelId === 'sol' || modelId === 'xlm' || modelId === 'tron') return 'non-custodial'
   if (modelId === 'ada') return 'non-custodial'
   if (modelId === 'xmr') {
@@ -165,6 +172,38 @@ async function getSolanaBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: stri
   throw lastError instanceof Error ? lastError : new Error('Bridge Solana balance query failed')
 }
 
+async function getSolanaBalanceDirectRpc(rpcUrl: string, address: string): Promise<string> {
+  const connection = new Connection(String(rpcUrl || '').trim(), 'confirmed')
+  const lamports = await connection.getBalance(new PublicKey(address), 'confirmed')
+  if (!Number.isFinite(lamports) || lamports < 0) {
+    throw new Error('Invalid Solana balance from RPC')
+  }
+  return String(lamports / LAMPORTS_PER_SOL)
+}
+
+async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<string> {
+  const calls: Array<() => Promise<any>> = [
+    () => callBridgeMethod(rpcConfig, 'get_balance', []),
+    () => callBridgeMethod(rpcConfig, 'getbalance', []),
+    () => callBridgeMethod(rpcConfig, 'getBalance', [])
+  ]
+  let lastError: unknown = null
+  for (const invoke of calls) {
+    try {
+      const result = await invoke()
+      const unlockedAtomic = asNumberLike((result as any)?.unlocked_balance)
+      const totalAtomic = asNumberLike((result as any)?.balance)
+      if (unlockedAtomic !== null) return formatDecimalUnits(BigInt(Math.trunc(unlockedAtomic)), 12)
+      if (totalAtomic !== null) return formatDecimalUnits(BigInt(Math.trunc(totalAtomic)), 12)
+      const scalar = asDecimalString((result as any)?.balance ?? result)
+      if (scalar) return scalar
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Bridge Monero balance query failed')
+}
+
 async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
   const calls: Array<() => Promise<any>> = [
     () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
@@ -233,10 +272,41 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   if (!address) throw new Error('Address is required')
 
   if (modelId === 'sol') {
-    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
-      throw new Error('Bridge RPC config is required for SOL')
+    if (input.rpcConfig?.bridgeUrl) {
+      try {
+        const balance = await getSolanaBalanceViaBridge(input.rpcConfig, address)
+        return { balance, syncPercent: 100, isSyncing: false }
+      } catch {
+        // Fallback to direct Solana RPC when bridge adapters are incompatible.
+      }
     }
-    const balance = await getSolanaBalanceViaBridge(input.rpcConfig, address)
+    const rpcUrl = String(input.network.rpcUrl || '').trim()
+    if (!rpcUrl) throw new Error('SOL RPC URL is not configured')
+    const balance = await getSolanaBalanceDirectRpc(rpcUrl, address)
+    return { balance, syncPercent: 100, isSyncing: false }
+  }
+  if (isCroCosmosLikeModel(modelId)) {
+    if (!input.rpcConfig) throw new Error('Bridge RPC config is required for CRO Cosmos')
+    let syncPercent: number | null = null
+    let isSyncing = false
+    try {
+      const chainInfo = await getBlockchainInfo(input.rpcConfig)
+      const parsed = resolveSyncStateFromChainInfo(chainInfo)
+      syncPercent = parsed.syncPercent
+      isSyncing = parsed.isSyncing
+    } catch {
+      // Keep sync unknown if backend doesn't expose chain probe.
+    }
+    const balance = await getUtxoBalance(input.rpcConfig, address, {
+      preferAddressIndex: false
+    })
+    return { balance: String(balance.total), syncPercent, isSyncing }
+  }
+  if (modelId === 'xmr') {
+    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
+      throw new Error('Bridge RPC config is required for XMR')
+    }
+    const balance = await getMoneroBalanceViaBridge(input.rpcConfig)
     return { balance, syncPercent: 100, isSyncing: false }
   }
   if (modelId === 'xlm') {
@@ -333,6 +403,7 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   }
   if (modelId === 'xlm') return StrKey.isValidEd25519PublicKey(value)
   if (modelId === 'tron') return TronWeb.isAddress(value)
+  if (isCroCosmosLikeModel(modelId)) return isCroCosmosAddress(value)
   if (network.coinType === 'EVM') return ethers.isAddress(value)
   if (protocol === 'xrp-jsonrpc-compat') {
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
@@ -409,6 +480,18 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const net = input.network
   const rpcConfig = input.rpcConfig
   if (net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
+  if (isCroCosmosLikeModel(resolveModelId(net))) {
+    const to = String(input.to || '').trim()
+    if (!isCroCosmosAddress(to)) {
+      throw new Error('Destination address must be a valid CRO Cosmos address (cro1...)')
+    }
+    const amount = Number(String(input.amount || '').trim())
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Amount must be greater than 0')
+    }
+    const txid = await sendToAddress(rpcConfig, to, Number(amount.toFixed(8)))
+    return { hash: String(txid) }
+  }
   if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
   const senderAddress = String(input.senderAddress || '').trim()
   if (!senderAddress) throw new Error(`No address derived for ${net.name}`)

@@ -3,15 +3,12 @@ import type { CoinApiInfo } from './types'
 import { RTM_PAYLOADS } from '../payloads'
 
 // RTM mainnet API profile and transport interceptor.
-const DEFAULT_API_BASE = 'https://rtm.metayoshi.app'
+const DEFAULT_API_BASE = 'https://api.metayoshi.app'
 const DEFAULT_WALLET = 'mainwallet'
 
-const apiBaseUrl = String(import.meta.env.VITE_RTM_RPC || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
+const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
 const wallet = String(import.meta.env.VITE_RTM_WALLET || DEFAULT_WALLET).trim() || DEFAULT_WALLET
-const defaultBridgeUrl = String(
-  import.meta.env.VITE_RTM_BRIDGE_URL
-  || `${apiBaseUrl}/v1/bridge/raptoreum/main/wallet/${encodeURIComponent(wallet)}`
-).trim()
+const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/raptoreum/main/wallet/${encodeURIComponent(wallet)}`
 
 export const RTM_API_INFO: CoinApiInfo = {
   networkId: 'rtm',

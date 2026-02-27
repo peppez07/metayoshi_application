@@ -26,10 +26,8 @@ export function createPivxNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: PIVX_CAPABILITIES,
-    derivation: {
-      status: 'unsupported',
-      reason: 'pivx address derivation is not supported in this build'
-    },    logo: utxoLogo
+    derivation: { status: 'supported' },
+    logo: utxoLogo
   }
 }
 

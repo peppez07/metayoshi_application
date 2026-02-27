@@ -7,15 +7,15 @@ const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAUL
 
 export const SYSCOINTANENBAUMEVM_API_INFO: CoinApiInfo = {
   networkId: 'srv--syscoin-tanenbaum-evm',
-  symbol: 'SYSCOI',
+  symbol: 'SYS',
   coinId: 'syscoin-tanenbaum-evm',
   chain: 'main',
-  protocol: 'utxo-jsonrpc',
+  protocol: 'evm-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl: apiBaseUrl + '/v1/bridge/syscoin-tanenbaum-evm/main',
   defaultWallet: '',
-  defaultExplorerUrl: '',
+  defaultExplorerUrl: 'https://explorer.syscoin.org',
   healthUrl: apiBaseUrl + '/health',
   bridgeMethodsUrl: apiBaseUrl + '/v1/bridge/methods/syscoin-tanenbaum-evm',
   sendCoinPathTemplate: '/v1/bridge/send/coin/syscoin-tanenbaum-evm/main/:wallet',

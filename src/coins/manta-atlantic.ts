@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethLogo from './coinlogos/ethereum.webp'
+import ethLogo from './coinlogos/manta-network.png'
 
 export const MANTAATLANTIC_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -26,7 +26,11 @@ export function createMantaAtlanticNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: MANTAATLANTIC_CAPABILITIES,
-    derivation: { status: 'supported' },    logo: ethLogo
+    derivation: {
+      status: 'unsupported',
+      reason: 'manta-atlantic bridge methods are not available in this deployment'
+    },
+    logo: ethLogo
   }
 }
 

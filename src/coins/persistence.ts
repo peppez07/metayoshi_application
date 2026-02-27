@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/btcz.webp'
+import utxoLogo from './coinlogos/persistence.png'
 
 export const PERSISTENCE_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },

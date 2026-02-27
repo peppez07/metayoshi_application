@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/btcz.webp'
+import utxoLogo from './coinlogos/terra-luna.png'
 
 export const TERRACLASSIC_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -26,10 +26,8 @@ export function createTerraClassicNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: TERRACLASSIC_CAPABILITIES,
-    derivation: {
-      status: 'unsupported',
-      reason: 'terra-classic address derivation is not supported in this build'
-    },    logo: utxoLogo
+    derivation: { status: 'supported' },
+    logo: utxoLogo
   }
 }
 

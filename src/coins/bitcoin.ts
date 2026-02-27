@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/bitcoin.webp'
+import utxoLogo from './coinlogos/bitcoin.png'
 
 export const BITCOIN_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },

@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import solanaLogo from './coinlogos/solana.webp'
+import solanaLogo from './coinlogos/solana.png'
 
 export const SOL_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -17,7 +17,7 @@ export function createSolNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_SOL_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_SOL_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_SOL_BRIDGE_URL || ctx.buildBridgeUrl('solana', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('solana', 'main'),
     bridgeUsername: import.meta.env.VITE_SOL_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_SOL_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_SOL_EXPLORER || 'https://solscan.io',

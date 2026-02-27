@@ -1,6 +1,6 @@
 import type { CoinPayloadCatalog } from '../payloads/types'
 export type CoinChain = 'main' | 'test'
-export type CoinRpcProtocol = 'utxo-jsonrpc' | 'xrp-jsonrpc-compat' | 'cardano-wallet-compat' | 'monero-wallet-compat'
+export type CoinRpcProtocol = 'utxo-jsonrpc' | 'evm-jsonrpc' | 'xrp-jsonrpc-compat' | 'cardano-wallet-compat' | 'monero-wallet-compat'
 
 /** Static API metadata per coin/network.
  *  This is the single source of truth for bridge endpoints and defaults. */

@@ -722,6 +722,12 @@ async function jsonRpcCall(
   return result
 }
 
+function isListUnspentRestrictedMessage(message: string): boolean {
+  const text = String(message || '').toLowerCase()
+  return text.includes('method listunspent is not allowed')
+    || (text.includes('listunspent') && text.includes('not allowed'))
+}
+
 export async function callBridgeMethod(
   config: UtxoRpcConfig,
   method: string,
@@ -1140,7 +1146,55 @@ export async function getUtxoBalance(
   try {
     unspent = await jsonRpcCall(config, 'listunspent', params)
   } catch (error) {
+    const errorMessage = asError(error).message
     if (address) {
+      // Shared providers can block wallet-index methods like listunspent.
+      // Try address-index and generic balance fallbacks before failing hard.
+      try {
+        const byAddressUtxos = await getAddressUtxos(config, address, 0)
+        if (byAddressUtxos.length > 0) {
+          let addrConfirmed = 0
+          let addrUnconfirmed = 0
+          for (const utxo of byAddressUtxos) {
+            if (utxo.confirmations >= 1) addrConfirmed += utxo.amount
+            else addrUnconfirmed += utxo.amount
+          }
+          return {
+            confirmed: Number(addrConfirmed.toFixed(8)),
+            unconfirmed: Number(addrUnconfirmed.toFixed(8)),
+            total: Number((addrConfirmed + addrUnconfirmed).toFixed(8))
+          }
+        }
+      } catch {
+        // continue
+      }
+
+      try {
+        const received = Number(await jsonRpcCall(config, 'getreceivedbyaddress', [address, 0]))
+        if (Number.isFinite(received) && received >= 0) {
+          return {
+            confirmed: Number(received.toFixed(8)),
+            unconfirmed: 0,
+            total: Number(received.toFixed(8))
+          }
+        }
+      } catch {
+        // continue
+      }
+
+      try {
+        const walletBalance = Number(await jsonRpcCall(config, 'getbalance', []))
+        if (Number.isFinite(walletBalance) && walletBalance >= 0) {
+          return {
+            confirmed: Number(walletBalance.toFixed(8)),
+            unconfirmed: 0,
+            total: Number(walletBalance.toFixed(8))
+          }
+        }
+      } catch {
+        // continue
+      }
+
       const btcExplorerBalance = await fetchBitcoinExplorerBalance(config, address)
       if (btcExplorerBalance) return btcExplorerBalance
       const btcExplorerUtxos = await fetchBitcoinExplorerUtxos(config, address, 0)
@@ -1157,6 +1211,12 @@ export async function getUtxoBalance(
           unconfirmed: Number(btcUnconfirmed.toFixed(8)),
           total: Number(btcTotal.toFixed(8))
         }
+      }
+      if (isListUnspentRestrictedMessage(errorMessage)) {
+        throw new Error(
+          'Bridge provider blocks listunspent on shared nodes. ' +
+          'Use a dedicated node/full RPC access for spendable UTXO operations.'
+        )
       }
     }
     throw error
@@ -1228,11 +1288,24 @@ export async function listUtxoUnspent(
   try {
     return await jsonRpcCall(config, 'listunspent', params)
   } catch (error) {
+    const message = asError(error).message
     if (address) {
+      try {
+        const byAddress = await getAddressUtxos(config, address, minConf)
+        if (byAddress.length > 0) return byAddress
+      } catch {
+        // continue fallback chain
+      }
       const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
       if (btczExplorer !== null) return btczExplorer
       const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
       if (btcExplorer !== null) return btcExplorer
+      if (isListUnspentRestrictedMessage(message)) {
+        throw new Error(
+          'Bridge provider blocks listunspent on shared nodes. ' +
+          'Use a dedicated node/full RPC access for spendable UTXO operations.'
+        )
+      }
     }
     throw error
   }

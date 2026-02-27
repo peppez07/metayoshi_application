@@ -27,6 +27,7 @@ import { deriveStellarAddress } from '../lib/stellarAddress'
 import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
 import { sendTronNonCustodial } from '../lib/tronNonCustodial'
+import { deriveCosmosAddress, isCroCosmosAddress } from '../lib/cosmosAddress'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -341,6 +342,10 @@ const EVM_ERC20_TRANSFER_IFACE = new ethers.Interface([
   'function transfer(address to, uint256 value) returns (bool)',
   'function decimals() view returns (uint8)'
 ])
+const EVM_ERC20_METADATA_IFACE = new ethers.Interface([
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)'
+])
 const EVM_ERC165_IFACE = new ethers.Interface(['function supportsInterface(bytes4 interfaceId) view returns (bool)'])
 const EVM_ERC721_IFACE = new ethers.Interface([
   'function ownerOf(uint256 tokenId) view returns (address)',
@@ -360,11 +365,18 @@ const EVM_ERC721_ENUMERABLE_IFACE = new ethers.Interface([
 const ERC721_INTERFACE_ID = '0x80ac58cd'
 const ERC1155_INTERFACE_ID = '0xd9b67a26'
 const MAX_TRACKED_EVM_NFTS = 120
+const EVM_TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)')
+const EVM_TOKEN_DISCOVERY_TTL_MS = 5 * 60 * 1000
+const evmTokenDiscoveryCache = new Map<string, {
+  checkedAt: number
+  addresses: string[]
+}>()
 
 type EvmTrackedToken = {
   address: string
   symbol: string
   decimals: number
+  discovered?: boolean
 }
 
 type EvmNftStandard = 'erc721' | 'erc1155'
@@ -385,11 +397,58 @@ type EvmNftHolding = {
 }
 
 const DEFAULT_ETH_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0xA0b73E1Ff0B80914AB6Fe0444E65848C4C34450b', symbol: 'CRO', decimals: 8 },
   { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
   { address: '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6 },
   { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 },
-  { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', symbol: 'SHIB', decimals: 18 }
+  { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', symbol: 'SHIB', decimals: 18 },
+  { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', decimals: 8 },
+  { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18 },
+  { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18 },
+  { address: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DdAE9', symbol: 'AAVE', decimals: 18 },
+  { address: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', symbol: 'PEPE', decimals: 18 }
 ]
+
+const DEFAULT_BNB_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
+  { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 },
+  { address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', symbol: 'BUSD', decimals: 18 },
+  { address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', symbol: 'CAKE', decimals: 18 },
+  { address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', symbol: 'ETH', decimals: 18 },
+  { address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', symbol: 'BTCB', decimals: 18 },
+  { address: '0x1D2F0dA169ceB9Fc7B3144628dB156f3F6c60dBE', symbol: 'XRP', decimals: 18 },
+  { address: '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', symbol: 'ADA', decimals: 18 },
+  { address: '0xBa2aE424d960c26247Dd6c32edC70B295c744C43', symbol: 'DOGE', decimals: 8 },
+  { address: '0xCE7de646e7208A4Ef112cb6ed5038FA6c0cFfDcF', symbol: 'TRX', decimals: 18 }
+]
+
+const MIN_TRACKED_EVM_TOKENS_PER_CHAIN = 100
+const MAX_TRACKED_EVM_TOKENS_PER_CHAIN = 220
+const EVM_TRACKED_TOKEN_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const evmTrackedTokenCache = new Map<string, {
+  checkedAt: number
+  tokens: EvmTrackedToken[]
+}>()
+
+const CHAIN_ID_BY_NETWORK_ID: Record<string, number> = {
+  eth: 1,
+  bnb: 56,
+  cro: 25,
+  polygon: 137,
+  arb: 42161,
+  base: 8453,
+  avaxc: 43114
+}
+
+const COINGECKO_CHAIN_SLUG_BY_CHAIN_ID: Record<number, string> = {
+  1: 'ethereum',
+  56: 'binance-smart-chain',
+  25: 'cronos',
+  137: 'polygon-pos',
+  42161: 'arbitrum-one',
+  8453: 'base',
+  43114: 'avalanche'
+}
 
 function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   const entries = String(raw || '')
@@ -418,7 +477,26 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   return parsed
 }
 
-function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedToken[] {
+function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[] {
+  const out: EvmTrackedToken[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const token of group) {
+      if (!ethers.isAddress(token.address)) continue
+      const address = ethers.getAddress(token.address)
+      if (seen.has(address)) continue
+      seen.add(address)
+      out.push({
+        address,
+        symbol: String(token.symbol || '').trim().toUpperCase() || shortAddress(address),
+        decimals: Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 30 ? token.decimals : 18
+      })
+    }
+  }
+  return out
+}
+
+function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedToken[] {
   const networkId = String(network?.id || '').trim()
   const modelId = String(network?.runtimeModelId || networkId).trim()
   const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${networkId.toUpperCase()}_TRACKED_TOKENS`] || ''))
@@ -426,7 +504,86 @@ function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId'>
   const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_TOKENS`] || ''))
   if (byModel.length > 0) return byModel
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
+  if (modelId.toLowerCase() === 'bnb') return DEFAULT_BNB_TRACKED_TOKENS
   return []
+}
+
+function resolveEvmChainId(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): number | null {
+  if (Number.isInteger(network.chainId) && Number(network.chainId) > 0) return Number(network.chainId)
+  const networkId = String(network.id || '').trim().toLowerCase()
+  if (CHAIN_ID_BY_NETWORK_ID[networkId]) return CHAIN_ID_BY_NETWORK_ID[networkId]
+  const modelId = String(network.runtimeModelId || '').trim().toLowerCase()
+  if (CHAIN_ID_BY_NETWORK_ID[modelId]) return CHAIN_ID_BY_NETWORK_ID[modelId]
+  return null
+}
+
+function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
+  const values = Array.isArray(payload?.tokens)
+    ? payload.tokens
+    : payload && typeof payload === 'object'
+      ? Object.values(payload)
+      : []
+  const out: EvmTrackedToken[] = []
+  for (const row of values as any[]) {
+    const candidateAddress = String(row?.address || row?.token_address || '').trim()
+    if (!ethers.isAddress(candidateAddress)) continue
+    const symbol = String(row?.symbol || '').trim().toUpperCase()
+    const decimals = Number(row?.decimals)
+    out.push({
+      address: ethers.getAddress(candidateAddress),
+      symbol: symbol || shortAddress(candidateAddress),
+      decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
+    })
+  }
+  return out
+}
+
+async function fetchRemoteTrackedTokensForChain(chainId: number): Promise<EvmTrackedToken[]> {
+  const cacheKey = `chain:${chainId}`
+  const cached = evmTrackedTokenCache.get(cacheKey)
+  if (cached && Date.now() - cached.checkedAt <= EVM_TRACKED_TOKEN_CACHE_TTL_MS) {
+    return cached.tokens
+  }
+
+  const urls: string[] = [
+    `https://tokens.1inch.io/v1.2/${chainId}`
+  ]
+  const cgSlug = COINGECKO_CHAIN_SLUG_BY_CHAIN_ID[chainId]
+  if (cgSlug) {
+    urls.push(`https://tokens.coingecko.com/${cgSlug}/all.json`)
+  }
+
+  let merged: EvmTrackedToken[] = []
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { method: 'GET' })
+      if (!response.ok) continue
+      const json = await response.json().catch(() => null)
+      const parsed = parseRemoteTokenCandidates(json)
+      if (parsed.length === 0) continue
+      merged = mergeTrackedEvmTokens(merged, parsed)
+      if (merged.length >= MAX_TRACKED_EVM_TOKENS_PER_CHAIN) break
+    } catch {
+      // Try the next source.
+    }
+  }
+
+  const sliced = merged.slice(0, MAX_TRACKED_EVM_TOKENS_PER_CHAIN)
+  evmTrackedTokenCache.set(cacheKey, { checkedAt: Date.now(), tokens: sliced })
+  return sliced
+}
+
+async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): Promise<EvmTrackedToken[]> {
+  const base = resolveTrackedEvmTokensBase(network)
+  const chainId = resolveEvmChainId(network)
+  if (!chainId) return base
+
+  const remote = await fetchRemoteTrackedTokensForChain(chainId).catch(() => [])
+  const merged = mergeTrackedEvmTokens(base, remote)
+  if (merged.length >= MIN_TRACKED_EVM_TOKENS_PER_CHAIN) {
+    return merged.slice(0, MAX_TRACKED_EVM_TOKENS_PER_CHAIN)
+  }
+  return merged
 }
 
 function resolveCatalogEvmTrackedTokens(
@@ -619,6 +776,127 @@ function toAssetDisplaySats(balanceRaw: bigint, decimals: number): number {
   return Number(scaled)
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const safeLimit = Math.max(1, Math.trunc(limit || 1))
+  const out = new Array<R>(items.length)
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(safeLimit, items.length) }, async () => {
+    while (true) {
+      const index = cursor
+      if (index >= items.length) return
+      cursor += 1
+      out[index] = await worker(items[index], index)
+    }
+  })
+  await Promise.all(runners)
+  return out
+}
+
+function formatEvmTopicAddress(address: string): string {
+  const stripped = String(address || '').trim().toLowerCase().replace(/^0x/, '')
+  return `0x${stripped.padStart(64, '0')}`
+}
+
+function toHexBlock(value: bigint): string {
+  if (value <= 0n) return '0x0'
+  return `0x${value.toString(16)}`
+}
+
+async function discoverEvmTokenContractsFromLogs(
+  rpcConfig: UtxoRpcConfig,
+  ownerAddress: string
+): Promise<string[]> {
+  const checksumOwner = ethers.getAddress(ownerAddress)
+  const cacheKey = `${String(rpcConfig.bridgeUrl || '').trim().toLowerCase()}|${checksumOwner.toLowerCase()}`
+  const cached = evmTokenDiscoveryCache.get(cacheKey)
+  if (cached && Date.now() - cached.checkedAt <= EVM_TOKEN_DISCOVERY_TTL_MS) {
+    return [...cached.addresses]
+  }
+
+  const ownerTopic = formatEvmTopicAddress(checksumOwner)
+  let latestBlock = 0n
+  try {
+    const latestRaw = await callBridgeMethod(rpcConfig, 'eth_blockNumber', [])
+    latestBlock = BigInt(String(latestRaw || '0x0'))
+  } catch {
+    latestBlock = 0n
+  }
+
+  const windows = Array.from(new Set<bigint>([
+    0n,
+    latestBlock > 500000n ? latestBlock - 500000n : 0n,
+    latestBlock > 100000n ? latestBlock - 100000n : 0n,
+    latestBlock > 25000n ? latestBlock - 25000n : 0n
+  ]))
+
+  const discovered = new Set<string>()
+  for (const fromBlock of windows) {
+    try {
+      const incoming = await callBridgeMethod(rpcConfig, 'eth_getLogs', [{
+        fromBlock: toHexBlock(fromBlock),
+        toBlock: 'latest',
+        topics: [EVM_TRANSFER_TOPIC, null, ownerTopic]
+      }]) as Array<{ address?: string }> | undefined
+
+      const outgoing = await callBridgeMethod(rpcConfig, 'eth_getLogs', [{
+        fromBlock: toHexBlock(fromBlock),
+        toBlock: 'latest',
+        topics: [EVM_TRANSFER_TOPIC, ownerTopic]
+      }]) as Array<{ address?: string }> | undefined
+
+      for (const row of [...(incoming || []), ...(outgoing || [])]) {
+        const candidate = String(row?.address || '').trim()
+        if (!ethers.isAddress(candidate)) continue
+        discovered.add(ethers.getAddress(candidate))
+        if (discovered.size >= 120) break
+      }
+      if (discovered.size >= 120) break
+      if (incoming || outgoing) break
+    } catch {
+      // Provider may reject large ranges; try a narrower window.
+    }
+  }
+
+  const out = [...discovered]
+  evmTokenDiscoveryCache.set(cacheKey, { checkedAt: Date.now(), addresses: out })
+  return out
+}
+
+async function readEvmTokenMetadata(
+  rpcConfig: UtxoRpcConfig,
+  tokenAddress: string
+): Promise<{ symbol: string; decimals: number }> {
+  const contract = ethers.getAddress(tokenAddress)
+  let symbol = shortAddress(contract)
+  let decimals = 18
+
+  try {
+    const symbolData = EVM_ERC20_METADATA_IFACE.encodeFunctionData('symbol', [])
+    const symbolRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: contract, data: symbolData }, 'latest'])
+    const [value] = EVM_ERC20_METADATA_IFACE.decodeFunctionResult('symbol', String(symbolRaw || '0x'))
+    const normalized = String(value || '').trim()
+    if (normalized) symbol = normalized.toUpperCase()
+  } catch {
+    // Some contracts expose bytes32 or non-standard symbol signatures.
+  }
+
+  try {
+    const decimalsData = EVM_ERC20_METADATA_IFACE.encodeFunctionData('decimals', [])
+    const decimalsRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: contract, data: decimalsData }, 'latest'])
+    const [value] = EVM_ERC20_METADATA_IFACE.decodeFunctionResult('decimals', String(decimalsRaw || '0x'))
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 30) decimals = Math.trunc(parsed)
+  } catch {
+    // Keep default decimals for non-standard contracts.
+  }
+
+  return { symbol, decimals }
+}
+
 // Balance refresh should avoid noisy address-index probes on bridges that do not
 // support them reliably for unfunded addresses.
 function supportsAddressIndexBalance(coinSymbol?: string): boolean {
@@ -635,6 +913,11 @@ function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
 
 function resolveNetworkModelId(network?: Partial<Network>): string {
   return String(network?.runtimeModelId || network?.id || '').trim().toLowerCase()
+}
+
+function isCroCosmosModel(network?: Partial<Network>): boolean {
+  const modelId = resolveNetworkModelId(network)
+  return modelId === 'crocosmos' || modelId === 'cro'
 }
 
 const SERVER_COIN_SYNC_REPORT_STORAGE_KEY = 'metayoshi:last-server-coin-sync-report'
@@ -742,7 +1025,16 @@ async function deriveAccountAddresses(
       continue
     }
 
-    if (net.coinType === 'UTXO' && net.coinSymbol) {
+    if (isCroCosmosModel(net)) {
+      try {
+        const cro = await deriveCosmosAddress(mnemonic, derivationIndex)
+        networkAddresses[net.id] = cro.address
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        derivationErrors.push(`${net.symbol}: ${msg}`)
+        console.warn(`Failed to derive ${net.symbol} Cosmos address (account ${derivationIndex}):`, err)
+      }
+    } else if (net.coinType === 'UTXO' && net.coinSymbol) {
       try {
         const utxo = await deriveUtxoAddress(mnemonic, net.coinSymbol, derivationIndex, 0, 0)
         networkAddresses[net.id] = utxo.address
@@ -1200,6 +1492,7 @@ export const useWalletStore = create<WalletState>()(
             || modelId === 'sol'
             || modelId === 'xlm'
             || modelId === 'tron'
+            || modelId === 'crocosmos'
           ) {
             const isValidPersisted = await validateChainAddress(net, undefined, existing).catch(() => false)
             if (isValidPersisted) return existing
@@ -1241,6 +1534,7 @@ export const useWalletStore = create<WalletState>()(
           || modelId === 'sol'
           || modelId === 'xlm'
           || modelId === 'tron'
+          || modelId === 'crocosmos'
         if (requiresMnemonic && !sessionMnemonic) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
@@ -1252,6 +1546,9 @@ export const useWalletStore = create<WalletState>()(
             address = deriveEvmWallet(sessionMnemonic!, accountIndex).address
           } else if (net.coinType === 'XRP') {
             const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
+            address = derived.address
+          } else if (modelId === 'crocosmos') {
+            const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           } else if (net.coinType === 'UTXO' && net.coinSymbol) {
             const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
@@ -1335,7 +1632,7 @@ export const useWalletStore = create<WalletState>()(
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
-          const trackedDefaults = resolveTrackedEvmTokens(net)
+          const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
           for (const token of [...trackedDefaults, ...trackedFromCatalog]) {
@@ -1344,27 +1641,72 @@ export const useWalletStore = create<WalletState>()(
             if (trackedByAddress.has(checksum)) continue
             trackedByAddress.set(checksum, { ...token, address: checksum })
           }
-          const trackedTokens = [...trackedByAddress.values()]
-
           try {
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
 
+            const discoveredAddresses = await discoverEvmTokenContractsFromLogs(rpcConfig, address).catch(() => [])
+            for (const discoveredAddress of discoveredAddresses) {
+              if (trackedByAddress.has(discoveredAddress)) continue
+              trackedByAddress.set(discoveredAddress, {
+                address: discoveredAddress,
+                symbol: shortAddress(discoveredAddress),
+                decimals: 18,
+                discovered: true
+              })
+            }
+
+            const mergedTokens = [...trackedByAddress.values()]
+
             // Bridge-first: keep app->server transport consistent with wallet policy.
-            const balances = await Promise.all(
-              trackedTokens.map(async (token) => {
+            const fungibleAssets: Record<string, number> = {}
+            const usedAssetKeys = new Set<string>()
+            const tokenRows = await mapWithConcurrency(mergedTokens, 18, async (token) => {
+              try {
                 const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
                 const rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
                 const rawBalance = BigInt(String(rawHex || '0x0'))
-                const displaySats = toAssetDisplaySats(rawBalance, token.decimals)
-                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
-                const symbol = String(token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
-                return [symbol, displaySats] as const
-              })
-            )
+                if (rawBalance <= 0n) return null
 
-            const fungibleAssets = Object.fromEntries(balances.filter((row): row is readonly [string, number] => Boolean(row))) as Record<string, number>
+                let symbol = String(token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
+                let decimals = token.decimals
+                if (token.discovered) {
+                  const discoveredMeta = await readEvmTokenMetadata(rpcConfig, token.address).catch(() => null)
+                  if (discoveredMeta) {
+                    symbol = String(discoveredMeta.symbol || symbol).trim().toUpperCase()
+                    decimals = discoveredMeta.decimals
+                  }
+                }
+
+                const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
+
+                return {
+                  token,
+                  symbol,
+                  displaySats
+                }
+              } catch {
+                // Ignore non-standard/non-ERC20 contracts discovered from Transfer logs.
+                return null
+              }
+            })
+
+            for (const row of tokenRows) {
+              if (!row) continue
+              const baseKey = row.token.discovered
+                ? `${row.symbol}@${shortAddress(row.token.address)}`
+                : row.symbol
+              let assetKey = baseKey
+              let suffix = 2
+              while (usedAssetKeys.has(assetKey)) {
+                assetKey = `${baseKey}-${suffix}`
+                suffix += 1
+              }
+              usedAssetKeys.add(assetKey)
+              fungibleAssets[assetKey] = row.displaySats
+            }
 
             const trackedNfts = [...resolveTrackedEvmNfts(net), ...resolveCatalogEvmTrackedNfts(serverCoinCatalog, modelId)]
             const nftByKey = new Map<string, EvmTrackedNft>()
@@ -1706,7 +2048,7 @@ export const useWalletStore = create<WalletState>()(
           const normalizedAssetId = String(assetId || '').trim()
           if (!normalizedAssetId) throw new Error('Token id is required')
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
-          const trackedDefaults = resolveTrackedEvmTokens(net)
+          const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
           const trackedTokens = [...trackedDefaults, ...trackedFromCatalog]
 
@@ -2773,6 +3115,9 @@ export const useWalletStore = create<WalletState>()(
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
+        if (isCroCosmosModel(net) && !isCroCosmosAddress(to)) {
+          throw new Error('Destination address must be a valid CRO Cosmos address (cro1...)')
+        }
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
 
         // Always use the network-specific address, not the generic UTXO slot

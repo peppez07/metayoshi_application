@@ -1,5 +1,5 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethLogo from './coinlogos/ethereum.webp'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import syscoinLogo from './coinlogos/syscoin.png'
 
 export const SYSCOINTANENBAUMEVM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -14,10 +14,10 @@ export function createSyscoinTanenbaumEvmNetwork(ctx: CoinRuntimeContext): Netwo
     runtimeModelId: 'eth',
     serverCoinId: 'syscoin-tanenbaum-evm',
     serverChain: 'main',
-    name: 'Syscoin Tanenbaum Evm',
-    symbol: 'SYSCOI',
+    name: 'Syscoin NEVM',
+    symbol: 'SYS',
     coinType: 'EVM',
-    coinSymbol: 'SYSCOI',
+    coinSymbol: 'SYS',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
     rpcUsername: '',
@@ -26,15 +26,16 @@ export function createSyscoinTanenbaumEvmNetwork(ctx: CoinRuntimeContext): Netwo
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: SYSCOINTANENBAUMEVM_CAPABILITIES,
-    derivation: { status: 'supported' },    logo: ethLogo
+    derivation: { status: 'supported' },
+    explorerUrl: 'https://explorer.syscoin.org',
+    logo: syscoinLogo
   }
 }
 
 export const syscoinTanenbaumEvmCoin: CoinModule = {
   id: 'srv--syscoin-tanenbaum-evm',
-  symbol: 'SYSCOI',
-  coinSymbol: 'SYSCOI',
+  symbol: 'SYS',
+  coinSymbol: 'SYS',
   capabilities: SYSCOINTANENBAUMEVM_CAPABILITIES,
   createNetwork: createSyscoinTanenbaumEvmNetwork
 }
-

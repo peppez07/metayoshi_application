@@ -1,6 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { XMR_API_INFO } from './interceptors'
-import moneroLogo from './coinlogos/monero.webp'
+import moneroLogo from './coinlogos/monero.png'
 
 const XMR_NON_CUSTODIAL_ENABLED = /^(1|true|yes)$/i.test(String(import.meta.env.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
 
@@ -10,18 +10,17 @@ export const XMR_CAPABILITIES: NetworkCapabilitiesInput = {
 }
 
 export function createMoneroNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'xmr',
     name: 'Monero',
     symbol: 'XMR',
     coinType: 'BTC',
     coinSymbol: 'XMR',
-    rpcUrl: import.meta.env.VITE_XMR_RPC || XMR_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcWallet: import.meta.env.VITE_XMR_RPC_WALLET || XMR_API_INFO.defaultWallet || '',
     rpcUsername: import.meta.env.VITE_XMR_RPC_USER || 'rpcuser',
     rpcPassword: import.meta.env.VITE_XMR_RPC_PASSWORD || 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_XMR_BRIDGE_URL || XMR_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('monero', 'main'),
     explorerUrl: import.meta.env.VITE_XMR_EXPLORER || XMR_API_INFO.defaultExplorerUrl || 'https://xmrchain.net',
     capabilities: XMR_CAPABILITIES,
     derivation: { status: 'supported' },

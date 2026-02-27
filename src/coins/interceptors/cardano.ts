@@ -2,10 +2,10 @@ import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
 import { ADA_PAYLOADS } from '../payloads'
 
-const DEFAULT_API_BASE = 'https://ada.metayoshi.app'
+const DEFAULT_API_BASE = 'https://api.metayoshi.app'
 
-const apiBaseUrl = String(import.meta.env.VITE_ADA_RPC || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
-const defaultBridgeUrl = String(import.meta.env.VITE_ADA_BRIDGE_URL || `${apiBaseUrl}/v1/bridge`).trim()
+const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
+const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/cardano/main`
 
 export const ADA_API_INFO: CoinApiInfo = {
   networkId: 'ada',

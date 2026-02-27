@@ -26,17 +26,16 @@ export function estimateTideFee(txBytes: number): number {
 }
 
 export function createTideNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'tide',
     name: 'Tidecoin',
     symbol: 'TIDE',
     coinType: 'UTXO',
     coinSymbol: 'TIDE',
-    rpcUrl: import.meta.env.VITE_TIDE_RPC || TIDE_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_TIDE_BRIDGE_URL || TIDE_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('tidecoin', 'main'),
     explorerUrl: import.meta.env.VITE_TIDE_EXPLORER || TIDE_API_INFO.defaultExplorerUrl || '',
     capabilities: TIDE_CAPABILITIES,
     feePerByte: TIDE_FEE_PER_BYTE,

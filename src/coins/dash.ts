@@ -26,10 +26,8 @@ export function createDashNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: DASH_CAPABILITIES,
-    derivation: {
-      status: 'unsupported',
-      reason: 'dash address derivation is not supported in this build'
-    },    logo: utxoLogo
+    derivation: { status: 'supported' },
+    logo: utxoLogo
   }
 }
 
@@ -40,4 +38,3 @@ export const dashCoin: CoinModule = {
   capabilities: DASH_CAPABILITIES,
   createNetwork: createDashNetwork
 }
-

@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/polkadot.jpg'
+import utxoLogo from './coinlogos/polkadot-new.png'
 
 export const POLKADOT_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },

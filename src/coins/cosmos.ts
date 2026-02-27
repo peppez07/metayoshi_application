@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/btcz.webp'
+import utxoLogo from './coinlogos/cosmos.png'
 
 export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },

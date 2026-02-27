@@ -71,9 +71,10 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>([
-  'srv--cronos-pos'
+  'srv--cronos-pos',
+  'srv--manta-atlantic'
 ])
-const DEFAULT_ENABLED_COIN_IDS = ['eth', 'cro'].filter((id) => ALL_COIN_IDS.has(id))
+const DEFAULT_ENABLED_COIN_IDS = ['eth', 'cro', 'doge'].filter((id) => ALL_COIN_IDS.has(id))
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()
@@ -188,7 +189,7 @@ const TOKEN_MARKERS = new Set([
 ])
 
 const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze)/i
-const BLOCKED_SERVER_COIN_IDS = new Set<string>(['cronos-pos'])
+const BLOCKED_SERVER_COIN_IDS = new Set<string>(['cronos-pos', 'manta-atlantic'])
 
 function isBlockedTestnetLikeCoinId(coinId: string): boolean {
   const normalized = String(coinId || '').trim().toLowerCase()
@@ -268,10 +269,7 @@ const DEFAULT_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER |
 const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
 
 const FORCE_DOGE_UTXO_COMPAT_IDS = new Set([
-  'bitcoin',
-  'dash',
-  'defichain',
-  'pivx'
+  'bitcoin'
 ])
 
 const FORCE_AVAXC_COMPAT_IDS = new Set([
@@ -443,7 +441,7 @@ type NetworkCandidate = {
   isPublicnode: boolean
 }
 
-const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'cro', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
+const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
 const PRIMARY_SERVER_COIN_BY_MODEL_ID: Record<string, string> = {
   rtm: 'raptoreum',
   doge: 'dogecoin',
@@ -576,6 +574,9 @@ function resolveBridgeUrlForNetwork(
   chain: 'main' | 'test',
   rpcWallet: string | undefined
 ): string {
+  if (networkId === 'cro') {
+    return `${API_BASE_URL}/v1/bridge/cronos-pos/${chain}`
+  }
   if (networkId === 'rtm' || networkId === 'xrp') {
     const wallet = String(rpcWallet || '').trim() || 'mainwallet'
     return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}/wallet/${encodeURIComponent(wallet)}`
@@ -753,7 +754,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
       const mappedNetwork: Network = {
         ...base,
         id: appNetworkId,
-        runtimeModelId: modelNetworkId,
+        runtimeModelId: String(base.runtimeModelId || modelNetworkId || '').trim() || undefined,
         serverCoinId: coinId,
         serverChain: chain,
         name: String(coin.name || base.name).trim() || base.name,
@@ -827,9 +828,16 @@ export async function loadServerRegistrySnapshot(): Promise<{
       return left.localeCompare(right)
     })
   const ordered = [...canonical, ...extra]
+  const mustKeepNetworkIds = new Set<string>(['doge'])
+  const withRequired = [...ordered]
+  for (const requiredId of mustKeepNetworkIds) {
+    if (withRequired.some((n) => n.id === requiredId)) continue
+    const fallback = ALL_NETWORKS.find((n) => n.id === requiredId)
+    if (fallback) withRequired.push(fallback)
+  }
   const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
   return {
-    networks: ordered.length > 0 ? ordered : null,
+    networks: withRequired.length > 0 ? withRequired : null,
     catalog: filteredCatalog
   }
 }

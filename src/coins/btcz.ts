@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { BTCZ_API_INFO } from './interceptors'
-import btczLogo from './coinlogos/btcz.webp'
+import btczLogo from './coinlogos/bitcoinz.png'
 
 export const BTCZ_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -25,17 +25,16 @@ export function estimateBtczFee(txBytes: number): number {
 }
 
 export function createBtczNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'btcz',
     name: 'BitcoinZ',
     symbol: 'BTCZ',
     coinType: 'UTXO',
     coinSymbol: 'BTCZ',
-    rpcUrl: import.meta.env.VITE_BTCZ_RPC || BTCZ_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_BTCZ_BRIDGE_URL || BTCZ_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('bitcoinz', 'main'),
     explorerUrl: import.meta.env.VITE_BTCZ_EXPLORER || BTCZ_API_INFO.defaultExplorerUrl || '',
     capabilities: BTCZ_CAPABILITIES,
     feePerByte: BTCZ_FEE_PER_BYTE,

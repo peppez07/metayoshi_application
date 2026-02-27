@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import xlmLogo from './coinlogos/xlm.png'
+import xlmLogo from './coinlogos/stellar.png'
 
 export const XLM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -17,7 +17,7 @@ export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_XLM_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_XLM_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_XLM_BRIDGE_URL || ctx.buildBridgeUrl('stellar', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('stellar', 'main'),
     bridgeUsername: import.meta.env.VITE_XLM_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_XLM_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_XLM_EXPLORER || 'https://stellar.expert/explorer/public',

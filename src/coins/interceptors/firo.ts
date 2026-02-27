@@ -3,10 +3,10 @@ import type { CoinApiInfo } from './types'
 import { FIRO_PAYLOADS } from '../payloads'
 
 // FIRO mainnet API profile and transport interceptor.
-const DEFAULT_API_BASE = 'https://firo.metayoshi.app'
+const DEFAULT_API_BASE = 'https://api.metayoshi.app'
 
-const apiBaseUrl = String(import.meta.env.VITE_FIRO_RPC || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
-const defaultBridgeUrl = String(import.meta.env.VITE_FIRO_BRIDGE_URL || `${apiBaseUrl}/v1/bridge`).trim()
+const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
+const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/firo/main`
 
 export const FIRO_API_INFO: CoinApiInfo = {
   networkId: 'firo',

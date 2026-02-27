@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { FIRO_API_INFO } from './interceptors'
-import firoLogo from './coinlogos/firo.webp'
+import firoLogo from './coinlogos/firo.png'
 
 export const FIRO_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -28,17 +28,16 @@ export function estimateFiroFee(txBytes: number): number {
 }
 
 export function createFiroNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'firo',
     name: 'Firo',
     symbol: 'FIRO',
     coinType: 'UTXO',
     coinSymbol: 'FIRO',
-    rpcUrl: import.meta.env.VITE_FIRO_RPC || FIRO_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_FIRO_BRIDGE_URL || FIRO_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('firo', 'main'),
     explorerUrl: import.meta.env.VITE_FIRO_EXPLORER || FIRO_API_INFO.defaultExplorerUrl || 'https://explorer.firo.org',
     capabilities: FIRO_CAPABILITIES,
     feePerByte: FIRO_FEE_PER_BYTE,

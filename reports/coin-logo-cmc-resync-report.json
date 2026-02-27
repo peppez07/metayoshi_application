@@ -1,0 +1,571 @@
+{
+  "generatedAt": "2026-02-27T12:04:07.683Z",
+  "updatedCount": 73,
+  "skippedCount": 0,
+  "unresolvedCount": 7,
+  "updated": [
+    {
+      "file": "0g-beacon.ts",
+      "id": 38337,
+      "slug": "zero-gravity",
+      "symbol": "0G",
+      "logoFile": "zero-gravity.png"
+    },
+    {
+      "file": "0g.ts",
+      "id": 38337,
+      "slug": "zero-gravity",
+      "symbol": "0G",
+      "logoFile": "zero-gravity.png"
+    },
+    {
+      "file": "akash.ts",
+      "id": 7431,
+      "slug": "akash-network",
+      "symbol": "AKT",
+      "logoFile": "akash-network.png"
+    },
+    {
+      "file": "analog.ts",
+      "id": 35651,
+      "slug": "analog",
+      "symbol": "ANLOG",
+      "logoFile": "analog.png"
+    },
+    {
+      "file": "arbitrum.ts",
+      "id": 11841,
+      "slug": "arbitrum",
+      "symbol": "ARB",
+      "logoFile": "arbitrum.png"
+    },
+    {
+      "file": "arr.ts",
+      "id": 3951,
+      "slug": "pirate-chain",
+      "symbol": "ARRR",
+      "logoFile": "pirate-chain.png"
+    },
+    {
+      "file": "asset-mantle.ts",
+      "id": 27075,
+      "slug": "mantle",
+      "symbol": "MNT",
+      "logoFile": "mantle.png"
+    },
+    {
+      "file": "atomone.ts",
+      "id": 38878,
+      "slug": "atomone",
+      "symbol": "ATONE",
+      "logoFile": "atomone.png"
+    },
+    {
+      "file": "avail.ts",
+      "id": 32376,
+      "slug": "avail",
+      "symbol": "AVAIL",
+      "logoFile": "avail.png"
+    },
+    {
+      "file": "avalanche-p-chain.ts",
+      "id": 5805,
+      "slug": "avalanche",
+      "symbol": "AVAX",
+      "logoFile": "avalanche.png"
+    },
+    {
+      "file": "avalanche-x-chain.ts",
+      "id": 5805,
+      "slug": "avalanche",
+      "symbol": "AVAX",
+      "logoFile": "avalanche.png"
+    },
+    {
+      "file": "avaxc.ts",
+      "id": 5805,
+      "slug": "avalanche",
+      "symbol": "AVAX",
+      "logoFile": "avalanche.png"
+    },
+    {
+      "file": "axelar.ts",
+      "id": 17799,
+      "slug": "axelar",
+      "symbol": "AXL",
+      "logoFile": "axelar.png"
+    },
+    {
+      "file": "babylon.ts",
+      "id": 32198,
+      "slug": "babylon",
+      "symbol": "BABY",
+      "logoFile": "babylon.png"
+    },
+    {
+      "file": "base.ts",
+      "id": 27789,
+      "slug": "swapbased-base",
+      "symbol": "BASE",
+      "logoFile": "swapbased-base.png"
+    },
+    {
+      "file": "bitcanna.ts",
+      "id": 4263,
+      "slug": "bitcanna",
+      "symbol": "BCNA",
+      "logoFile": "bitcanna.png"
+    },
+    {
+      "file": "bitcoin.ts",
+      "id": 1,
+      "slug": "bitcoin",
+      "symbol": "BTC",
+      "logoFile": "bitcoin.png"
+    },
+    {
+      "file": "bitway.ts",
+      "id": 39158,
+      "slug": "bitway-btw",
+      "symbol": "BTW",
+      "logoFile": "bitway-btw.png"
+    },
+    {
+      "file": "bnb.ts",
+      "id": 1839,
+      "slug": "bnb",
+      "symbol": "BNB",
+      "logoFile": "bnb.png"
+    },
+    {
+      "file": "btcz.ts",
+      "id": 2041,
+      "slug": "bitcoinz",
+      "symbol": "BTCZ",
+      "logoFile": "bitcoinz.png"
+    },
+    {
+      "file": "cardano.ts",
+      "id": 2010,
+      "slug": "cardano",
+      "symbol": "ADA",
+      "logoFile": "cardano.png"
+    },
+    {
+      "file": "celer.ts",
+      "id": 3814,
+      "slug": "celer-network",
+      "symbol": "CELR",
+      "logoFile": "celer-network.png"
+    },
+    {
+      "file": "celestia.ts",
+      "id": 22861,
+      "slug": "celestia",
+      "symbol": "TIA",
+      "logoFile": "celestia.png"
+    },
+    {
+      "file": "cheqd.ts",
+      "id": 12256,
+      "slug": "cheqd",
+      "symbol": "CHEQ",
+      "logoFile": "cheqd.png"
+    },
+    {
+      "file": "chihuahua.ts",
+      "id": 17208,
+      "slug": "chihuahua-wtf",
+      "symbol": "HUAHUA",
+      "logoFile": "chihuahua-wtf.png"
+    },
+    {
+      "file": "chiliz-spicy.ts",
+      "id": 4066,
+      "slug": "chiliz",
+      "symbol": "CHZ",
+      "logoFile": "chiliz.png"
+    },
+    {
+      "file": "chiliz.ts",
+      "id": 4066,
+      "slug": "chiliz",
+      "symbol": "CHZ",
+      "logoFile": "chiliz.png"
+    },
+    {
+      "file": "comdex.ts",
+      "id": 14713,
+      "slug": "comdex",
+      "symbol": "CMDX",
+      "logoFile": "comdex.png"
+    },
+    {
+      "file": "coreum.ts",
+      "id": 16399,
+      "slug": "coreum",
+      "symbol": "COREUM",
+      "logoFile": "coreum.png"
+    },
+    {
+      "file": "cosmos.ts",
+      "id": 3794,
+      "slug": "cosmos",
+      "symbol": "ATOM",
+      "logoFile": "cosmos.png"
+    },
+    {
+      "file": "cronos-pos.ts",
+      "id": 3635,
+      "slug": "cronos",
+      "symbol": "CRO",
+      "logoFile": "cronos.png"
+    },
+    {
+      "file": "cronos.ts",
+      "id": 3635,
+      "slug": "cronos",
+      "symbol": "CRO",
+      "logoFile": "cronos.png"
+    },
+    {
+      "file": "dash.ts",
+      "id": 131,
+      "slug": "dash",
+      "symbol": "DASH",
+      "logoFile": "dash.png"
+    },
+    {
+      "file": "defichain.ts",
+      "id": 5804,
+      "slug": "defichain",
+      "symbol": "DFI",
+      "logoFile": "defichain.png"
+    },
+    {
+      "file": "doge.ts",
+      "id": 74,
+      "slug": "dogecoin",
+      "symbol": "DOGE",
+      "logoFile": "dogecoin.png"
+    },
+    {
+      "file": "dora.ts",
+      "id": 37482,
+      "slug": "dora",
+      "symbol": "DORA",
+      "logoFile": "dora.png"
+    },
+    {
+      "file": "dydx.ts",
+      "id": 28324,
+      "slug": "dydx-chain",
+      "symbol": "DYDX",
+      "logoFile": "dydx-chain.png"
+    },
+    {
+      "file": "eth.ts",
+      "id": 1027,
+      "slug": "ethereum",
+      "symbol": "ETH",
+      "logoFile": "ethereum.png"
+    },
+    {
+      "file": "fetch.ts",
+      "id": 3773,
+      "slug": "artificial-superintelligence-alliance",
+      "symbol": "FET",
+      "logoFile": "artificial-superintelligence-alliance.png"
+    },
+    {
+      "file": "firo.ts",
+      "id": 1414,
+      "slug": "firo",
+      "symbol": "FIRO",
+      "logoFile": "firo.png"
+    },
+    {
+      "file": "injective.ts",
+      "id": 7226,
+      "slug": "injective",
+      "symbol": "INJ",
+      "logoFile": "injective.png"
+    },
+    {
+      "file": "juno.ts",
+      "id": 14299,
+      "slug": "juno",
+      "symbol": "JUNO",
+      "logoFile": "juno.png"
+    },
+    {
+      "file": "kujira.ts",
+      "id": 15185,
+      "slug": "kujira",
+      "symbol": "KUJI",
+      "logoFile": "kujira.png"
+    },
+    {
+      "file": "kusama.ts",
+      "id": 5034,
+      "slug": "kusama",
+      "symbol": "KSM",
+      "logoFile": "kusama.png"
+    },
+    {
+      "file": "lava.ts",
+      "id": 32722,
+      "slug": "lava-network",
+      "symbol": "LAVA",
+      "logoFile": "lava-network.png"
+    },
+    {
+      "file": "manta-atlantic.ts",
+      "id": 13631,
+      "slug": "manta-network",
+      "symbol": "MANTA",
+      "logoFile": "manta-network.png"
+    },
+    {
+      "file": "medibloc.ts",
+      "id": 2303,
+      "slug": "medibloc",
+      "symbol": "MED",
+      "logoFile": "medibloc.png"
+    },
+    {
+      "file": "monero.ts",
+      "id": 328,
+      "slug": "monero",
+      "symbol": "XMR",
+      "logoFile": "monero.png"
+    },
+    {
+      "file": "neutron.ts",
+      "id": 894,
+      "slug": "neutron",
+      "symbol": "NTRN",
+      "logoFile": "neutron.png"
+    },
+    {
+      "file": "nolus.ts",
+      "id": 28485,
+      "slug": "nolus-io",
+      "symbol": "NLS",
+      "logoFile": "nolus-io.png"
+    },
+    {
+      "file": "oraichain.ts",
+      "id": 7533,
+      "slug": "oraichain-token",
+      "symbol": "ORAI",
+      "logoFile": "oraichain-token.png"
+    },
+    {
+      "file": "osmosis.ts",
+      "id": 12220,
+      "slug": "osmosis",
+      "symbol": "OSMO",
+      "logoFile": "osmosis.png"
+    },
+    {
+      "file": "passage.ts",
+      "id": 28030,
+      "slug": "passage",
+      "symbol": "PASG",
+      "logoFile": "passage.png"
+    },
+    {
+      "file": "peaq.ts",
+      "id": 14588,
+      "slug": "peaq",
+      "symbol": "PEAQ",
+      "logoFile": "peaq.png"
+    },
+    {
+      "file": "persistence.ts",
+      "id": 7281,
+      "slug": "persistence",
+      "symbol": "XPRT",
+      "logoFile": "persistence.png"
+    },
+    {
+      "file": "pivx.ts",
+      "id": 1169,
+      "slug": "pivx",
+      "symbol": "PIVX",
+      "logoFile": "pivx.png"
+    },
+    {
+      "file": "polkadot.ts",
+      "id": 6636,
+      "slug": "polkadot-new",
+      "symbol": "DOT",
+      "logoFile": "polkadot-new.png"
+    },
+    {
+      "file": "quicksilver.ts",
+      "id": 722,
+      "slug": "quicksilver",
+      "symbol": "QSLV",
+      "logoFile": "quicksilver.png"
+    },
+    {
+      "file": "regen.ts",
+      "id": 11646,
+      "slug": "regen-network",
+      "symbol": "REGEN",
+      "logoFile": "regen-network.png"
+    },
+    {
+      "file": "rtm.ts",
+      "id": 12306,
+      "slug": "raptoreum",
+      "symbol": "RTM",
+      "logoFile": "raptoreum.png"
+    },
+    {
+      "file": "saga.ts",
+      "id": 30372,
+      "slug": "saga",
+      "symbol": "SAGA",
+      "logoFile": "saga.png"
+    },
+    {
+      "file": "sentinel.ts",
+      "id": 2643,
+      "slug": "sentinel",
+      "symbol": "P2P",
+      "logoFile": "sentinel.png"
+    },
+    {
+      "file": "shentu.ts",
+      "id": 4807,
+      "slug": "shentu",
+      "symbol": "CTK",
+      "logoFile": "shentu.png"
+    },
+    {
+      "file": "sol.ts",
+      "id": 5426,
+      "slug": "solana",
+      "symbol": "SOL",
+      "logoFile": "solana.png"
+    },
+    {
+      "file": "stargaze.ts",
+      "id": 16842,
+      "slug": "stargaze",
+      "symbol": "STARS",
+      "logoFile": "stargaze.png"
+    },
+    {
+      "file": "stride.ts",
+      "id": 21781,
+      "slug": "stride",
+      "symbol": "STRD",
+      "logoFile": "stride.png"
+    },
+    {
+      "file": "syscoin-tanenbaum-evm.ts",
+      "id": 541,
+      "slug": "syscoin",
+      "symbol": "SYS",
+      "logoFile": "syscoin.png"
+    },
+    {
+      "file": "teritori.ts",
+      "id": 22082,
+      "slug": "teritori",
+      "symbol": "TORI",
+      "logoFile": "teritori.png"
+    },
+    {
+      "file": "terra-classic.ts",
+      "id": 4172,
+      "slug": "terra-luna",
+      "symbol": "LUNC",
+      "logoFile": "terra-luna.png"
+    },
+    {
+      "file": "terra.ts",
+      "id": 20314,
+      "slug": "terra-luna-v2",
+      "symbol": "LUNA",
+      "logoFile": "terra-luna-v2.png"
+    },
+    {
+      "file": "tron.ts",
+      "id": 1958,
+      "slug": "tron",
+      "symbol": "TRX",
+      "logoFile": "tron.png"
+    },
+    {
+      "file": "xlm.ts",
+      "id": 512,
+      "slug": "stellar",
+      "symbol": "XLM",
+      "logoFile": "stellar.png"
+    },
+    {
+      "file": "xrp.ts",
+      "id": 52,
+      "slug": "xrp",
+      "symbol": "XRP",
+      "logoFile": "xrp.png"
+    }
+  ],
+  "skipped": [],
+  "unresolved": [
+    {
+      "file": "elys.ts",
+      "serverCoinId": "elys",
+      "name": "Elys",
+      "symbol": "ELYS",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "lumera.ts",
+      "serverCoinId": "lumera",
+      "name": "Lumera",
+      "symbol": "LUMERA",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "polygon.ts",
+      "serverCoinId": "",
+      "name": "Polygon",
+      "symbol": "MATIC",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "rebus.ts",
+      "serverCoinId": "rebus",
+      "name": "Rebus",
+      "symbol": "REBUS",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "rizon.ts",
+      "serverCoinId": "rizon",
+      "name": "Rizon",
+      "symbol": "RIZON",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "sifchain.ts",
+      "serverCoinId": "sifchain",
+      "name": "Sifchain",
+      "symbol": "SIFCHA",
+      "reason": "not-in-cmc-map"
+    },
+    {
+      "file": "tide.ts",
+      "serverCoinId": "",
+      "name": "Tidecoin",
+      "symbol": "TIDE",
+      "reason": "not-in-cmc-map"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import tronLogo from './coinlogos/tron.webp'
+import tronLogo from './coinlogos/tron.png'
 
 export const TRON_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -18,7 +18,7 @@ export function createTronNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_TRON_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_TRON_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_TRON_BRIDGE_URL || ctx.buildBridgeUrl('tron', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('tron', 'main'),
     bridgeUsername: import.meta.env.VITE_TRON_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_TRON_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_TRON_EXPLORER || 'https://tronscan.org',

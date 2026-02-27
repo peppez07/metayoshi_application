@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import bnbLogo from './coinlogos/bnb.webp'
+import bnbLogo from './coinlogos/bnb.png'
 
 export const BNB_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -18,7 +18,7 @@ export function createBnbNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_BNB_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_BNB_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_BNB_BRIDGE_URL || ctx.buildBridgeUrl('bsc', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('bsc', 'main'),
     bridgeUsername: import.meta.env.VITE_BNB_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_BNB_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_BNB_EXPLORER || 'https://bscscan.com',

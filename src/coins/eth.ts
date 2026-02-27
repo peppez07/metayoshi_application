@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethereumLogo from './coinlogos/ethereum.webp'
+import ethereumLogo from './coinlogos/ethereum.png'
 
 export const ETH_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -18,7 +18,7 @@ export function createEthNetwork(ctx: CoinRuntimeContext): Network {
     rpcWallet: '',
     rpcUsername: import.meta.env.VITE_ETH_RPC_USER || '',
     rpcPassword: import.meta.env.VITE_ETH_RPC_PASSWORD || '',
-    bridgeUrl: import.meta.env.VITE_ETH_BRIDGE_URL || ctx.buildBridgeUrl('ethereum', 'main'),
+    bridgeUrl: ctx.buildBridgeUrl('ethereum', 'main'),
     bridgeUsername: import.meta.env.VITE_ETH_BRIDGE_USER || 'bridgeuser',
     bridgePassword: import.meta.env.VITE_ETH_BRIDGE_PASSWORD || 'bridgepass',
     explorerUrl: import.meta.env.VITE_ETH_EXPLORER || 'https://etherscan.io',

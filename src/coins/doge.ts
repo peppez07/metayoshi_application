@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { DOGE_API_INFO } from './interceptors'
-import dogeLogo from './coinlogos/doge.webp'
+import dogeLogo from './coinlogos/dogecoin.png'
 
 export const DOGE_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -26,17 +26,16 @@ export function estimateDogeFee(txBytes: number): number {
 }
 
 export function createDogeNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'doge',
     name: 'Dogecoin',
     symbol: 'DOGE',
     coinType: 'UTXO',
     coinSymbol: 'DOGE',
-    rpcUrl: import.meta.env.VITE_DOGE_RPC || DOGE_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_DOGE_BRIDGE_URL || DOGE_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('dogecoin', 'main'),
     explorerUrl: import.meta.env.VITE_DOGE_EXPLORER || DOGE_API_INFO.defaultExplorerUrl || 'https://dogechain.info',
     capabilities: DOGE_CAPABILITIES,
     feePerByte: DOGE_FEE_PER_BYTE,

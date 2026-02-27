@@ -10,7 +10,7 @@ export const MANTAATLANTIC_API_INFO: CoinApiInfo = {
   symbol: 'MANTAA',
   coinId: 'manta-atlantic',
   chain: 'main',
-  protocol: 'utxo-jsonrpc',
+  protocol: 'evm-jsonrpc',
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl: apiBaseUrl + '/v1/bridge/manta-atlantic/main',

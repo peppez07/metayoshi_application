@@ -2,15 +2,12 @@ import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
 import { XRP_PAYLOADS } from '../payloads'
 
-const DEFAULT_API_BASE = 'https://xrp.metayoshi.app'
+const DEFAULT_API_BASE = 'https://api.metayoshi.app'
 const DEFAULT_WALLET = 'mainwallet'
 
-const apiBaseUrl = String(import.meta.env.VITE_XRP_RPC || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
+const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
 const wallet = String(import.meta.env.VITE_XRP_RPC_WALLET || DEFAULT_WALLET).trim() || DEFAULT_WALLET
-const defaultBridgeUrl = String(
-  import.meta.env.VITE_XRP_BRIDGE_URL
-  || `${apiBaseUrl}/v1/bridge/xrp/main/wallet/${encodeURIComponent(wallet)}`
-).trim()
+const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/xrp/main/wallet/${encodeURIComponent(wallet)}`
 
 export const XRP_API_INFO: CoinApiInfo = {
   networkId: 'xrp',

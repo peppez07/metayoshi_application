@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { RTM_API_INFO } from './interceptors'
-import rtmLogo from './coinlogos/rtm.webp'
+import rtmLogo from './coinlogos/raptoreum.png'
 
 export const RTM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -26,20 +26,18 @@ export function estimateRtmFee(txBytes: number): number {
 }
 
 export function createRtmNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   const wallet = import.meta.env.VITE_RTM_WALLET || RTM_API_INFO.defaultWallet || 'mainwallet'
-  const bridgeDefault = RTM_API_INFO.defaultBridgeUrl
   return {
     id: 'rtm',
     name: 'Raptoreum',
     symbol: 'RTM',
     coinType: 'UTXO',
     coinSymbol: 'RTM',
-    rpcUrl: import.meta.env.VITE_RTM_RPC || RTM_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcWallet: wallet,
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_RTM_BRIDGE_URL || bridgeDefault,
+    bridgeUrl: ctx.buildBridgeUrl('raptoreum', 'main', wallet),
     explorerUrl: import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || 'https://explorer.raptoreum.com',
     capabilities: RTM_CAPABILITIES,
     feePerByte: RTM_FEE_PER_BYTE,

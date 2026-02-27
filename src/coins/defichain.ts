@@ -26,10 +26,8 @@ export function createDefichainNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername: bridgeUser,
     bridgePassword: bridgePass,
     capabilities: DEFICHAIN_CAPABILITIES,
-    derivation: {
-      status: 'unsupported',
-      reason: 'defichain address derivation is not supported in this build'
-    },    logo: utxoLogo
+    derivation: { status: 'supported' },
+    logo: utxoLogo
   }
 }
 

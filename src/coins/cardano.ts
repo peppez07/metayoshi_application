@@ -1,6 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { ADA_API_INFO } from './interceptors'
-import cardanoLogo from './coinlogos/cardano.webp'
+import cardanoLogo from './coinlogos/cardano.png'
 
 export const ADA_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -8,18 +8,17 @@ export const ADA_CAPABILITIES: NetworkCapabilitiesInput = {
 }
 
 export function createCardanoNetwork(ctx: CoinRuntimeContext): Network {
-  void ctx
   return {
     id: 'ada',
     name: 'Cardano',
     symbol: 'ADA',
     coinType: 'BTC',
     coinSymbol: 'ADA',
-    rpcUrl: import.meta.env.VITE_ADA_RPC || ADA_API_INFO.defaultRpcUrl,
+    rpcUrl: ctx.apiBaseUrl,
     rpcWallet: import.meta.env.VITE_ADA_RPC_WALLET || ADA_API_INFO.defaultWallet || '',
     rpcUsername: import.meta.env.VITE_ADA_RPC_USER || 'rpcuser',
     rpcPassword: import.meta.env.VITE_ADA_RPC_PASSWORD || 'rpcpass',
-    bridgeUrl: import.meta.env.VITE_ADA_BRIDGE_URL || ADA_API_INFO.defaultBridgeUrl,
+    bridgeUrl: ctx.buildBridgeUrl('cardano', 'main'),
     explorerUrl: import.meta.env.VITE_ADA_EXPLORER || ADA_API_INFO.defaultExplorerUrl || 'https://cardanoscan.io',
     capabilities: ADA_CAPABILITIES,
     derivation: { status: 'supported' },
