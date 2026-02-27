@@ -2110,11 +2110,20 @@ export const useWalletStore = create<WalletState>()(
         console.info('[coins-sync] generated report:\n' + syncReport)
 
         set((state) => {
-          const activeNetworkId = syncedNetworks.length > 0 && syncedNetworks.some((n) => n.id === state.activeNetworkId)
+          const baseNetworks = syncedNetworks.length > 0 ? syncedNetworks : state.networks
+          const fallbackEthNetwork =
+            state.networks.find((network) => network.id === 'eth')
+            || INITIAL_NETWORKS.find((network) => network.id === 'eth')
+          const networks = (
+            fallbackEthNetwork && !baseNetworks.some((network) => network.id === 'eth')
+              ? [fallbackEthNetwork, ...baseNetworks]
+              : baseNetworks
+          )
+          const activeNetworkId = networks.length > 0 && networks.some((n) => n.id === state.activeNetworkId)
             ? state.activeNetworkId
-            : (syncedNetworks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
+            : (networks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
           return {
-            networks: syncedNetworks.length > 0 ? syncedNetworks : state.networks,
+            networks,
             activeNetworkId,
             serverCoinCatalog: serverCatalog,
             lastServerCoinSyncReport: syncReport

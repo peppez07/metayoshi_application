@@ -51,6 +51,7 @@ const STANDARD_PAYLOAD_META: Record<string, StandardPayloadMeta> = {
   arb: { symbol: 'ETH', coinId: 'arbitrum-one' },
   base: { symbol: 'ETH', coinId: 'base' },
   bnb: { symbol: 'BNB', coinId: 'bsc' },
+  cro: { symbol: 'CRO', coinId: 'cronos' },
   polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
   avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
   sol: { symbol: 'SOL', coinId: 'solana' },

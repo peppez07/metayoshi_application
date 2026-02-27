@@ -174,7 +174,7 @@ const DappConnectStep1: React.FC = () => {
         <span className="text-xs font-bold text-primary">1 of 2</span>
       </header>
 
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 min-h-0 p-6 space-y-6 overflow-y-auto custom-scrollbar">
         <div className="flex flex-col items-center gap-4 py-4">
           <div className="w-16 h-16 rounded-full bg-dark-700 border border-dark-600 flex items-center justify-center overflow-hidden">
             <div className="w-8 h-8 bg-blue-500 rounded-full" />

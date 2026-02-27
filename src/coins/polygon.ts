@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import polygonLogo from './coinlogos/polygon.webp'
+import polygonLogo from './coinlogos/polygon.png'
 
 export const POLYGON_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },

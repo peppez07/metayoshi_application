@@ -3,6 +3,7 @@ import { arbitrumCoin } from './arbitrum'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
 import { cardanoCoin } from './cardano'
+import { croCoin } from './cronos'
 import { BTC_ADDRESS_SPEC } from './btc'
 import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
@@ -25,6 +26,8 @@ export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile
 
 const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+const GLOBAL_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || '').trim()
+const GLOBAL_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || '').trim()
 
 if (!API_BASE_URL) {
   throw new Error('VITE_API_BASE_URL is required. Set it in your environment (for example .env.local).')
@@ -46,6 +49,7 @@ export const DEFAULT_UTXO_COIN_SYMBOL = 'RTM'
 export const ALL_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
+  croCoin,
   bnbCoin,
   polygonCoin,
   arbitrumCoin,
@@ -66,8 +70,10 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
-const DISABLED_NETWORK_IDS = new Set<string>()
-const DEFAULT_ENABLED_COIN_IDS = [...ALL_COIN_IDS]
+const DISABLED_NETWORK_IDS = new Set<string>([
+  'srv--cronos-pos'
+])
+const DEFAULT_ENABLED_COIN_IDS = ['eth', 'cro'].filter((id) => ALL_COIN_IDS.has(id))
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()
@@ -103,7 +109,18 @@ for (const coin of ALL_COIN_MODULES) {
   }
 }
 
-export const ALL_NETWORKS: Network[] = ALL_COIN_MODULES.map((coin) => coin.createNetwork(runtimeContext))
+function withGlobalBridgeCredentials(network: Network): Network {
+  if (!GLOBAL_BRIDGE_USER || !GLOBAL_BRIDGE_PASSWORD) return network
+  return {
+    ...network,
+    bridgeUsername: GLOBAL_BRIDGE_USER,
+    bridgePassword: GLOBAL_BRIDGE_PASSWORD
+  }
+}
+
+export const ALL_NETWORKS: Network[] = ALL_COIN_MODULES
+  .map((coin) => coin.createNetwork(runtimeContext))
+  .map(withGlobalBridgeCredentials)
 export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => ENABLED_NETWORK_IDS.has(network.id))
 
 export const DEFAULT_ACTIVE_NETWORK_ID =
@@ -170,6 +187,21 @@ const TOKEN_MARKERS = new Set([
   'dai'
 ])
 
+const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze)/i
+const BLOCKED_SERVER_COIN_IDS = new Set<string>(['cronos-pos'])
+
+function isBlockedTestnetLikeCoinId(coinId: string): boolean {
+  const normalized = String(coinId || '').trim().toLowerCase()
+  if (!normalized) return false
+  return TESTNET_ID_MARKERS.test(normalized)
+}
+
+function isBlockedServerCoinId(coinId: string): boolean {
+  const normalized = String(coinId || '').trim().toLowerCase()
+  if (!normalized) return false
+  return BLOCKED_SERVER_COIN_IDS.has(normalized) || isBlockedTestnetLikeCoinId(normalized)
+}
+
 function isLikelyTokenServerCoin(coin: ServerCoinRow): boolean {
   const coinId = String(coin?.coinId || '').trim().toLowerCase()
   const name = String(coin?.name || '').trim().toLowerCase()
@@ -199,45 +231,27 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   stellar: 'xlm',
   xlm: 'xlm',
   ethereum: 'eth',
-  'ethereum-sepolia': 'eth',
-  'ethereum-hoodi': 'eth',
   'arbitrum-one': 'arb',
   'arbitrum-nova': 'arb',
-  'arbitrum-sepolia': 'arb',
   base: 'base',
-  'base-sepolia': 'base',
   bsc: 'bnb',
-  'bsc-testnet': 'bnb',
   'polygon-bor': 'polygon',
-  'polygon-amoy-bor': 'polygon',
   'avalanche-c-chain': 'avaxc',
-  'avalanche-fuji-c-chain': 'avaxc',
   solana: 'sol',
-  'solana-testnet': 'sol',
   tron: 'tron',
   // Additional enabled server EVM chains mapped to app EVM runtime.
   blast: 'eth',
   berachain: 'eth',
   celo: 'eth',
-  cronos: 'eth',
+  cronos: 'cro',
   fraxtal: 'eth',
   haqq: 'eth',
   mantle: 'eth',
   moonbeam: 'eth',
   moonriver: 'eth',
-  'cronos-pos': 'eth',
+  'cronos-pos': 'cro',
   'avail': 'eth',
   'peaq': 'eth',
-  'dymension-testnet': 'eth',
-  'dymension-testnet-evm': 'eth',
-  'evmos-testnet': 'eth',
-  'evmos-testnet-evm': 'eth',
-  'fraxtal-hoodi': 'eth',
-  'opbnb-testnet': 'bnb',
-  'pulsechain-testnet': 'eth',
-  'scroll-sepolia': 'eth',
-  'soneium-minato': 'eth',
-  'sonic-blaze': 'eth',
   'syscoin-tanenbaum-evm': 'eth',
   optimism: 'base',
   pulsechain: 'eth',
@@ -255,7 +269,6 @@ const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PA
 
 const FORCE_DOGE_UTXO_COMPAT_IDS = new Set([
   'bitcoin',
-  'bitcoin-testnet',
   'dash',
   'defichain',
   'pivx'
@@ -263,14 +276,11 @@ const FORCE_DOGE_UTXO_COMPAT_IDS = new Set([
 
 const FORCE_AVAXC_COMPAT_IDS = new Set([
   'avalanche-p-chain',
-  'avalanche-x-chain',
-  'avalanche-fuji-p-chain',
-  'avalanche-fuji-x-chain'
+  'avalanche-x-chain'
 ])
 
 const FORCE_POLYGON_COMPAT_IDS = new Set([
-  'polygon-heimdall',
-  'polygon-amoy-heimdall'
+  'polygon-heimdall'
 ])
 
 const FORCE_ETH_COMPAT_IDS = new Set([
@@ -296,10 +306,8 @@ const FORCE_ETH_COMPAT_IDS = new Set([
   'dora',
   'dydx',
   'elys',
-  'elys-testnet',
   'fetch',
   'injective',
-  'injective-testnet',
   'juno',
   'kujira',
   'kusama',
@@ -336,35 +344,32 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
   const scaffoldMapped = SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID[normalized]
   if (scaffoldMapped) return scaffoldMapped
 
-  // Pattern mapping for additional server coin IDs:
-  // map many chain variants/testnets into the closest app network model.
+  // Pattern mapping for additional server coin IDs.
   if (normalized === 'ethereum-holesky') return 'eth'
-  if (normalized === 'arbitrum-sepolia') return 'arb'
-  if (normalized === 'base-sepolia') return 'base'
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
-  if (normalized === 'bsc' || normalized === 'bsc-testnet') return 'bnb'
-  if (normalized === 'polygon' || normalized === 'polygon-bor' || normalized === 'polygon-amoy-bor') return 'polygon'
+  if (normalized === 'bsc') return 'bnb'
+  if (normalized === 'polygon' || normalized === 'polygon-bor') return 'polygon'
   if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
-  if (normalized === 'solana' || normalized.startsWith('solana-')) return 'sol'
+  if (normalized === 'solana') return 'sol'
   if (normalized === 'tron') return 'tron'
   if (normalized === 'tron-evm') return 'eth'
-  if (normalized === 'optimism' || normalized === 'optimism-sepolia') return 'base'
+  if (normalized === 'optimism') return 'base'
   if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
   if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
-  if (normalized === 'cronos' || normalized.startsWith('cronos-')) return 'eth'
+  if (normalized === 'cronos' || normalized.startsWith('cronos-')) return 'cro'
   if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
   if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
-  if (normalized === 'linea' || normalized === 'linea-sepolia') return 'eth'
+  if (normalized === 'linea') return 'eth'
   if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'eth'
-  if (normalized === 'metis' || normalized === 'metis-sepolia') return 'eth'
+  if (normalized === 'metis') return 'eth'
   if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'eth'
   if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'eth'
   if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'eth'
   if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'eth'
   if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'eth'
-  if (normalized === 'taiko' || normalized === 'taiko-hoodi') return 'eth'
-  if (normalized === 'unichain' || normalized === 'unichain-sepolia') return 'base'
+  if (normalized === 'taiko') return 'eth'
+  if (normalized === 'unichain') return 'base'
   if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
   if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
   // Forced compatibility mappings:
@@ -438,7 +443,7 @@ type NetworkCandidate = {
   isPublicnode: boolean
 }
 
-const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
+const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'cro', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
 const PRIMARY_SERVER_COIN_BY_MODEL_ID: Record<string, string> = {
   rtm: 'raptoreum',
   doge: 'dogecoin',
@@ -453,6 +458,7 @@ const PRIMARY_SERVER_COIN_BY_MODEL_ID: Record<string, string> = {
   sol: 'solana',
   tron: 'tron',
   eth: 'ethereum',
+  cro: 'cronos',
   arb: 'arbitrum-one',
   base: 'base',
   bnb: 'bsc',
@@ -673,6 +679,7 @@ function buildServerCoinCatalog(coins: ServerCoinRow[]): ServerCoinCatalogItem[]
     if (coin?.features?.bridge === false) continue
     const coinId = String(coin.coinId || '').trim().toLowerCase()
     if (!coinId) continue
+    if (isBlockedServerCoinId(coinId)) continue
 
     const selectedNetwork = resolveActiveServerNetwork(coin.networks)
     const chain = String(selectedNetwork?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
@@ -725,6 +732,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
     if (coin?.features?.bridge === false) continue
     const coinId = String(coin.coinId || '').trim().toLowerCase()
     if (!coinId) continue
+    if (isBlockedServerCoinId(coinId)) continue
     if (isLikelyTokenServerCoin(coin)) continue
     const modelNetworkId = mapServerCoinIdToNetworkId(coinId)
     const selectedNetwork = resolveActiveServerNetwork(coin.networks)
