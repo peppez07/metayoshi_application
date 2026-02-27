@@ -1,20 +1,21 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput, UtxoAddressSpec } from './types'
+import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import utxoLogo from './coinlogos/pivx.png'
 
-export const PIVX_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+export const PIVX_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
+export const PIVX_ADDRESS_SPEC: UtxoAddressSpec = {
+  bip44CoinType: 119,
+  p2pkhVersion: 0x1e
 }
 
 export function createPivxNetwork(ctx: CoinRuntimeContext): Network {
-  const bridgeUser = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-  const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
     id: 'srv--pivx',
-    runtimeModelId: 'utxo',
+    runtimeModelId: 'pivx',
     serverCoinId: 'pivx',
     serverChain: 'main',
-    name: 'Pivx',
+    name: 'PIVX',
     symbol: 'PIVX',
     coinType: 'UTXO',
     coinSymbol: 'PIVX',
@@ -23,10 +24,9 @@ export function createPivxNetwork(ctx: CoinRuntimeContext): Network {
     rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('pivx', 'main'),
-    bridgeUsername: bridgeUser,
-    bridgePassword: bridgePass,
+    bridgeUsername,
+    bridgePassword,
     capabilities: PIVX_CAPABILITIES,
-    derivation: { status: 'supported' },
     logo: utxoLogo
   }
 }
@@ -36,5 +36,7 @@ export const pivxCoin: CoinModule = {
   symbol: 'PIVX',
   coinSymbol: 'PIVX',
   capabilities: PIVX_CAPABILITIES,
+  utxoAddress: PIVX_ADDRESS_SPEC,
   createNetwork: createPivxNetwork
 }
+

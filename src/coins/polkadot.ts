@@ -1,42 +1,43 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { resolveBridgeCredentials } from './factories'
 import utxoLogo from './coinlogos/polkadot-new.png'
 
 export const POLKADOT_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
 }
 
 export function createPolkadotNetwork(ctx: CoinRuntimeContext): Network {
-  const bridgeUser = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-  const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
     id: 'srv--polkadot',
-    runtimeModelId: 'utxo',
+    runtimeModelId: 'polkadot',
     serverCoinId: 'polkadot',
     serverChain: 'main',
     name: 'Polkadot',
-    symbol: 'POLKAD',
+    symbol: 'DOT',
     coinType: 'UTXO',
-    coinSymbol: 'POLKAD',
+    coinSymbol: 'DOT',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
     rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('polkadot', 'main'),
-    bridgeUsername: bridgeUser,
-    bridgePassword: bridgePass,
-    capabilities: POLKADOT_CAPABILITIES,
+    bridgeUsername,
+    bridgePassword,
     derivation: {
       status: 'unsupported',
-      reason: 'polkadot address derivation is not supported in this build'
-    },    logo: utxoLogo
+      reason: 'Polkadot non-custodial signer is not implemented yet'
+    },
+    capabilities: POLKADOT_CAPABILITIES,
+    logo: utxoLogo
   }
 }
 
 export const polkadotCoin: CoinModule = {
   id: 'srv--polkadot',
-  symbol: 'POLKAD',
-  coinSymbol: 'POLKAD',
+  symbol: 'DOT',
+  coinSymbol: 'DOT',
   capabilities: POLKADOT_CAPABILITIES,
   createNetwork: createPolkadotNetwork
 }

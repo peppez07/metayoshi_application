@@ -2,17 +2,25 @@ import { arrCoin } from './arr'
 import { arbitrumCoin } from './arbitrum'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
+import { bitcoinCoin } from './bitcoin'
 import { cardanoCoin } from './cardano'
 import { BTC_ADDRESS_SPEC } from './btc'
 import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
+import { cosmosCoin } from './cosmos'
+import { dashCoin } from './dash'
 import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
+import { mantaAtlanticCoin } from './manta-atlantic'
 import { moneroCoin } from './monero'
+import { pivxCoin } from './pivx'
+import { polkadotCoin } from './polkadot'
 import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
+import { terraClassicCoin } from './terra-classic'
+import { terraCoin } from './terra'
 import { tideCoin } from './tide'
 import { tronCoin } from './tron'
 import { xlmCoin } from './xlm'
@@ -53,6 +61,14 @@ export const ALL_COIN_MODULES: CoinModule[] = [
   arbitrumCoin,
   baseCoin,
   avaxcCoin,
+  bitcoinCoin,
+  cosmosCoin,
+  dashCoin,
+  pivxCoin,
+  polkadotCoin,
+  terraCoin,
+  terraClassicCoin,
+  mantaAtlanticCoin,
   solCoin,
   xlmCoin,
   tronCoin,
@@ -69,10 +85,9 @@ export const ALL_COIN_MODULES: CoinModule[] = [
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>([
-  'srv--cronos-pos',
-  'srv--manta-atlantic'
+  'srv--cronos-pos'
 ])
-const DEFAULT_ENABLED_COIN_IDS = ['eth', 'cro', 'doge'].filter((id) => ALL_COIN_IDS.has(id))
+const DEFAULT_ENABLED_COIN_IDS = [...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id))
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()
@@ -187,7 +202,13 @@ const TOKEN_MARKERS = new Set([
 ])
 
 const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze)/i
-const BLOCKED_SERVER_COIN_IDS = new Set<string>(['cronos-pos', 'manta-atlantic'])
+const BLOCKED_SERVER_COIN_IDS = new Set<string>([
+  'cronos-pos',
+  'manta-atlantic',
+  'syscoin',
+  'syscoin-evm',
+  'syscoin-tanenbaum-evm'
+])
 
 function isBlockedTestnetLikeCoinId(coinId: string): boolean {
   const normalized = String(coinId || '').trim().toLowerCase()
@@ -824,7 +845,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
       return left.localeCompare(right)
     })
   const ordered = [...canonical, ...extra]
-  const mustKeepNetworkIds = new Set<string>(['doge'])
+  const mustKeepNetworkIds = new Set<string>(['doge', 'eth'])
   const withRequired = [...ordered]
   for (const requiredId of mustKeepNetworkIds) {
     if (withRequired.some((n) => n.id === requiredId)) continue

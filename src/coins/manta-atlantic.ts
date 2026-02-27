@@ -1,44 +1,44 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import ethLogo from './coinlogos/manta-network.png'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import { resolveBridgeCredentials } from './factories'
+import utxoLogo from './coinlogos/manta-network.png'
 
-export const MANTAATLANTIC_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
+export const MANTA_ATLANTIC_CAPABILITIES: NetworkCapabilitiesInput = {
+  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
+  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
 }
 
 export function createMantaAtlanticNetwork(ctx: CoinRuntimeContext): Network {
-  const bridgeUser = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-  const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
     id: 'srv--manta-atlantic',
-    runtimeModelId: 'eth',
+    runtimeModelId: 'manta-atlantic',
     serverCoinId: 'manta-atlantic',
     serverChain: 'main',
     name: 'Manta Atlantic',
-    symbol: 'MANTAA',
-    coinType: 'EVM',
-    coinSymbol: 'MANTAA',
+    symbol: 'MANTA',
+    coinType: 'UTXO',
+    coinSymbol: 'MANTA',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
     rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('manta-atlantic', 'main'),
-    bridgeUsername: bridgeUser,
-    bridgePassword: bridgePass,
-    capabilities: MANTAATLANTIC_CAPABILITIES,
+    bridgeUsername,
+    bridgePassword,
     derivation: {
       status: 'unsupported',
-      reason: 'manta-atlantic bridge methods are not available in this deployment'
+      reason: 'Manta Atlantic non-custodial signer is not implemented yet'
     },
-    logo: ethLogo
+    capabilities: MANTA_ATLANTIC_CAPABILITIES,
+    logo: utxoLogo
   }
 }
 
 export const mantaAtlanticCoin: CoinModule = {
   id: 'srv--manta-atlantic',
-  symbol: 'MANTAA',
-  coinSymbol: 'MANTAA',
-  capabilities: MANTAATLANTIC_CAPABILITIES,
+  symbol: 'MANTA',
+  coinSymbol: 'MANTA',
+  capabilities: MANTA_ATLANTIC_CAPABILITIES,
   createNetwork: createMantaAtlanticNetwork
 }
 

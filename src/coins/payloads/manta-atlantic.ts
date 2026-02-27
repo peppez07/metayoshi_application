@@ -2,7 +2,7 @@
 
 export const MANTAATLANTIC_PAYLOADS = createModelPayloadCatalog({
   networkId: 'srv--manta-atlantic',
-  symbol: 'MANTAA',
+  symbol: 'MANTA',
   coinId: 'manta-atlantic',
   chain: 'main',
   model: 'evm'

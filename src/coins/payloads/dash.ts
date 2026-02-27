@@ -1,9 +1,8 @@
-﻿import { createModelPayloadCatalog } from './common'
+﻿import { createUtxoPayloadCatalog } from './common'
 
-export const DASH_PAYLOADS = createModelPayloadCatalog({
+export const DASH_PAYLOADS = createUtxoPayloadCatalog({
   networkId: 'srv--dash',
   symbol: 'DASH',
   coinId: 'dash',
-  chain: 'main',
-  model: 'utxo'
+  chain: 'main'
 })

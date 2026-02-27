@@ -1,11 +1,18 @@
 import { ARR_PAYLOADS } from './arr'
+import { BITCOIN_PAYLOADS } from './bitcoin'
 import { ADA_PAYLOADS } from './cardano'
 import { BTCZ_PAYLOADS } from './btcz'
 import { createUtxoPayloadCatalog } from './common'
+import { DASH_PAYLOADS } from './dash'
 import { DOGE_PAYLOADS } from './doge'
 import { FIRO_PAYLOADS } from './firo'
+import { MANTAATLANTIC_PAYLOADS } from './manta-atlantic'
 import { XMR_PAYLOADS } from './monero'
+import { PIVX_PAYLOADS } from './pivx'
+import { POLKADOT_PAYLOADS } from './polkadot'
 import { RTM_PAYLOADS } from './rtm'
+import { TERRACLASSIC_PAYLOADS } from './terra-classic'
+import { TERRA_PAYLOADS } from './terra'
 import { TIDE_PAYLOADS } from './tide'
 import { XRP_PAYLOADS } from './xrp'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
@@ -83,7 +90,14 @@ export {
   ARR_PAYLOADS,
   XRP_PAYLOADS,
   XMR_PAYLOADS,
-  ADA_PAYLOADS
+  ADA_PAYLOADS,
+  BITCOIN_PAYLOADS,
+  PIVX_PAYLOADS,
+  DASH_PAYLOADS,
+  TERRA_PAYLOADS,
+  TERRACLASSIC_PAYLOADS,
+  POLKADOT_PAYLOADS,
+  MANTAATLANTIC_PAYLOADS
 }
 
 export type { CoinPayloadCatalog, CoinPayloadBuilders, JsonRpcEnvelope, UtxoTxInputRef } from './types'

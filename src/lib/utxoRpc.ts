@@ -683,11 +683,15 @@ async function jsonRpcCall(
     const txAuthHint = txAuthRejected
       ? ' | Configure bridge tx auth in Settings -> Bridge tx auth (runtime storage only; never bundle shared secrets).'
       : ''
+    const coinDisabled = /coin is disabled(?::| in registry:)/i.test(`${rpcErrorMessage} ${bodyText}`)
+    const coinDisabledHint = coinDisabled
+      ? ' | Server disabled this coin. Check server env DISABLE_<COIN>=true / DISABLED_COINS, or coin registry enabled=false.'
+      : ''
     const mempoolConflict = /txn-mempool-conflict|\(code\s*18\)|code\s*18/i.test(`${rpcErrorMessage} ${bodyText}`)
     const mempoolConflictHint = mempoolConflict
       ? ' | Inputs are already used by a pending mempool transaction. Wait for confirmation, then retry.'
       : ''
-    failAndThrow('http', new Error(`RPC call failed [${mode}]: HTTP ${response.status} ${response.statusText} — ${request.url}${detail}${txAuthHint}${mempoolConflictHint}`), response.status)
+    failAndThrow('http', new Error(`RPC call failed [${mode}]: HTTP ${response.status} ${response.statusText} — ${request.url}${detail}${txAuthHint}${coinDisabledHint}${mempoolConflictHint}`), response.status)
   }
 
   let json: any
@@ -1213,8 +1217,15 @@ export async function getUtxoBalance(
         }
       }
       if (isListUnspentRestrictedMessage(errorMessage)) {
+        const scanned = await scanAddressUnspent(config, address).catch(() => [])
+        if (scanned.length > 0) {
+          let scanTotal = 0
+          for (const utxo of scanned) scanTotal += utxo.amount
+          const total = Number(scanTotal.toFixed(8))
+          return { confirmed: total, unconfirmed: 0, total }
+        }
         throw new Error(
-          'Bridge provider blocks listunspent on shared nodes. ' +
+          'Bridge provider blocks listunspent on shared nodes and no chainstate scan is available. ' +
           'Use a dedicated node/full RPC access for spendable UTXO operations.'
         )
       }
@@ -1295,6 +1306,12 @@ export async function listUtxoUnspent(
         if (byAddress.length > 0) return byAddress
       } catch {
         // continue fallback chain
+      }
+      // Shared providers can block wallet-index methods like listunspent.
+      // Fall back to chainstate scans (confirmed only) to keep non-custodial sends functional.
+      if (isListUnspentRestrictedMessage(message)) {
+        const scanned = await scanAddressUnspent(config, address).catch(() => [])
+        if (scanned.length > 0) return scanned
       }
       const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
       if (btczExplorer !== null) return btczExplorer

@@ -1,9 +1,8 @@
-﻿import { createModelPayloadCatalog } from './common'
+﻿import { createUtxoPayloadCatalog } from './common'
 
-export const BITCOIN_PAYLOADS = createModelPayloadCatalog({
+export const BITCOIN_PAYLOADS = createUtxoPayloadCatalog({
   networkId: 'srv--bitcoin',
   symbol: 'BTC',
   coinId: 'bitcoin',
-  chain: 'main',
-  model: 'utxo'
+  chain: 'main'
 })

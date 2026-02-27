@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware'
 import { ethers } from 'ethers'
 import { decryptVaultV1, encryptVaultV1, type EncryptedVaultV1 } from '../lib/vaultCrypto'
@@ -23,7 +23,7 @@ import { sendCardanoAssetNonCustodial, sendCardanoNonCustodial } from '../lib/ca
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { deriveSolanaAddress } from '../lib/solanaAddress'
-import { sendSolanaNonCustodial } from '../lib/solanaNonCustodial'
+import { listSolanaTokenBalances, sendSolanaNonCustodial, sendSolanaSplTokenNonCustodial } from '../lib/solanaNonCustodial'
 import { deriveStellarAddress } from '../lib/stellarAddress'
 import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
@@ -1180,7 +1180,7 @@ async function deriveAccountAddresses(
       continue
     }
 
-    if (isCroCosmosModel(net)) {
+    if (modelId === 'cosmos' || isCroCosmosModel(net)) {
       try {
         const cosmosCfg = resolveCosmosNetworkConfig(net)
         const cosmosAddr = await deriveCosmosAddress(mnemonic, derivationIndex, cosmosCfg)
@@ -1663,6 +1663,7 @@ export const useWalletStore = create<WalletState>()(
             || modelId === 'sol'
             || modelId === 'xlm'
             || modelId === 'tron'
+            || modelId === 'cosmos'
             || isCroCosmosModel(net)
           ) {
             const isValidPersisted = await validateChainAddress(net, undefined, existing).catch(() => false)
@@ -1709,7 +1710,7 @@ export const useWalletStore = create<WalletState>()(
           } else if (net.coinType === 'XRP') {
             const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
             address = derived.address
-          } else if (isCroCosmosModel(net)) {
+          } else if (modelId === 'cosmos' || isCroCosmosModel(net)) {
             const cosmosCfg = resolveCosmosNetworkConfig(net)
             const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
             address = derived.address
@@ -2140,6 +2141,34 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
+        if (activeModelId === 'sol') {
+          try {
+            const rows = await listSolanaTokenBalances(net.rpcUrl, address)
+            const assets: Record<string, number> = {}
+            for (const row of rows) {
+              const tokenId = String(row.tokenId || '').trim()
+              const amountRaw = String(row.amountRaw || '').trim()
+              if (!tokenId || !/^\d+$/.test(amountRaw)) continue
+              const displaySats = toAssetDisplaySats(BigInt(amountRaw), row.decimals)
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+              assets[tokenId] = displaySats
+            }
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: {}
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (Solana) failed:`, err)
+          }
+          return
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2435,6 +2464,28 @@ export const useWalletStore = create<WalletState>()(
           } as RtmAssetDetails
         }
 
+        if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'sol') {
+          const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+          const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
+          const mint = String(normalizedAssetId.split(':').pop() || normalizedAssetId).trim()
+          const tokenRef = mint && explorerBase ? `${explorerBase}/token/${mint}` : undefined
+          return {
+            name: mint || normalizedAssetId,
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: tokenRef,
+            metadata_url: tokenRef,
+            token_id: normalizedAssetId,
+            contract_address: mint,
+            txid_or_longname: normalizedAssetId,
+            ownership_address: ''
+          } as RtmAssetDetails
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2704,6 +2755,29 @@ export const useWalletStore = create<WalletState>()(
           })
           await get().fetchNetworkAssets()
           return { txid: sent.txid }
+        }
+
+        if (modelId === 'sol') {
+          const tokenId = String(assetId || '').trim()
+          const recipient = String(toAddress || '').trim()
+          if (!tokenId) throw new Error('SPL token mint address is required')
+          if (!recipient) throw new Error('Solana recipient address is required')
+
+          const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
+          if (String(senderAddress || '').trim() !== derived.address) {
+            throw new Error(`Active SOL address does not match derived signer address (${senderAddress} != ${derived.address})`)
+          }
+
+          const tx = await sendSolanaSplTokenNonCustodial({
+            rpcUrl: net.rpcUrl,
+            fromAddress: derived.address,
+            toAddress: recipient,
+            assetId: tokenId,
+            amount: String(qty || '').trim(),
+            privateKeyHex: derived.privHex
+          })
+          await get().fetchNetworkAssets()
+          return { txid: tx.hash }
         }
 
         if (modelId === 'ada') {
@@ -3138,15 +3212,11 @@ export const useWalletStore = create<WalletState>()(
         console.info('[coins-sync] generated report:\n' + syncReport)
 
         set((state) => {
-          const baseNetworks = syncedNetworks.length > 0 ? syncedNetworks : normalizeNetworkListSymbols(state.networks)
-          const fallbackEthNetwork =
-            state.networks.find((network) => network.id === 'eth')
-            || INITIAL_NETWORKS.find((network) => network.id === 'eth')
-          const networks = (
-            fallbackEthNetwork && !baseNetworks.some((network) => network.id === 'eth')
-              ? [fallbackEthNetwork, ...baseNetworks]
-              : baseNetworks
-          )
+          const localBaseline = normalizeNetworkListSymbols(INITIAL_NETWORKS)
+          const serverById = new Map(syncedNetworks.map((network) => [network.id, network]))
+          const mergedLocal = localBaseline.map((network) => serverById.get(network.id) || network)
+          const serverOnly = syncedNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
+          const networks = [...mergedLocal, ...serverOnly]
           const activeNetworkId = networks.length > 0 && networks.some((n) => n.id === state.activeNetworkId)
             ? state.activeNetworkId
             : (networks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
@@ -3194,7 +3264,13 @@ export const useWalletStore = create<WalletState>()(
         // NEVER fall back to acc.addresses.UTXO â€” that slot holds the FIRST UTXO
         // network's address (RTM) and would show a wrong address on other coins.
         let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
-        if (address && net.coinType === 'UTXO' && net.coinSymbol && !isAddressForCoinSymbol(address, net.coinSymbol)) {
+        if (
+          address
+          && net.coinType === 'UTXO'
+          && net.coinSymbol
+          && modelId !== 'cosmos'
+          && !isAddressForCoinSymbol(address, net.coinSymbol)
+        ) {
           address = null
         }
         if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
@@ -3534,7 +3610,13 @@ export const useWalletStore = create<WalletState>()(
             : (useLocalRpc ? 'local-rpc' : 'bridge')
 
         let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
-        if (address && net.coinType === 'UTXO' && net.coinSymbol && !isAddressForCoinSymbol(address, net.coinSymbol)) {
+        if (
+          address
+          && net.coinType === 'UTXO'
+          && net.coinSymbol
+          && modelId !== 'cosmos'
+          && !isAddressForCoinSymbol(address, net.coinSymbol)
+        ) {
           address = null
         }
         if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
@@ -3952,4 +4034,5 @@ export const useWalletStore = create<WalletState>()(
     }
   )
 )
+
 

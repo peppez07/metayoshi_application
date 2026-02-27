@@ -2,8 +2,8 @@
 
 export const TERRA_PAYLOADS = createModelPayloadCatalog({
   networkId: 'srv--terra',
-  symbol: 'TERRA',
+  symbol: 'LUNA',
   coinId: 'terra',
   chain: 'main',
-  model: 'utxo'
+  model: 'cosmos'
 })

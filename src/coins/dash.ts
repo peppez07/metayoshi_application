@@ -1,17 +1,18 @@
-﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
+import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput, UtxoAddressSpec } from './types'
+import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import utxoLogo from './coinlogos/dash.png'
 
-export const DASH_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+export const DASH_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
+export const DASH_ADDRESS_SPEC: UtxoAddressSpec = {
+  bip44CoinType: 5,
+  p2pkhVersion: 0x4c
 }
 
 export function createDashNetwork(ctx: CoinRuntimeContext): Network {
-  const bridgeUser = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-  const bridgePass = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
     id: 'srv--dash',
-    runtimeModelId: 'utxo',
+    runtimeModelId: 'dash',
     serverCoinId: 'dash',
     serverChain: 'main',
     name: 'Dash',
@@ -23,10 +24,9 @@ export function createDashNetwork(ctx: CoinRuntimeContext): Network {
     rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('dash', 'main'),
-    bridgeUsername: bridgeUser,
-    bridgePassword: bridgePass,
+    bridgeUsername,
+    bridgePassword,
     capabilities: DASH_CAPABILITIES,
-    derivation: { status: 'supported' },
     logo: utxoLogo
   }
 }
@@ -36,5 +36,7 @@ export const dashCoin: CoinModule = {
   symbol: 'DASH',
   coinSymbol: 'DASH',
   capabilities: DASH_CAPABILITIES,
+  utxoAddress: DASH_ADDRESS_SPEC,
   createNetwork: createDashNetwork
 }
+
