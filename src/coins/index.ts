@@ -509,6 +509,38 @@ function inferBridgeCapabilities(
   }
 }
 
+function mergeCapabilityInputs(
+  baseCaps: Network['capabilities'] | undefined,
+  inferredCaps: Network['capabilities'] | undefined
+): Network['capabilities'] {
+  const baseFeatures = baseCaps?.features || {}
+  const baseUi = baseCaps?.ui || {}
+  const inferredFeatures = inferredCaps?.features || {}
+  const inferredUi = inferredCaps?.ui || {}
+
+  const nativeSend = Boolean(baseFeatures.nativeSend || inferredFeatures.nativeSend)
+  const assetLayer = Boolean(baseFeatures.assetLayer || inferredFeatures.assetLayer)
+  const assetSend = Boolean(baseFeatures.assetSend || inferredFeatures.assetSend)
+  const activity = Boolean(
+    (baseFeatures.activity ?? true) || (inferredFeatures.activity ?? true)
+  )
+
+  return {
+    features: {
+      nativeSend,
+      assetLayer,
+      assetSend,
+      activity
+    },
+    ui: {
+      showAssetsTab: Boolean(baseUi.showAssetsTab || inferredUi.showAssetsTab || assetLayer),
+      showAssetsAction: Boolean(baseUi.showAssetsAction || inferredUi.showAssetsAction || assetLayer),
+      showSendAction: Boolean(baseUi.showSendAction || inferredUi.showSendAction || nativeSend),
+      showActivityTab: Boolean((baseUi.showActivityTab ?? true) || (inferredUi.showActivityTab ?? true))
+    }
+  }
+}
+
 function isNetworkSpendable(network: Network): boolean {
   if (network.derivation?.status === 'unsupported') return false
   return network.capabilities?.features?.nativeSend === true
@@ -704,6 +736,8 @@ export async function loadServerRegistrySnapshot(): Promise<{
     if (canUseMappedModel && modelNetworkId) {
       const base = moduleById.get(modelNetworkId)!
       const appNetworkId = resolveAppNetworkId(modelNetworkId, coinId)
+      const inferredCapabilities = inferBridgeCapabilities(coinId, modelNetworkId, coin.methodGroups)
+      const mergedCapabilities = mergeCapabilityInputs(base.capabilities, inferredCapabilities)
       const mappedNetwork: Network = {
         ...base,
         id: appNetworkId,
@@ -720,7 +754,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
         // Base modules may contain placeholder defaults (e.g. "bridgepass").
         bridgeUsername: DEFAULT_BRIDGE_USER,
         bridgePassword: DEFAULT_BRIDGE_PASSWORD,
-        capabilities: inferBridgeCapabilities(coinId, modelNetworkId, coin.methodGroups)
+        capabilities: mergedCapabilities
       }
       if (!isNetworkSpendable(mappedNetwork)) continue
       const row = candidatesByAppNetworkId.get(appNetworkId) || []

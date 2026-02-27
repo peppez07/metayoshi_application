@@ -29,6 +29,12 @@ export interface DappSendRequestPayload {
   amount: string
 }
 
+export interface DappSendAssetRequestPayload {
+  assetId: string
+  qty: string
+  toAddress: string
+}
+
 export interface DappRequestError {
   code: number
   message: string
@@ -42,10 +48,10 @@ export interface DappRequestResult {
 export interface DappPendingRequest {
   id: string
   origin: string
-  method: 'wallet_sendTransaction'
+  method: 'wallet_sendTransaction' | 'wallet_sendAsset'
   networkId: string
   accountId: string
-  request: DappSendRequestPayload
+  request: DappSendRequestPayload | DappSendAssetRequestPayload
   status: DappRequestStatus
   requestedAt: number
   updatedAt: number
@@ -152,6 +158,16 @@ function parseDappSendRequest(raw: unknown): DappSendRequestPayload | null {
   return { to, amount }
 }
 
+function parseDappSendAssetRequest(raw: unknown): DappSendAssetRequestPayload | null {
+  if (!raw || typeof raw !== 'object') return null
+  const candidate = raw as Partial<DappSendAssetRequestPayload>
+  const assetId = String(candidate.assetId || '').trim()
+  const qty = String(candidate.qty || '').trim()
+  const toAddress = String(candidate.toAddress || '').trim()
+  if (!assetId || !qty || !toAddress) return null
+  return { assetId, qty, toAddress }
+}
+
 function parseDappRequestError(raw: unknown): DappRequestError | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const candidate = raw as Partial<DappRequestError>
@@ -179,13 +195,15 @@ export function parseDappPendingRequest(raw: unknown): DappPendingRequest | null
   const origin = normalizeDappOrigin(String(candidate.origin || ''))
   if (!origin || origin === 'unknown') return null
   const method = String(candidate.method || '').trim()
-  if (method !== 'wallet_sendTransaction') return null
+  if (method !== 'wallet_sendTransaction' && method !== 'wallet_sendAsset') return null
 
   const networkId = String(candidate.networkId || '').trim()
   const accountId = String(candidate.accountId || '').trim()
   if (!networkId || !accountId) return null
 
-  const request = parseDappSendRequest(candidate.request)
+  const request = method === 'wallet_sendAsset'
+    ? parseDappSendAssetRequest(candidate.request)
+    : parseDappSendRequest(candidate.request)
   if (!request) return null
 
   const now = Date.now()
@@ -196,7 +214,7 @@ export function parseDappPendingRequest(raw: unknown): DappPendingRequest | null
   return {
     id,
     origin,
-    method: 'wallet_sendTransaction',
+    method: method as 'wallet_sendTransaction' | 'wallet_sendAsset',
     networkId,
     accountId,
     request,

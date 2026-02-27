@@ -32,6 +32,7 @@ const DappRequestConfirm: React.FC = () => {
     sendStellarTransaction,
     sendTronTransaction,
     sendUtxoTransaction,
+    sendRtmAsset,
     refreshActiveBalance,
     addActivity,
     isConnected,
@@ -57,6 +58,16 @@ const DappRequestConfirm: React.FC = () => {
     () => networks.find((n) => n.id === pendingRequest?.networkId) || activeNetwork,
     [networks, pendingRequest, activeNetwork]
   )
+  const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
+  const requestTo = requestIsAssetSend
+    ? String((pendingRequest?.request as any)?.toAddress || '')
+    : String((pendingRequest?.request as any)?.to || '')
+  const requestAmount = requestIsAssetSend
+    ? String((pendingRequest?.request as any)?.qty || '')
+    : String((pendingRequest?.request as any)?.amount || '')
+  const requestAssetId = requestIsAssetSend
+    ? String((pendingRequest?.request as any)?.assetId || '')
+    : ''
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -155,45 +166,53 @@ const DappRequestConfirm: React.FC = () => {
         setActiveAccount(pendingRequest.accountId)
       }
 
-      const tx = requestNetwork.coinType === 'EVM'
+      const tx = requestIsAssetSend
+        ? await sendRtmAsset({
+            assetId: requestAssetId,
+            qty: requestAmount,
+            toAddress: requestTo
+          })
+        : requestNetwork.coinType === 'EVM'
         ? await sendEvmTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.coinType === 'XRP'
         ? await sendXrpTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.id === 'ada'
         ? await sendCardanoTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.id === 'xmr'
         ? await sendMoneroTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.id === 'sol'
         ? await sendSolanaTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.id === 'xlm'
         ? await sendStellarTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : requestNetwork.id === 'tron'
         ? await sendTronTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
         : await sendUtxoTransaction({
-            to: pendingRequest.request.to,
-            amount: pendingRequest.request.amount
+            to: requestTo,
+            amount: requestAmount
           })
+      const txHash = String((tx as any)?.hash || (tx as any)?.txid || '').trim()
+      if (!txHash) throw new Error('Transaction hash is missing from wallet response')
 
       const latestState = useWalletStore.getState()
       const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]
@@ -206,12 +225,12 @@ const DappRequestConfirm: React.FC = () => {
 
       if (networkForActivity) {
         addActivity({
-          id: tx.hash,
+          id: txHash,
           type: 'sent',
-          asset: networkForActivity.symbol,
-          amount: pendingRequest.request.amount,
+          asset: requestIsAssetSend ? requestAssetId : networkForActivity.symbol,
+          amount: requestAmount,
           from: senderAddress,
-          to: pendingRequest.request.to,
+          to: requestTo,
           status: 'confirmed',
           timestamp: Date.now(),
           networkId: networkForActivity.id
@@ -223,7 +242,7 @@ const DappRequestConfirm: React.FC = () => {
         [DAPP_PENDING_REQUEST_STORAGE_KEY]: {
           ...pendingRequest,
           status: 'executed',
-          result: { hash: tx.hash, txid: tx.hash },
+          result: { hash: txHash, txid: txHash },
           updatedAt: Date.now()
         }
       })
@@ -275,8 +294,10 @@ const DappRequestConfirm: React.FC = () => {
 
             <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
               <Row label="Network" value={requestNetwork?.name || pendingRequest.networkId} />
-              <Row label="To" value={pendingRequest.request.to} mono />
-              <Row label="Amount" value={`${pendingRequest.request.amount} ${requestNetwork?.symbol || ''}`} />
+              <Row label="Type" value={requestIsAssetSend ? 'Asset Transfer' : 'Native Coin Transfer'} />
+              <Row label="To" value={requestTo} mono />
+              {requestIsAssetSend ? <Row label="Asset" value={requestAssetId} mono /> : null}
+              <Row label="Amount" value={`${requestAmount} ${requestIsAssetSend ? '' : (requestNetwork?.symbol || '')}`.trim()} />
             </div>
 
             {submitError ? (

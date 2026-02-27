@@ -70,6 +70,12 @@ type SendTransactionParams = {
   amount: string
 }
 
+type SendAssetParams = {
+  assetId: string
+  qty: string
+  toAddress: string
+}
+
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const CAPABILITIES_METHODS = new Set(['wallet_getCapabilities', 'metayoshi_getCapabilities', 'rtm_getCapabilities'])
@@ -78,6 +84,7 @@ const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_r
 const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
 const SIGN_MESSAGE_METHODS = new Set(['wallet_signMessage', 'metayoshi_signMessage', 'rtm_signMessage'])
 const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
+const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
 
@@ -102,9 +109,7 @@ interface WalletState {
 function resolveDappNetworks(state: WalletState): Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
   return (state.networks || []).filter((network) => {
     const id = String(network?.id || '').trim()
-    if (!id) return false
-    const coinType = String(network?.coinType || '').trim().toUpperCase()
-    return coinType === 'UTXO' || coinType === 'XRP' || coinType === 'BTC' || coinType === 'EVM' || id === 'ada' || id === 'xmr'
+    return Boolean(id)
   })
 }
 
@@ -113,6 +118,9 @@ function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?
   const id = String(network?.id || '').trim().toLowerCase()
   if (network?.coinType === 'EVM') return 18
   if (network?.coinType === 'XRP') return 6
+  if (network?.coinType === 'SOL' || symbol === 'SOL' || id === 'sol' || id === 'solana' || id === 'srv--solana-testnet') return 9
+  if (symbol === 'XLM' || id === 'xlm' || id === 'stellar') return 7
+  if (symbol === 'TRX' || id === 'tron') return 6
   if (symbol === 'ADA' || id === 'ada') return 6
   if (symbol === 'XMR' || id === 'xmr') return 12
   return 8
@@ -667,11 +675,35 @@ function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTrans
   return { to, amount }
 }
 
-async function requestTransactionApproval(
+function parseSendAssetParams(params: unknown): SendAssetParams {
+  const candidate = Array.isArray(params) ? params[0] : params
+  if (!candidate || typeof candidate !== 'object') {
+    throw { code: -32602, message: 'wallet_sendAsset requires params { assetId, qty, toAddress }' }
+  }
+
+  const payload = candidate as Record<string, unknown>
+  const assetId = String(payload.assetId ?? payload.asset ?? payload.tokenId ?? '').trim()
+  const toAddress = String(payload.toAddress ?? payload.to ?? payload.address ?? '').trim()
+  const qtyRaw = payload.qty ?? payload.amount ?? payload.value
+  const qty = typeof qtyRaw === 'string'
+    ? qtyRaw.trim()
+    : (typeof qtyRaw === 'number' ? String(qtyRaw) : '')
+
+  if (!assetId) throw { code: -32602, message: 'wallet_sendAsset requires `assetId`' }
+  if (!toAddress) throw { code: -32602, message: 'wallet_sendAsset requires recipient `toAddress`' }
+  if (!qty) throw { code: -32602, message: 'wallet_sendAsset requires `qty` as a decimal string' }
+  if (!/^\d+(\.\d+)?$/.test(qty)) throw { code: -32602, message: 'wallet_sendAsset qty must be a positive decimal string' }
+  if (Number(qty) <= 0) throw { code: -32602, message: 'wallet_sendAsset qty must be greater than zero' }
+
+  return { assetId, qty, toAddress }
+}
+
+async function requestDappActionApproval(
   origin: string,
   networkId: string,
   accountId: string,
-  request: SendTransactionParams
+  method: 'wallet_sendTransaction' | 'wallet_sendAsset',
+  request: SendTransactionParams | SendAssetParams
 ): Promise<DappRequestResult> {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') {
@@ -688,7 +720,7 @@ async function requestTransactionApproval(
   const nextPending: DappPendingRequest = {
     id: requestId,
     origin: normalizedOrigin,
-    method: 'wallet_sendTransaction',
+    method,
     networkId,
     accountId,
     request,
@@ -942,7 +974,10 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
         'rtm_getCapabilities',
         'wallet_sendTransaction',
         'metayoshi_sendTransaction',
-        'rtm_sendTransaction'
+        'rtm_sendTransaction',
+        'wallet_sendAsset',
+        'metayoshi_sendAsset',
+        'rtm_sendAsset'
       ]
     }
   }
@@ -1022,11 +1057,43 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
 
     const parsedSend = parseSendTransactionParams(params, resolveCoinDecimals(network))
-    const result = await requestTransactionApproval(
+    const result = await requestDappActionApproval(
       origin || 'unknown',
       network.id,
       activeAccount.id,
+      'wallet_sendTransaction',
       parsedSend
+    )
+    return result
+  }
+
+  if (SEND_ASSET_METHODS.has(method)) {
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if (!network || !resolveNetworkCapabilities(network).features.assetSend) {
+      throw { code: -32603, message: 'No supported asset-send network selected' }
+    }
+    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+
+    if (origin) {
+      const approved = await requestScopes(origin, ['read', 'send_asset'])
+      if (!approved) {
+        throw { code: 4001, message: 'User rejected the request' }
+      }
+      await touchLastConnected(origin)
+    }
+
+    const parsedSendAsset = parseSendAssetParams(params)
+    const result = await requestDappActionApproval(
+      origin || 'unknown',
+      network.id,
+      activeAccount.id,
+      'wallet_sendAsset',
+      parsedSendAsset
     )
     return result
   }

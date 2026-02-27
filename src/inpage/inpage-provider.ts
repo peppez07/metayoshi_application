@@ -247,7 +247,7 @@ function initState(): void {
   })
 }
 
-// MetaYoshi provider interface (UTXO-focused)
+// MetaYoshi provider interface (multi-chain)
 const provider = {
   isMetaYoshi: true,
   isRtm: true,
@@ -298,6 +298,10 @@ const provider = {
   getProviderState: () => request({ method: PROVIDER_STATE_METHOD }),
   getNetworks: () => request({ method: 'wallet_getNetworks' }),
   getCapabilities: () => request({ method: 'wallet_getCapabilities' }),
+  sendTransaction: (params: { to: string; amount: string }) =>
+    request({ method: 'wallet_sendTransaction', params }),
+  sendAsset: (params: { assetId: string; qty: string; toAddress: string }) =>
+    request({ method: 'wallet_sendAsset', params }),
   
   // Event methods
   on,
