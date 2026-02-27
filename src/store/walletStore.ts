@@ -42,8 +42,10 @@ import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
 import { getTokenLogoForAsset } from '../coins/tokenlogos'
+import { createRequestCache } from '../lib/requestCache'
 import {
   fetchChainBalanceAndSync,
+  type ChainBalanceSyncResult,
   resolveChainSendCustodyMode,
   sendChainTransaction,
   sendUtxoNonCustodialTransaction,
@@ -261,7 +263,7 @@ interface WalletState {
   }) => Promise<void>
 
   // RTM asset layer
-  fetchNetworkAssets: () => Promise<void>
+  fetchNetworkAssets: (options?: { force?: boolean }) => Promise<void>
   fetchAssetDetails: (assetId: string) => Promise<RtmAssetDetails>
   sendRtmAsset: (params: {
     assetId: string
@@ -887,6 +889,25 @@ type TrackedTronToken = {
   contract: string
 }
 
+const chainBalanceSnapshotCache = createRequestCache<ChainBalanceSyncResult & { balance: string }>({
+  defaultTtlMs: 10_000,
+  maxEntries: 200
+})
+
+const assetDetailsCache = createRequestCache<any>({
+  defaultTtlMs: 5 * 60_000,
+  maxEntries: 800
+})
+
+const networkAssetsCache = createRequestCache<{
+  assets: Record<string, number>
+  logos: Record<string, string>
+  evmNfts?: Record<string, any>
+}>({
+  defaultTtlMs: 25_000,
+  maxEntries: 120
+})
+
 function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
   const input = String(raw || '').trim()
   if (!input) return []
@@ -928,6 +949,37 @@ function extractTronContractFromLogoHint(value: string): string {
   } catch {
     return raw.slice(idx + '#tron-contract='.length).trim()
   }
+}
+
+async function cachedFetchChainBalanceAndSync(params: {
+  network: Network
+  address: string
+  rpcConfig: UtxoRpcConfig
+  preferAddressIndexBalance?: boolean
+  skipChainSyncProbe?: boolean
+  zeroBalanceRecheckMs?: number
+  force?: boolean
+}): Promise<ChainBalanceSyncResult & { balance: string }> {
+  const networkId = String(params.network?.id || '').trim()
+  const address = String(params.address || '').trim().toLowerCase()
+  const backend = String(params.rpcConfig?.bridgeUrl || params.network?.rpcUrl || '').trim().toLowerCase()
+  const prefer = params.preferAddressIndexBalance === true ? '1' : '0'
+  const syncProbe = params.skipChainSyncProbe === true ? '1' : '0'
+  const recheck = Number.isFinite(Number(params.zeroBalanceRecheckMs)) ? String(Math.max(0, Math.trunc(Number(params.zeroBalanceRecheckMs)))) : '0'
+  const key = `bal|${networkId}|${address}|${backend}|${prefer}|${syncProbe}|${recheck}`
+  return await chainBalanceSnapshotCache.get(
+    key,
+    async () => await fetchChainBalanceAndSync({
+      network: params.network,
+      address: params.address,
+      rpcConfig: params.rpcConfig,
+      preferAddressIndexBalance: params.preferAddressIndexBalance,
+      skipChainSyncProbe: params.skipChainSyncProbe,
+      zeroBalanceRecheckMs: params.zeroBalanceRecheckMs
+    }),
+    undefined,
+    { force: params.force === true }
+  )
 }
 
 async function mapWithConcurrency<T, R>(
@@ -1812,7 +1864,7 @@ export const useWalletStore = create<WalletState>()(
       setConnected: (connected) => set({ isConnected: connected }),
       setSyncing: (syncing) => set({ isSyncing: syncing }),
 
-      fetchNetworkAssets: async () => {
+      fetchNetworkAssets: async (options) => {
         const {
           networks,
           activeNetworkId,
@@ -1830,6 +1882,22 @@ export const useWalletStore = create<WalletState>()(
 
         const address = acc.networkAddresses?.[activeNetworkId] || ''
         if (!address) return
+
+        const force = options?.force === true
+        const cacheKey = `assets|${activeNetworkId}|${String(address).trim().toLowerCase()}`
+        if (!force) {
+          const cached = networkAssetsCache.peek(cacheKey)
+          if (cached) {
+            set((state) => ({
+              networkAssets: { ...state.networkAssets, [activeNetworkId]: cached.assets },
+              networkAssetLogos: { ...state.networkAssetLogos, [activeNetworkId]: cached.logos },
+              ...(cached.evmNfts
+                ? { evmNftAssets: { ...state.evmNftAssets, [activeNetworkId]: cached.evmNfts } }
+                : {})
+            }))
+            return
+          }
+        }
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
@@ -2089,6 +2157,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: nftLookup
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: fungibleAssetLogos, evmNfts: nftLookup }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(
               `[${net.symbol}] fetchNetworkAssets failed for ${activeNetworkId} (${address}). `
@@ -2144,6 +2219,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: logos
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (TRON) failed:`, err)
           }
@@ -2187,6 +2269,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: {}
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: {} }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (XRP) failed:`, err)
           }
@@ -2227,6 +2316,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: {}
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: {} }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cardano) failed:`, err)
           }
@@ -2265,6 +2361,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: {}
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: {} }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cosmos) failed:`, err)
           }
@@ -2293,6 +2396,13 @@ export const useWalletStore = create<WalletState>()(
                 [activeNetworkId]: {}
               }
             }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: {} }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Solana) failed:`, err)
           }
@@ -2317,6 +2427,13 @@ export const useWalletStore = create<WalletState>()(
               [activeNetworkId]: {}
             }
           }))
+
+          networkAssetsCache.get(
+            cacheKey,
+            async () => ({ assets: assets ?? {}, logos: {} }),
+            undefined,
+            { force: true }
+          ).catch(() => {})
         } catch (err) {
           console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
         }
@@ -2341,6 +2458,9 @@ export const useWalletStore = create<WalletState>()(
         if (!resolveNetworkCapabilities(net).features.assetLayer) {
           throw new Error('Active network does not support assets')
         }
+
+        const detailsCacheKey = `assetDetails|${activeNetworkId}|${normalizedAssetId}`
+        return await assetDetailsCache.get(detailsCacheKey, async () => {
 
         const modelId = resolveNetworkModelId(net)
         if (modelId === 'tron') {
@@ -2700,6 +2820,7 @@ export const useWalletStore = create<WalletState>()(
         }
 
         throw new Error(`Asset metadata not found for "${normalizedAssetId}". Tried: ${candidates.join(', ')}`)
+        })
       },
 
       sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
@@ -3529,10 +3650,11 @@ export const useWalletStore = create<WalletState>()(
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            const snapshot = await fetchChainBalanceAndSync({
+            const snapshot = await cachedFetchChainBalanceAndSync({
               network: net,
               address,
-              rpcConfig
+              rpcConfig,
+              force: fastMode
             })
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -3561,10 +3683,11 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: localRpcOverrides[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
-          const snapshot = await fetchChainBalanceAndSync({
+          const snapshot = await cachedFetchChainBalanceAndSync({
             network: net,
             address,
-            rpcConfig
+            rpcConfig,
+            force: fastMode
           })
           await waitForUiStabilize()
           if (isStaleRequest()) return
@@ -3602,15 +3725,16 @@ export const useWalletStore = create<WalletState>()(
         })
         const isBtczBridgeMode =
           String(net.coinSymbol || '').trim().toUpperCase() === 'BTCZ' && !useLocalRpc
-            const snapshot = await fetchChainBalanceAndSync({
-              network: net,
-              address,
-              rpcConfig,
-              skipChainSyncProbe: isBtczBridgeMode,
-              preferAddressIndexBalance: supportsAddressIndexBalance(net.coinSymbol),
-              zeroBalanceRecheckMs: !skipZeroBalanceRecheck && !fastMode ? UTXO_ZERO_BALANCE_RECHECK_MS : 0
-            })
-            console.info(`[${net.symbol}] connected via bridge`)
+        const snapshot = await cachedFetchChainBalanceAndSync({
+          network: net,
+          address,
+          rpcConfig,
+          skipChainSyncProbe: isBtczBridgeMode,
+          preferAddressIndexBalance: supportsAddressIndexBalance(net.coinSymbol),
+          zeroBalanceRecheckMs: !skipZeroBalanceRecheck && !fastMode ? UTXO_ZERO_BALANCE_RECHECK_MS : 0,
+          force: fastMode
+        })
+        console.info(`[${net.symbol}] connected via bridge`)
 
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -3741,10 +3865,11 @@ export const useWalletStore = create<WalletState>()(
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            const snapshot = await fetchChainBalanceAndSync({
+            const snapshot = await cachedFetchChainBalanceAndSync({
               network: net,
               address,
-              rpcConfig
+              rpcConfig,
+              force: fastMode
             })
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -3770,10 +3895,11 @@ export const useWalletStore = create<WalletState>()(
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            const snapshot = await fetchChainBalanceAndSync({
+            const snapshot = await cachedFetchChainBalanceAndSync({
               network: net,
               address,
-              rpcConfig
+              rpcConfig,
+              force: fastMode
             })
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -3926,7 +4052,7 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           const [snapshot, addressValid] = await Promise.all([
-            fetchChainBalanceAndSync({
+            cachedFetchChainBalanceAndSync({
               network: net,
               address: resolvedAddress,
               rpcConfig,

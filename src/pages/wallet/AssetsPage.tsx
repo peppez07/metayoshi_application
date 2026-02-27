@@ -271,7 +271,7 @@ const AssetsPage: React.FC = () => {
   const handleRefresh = async () => {
     if (refreshing) return
     setRefreshing(true)
-    try { await fetchNetworkAssets() } finally { setRefreshing(false) }
+    try { await fetchNetworkAssets({ force: true }) } finally { setRefreshing(false) }
   }
 
   const openSend = (name: string) => {
