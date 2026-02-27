@@ -632,6 +632,11 @@ function sanitizeServerCoinId(coinId: string): string {
 function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): string {
   const normalizedServerCoinId = String(serverCoinId || '').trim().toLowerCase()
   const normalizedBaseNetworkId = String(baseNetworkId || '').trim().toLowerCase()
+  if (normalizedBaseNetworkId.startsWith('srv--')) {
+    const parts = normalizedBaseNetworkId.split('--')
+    if (parts.length >= 2 && parts[1]) return `srv--${parts[1]}`
+    return normalizedBaseNetworkId
+  }
   const primary = PRIMARY_SERVER_COIN_BY_MODEL_ID[normalizedBaseNetworkId]
   if (primary && normalizedServerCoinId === primary) return normalizedBaseNetworkId
   const suffix = sanitizeServerCoinId(normalizedServerCoinId)
