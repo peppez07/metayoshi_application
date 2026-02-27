@@ -1,5 +1,5 @@
 ﻿import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import utxoLogo from './coinlogos/PIVX.png'
+import utxoLogo from './coinlogos/pivx.png'
 
 export const PIVX_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -40,4 +40,3 @@ export const pivxCoin: CoinModule = {
   capabilities: PIVX_CAPABILITIES,
   createNetwork: createPivxNetwork
 }
-
