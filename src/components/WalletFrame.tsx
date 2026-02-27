@@ -7,6 +7,7 @@ import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, Io
 import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
+import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -331,7 +332,17 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
                       }
                       <div className="flex flex-col leading-tight">
-                        <span className="text-sm font-bold">{n.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold">{n.name}</span>
+                          {resolveNetworkCapabilities(n).features.assetLayer && (
+                            <span
+                              title="Supports assets/tokens"
+                              className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200"
+                            >
+                              Assets
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-gray-500 uppercase font-mono">{n.symbol}</span>
                       </div>
                     </div>
