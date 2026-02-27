@@ -30,17 +30,18 @@ interface AssetPreviewRowProps {
   name: string
   displayName?: string
   nft?: boolean
+  logoUrl?: string
   rawAmount: number
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
 }
 
-const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false }) => {
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
-  const logoSrc = getTokenLogoForAsset(effectiveName)
+  const logoSrc = String(logoUrl || '').trim() || getTokenLogoForAsset(effectiveName)
 
   return (
     <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700 transition-colors">
@@ -104,7 +105,7 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
 // ── main ─────────────────────────────────────────────────────────────────────
 
 const Assets: React.FC = () => {
-  const { networks, activeNetworkId, networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, activity } = useWalletStore()
+  const { networks, activeNetworkId, networkAssets, networkAssetLogos, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, activity } = useWalletStore()
   const navigate = useNavigate()
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
@@ -131,6 +132,7 @@ const Assets: React.FC = () => {
   }
 
   const rawAssets = networkAssets[activeNetworkId] ?? {}
+  const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
   const assetUsage = useMemo(() => {
     const out = new Map<string, number>()
@@ -206,6 +208,7 @@ const Assets: React.FC = () => {
             name={name}
             displayName={nftLookup[name]?.label}
             nft={isEvmNftAssetKey(name)}
+            logoUrl={assetLogos[name]}
             rawAmount={raw}
             onClick={() => {
               if (canOpenAssetSend && !isEvmNftAssetKey(name)) {

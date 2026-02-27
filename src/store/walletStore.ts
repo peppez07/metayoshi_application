@@ -147,6 +147,8 @@ interface WalletState {
   balanceRefreshNonce: number
   /** Per-network asset balances. Key = networkId, value = { assetName: rawAmount (sats) } */
   networkAssets: Record<string, Record<string, number>>
+  /** Per-network asset logos. Key = networkId, value = { assetName: logoUrl } */
+  networkAssetLogos: Record<string, Record<string, string>>
   /** EVM NFT metadata key lookup by network id and asset key. */
   evmNftAssets: Record<string, Record<string, EvmNftHolding>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
@@ -376,6 +378,7 @@ type EvmTrackedToken = {
   address: string
   symbol: string
   decimals: number
+  logoUri?: string
   discovered?: boolean
 }
 
@@ -450,6 +453,21 @@ const COINGECKO_CHAIN_SLUG_BY_CHAIN_ID: Record<number, string> = {
   43114: 'avalanche'
 }
 
+const TRUSTWALLET_CHAIN_FOLDER_BY_CHAIN_ID: Record<number, string> = {
+  1: 'ethereum',
+  10: 'optimism',
+  25: 'cronos',
+  56: 'smartchain',
+  100: 'xdai',
+  137: 'polygon',
+  250: 'fantom',
+  324: 'zksync',
+  8453: 'base',
+  42161: 'arbitrum',
+  43114: 'avalanchec',
+  59144: 'linea'
+}
+
 function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   const entries = String(raw || '')
     .split(',')
@@ -479,18 +497,26 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
 
 function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[] {
   const out: EvmTrackedToken[] = []
-  const seen = new Set<string>()
+  const byAddress = new Map<string, number>()
   for (const group of groups) {
     for (const token of group) {
       if (!ethers.isAddress(token.address)) continue
       const address = ethers.getAddress(token.address)
-      if (seen.has(address)) continue
-      seen.add(address)
+      const existingIndex = byAddress.get(address)
+      if (existingIndex !== undefined) {
+        const existing = out[existingIndex]
+        if (!existing.logoUri && token.logoUri) {
+          out[existingIndex] = { ...existing, logoUri: String(token.logoUri || '').trim() || undefined }
+        }
+        continue
+      }
       out.push({
         address,
         symbol: String(token.symbol || '').trim().toUpperCase() || shortAddress(address),
-        decimals: Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 30 ? token.decimals : 18
+        decimals: Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 30 ? token.decimals : 18,
+        logoUri: String(token.logoUri || '').trim() || undefined
       })
+      byAddress.set(address, out.length - 1)
     }
   }
   return out
@@ -505,6 +531,9 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   if (byModel.length > 0) return byModel
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'bnb') return DEFAULT_BNB_TRACKED_TOKENS
+  const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
+  if (chainId === 1) return DEFAULT_ETH_TRACKED_TOKENS
+  if (chainId === 56) return DEFAULT_BNB_TRACKED_TOKENS
   return []
 }
 
@@ -532,10 +561,19 @@ function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
     out.push({
       address: ethers.getAddress(candidateAddress),
       symbol: symbol || shortAddress(candidateAddress),
-      decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
+      decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18,
+      logoUri: String(row?.logoURI || row?.logo_uri || row?.logo || row?.image || '').trim() || undefined
     })
   }
   return out
+}
+
+function buildTrustWalletErc20LogoUri(chainId: number | null, tokenAddress: string): string | undefined {
+  if (!chainId || !ethers.isAddress(tokenAddress)) return undefined
+  const folder = TRUSTWALLET_CHAIN_FOLDER_BY_CHAIN_ID[chainId]
+  if (!folder) return undefined
+  const checksum = ethers.getAddress(tokenAddress)
+  return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${folder}/assets/${checksum}/logo.png`
 }
 
 async function fetchRemoteTrackedTokensForChain(chainId: number): Promise<EvmTrackedToken[]> {
@@ -578,6 +616,8 @@ async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeMod
   const chainId = resolveEvmChainId(network)
   if (!chainId) return base
 
+  const enableRemoteCatalog = String((import.meta as any)?.env?.VITE_ENABLE_REMOTE_EVM_TOKEN_CATALOG || '').trim() === '1'
+  if (!enableRemoteCatalog) return base
   const remote = await fetchRemoteTrackedTokensForChain(chainId).catch(() => [])
   const merged = mergeTrackedEvmTokens(base, remote)
   if (merged.length >= MIN_TRACKED_EVM_TOKENS_PER_CHAIN) {
@@ -796,6 +836,10 @@ async function mapWithConcurrency<T, R>(
   return out
 }
 
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.trunc(ms))))
+}
+
 function formatEvmTopicAddress(address: string): string {
   const stripped = String(address || '').trim().toLowerCase().replace(/^0x/, '')
   return `0x${stripped.padStart(64, '0')}`
@@ -827,10 +871,9 @@ async function discoverEvmTokenContractsFromLogs(
   }
 
   const windows = Array.from(new Set<bigint>([
-    0n,
-    latestBlock > 500000n ? latestBlock - 500000n : 0n,
-    latestBlock > 100000n ? latestBlock - 100000n : 0n,
-    latestBlock > 25000n ? latestBlock - 25000n : 0n
+    latestBlock > 5000n ? latestBlock - 5000n : 0n,
+    latestBlock > 25000n ? latestBlock - 25000n : 0n,
+    latestBlock > 50000n ? latestBlock - 50000n : 0n
   ]))
 
   const discovered = new Set<string>()
@@ -1255,6 +1298,7 @@ export const useWalletStore = create<WalletState>()(
       lowSyncStreak: 0,
       balanceRefreshNonce: 0,
       networkAssets: {},
+      networkAssetLogos: {},
       evmNftAssets: {},
       serverCoinCatalog: [],
       authorizedSites: [],
@@ -1442,6 +1486,9 @@ export const useWalletStore = create<WalletState>()(
           syncPercent: null,
           lowSyncStreak: 0,
           donationPercent: MIN_DONATION_PERCENT,
+          networkAssets: {},
+          networkAssetLogos: {},
+          evmNftAssets: {},
           activity: []
         }),
 
@@ -1458,6 +1505,10 @@ export const useWalletStore = create<WalletState>()(
           // Prevent showing stale assets from the previous account while reloading.
           networkAssets: {
             ...state.networkAssets,
+            [activeNetworkId]: {}
+          },
+          networkAssetLogos: {
+            ...state.networkAssetLogos,
             [activeNetworkId]: {}
           },
           evmNftAssets: {
@@ -1634,6 +1685,7 @@ export const useWalletStore = create<WalletState>()(
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+          const chainId = resolveEvmChainId(net)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
           for (const token of [...trackedDefaults, ...trackedFromCatalog]) {
             if (!ethers.isAddress(token.address)) continue
@@ -1657,15 +1709,36 @@ export const useWalletStore = create<WalletState>()(
               })
             }
 
-            const mergedTokens = [...trackedByAddress.values()]
+            let mergedTokens = [...trackedByAddress.values()]
+            if (discoveredAddresses.length === 0 && mergedTokens.length > 80) {
+              // Shared/public RPC providers often throttle large token scan bursts.
+              // Keep the highest-priority tracked set first (defaults/env/catalog are inserted first).
+              mergedTokens = mergedTokens.slice(0, 80)
+            }
 
             // Bridge-first: keep app->server transport consistent with wallet policy.
             const fungibleAssets: Record<string, number> = {}
+            const fungibleAssetLogos: Record<string, string> = {}
             const usedAssetKeys = new Set<string>()
-            const tokenRows = await mapWithConcurrency(mergedTokens, 18, async (token) => {
+            let tokenReadSuccesses = 0
+            let tokenReadErrors = 0
+            const tokenRows = await mapWithConcurrency(mergedTokens, 8, async (token) => {
               try {
                 const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
-                const rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
+                let rawHex: unknown = null
+                let lastError: unknown = null
+                for (let attempt = 0; attempt < 3; attempt += 1) {
+                  try {
+                    rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
+                    lastError = null
+                    break
+                  } catch (err) {
+                    lastError = err
+                    if (attempt < 2) await waitMs(120 * (attempt + 1))
+                  }
+                }
+                if (lastError) throw lastError
+                tokenReadSuccesses += 1
                 const rawBalance = BigInt(String(rawHex || '0x0'))
                 if (rawBalance <= 0n) return null
 
@@ -1685,10 +1758,12 @@ export const useWalletStore = create<WalletState>()(
                 return {
                   token,
                   symbol,
-                  displaySats
+                  displaySats,
+                  logoUri: String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim() || undefined
                 }
               } catch {
                 // Ignore non-standard/non-ERC20 contracts discovered from Transfer logs.
+                tokenReadErrors += 1
                 return null
               }
             })
@@ -1706,6 +1781,53 @@ export const useWalletStore = create<WalletState>()(
               }
               usedAssetKeys.add(assetKey)
               fungibleAssets[assetKey] = row.displaySats
+              if (row.logoUri) fungibleAssetLogos[assetKey] = row.logoUri
+            }
+
+            // Priority fallback: ensure core chain defaults are checked with a low-volume pass,
+            // so transient broad-scan failures do not hide common holdings.
+            const priorityDefaults = chainId === 1
+              ? DEFAULT_ETH_TRACKED_TOKENS
+              : chainId === 56
+                ? DEFAULT_BNB_TRACKED_TOKENS
+                : []
+            const presentSymbols = new Set(Object.keys(fungibleAssets).map((k) => String(k || '').trim().toUpperCase()))
+            for (const token of priorityDefaults) {
+              const symbol = String(token.symbol || '').trim().toUpperCase()
+              if (!symbol || presentSymbols.has(symbol)) continue
+              try {
+                const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
+                let rawHex: unknown = null
+                let lastError: unknown = null
+                for (let attempt = 0; attempt < 3; attempt += 1) {
+                  try {
+                    rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
+                    lastError = null
+                    break
+                  } catch (err) {
+                    lastError = err
+                    if (attempt < 2) await waitMs(120 * (attempt + 1))
+                  }
+                }
+                if (lastError) continue
+                const rawBalance = BigInt(String(rawHex || '0x0'))
+                if (rawBalance <= 0n) continue
+                const displaySats = toAssetDisplaySats(rawBalance, token.decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+                let assetKey = symbol
+                let suffix = 2
+                while (usedAssetKeys.has(assetKey)) {
+                  assetKey = `${symbol}-${suffix}`
+                  suffix += 1
+                }
+                usedAssetKeys.add(assetKey)
+                presentSymbols.add(symbol)
+                fungibleAssets[assetKey] = displaySats
+                const logoUri = String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim()
+                if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+              } catch {
+                // Keep scanning remaining priority defaults.
+              }
             }
 
             const trackedNfts = [...resolveTrackedEvmNfts(net), ...resolveCatalogEvmTrackedNfts(serverCoinCatalog, modelId)]
@@ -1794,10 +1916,23 @@ export const useWalletStore = create<WalletState>()(
 
             const assets = { ...fungibleAssets, ...nftAssets }
 
+            // Do not wipe visible assets on transient provider failures.
+            if (tokenReadSuccesses === 0 && tokenReadErrors > 0) {
+              console.warn(
+                `[${net.symbol}] fetchNetworkAssets skipped state update for ${activeNetworkId} (${address}) `
+                + `because all ERC20 reads failed (errors=${tokenReadErrors}).`
+              )
+              return
+            }
+
             set((state) => ({
               networkAssets: {
                 ...state.networkAssets,
                 [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: fungibleAssetLogos
               },
               evmNftAssets: {
                 ...state.evmNftAssets,
@@ -1826,6 +1961,10 @@ export const useWalletStore = create<WalletState>()(
             networkAssets: {
               ...state.networkAssets,
               [activeNetworkId]: assets ?? {}
+            },
+            networkAssetLogos: {
+              ...state.networkAssetLogos,
+              [activeNetworkId]: {}
             }
           }))
         } catch (err) {
@@ -2213,6 +2352,8 @@ export const useWalletStore = create<WalletState>()(
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
           donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
           networkAssets:    backup.networkAssets ?? {},
+          networkAssetLogos: {},
+          evmNftAssets: {},
           lastActiveTimestamp: Date.now()
         })
       },

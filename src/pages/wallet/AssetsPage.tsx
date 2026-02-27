@@ -53,17 +53,18 @@ interface AssetRowProps {
   name: string
   displayName?: string
   nft?: boolean
+  logoUrl?: string
   rawAmount: number
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
 }
 
-const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false }) => {
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
-  const logoSrc = getTokenLogoForAsset(effectiveName)
+  const logoSrc = String(logoUrl || '').trim() || getTokenLogoForAsset(effectiveName)
 
   return (
     <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700/40 transition-colors">
@@ -128,7 +129,7 @@ const AssetsPage: React.FC = () => {
     accounts, activeAccountId,
     networks, activeNetworkId,
     serverCoinCatalog,
-    networkAssets, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
+    networkAssets, networkAssetLogos, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
     activity,
     isConnected,
     isSyncing, syncPercent, lowSyncStreak
@@ -177,6 +178,7 @@ const AssetsPage: React.FC = () => {
     return a.localeCompare(b)
   }
   const rawAssets  = networkAssets[activeNetworkId] ?? {}
+  const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
   const roots      = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const subs       = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
@@ -441,6 +443,7 @@ const AssetsPage: React.FC = () => {
                 name={name}
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
+                logoUrl={assetLogos[name]}
                 rawAmount={raw}
                 onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
@@ -466,6 +469,7 @@ const AssetsPage: React.FC = () => {
                 name={name}
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
+                logoUrl={assetLogos[name]}
                 rawAmount={raw}
                 onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
@@ -491,6 +495,7 @@ const AssetsPage: React.FC = () => {
                 name={name}
                 displayName={nftLookup[name]?.label}
                 nft={isEvmNftAssetKey(name)}
+                logoUrl={assetLogos[name]}
                 rawAmount={raw}
                 onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
                 onPreview={() => {
