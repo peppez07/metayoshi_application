@@ -265,6 +265,11 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   'tron-evm': 'eth'
 }
 
+const SERVER_SYMBOL_OVERRIDES: Record<string, string> = {
+  bitcoin: 'BTC',
+  'bitcoin-testnet': 'BTC'
+}
+
 const DEFAULT_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
 const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
 
@@ -491,6 +496,7 @@ function inferBridgeCapabilities(
   const methods = new Set(flattenServerMethodGroups(methodGroups))
   const isEvmModel = Boolean(modelNetworkId && EVM_MODEL_NETWORK_IDS.has(modelNetworkId))
   const isRtm = coinId === 'raptoreum'
+  const isCardano = coinId === 'cardano' || modelNetworkId === 'ada'
 
   const canSendCoin =
     methods.has('sendtoaddress')
@@ -498,8 +504,8 @@ function inferBridgeCapabilities(
     || methods.has('eth_sendrawtransaction')
     || methods.has('submit')
 
-  const assetLayer = isEvmModel || isRtm
-  const assetSend = isEvmModel || isRtm || methods.has('sendasset')
+  const assetLayer = isEvmModel || isRtm || isCardano
+  const assetSend = isEvmModel || isRtm || isCardano || methods.has('sendasset')
 
   return {
     features: {
@@ -591,8 +597,11 @@ function createGenericServerNetwork(input: {
   selectedNetwork?: ServerCoinNetworkRow | null
 }): Network {
   const suffix = sanitizeServerCoinId(input.coinId) || 'unknown'
-  const symbolRaw = String(input.coin.symbol || '').trim().toUpperCase()
-  const symbol = symbolRaw || suffix.slice(0, 6).toUpperCase()
+  const symbol = normalizeServerCoinSymbol(
+    input.coinId,
+    String(input.coin.symbol || '').trim(),
+    suffix.slice(0, 6)
+  )
   const rpcWallet = String(input.selectedNetwork?.rpcWallet || '').trim()
   return {
     id: `generic--${suffix}`,
@@ -627,6 +636,15 @@ function sanitizeServerCoinId(coinId: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function normalizeServerCoinSymbol(coinId: string, symbol: string, fallback?: string): string {
+  const normalizedCoinId = String(coinId || '').trim().toLowerCase()
+  const override = SERVER_SYMBOL_OVERRIDES[normalizedCoinId]
+  if (override) return override
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (normalized) return normalized
+  return String(fallback || '').trim().toUpperCase()
 }
 
 function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): string {
@@ -699,7 +717,7 @@ function buildServerCoinCatalog(coins: ServerCoinRow[]): ServerCoinCatalogItem[]
     out.push({
       coinId,
       name: String(coin.name || coinId).trim() || coinId,
-      symbol: String(coin.symbol || '').trim().toUpperCase(),
+      symbol: normalizeServerCoinSymbol(coinId, String(coin.symbol || '').trim()),
       kind: tokenLike ? 'asset' : 'main',
       contractAddress: tokenLike ? (findContractAddress(coin) || undefined) : undefined,
       runtimeModelId: runtimeModelId || null,
@@ -763,7 +781,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
         serverCoinId: coinId,
         serverChain: chain,
         name: String(coin.name || base.name).trim() || base.name,
-        symbol: String(coin.symbol || base.symbol).trim().toUpperCase() || base.symbol,
+        symbol: normalizeServerCoinSymbol(coinId, String(coin.symbol || '').trim(), base.symbol) || base.symbol,
         rpcUrl: String(selectedNetwork?.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
         rpcWallet: rpcWallet || base.rpcWallet || '',
         rpcUsername: String(selectedNetwork?.rpcUser || base.rpcUsername || '').trim(),

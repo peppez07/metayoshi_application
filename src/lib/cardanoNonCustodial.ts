@@ -89,6 +89,12 @@ type CardanoConstructResponse = {
   feeLovelace?: number
 }
 
+type CardanoConstructAsset = {
+  policyId: string
+  assetName: string
+  quantity: string
+}
+
 async function requestCardanoConstruct(
   network: Network,
   payload: {
@@ -97,6 +103,7 @@ async function requestCardanoConstruct(
     toAddress: string
     amountLovelace: number
     changeAddress: string
+    assets?: CardanoConstructAsset[]
   }
 ): Promise<CardanoConstructResponse> {
   const apiBase = resolveApiBaseUrl(network)
@@ -212,6 +219,32 @@ function mergeUniqueAddresses(values: string[]): string[] {
   return out
 }
 
+function parseCardanoTokenId(tokenId: string): { policyId: string; assetName: string } {
+  const normalized = String(tokenId || '').trim()
+  if (!normalized) throw new Error('Cardano token id is required')
+  const dot = normalized.indexOf('.')
+  if (dot <= 0 || dot >= normalized.length - 1) {
+    throw new Error('Cardano token id must be in policyId.assetName format')
+  }
+  const policyId = normalized.slice(0, dot).trim()
+  const assetName = normalized.slice(dot + 1).trim()
+  if (!/^[0-9a-f]{56}$/i.test(policyId)) {
+    throw new Error('Cardano token policy id must be 56 hex chars')
+  }
+  if (!/^[0-9a-f]+$/i.test(assetName)) {
+    throw new Error('Cardano token asset name must be hex')
+  }
+  return { policyId: policyId.toLowerCase(), assetName: assetName.toLowerCase() }
+}
+
+function parseCardanoTokenAmountRaw(value: string): string {
+  const raw = String(value || '').trim()
+  if (!/^\d+$/.test(raw)) throw new Error('Cardano token amount must be a positive integer')
+  const qty = BigInt(raw)
+  if (qty <= 0n) throw new Error('Cardano token amount must be greater than 0')
+  return qty.toString()
+}
+
 function signCardanoUnsignedTx(
   CSL: CardanoLib,
   unsignedTxHex: string,
@@ -265,6 +298,59 @@ export async function sendCardanoNonCustodial(params: {
     amountLovelace,
     changeAddress: fromAddress
   })
+  const CSL = await loadCardanoLib()
+  const witnessAddresses = mergeUniqueAddresses([fromAddress, ...constructed.inputAddresses])
+  const signingKeys = await findWitnessKeys(
+    CSL,
+    params.mnemonic,
+    params.accountIndex,
+    params.network.rpcUrl,
+    witnessAddresses
+  )
+  const signedTxCborHex = signCardanoUnsignedTx(CSL, constructed.unsignedTxCborHex, signingKeys)
+  const txid = await submitCardanoSignedTx(params.network, {
+    walletId: String(params.walletId || '').trim() || undefined,
+    signedTxCborHex
+  })
+  return { hash: txid, feeLovelace: constructed.feeLovelace }
+}
+
+export async function sendCardanoAssetNonCustodial(params: {
+  network: Network
+  mnemonic: string
+  accountIndex: number
+  fromAddress: string
+  toAddress: string
+  tokenId: string
+  tokenAmountRaw: string
+  minAdaLovelace?: number
+  walletId?: string
+}): Promise<{ hash: string; feeLovelace?: number }> {
+  const fromAddress = String(params.fromAddress || '').trim()
+  const toAddress = String(params.toAddress || '').trim()
+  if (!fromAddress) throw new Error('Cardano sender address is required')
+  if (!toAddress) throw new Error('Cardano destination address is required')
+
+  const { policyId, assetName } = parseCardanoTokenId(params.tokenId)
+  const tokenQty = parseCardanoTokenAmountRaw(params.tokenAmountRaw)
+  const minAdaLovelaceRaw = Number(params.minAdaLovelace ?? 1_500_000)
+  const minAdaLovelace = Number.isFinite(minAdaLovelaceRaw) && minAdaLovelaceRaw > 0
+    ? Math.trunc(minAdaLovelaceRaw)
+    : 1_500_000
+
+  const constructed = await requestCardanoConstruct(params.network, {
+    walletId: String(params.walletId || '').trim() || undefined,
+    fromAddress,
+    toAddress,
+    amountLovelace: minAdaLovelace,
+    changeAddress: fromAddress,
+    assets: [{
+      policyId,
+      assetName,
+      quantity: tokenQty
+    }]
+  })
+
   const CSL = await loadCardanoLib()
   const witnessAddresses = mergeUniqueAddresses([fromAddress, ...constructed.inputAddresses])
   const signingKeys = await findWitnessKeys(

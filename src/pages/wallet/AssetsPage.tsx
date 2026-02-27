@@ -139,7 +139,10 @@ const AssetsPage: React.FC = () => {
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
-  const supportsPreview = activeNetwork.coinType === 'UTXO' || activeNetwork.coinType === 'EVM'
+  const supportsPreview =
+    activeNetwork.coinType === 'UTXO'
+    || activeNetwork.coinType === 'EVM'
+    || activeModelId === 'ada'
   const canOpenAssetSend = caps.features.assetLayer
   const canSubmitAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}

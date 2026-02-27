@@ -2415,6 +2415,8 @@ export async function sendBridgeTokenTransfer(
     fromAddress?: string
     coin?: string
     chain?: string
+    wallet?: string
+    signedFormat?: 'evm-raw-hex' | 'cardano-cbor-hex'
   }
 ): Promise<{ txid: string; relayed?: boolean }> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for token transfer')
@@ -2428,13 +2430,22 @@ export async function sendBridgeTokenTransfer(
   const toAddress = String(input.toAddress || '').trim()
   const signedTxHex = String(input.signedTxHex || '').trim()
   const amountNum = Number(input.amount)
+  const wallet = String(input.wallet || '').trim()
+  const signedFormat = String(input.signedFormat || (coin === 'cardano' ? 'cardano-cbor-hex' : 'evm-raw-hex')).trim().toLowerCase()
 
   if (!coin) throw new Error('Bridge coin is required for token transfer')
   if (!chain) throw new Error('Bridge chain is required for token transfer')
   if (!tokenId) throw new Error('Token id is required for token transfer')
   if (!toAddress) throw new Error('Destination address is required for token transfer')
   if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Token amount must be a positive number')
-  if (!/^0x[0-9a-f]+$/i.test(signedTxHex)) throw new Error('Signed token transaction must be 0x-prefixed hex')
+  if (signedFormat === 'evm-raw-hex') {
+    if (!/^0x[0-9a-f]+$/i.test(signedTxHex)) throw new Error('Signed token transaction must be 0x-prefixed hex')
+  } else if (signedFormat === 'cardano-cbor-hex') {
+    if (!/^[0-9a-f]+$/i.test(signedTxHex)) throw new Error('Signed Cardano transaction must be CBOR hex')
+    if (!wallet) throw new Error('wallet is required for Cardano token transfer')
+  } else {
+    throw new Error(`Unsupported token signed format: ${signedFormat}`)
+  }
 
   const url = `${apiBase}/v1/bridge/token/transfer/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -2468,8 +2479,9 @@ export async function sendBridgeTokenTransfer(
             toAddress,
             tokenId,
             amount: amountNum,
+            wallet: wallet || undefined,
             signed: {
-              format: 'evm-raw-hex',
+              format: signedFormat,
               payload: signedTxHex
             }
           }
@@ -2515,6 +2527,99 @@ export async function sendBridgeTokenTransfer(
   }
 
   throw new Error(lastError)
+}
+
+export type BridgeTokenBalanceRow = {
+  tokenType?: string
+  tokenId: string
+  tokenAddress?: string
+  symbol?: string
+  name?: string
+  issuer?: string
+  decimals?: number | null
+  balanceRaw?: string
+  balance?: string
+}
+
+export async function fetchBridgeTokenBalances(
+  config: UtxoRpcConfig,
+  input: {
+    coin?: string
+    chain?: string
+    owner?: string
+    wallet?: string
+    tokenId?: string
+  } = {}
+): Promise<BridgeTokenBalanceRow[]> {
+  if (!config.bridgeUrl) throw new Error('Bridge URL is required for token balance')
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) throw new Error('Bridge API base URL is not available')
+
+  const hinted = resolveBridgeCoinChainHint(config)
+  const coin = String(input.coin || hinted.coin || '').trim()
+  const chain = String(input.chain || hinted.chain || 'main').trim()
+  if (!coin) throw new Error('Bridge coin is required for token balance')
+  if (!chain) throw new Error('Bridge chain is required for token balance')
+
+  const url = `${apiBase}/v1/bridge/token/balance/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.bridgeUsername && config.bridgePassword) {
+    headers['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
+  }
+
+  const body: Record<string, unknown> = { id: `tok-bal-${Date.now()}` }
+  const owner = String(input.owner || '').trim()
+  const wallet = String(input.wallet || '').trim()
+  const tokenId = String(input.tokenId || '').trim()
+  if (owner) body.owner = owner
+  if (wallet) body.wallet = wallet
+  if (tokenId) body.tokenId = tokenId
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+
+  const rawText = await res.text().catch(() => '')
+  const json = (() => {
+    try { return rawText ? JSON.parse(rawText) : null } catch { return null }
+  })()
+
+  if (!res.ok) {
+    const detail = compactErrorText(String(
+      json?.error?.message
+      || json?.error
+      || json?.message
+      || rawText
+      || `HTTP ${res.status}`
+    ))
+    throw new Error(`Token balance failed [HTTP ${res.status}]: ${detail}`)
+  }
+
+  const result = json?.result ?? json?.payload?.data ?? json ?? {}
+  const balances = Array.isArray(result?.balances) ? result.balances : []
+  return balances
+    .map((row: any) => ({
+      tokenType: String(row?.tokenType || '').trim() || undefined,
+      tokenId: String(row?.tokenId || '').trim(),
+      tokenAddress: String(row?.tokenAddress || '').trim() || undefined,
+      symbol: String(row?.symbol || '').trim() || undefined,
+      name: String(row?.name || '').trim() || undefined,
+      issuer: String(row?.issuer || '').trim() || undefined,
+      decimals: Number.isFinite(Number(row?.decimals)) ? Number(row.decimals) : null,
+      balanceRaw: String(row?.balanceRaw ?? '').trim() || undefined,
+      balance: String(row?.balance ?? '').trim() || undefined
+    }))
+    .filter((row: BridgeTokenBalanceRow) => Boolean(row.tokenId))
 }
 
 /** Quick reachability probe — resolves true if node responds, false otherwise. */

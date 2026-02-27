@@ -6,6 +6,7 @@ import { normalizeDappOrigin } from '../lib/dappPermissions'
 import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import {
   callBridgeMethod,
+  fetchBridgeTokenBalances,
   listAssetBalancesByAddress,
   sendBridgeTokenTransfer,
   sendRtmAssetNonCustodial,
@@ -18,7 +19,7 @@ import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } 
 import { deriveXrpAddress } from '../lib/xrpAddress'
 import { sendXrpNonCustodial } from '../lib/xrpNonCustodial'
 import { deriveCardanoAddress } from '../lib/cardanoAddress'
-import { sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
+import { sendCardanoAssetNonCustodial, sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { deriveSolanaAddress } from '../lib/solanaAddress'
@@ -963,6 +964,40 @@ function isCroCosmosModel(network?: Partial<Network>): boolean {
   return modelId === 'crocosmos' || modelId === 'cro'
 }
 
+function normalizeNetworkSymbol(network: Network): Network {
+  const serverCoinId = String(network.serverCoinId || '').trim().toLowerCase()
+  const networkId = String(network.id || '').trim().toLowerCase()
+  const networkName = String(network.name || '').trim().toLowerCase()
+  const symbol = String(network.symbol || '').trim().toUpperCase()
+  const coinSymbol = String(network.coinSymbol || '').trim().toUpperCase()
+  const isBitcoin =
+    serverCoinId === 'bitcoin'
+    || networkId === 'srv--bitcoin'
+    || networkName === 'bitcoin'
+    || symbol === 'BITCOI'
+    || coinSymbol === 'BITCOI'
+  if (!isBitcoin) return network
+  return {
+    ...network,
+    symbol: 'BTC',
+    coinSymbol: network.coinType === 'UTXO' ? 'BTC' : (network.coinSymbol || 'BTC')
+  }
+}
+
+function normalizeNetworkListSymbols(networks: Network[]): Network[] {
+  return (Array.isArray(networks) ? networks : []).map((network) => normalizeNetworkSymbol(network))
+}
+
+function normalizeServerCatalogSymbols(catalog: ServerCoinCatalogItem[]): ServerCoinCatalogItem[] {
+  if (!Array.isArray(catalog)) return []
+  return catalog.map((item) => {
+    const coinId = String(item.coinId || '').trim().toLowerCase()
+    const symbol = String(item.symbol || '').trim().toUpperCase()
+    if (coinId !== 'bitcoin' && symbol !== 'BITCOI') return item
+    return { ...item, symbol: 'BTC' }
+  })
+}
+
 const SERVER_COIN_SYNC_REPORT_STORAGE_KEY = 'metayoshi:last-server-coin-sync-report'
 
 function buildServerCoinSyncReport(networks: Network[]): string {
@@ -1290,7 +1325,7 @@ export const useWalletStore = create<WalletState>()(
       nextAccountIndex: 1,
       activeAccountId: null,
       activeNetworkId: DEFAULT_ACTIVE_NETWORK_ID,
-      networks: INITIAL_NETWORKS,
+      networks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
       
       isConnected: false,
       isSyncing: false,
@@ -1676,6 +1711,7 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
+        const activeModelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
         if (!resolveNetworkCapabilities(net).features.assetLayer) return
 
         const address = acc.networkAddresses?.[activeNetworkId] || ''
@@ -1949,6 +1985,46 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
+        if (activeModelId === 'ada') {
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          try {
+            const rows = await fetchBridgeTokenBalances(rpcConfig, {
+              coin: 'cardano',
+              chain: 'main',
+              owner: address,
+              wallet: String(net.rpcWallet || '').trim() || undefined
+            })
+            const assets: Record<string, number> = {}
+            for (const row of rows) {
+              const tokenId = String(row.tokenId || '').trim()
+              if (!tokenId) continue
+              const rawQtyText = String(row.balanceRaw || row.balance || '0').trim()
+              if (!/^\d+(\.\d+)?$/.test(rawQtyText)) continue
+              const qty = Number(rawQtyText)
+              if (!Number.isFinite(qty) || qty <= 0) continue
+              // UI asset renderer expects sat-like integer scale.
+              assets[tokenId] = Math.round(qty * 1e8)
+            }
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: {}
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (Cardano) failed:`, err)
+          }
+          return
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2122,6 +2198,47 @@ export const useWalletStore = create<WalletState>()(
           }
         }
 
+        if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'ada') {
+          const {
+            accounts,
+            activeAccountId,
+            networkAssets
+          } = get()
+          const activeAcc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+          const owner = String(activeAcc?.networkAddresses?.[activeNetworkId] || '').trim()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const rows = await fetchBridgeTokenBalances(rpcConfig, {
+            coin: 'cardano',
+            chain: 'main',
+            owner: owner || undefined,
+            wallet: String(net.rpcWallet || '').trim() || undefined,
+            tokenId: normalizedAssetId
+          })
+          const row = rows.find((r) => String(r.tokenId || '').trim() === normalizedAssetId)
+          const [policy = '', assetName = ''] = normalizedAssetId.split('.', 2)
+          const knownRaw = Number((networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0))
+          const amountUi = knownRaw > 0 ? (knownRaw / 1e8) : Number(String(row?.balanceRaw || row?.balance || '0'))
+          const cardanoTokenRef = `https://cardanoscan.io/token/${encodeURIComponent(normalizedAssetId)}`
+          return {
+            name: String(row?.name || row?.symbol || normalizedAssetId).trim(),
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: cardanoTokenRef,
+            metadata_url: cardanoTokenRef,
+            token_id: normalizedAssetId,
+            contract_address: '',
+            txid_or_longname: normalizedAssetId,
+            ownership_address: policy || assetName || ''
+          } as RtmAssetDetails
+        }
+
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
@@ -2170,6 +2287,7 @@ export const useWalletStore = create<WalletState>()(
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net) throw new Error('Active network not found')
         if (!acc) throw new Error('No active account')
+        const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
         if (!resolveNetworkCapabilities(net).features.assetSend) {
           throw new Error('Active network does not support asset transfers')
@@ -2270,6 +2388,28 @@ export const useWalletStore = create<WalletState>()(
           })
           await get().fetchNetworkAssets()
           return { txid: sent.txid }
+        }
+
+        if (modelId === 'ada') {
+          if (String(assetId || '').indexOf('.') <= 0) {
+            throw new Error('Cardano token id must be in policyId.assetName format')
+          }
+          const tokenAmountRaw = String(qty || '').trim()
+          if (!/^\d+$/.test(tokenAmountRaw) || BigInt(tokenAmountRaw) <= 0n) {
+            throw new Error('Cardano token send quantity must be a positive integer')
+          }
+          const tx = await sendCardanoAssetNonCustodial({
+            network: net,
+            mnemonic: sessionMnemonic,
+            accountIndex,
+            fromAddress: senderAddress,
+            toAddress: String(toAddress || '').trim(),
+            tokenId: String(assetId || '').trim(),
+            tokenAmountRaw,
+            walletId: String(net.rpcWallet || '').trim() || undefined
+          })
+          await get().fetchNetworkAssets()
+          return { txid: tx.hash }
         }
 
         const derived = await deriveUtxoAddress(sessionMnemonic, net.coinSymbol, accountIndex, 0, 0)
@@ -2543,7 +2683,7 @@ export const useWalletStore = create<WalletState>()(
 
       addNetwork: (network) => {
         set((state) => ({
-          networks: [...state.networks, network]
+          networks: [...state.networks, normalizeNetworkSymbol(network)]
         }))
       },
 
@@ -2563,7 +2703,7 @@ export const useWalletStore = create<WalletState>()(
       updateNetwork: (id, updates) => {
         set((state) => ({
           networks: state.networks.map(net => 
-            net.id === id ? { ...net, ...updates } : net
+            net.id === id ? normalizeNetworkSymbol({ ...net, ...updates }) : net
           )
         }))
       },
@@ -2580,8 +2720,10 @@ export const useWalletStore = create<WalletState>()(
         let serverCatalog: ServerCoinCatalogItem[] = []
         try {
           const snapshot = await loadServerRegistrySnapshot()
-          serverNetworks = snapshot.networks
-          serverCatalog = Array.isArray(snapshot.catalog) ? snapshot.catalog : []
+          serverNetworks = snapshot.networks ? normalizeNetworkListSymbols(snapshot.networks) : null
+          serverCatalog = normalizeServerCatalogSymbols(
+            Array.isArray(snapshot.catalog) ? snapshot.catalog : []
+          )
         } catch (error) {
           console.warn('Failed to sync networks from /v1/coins:', error)
           return
@@ -2593,7 +2735,7 @@ export const useWalletStore = create<WalletState>()(
         console.info('[coins-sync] generated report:\n' + syncReport)
 
         set((state) => {
-          const baseNetworks = syncedNetworks.length > 0 ? syncedNetworks : state.networks
+          const baseNetworks = syncedNetworks.length > 0 ? syncedNetworks : normalizeNetworkListSymbols(state.networks)
           const fallbackEthNetwork =
             state.networks.find((network) => network.id === 'eth')
             || INITIAL_NETWORKS.find((network) => network.id === 'eth')
@@ -3344,11 +3486,13 @@ export const useWalletStore = create<WalletState>()(
           accounts: accountsWithActiveNetworkBalance,
           nextAccountIndex,
           activeAccountId,
-          networks: INITIAL_NETWORKS,
+          networks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
           activeNetworkId,
-          serverCoinCatalog: Array.isArray((persisted as any).serverCoinCatalog)
-            ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
-            : [],
+          serverCoinCatalog: normalizeServerCatalogSymbols(
+            Array.isArray((persisted as any).serverCoinCatalog)
+              ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
+              : []
+          ),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT)),
           lastServerCoinSyncReport: String(
             merged.lastServerCoinSyncReport

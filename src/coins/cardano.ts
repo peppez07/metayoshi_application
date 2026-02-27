@@ -3,8 +3,8 @@ import { ADA_API_INFO } from './interceptors'
 import cardanoLogo from './coinlogos/cardano.png'
 
 export const ADA_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 
 export function createCardanoNetwork(ctx: CoinRuntimeContext): Network {
