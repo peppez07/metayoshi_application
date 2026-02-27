@@ -26,28 +26,14 @@
   },
   "permissions": ["storage"],
   "host_permissions": [
-    "https://metayoshi.app/*",
-    "https://*.metayoshi.app/*",
-    "https://*.publicnode.com/*",
-    "https://explorer.btcz.rocks/*",
-    "https://gateway.pinata.cloud/*",
-    "https://ipfs.io/*",
-    "https://cloudflare-ipfs.com/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*",
-    "https://localhost/*",
-    "https://127.0.0.1/*",
-    "http://host.docker.internal/*"
+    "https://*/*",
+    "http://*/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://metayoshi.app/*",
-        "https://*.metayoshi.app/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*",
-        "https://localhost/*",
-        "https://127.0.0.1/*"
+        "https://*/*",
+        "http://*/*"
       ],
       "js": ["assets/content.js"],
       "run_at": "document_start"
@@ -57,12 +43,8 @@
     {
       "resources": ["assets/inpage.js"],
       "matches": [
-        "https://metayoshi.app/*",
-        "https://*.metayoshi.app/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*",
-        "https://localhost/*",
-        "https://127.0.0.1/*"
+        "https://*/*",
+        "http://*/*"
       ]
     }
   ]

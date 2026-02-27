@@ -270,11 +270,13 @@ const ALL_SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID: Record<string, string> = {
   'unichain-sepolia': 'srv--unichain-sepolia'
 }
 
+const SCAFFOLD_FILTER_API_BASE_URL = String((import.meta as any)?.env?.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+  || 'http://127.0.0.1'
 
 const SCAFFOLD_FILTER_RUNTIME_CONTEXT: CoinRuntimeContext = {
-  apiBaseUrl: 'https://rtm.metayoshi.app',
+  apiBaseUrl: SCAFFOLD_FILTER_API_BASE_URL,
   buildBridgeUrl: (coin: string, chain: 'main' | 'test', wallet?: string): string => {
-    const base = `https://rtm.metayoshi.app/v1/bridge/${coin}/${chain}`
+    const base = `${SCAFFOLD_FILTER_API_BASE_URL}/v1/bridge/${coin}/${chain}`
     return wallet ? `${base}/wallet/${encodeURIComponent(wallet)}` : base
   }
 }

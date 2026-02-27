@@ -23,8 +23,12 @@ import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from '.
 export type { CoinType, Network } from './types'
 export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://rtm.metayoshi.app').trim().replace(/\/+$/, '')
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+
+if (!API_BASE_URL) {
+  throw new Error('VITE_API_BASE_URL is required. Set it in your environment (for example .env.local).')
+}
 
 export function buildBridgeUrl(coin: string, chain: 'main' | 'test', wallet?: string): string {
   const base = `${API_BASE_URL}/v1/bridge/${coin}/${chain}`
