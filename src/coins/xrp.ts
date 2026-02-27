@@ -3,8 +3,10 @@ import { XRP_API_INFO } from './interceptors'
 import xrpLogo from './coinlogos/xrp.png'
 
 export const XRP_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: true, showActivityTab: true }
+  // XRPL supports trustline-issued assets; we enable asset listing as "ecosystem".
+  // Asset sending is not enabled yet (requires Payment with issued Amount + trustline UX).
+  features: { nativeSend: true, assetLayer: true, assetSend: false, activity: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 
 export function createXrpNetwork(ctx: CoinRuntimeContext): Network {

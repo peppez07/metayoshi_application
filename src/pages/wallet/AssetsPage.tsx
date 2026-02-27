@@ -58,9 +58,10 @@ interface AssetRowProps {
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
+  hideMetaLabels?: boolean
 }
 
-const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false, hideMetaLabels = false }) => {
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
@@ -90,10 +91,12 @@ const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, log
               <span className="text-sm font-bold truncate">{root}</span>
             )}
           </div>
-          <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-            {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`)}
-          </span>
-          {previewAvailable && (
+          {(nft || !hideMetaLabels) && (
+            <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
+              {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`)}
+            </span>
+          )}
+          {!hideMetaLabels && previewAvailable && (
             <span className="text-[9px] font-bold uppercase text-primary">Preview</span>
           )}
         </div>
@@ -112,7 +115,11 @@ const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, log
             ? 'border-primary/40 bg-primary/10 hover:bg-primary/20'
             : 'border-dark-600 bg-dark-700/40 opacity-40 cursor-not-allowed'
         }`}
-        title={previewAvailable ? 'Preview asset file' : 'No preview available'}
+        title={
+          previewAvailable
+            ? (hideMetaLabels ? 'View asset file' : 'Preview asset file')
+            : (hideMetaLabels ? 'No file available' : 'No preview available')
+        }
       >
         <IoEyeOutline className={`w-4.5 h-4.5 ${previewAvailable ? 'text-primary' : 'text-gray-300'}`} />
       </button>
@@ -139,11 +146,14 @@ const AssetsPage: React.FC = () => {
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
+  const isEvmEcosystem = activeNetwork.coinType === 'EVM'
   const supportsPreview =
     activeNetwork.coinType === 'UTXO'
     || activeNetwork.coinType === 'EVM'
     || activeModelId === 'ada'
-  const canOpenAssetSend = caps.features.assetLayer
+    || activeModelId === 'tron'
+    || activeNetwork.coinType === 'XRP'
+  const canOpenAssetSend = caps.features.assetSend
   const canSubmitAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -454,13 +464,37 @@ const AssetsPage: React.FC = () => {
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
                 previewAvailable={supportsPreview && previewByAsset[name] === true}
+                hideMetaLabels={isEvmEcosystem}
+              />
+            ))}
+          </>
+        )}
+
+        {/* normal: EVM assets (flat, no root/sub labels) */}
+        {caps.features.assetLayer && !isSearching && isEvmEcosystem && sorted.length > 0 && (
+          <>
+            {sorted.map(([name, raw]) => (
+              <AssetRow
+                key={name}
+                name={name}
+                displayName={nftLookup[name]?.label}
+                nft={isEvmNftAssetKey(name)}
+                logoUrl={assetLogos[name]}
+                rawAmount={raw}
+                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
+                onPreview={() => {
+                  if (!supportsPreview) return
+                  navigate('/assets/preview', { state: { assetId: name } })
+                }}
+                previewAvailable={supportsPreview && previewByAsset[name] === true}
+                hideMetaLabels={true}
               />
             ))}
           </>
         )}
 
         {/* normal: Root Assets */}
-        {caps.features.assetLayer && !isSearching && roots.length > 0 && (
+        {caps.features.assetLayer && !isSearching && !isEvmEcosystem && roots.length > 0 && (
           <>
             <div className="px-4 pt-3 pb-1 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-yellow-500 shrink-0" />
@@ -480,13 +514,14 @@ const AssetsPage: React.FC = () => {
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
                 previewAvailable={supportsPreview && previewByAsset[name] === true}
+                hideMetaLabels={false}
               />
             ))}
           </>
         )}
 
         {/* normal: Sub Assets */}
-        {caps.features.assetLayer && !isSearching && subs.length > 0 && (
+        {caps.features.assetLayer && !isSearching && !isEvmEcosystem && subs.length > 0 && (
           <>
             <div className="px-4 pt-3 pb-1 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
@@ -506,6 +541,7 @@ const AssetsPage: React.FC = () => {
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
                 previewAvailable={supportsPreview && previewByAsset[name] === true}
+                hideMetaLabels={false}
               />
             ))}
           </>
@@ -534,13 +570,15 @@ const AssetsPage: React.FC = () => {
               <div className="flex flex-col gap-1.5">
                 <h2 className="text-sm font-black uppercase tracking-widest">Send Asset</h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
-                    isRoot(selectedAsset)
-                      ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                      : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-                  }`}>
-                    {isRoot(selectedAsset) ? 'Root' : 'Sub'}
-                  </span>
+                  {!isEvmEcosystem && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
+                      isRoot(selectedAsset)
+                        ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                        : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                    }`}>
+                      {isRoot(selectedAsset) ? 'Root' : 'Sub'}
+                    </span>
+                  )}
                   <span className="text-sm font-mono font-bold text-white">{selectedAsset}</span>
                 </div>
               </div>

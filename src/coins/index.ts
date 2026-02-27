@@ -53,7 +53,20 @@ const runtimeContext: CoinRuntimeContext = {
 export const DEFAULT_NETWORK_ID = 'rtm'
 export const DEFAULT_UTXO_COIN_SYMBOL = 'RTM'
 
-export const ALL_COIN_MODULES: CoinModule[] = [
+function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
+  const out: CoinModule[] = []
+  const seen = new Set<string>()
+  for (const mod of modules) {
+    const id = String(mod?.id || '').trim()
+    if (!id) continue
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(mod)
+  }
+  return out
+}
+
+const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
   bnbCoin,
@@ -82,6 +95,8 @@ export const ALL_COIN_MODULES: CoinModule[] = [
   cardanoCoin,
   ...SERVER_SCAFFOLD_COIN_MODULES
 ]
+
+export const ALL_COIN_MODULES: CoinModule[] = uniqCoinModulesById(RAW_COIN_MODULES)
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>([

@@ -27,7 +27,13 @@ import { listSolanaTokenBalances, sendSolanaNonCustodial, sendSolanaSplTokenNonC
 import { deriveStellarAddress } from '../lib/stellarAddress'
 import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
-import { sendTronNonCustodial } from '../lib/tronNonCustodial'
+import {
+  getTrc20BalanceRaw,
+  parseTrc20UiAmountToRaw,
+  readTrc20TokenMetadata,
+  sendTrc20NonCustodial,
+  sendTronNonCustodial
+} from '../lib/tronNonCustodial'
 import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
@@ -57,7 +63,7 @@ import { useApiMonitorStore } from './apiMonitorStore'
 
 export type { CoinType, Network } from '../coins'
 
-// â”€â”€ Full backup format â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬ Full backup format Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 export interface FullBackupV1 {
   type: 'metayoshi-full-backup'
@@ -163,7 +169,7 @@ interface WalletState {
   lastActiveTimestamp: number
   activity: Activity[]
 
-  // Local RPC mode â€” bypasses the MetaYoshi bridge when enabled
+  // Local RPC mode Ã¢â‚¬â€ bypasses the MetaYoshi bridge when enabled
   useLocalRpc: boolean
   /** Last generated /v1/coins mapping report (server coin -> app network id). */
   lastServerCoinSyncReport: string
@@ -316,7 +322,7 @@ async function createUtxoRpcConfig(
     networkId: net.id,
     coinSymbol: net.symbol,
     apiInterceptor: getCoinApiInterceptor(net.id),
-    // Local RPC fields â€” use user override if set, otherwise fall back to network defaults
+    // Local RPC fields Ã¢â‚¬â€ use user override if set, otherwise fall back to network defaults
     rpcUrl:      (override?.rpcUrl?.trim())      || net.rpcUrl,
     rpcWallet:   (override?.rpcWallet?.trim())   || net.rpcWallet,
     rpcUsername: (override?.rpcUsername?.trim()) || net.rpcUsername,
@@ -873,6 +879,54 @@ function toAssetDisplaySats(balanceRaw: bigint, decimals: number): number {
   const denom = 10n ** BigInt(Math.max(0, decimals))
   const scaled = (balanceRaw * 100000000n) / denom
   return Number(scaled)
+}
+
+type TrackedTronToken = {
+  symbol: string
+  contract: string
+}
+
+function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
+  const input = String(raw || '').trim()
+  if (!input) return []
+  const out: TrackedTronToken[] = []
+  for (const part of input.split(',').map((v) => v.trim()).filter(Boolean)) {
+    const [symbolRaw, contractRaw] = part.split(':').map((v) => String(v || '').trim())
+    const symbol = String(symbolRaw || '').trim().toUpperCase()
+    const contract = String(contractRaw || '').trim()
+    if (!symbol || !contract) continue
+    out.push({ symbol, contract })
+  }
+  return out
+}
+
+function resolveTrackedTronTokens(): TrackedTronToken[] {
+  const fromEnv = parseTrackedTronTokensEnv((import.meta as any)?.env?.VITE_TRON_TRACKED_TOKENS)
+  if (fromEnv.length > 0) return fromEnv
+
+  // Default minimal TRC20 set (extend via VITE_TRON_TRACKED_TOKENS).
+  // USDT TRC20 contract is widely used and stable.
+  return [{ symbol: 'USDT', contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }]
+}
+
+function encodeTronContractLogoHint(logo: string, contract: string): string {
+  const base = String(logo || '').trim()
+  const c = String(contract || '').trim()
+  if (!base || !c) return base || ''
+  // Keep the original URL intact; store the contract as a fragment hint for later extraction.
+  return `${base}#tron-contract=${encodeURIComponent(c)}`
+}
+
+function extractTronContractFromLogoHint(value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const idx = raw.indexOf('#tron-contract=')
+  if (idx < 0) return ''
+  try {
+    return decodeURIComponent(raw.slice(idx + '#tron-contract='.length)).trim()
+  } catch {
+    return raw.slice(idx + '#tron-contract='.length).trim()
+  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -1674,26 +1728,7 @@ export const useWalletStore = create<WalletState>()(
           }
         }
         if (net.derivation?.status === 'unsupported') {
-          // Server-managed fallback for bridge-only UTXO-like chains:
-          // request an address from the coin wallet when local seed derivation is unavailable.
-          if (net.coinType === 'UTXO') {
-            try {
-              const rpcConfig = await createUtxoRpcConfig(net, {
-                secureBridgeSigner: get().signBackendAuthMessage
-              })
-              const serverAddressRaw = await callBridgeMethod(rpcConfig, 'getnewaddress', [])
-              const serverAddress = String(serverAddressRaw || '').trim()
-              if (serverAddress) {
-                get().updateAccount(acc.id, {
-                  networkAddresses: { ...(acc.networkAddresses ?? {}), [networkId]: serverAddress }
-                })
-                console.info(`[${net.symbol}] Using server-managed address for ${networkId}: ${serverAddress}`)
-                return serverAddress
-              }
-            } catch (error) {
-              console.warn(`[${net.symbol}] Failed to acquire server-managed address for ${networkId}:`, error)
-            }
-          }
+          // Non-custodial only: if we cannot derive locally, we do not ask the backend wallet for addresses.
           console.warn(`[${net.symbol}] Derivation disabled: ${net.derivation.reason || 'unsupported in this build'}`)
           return null
         }
@@ -1720,7 +1755,7 @@ export const useWalletStore = create<WalletState>()(
             if (forceCanonicalUtxoAddress && existing && existing !== address) {
               console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
             } else {
-              console.log(`âœ“ Derived ${net.symbol} address on demand: ${address}`)
+              console.log(`Ã¢Å“â€œ Derived ${net.symbol} address on demand: ${address}`)
             }
           } else if (modelId === 'ada') {
             const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
@@ -2014,7 +2049,7 @@ export const useWalletStore = create<WalletState>()(
 
               const collection = nft.label || await readCollectionName(nft.address, standard)
               const tokenIdLabel = formatTokenIdForLabel(nft.tokenId)
-              const displayLabel = `${collection} #${tokenIdLabel} · ${shortAddress(nft.address)}`
+              const displayLabel = `${collection} #${tokenIdLabel} Â· ${shortAddress(nft.address)}`
               const assetKey = buildEvmNftAssetKey(nft.address, nft.tokenId, standard)
               const quantitySats = Number(quantityRaw > 9999999999n ? 9999999999n : quantityRaw) * 1e8
               if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
@@ -2059,6 +2094,100 @@ export const useWalletStore = create<WalletState>()(
               + 'Bridge token reads require eth_call to be allowed for this chain.',
               err
             )
+          }
+          return
+        }
+
+        if (activeModelId === 'tron') {
+          const tracked = resolveTrackedTronTokens()
+          try {
+            const assets: Record<string, number> = {}
+            const logos: Record<string, string> = {}
+            const usedKeys = new Set<string>()
+
+            const rows = await mapWithConcurrency(tracked, 6, async (token) => {
+              try {
+                const meta = await readTrc20TokenMetadata(net.rpcUrl, token.contract)
+                const raw = await getTrc20BalanceRaw(net.rpcUrl, token.contract, address)
+                if (raw <= 0n) return null
+                const displaySats = toAssetDisplaySats(raw, meta.decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
+                return { token, meta, displaySats }
+              } catch {
+                return null
+              }
+            })
+
+            for (const row of rows) {
+              if (!row) continue
+              const baseSymbol = String(row.meta.symbol || row.token.symbol || 'TRC20').trim().toUpperCase()
+              let key = baseSymbol
+              if (usedKeys.has(key)) {
+                let suffix = 2
+                while (usedKeys.has(`${baseSymbol} #${suffix}`)) suffix += 1
+                key = `${baseSymbol} #${suffix}`
+              }
+              usedKeys.add(key)
+              assets[key] = row.displaySats
+              const baseLogo = getTokenLogoForAsset(baseSymbol)
+              logos[key] = encodeTronContractLogoHint(baseLogo, row.token.contract)
+            }
+
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: logos
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (TRON) failed:`, err)
+          }
+          return
+        }
+
+        if (net.coinType === 'XRP' || activeModelId === 'xrp') {
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          try {
+            const raw = await callBridgeMethod(rpcConfig, 'account_lines', [{
+              account: address,
+              ledger_index: 'validated'
+            }])
+            const lines =
+              raw?.lines
+              ?? raw?.result?.lines
+              ?? raw?.result?.result?.lines
+              ?? []
+            const rows: any[] = Array.isArray(lines) ? lines : []
+            const assets: Record<string, number> = {}
+            for (const line of rows) {
+              const currency = String(line?.currency || '').trim().toUpperCase()
+              const issuer = String(line?.account || line?.issuer || '').trim()
+              const balText = String(line?.balance ?? '').trim()
+              if (!currency || !issuer || !/^-?\\d+(\\.\\d+)?$/.test(balText)) continue
+              const balNum = Number(balText)
+              if (!Number.isFinite(balNum) || balNum === 0) continue
+              assets[`${currency}|${issuer}`] = Math.round(Math.abs(balNum) * 1e8)
+            }
+            set((state) => ({
+              networkAssets: {
+                ...state.networkAssets,
+                [activeNetworkId]: assets
+              },
+              networkAssetLogos: {
+                ...state.networkAssetLogos,
+                [activeNetworkId]: {}
+              }
+            }))
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (XRP) failed:`, err)
           }
           return
         }
@@ -2212,6 +2341,55 @@ export const useWalletStore = create<WalletState>()(
           throw new Error('Active network does not support assets')
         }
 
+        const modelId = resolveNetworkModelId(net)
+        if (modelId === 'tron') {
+          const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+          const hint = extractTronContractFromLogoHint(logoUri)
+          const tracked = resolveTrackedTronTokens()
+          const trackedMatch = tracked.find((t) => String(t.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase())
+          const contract = String(hint || trackedMatch?.contract || '').trim()
+          const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+          const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+          const explorerBase = String(net.explorerUrl || 'https://tronscan.org').trim().replace(/\/+$/, '')
+          const tokenRef = contract ? `${explorerBase}/#/contract/${contract}` : undefined
+          return {
+            name: normalizedAssetId,
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: tokenRef || undefined,
+            metadata_url: tokenRef || undefined,
+            token_id: normalizedAssetId,
+            contract_address: contract,
+            txid_or_longname: normalizedAssetId,
+            ownership_address: ''
+          }
+        }
+
+        if (net.coinType === 'XRP' || modelId === 'xrp') {
+          const [currency, issuer] = normalizedAssetId.split('|').map((v) => String(v || '').trim())
+          const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+          const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+          const explorerBase = String(net.explorerUrl || 'https://xrpscan.com').trim().replace(/\/+$/, '')
+          const ref = issuer ? `${explorerBase}/account/${issuer}` : undefined
+          return {
+            name: currency || normalizedAssetId,
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: ref || undefined,
+            metadata_url: ref || undefined,
+            token_id: normalizedAssetId,
+            contract_address: '',
+            txid_or_longname: normalizedAssetId,
+            ownership_address: issuer || ''
+          }
+        }
+
         if (net.coinType === 'EVM') {
           const nftLookup = evmNftAssets?.[activeNetworkId] || {}
           const direct = nftLookup[normalizedAssetId]
@@ -2221,7 +2399,7 @@ export const useWalletStore = create<WalletState>()(
                 address: parsedKey.address,
                 tokenId: parsedKey.tokenId,
                 standard: parsedKey.standard,
-                label: `${parsedKey.standard.toUpperCase()} #${formatTokenIdForLabel(parsedKey.tokenId)} · ${shortAddress(parsedKey.address)}`,
+                label: `${parsedKey.standard.toUpperCase()} #${formatTokenIdForLabel(parsedKey.tokenId)} Â· ${shortAddress(parsedKey.address)}`,
                 quantityRaw: '1'
               }
             : null
@@ -3214,7 +3392,18 @@ export const useWalletStore = create<WalletState>()(
         set((state) => {
           const localBaseline = normalizeNetworkListSymbols(INITIAL_NETWORKS)
           const serverById = new Map(syncedNetworks.map((network) => [network.id, network]))
-          const mergedLocal = localBaseline.map((network) => serverById.get(network.id) || network)
+          const mergedLocal = localBaseline.map((localNetwork) => {
+            const serverNetwork = serverById.get(localNetwork.id)
+            if (!serverNetwork) return localNetwork
+
+            // If the app build marks a network as unsupported (no non-custodial signer),
+            // do not let the server override it into a "working" network. That would
+            // trigger bridge RPC calls with the wrong protocol (e.g. Terra/Substrate)
+            // and produce misleading runtime errors.
+            if (localNetwork.derivation?.status === 'unsupported') return localNetwork
+
+            return serverNetwork
+          })
           const serverOnly = syncedNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
           const networks = [...mergedLocal, ...serverOnly]
           const activeNetworkId = networks.length > 0 && networks.some((n) => n.id === state.activeNetworkId)
@@ -3260,8 +3449,21 @@ export const useWalletStore = create<WalletState>()(
           accounts: state.accounts
         }))
 
-        // â”€â”€ Resolve the correct per-network address â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        // NEVER fall back to acc.addresses.UTXO â€” that slot holds the FIRST UTXO
+        if (net.derivation?.status === 'unsupported') {
+          console.warn(`[${net.symbol}] Balance refresh skipped: ${net.derivation.reason || 'unsupported in this build'}`)
+          await waitForUiStabilize()
+          if (isStaleRequest()) return
+          set((state) => ({
+            isSyncing: false,
+            isConnected: false,
+            syncPercent: null,
+            lowSyncStreak: 0,
+            accounts: state.accounts
+          }))
+          return
+        }
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Resolve the correct per-network address Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // NEVER fall back to acc.addresses.UTXO Ã¢â‚¬â€ that slot holds the FIRST UTXO
         // network's address (RTM) and would show a wrong address on other coins.
         let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
         if (
@@ -3280,7 +3482,7 @@ export const useWalletStore = create<WalletState>()(
         }
 
         if (!address) {
-          console.warn(`No address for ${activeNetworkId} â€” skipping balance refresh`)
+          console.warn(`No address for ${activeNetworkId} Ã¢â‚¬â€ skipping balance refresh`)
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set({ isSyncing: false, isConnected: false, syncPercent: null, lowSyncStreak: 0 })
@@ -3587,7 +3789,7 @@ export const useWalletStore = create<WalletState>()(
             return
           }
 
-          // Non-transient failure â†’ mark disconnected.
+          // Non-transient failure Ã¢â€ â€™ mark disconnected.
           console.error(`[${net?.symbol}] all RPC attempts failed:`, err)
           await waitForUiStabilize()
           if (isStaleRequest()) return
@@ -3609,20 +3811,23 @@ export const useWalletStore = create<WalletState>()(
             ? 'evm-rpc'
             : (useLocalRpc ? 'local-rpc' : 'bridge')
 
+        // For unsupported coins, probing must not call the backend bridge or attempt server-managed derivation.
         let address: string | null = acc.networkAddresses?.[activeNetworkId] ?? null
-        if (
-          address
-          && net.coinType === 'UTXO'
-          && net.coinSymbol
-          && modelId !== 'cosmos'
-          && !isAddressForCoinSymbol(address, net.coinSymbol)
-        ) {
-          address = null
-        }
-        if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
-        if (!address || net.coinType === 'UTXO') {
-          const ensured = await get().ensureNetworkAddress(activeNetworkId)
-          if (ensured) address = ensured
+        if (net.derivation?.status !== 'unsupported') {
+          if (
+            address
+            && net.coinType === 'UTXO'
+            && net.coinSymbol
+            && modelId !== 'cosmos'
+            && !isAddressForCoinSymbol(address, net.coinSymbol)
+          ) {
+            address = null
+          }
+          if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
+          if (!address || net.coinType === 'UTXO') {
+            const ensured = await get().ensureNetworkAddress(activeNetworkId)
+            if (ensured) address = ensured
+          }
         }
         const resolvedAddress = String(address || '').trim()
 
@@ -3641,6 +3846,15 @@ export const useWalletStore = create<WalletState>()(
           sendCustodyMode,
           serverMatched: false,
           checkedAt: Date.now()
+        }
+        if (net.derivation?.status === 'unsupported') {
+          return {
+            ...base,
+            checkedAt: Date.now(),
+            isConnected: false,
+            serverMatched: false,
+            error: net.derivation.reason || 'Derivation is not supported in this build'
+          }
         }
         if (!resolvedAddress) {
           return { ...base, error: 'No active address for network/account' }

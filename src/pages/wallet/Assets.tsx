@@ -5,7 +5,7 @@ import { IoLayersOutline, IoChevronForward, IoEyeOutline } from 'react-icons/io5
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 function formatAmount(raw: number): string {
   return (raw / 1e8).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
@@ -24,7 +24,7 @@ function isEvmNftAssetKey(name: string): boolean {
   return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(String(name || '').trim())
 }
 
-// ── compact asset row (mirrors ActivityRow look) ───────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ compact asset row (mirrors ActivityRow look) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 interface AssetPreviewRowProps {
   name: string
@@ -35,9 +35,10 @@ interface AssetPreviewRowProps {
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
+  hideMetaLabels?: boolean
 }
 
-const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false }) => {
+const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false, hideMetaLabels = false }) => {
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
@@ -70,10 +71,12 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
                 <span className="text-sm font-bold leading-none truncate">{root}</span>
               )}
             </div>
-            <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-              {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub · ${root}`)}
-            </span>
-            {previewAvailable && (
+            {(nft || !hideMetaLabels) && (
+              <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
+                {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`)}
+              </span>
+            )}
+            {!hideMetaLabels && previewAvailable && (
               <span className="text-[9px] font-bold uppercase text-primary">Preview</span>
             )}
           </div>
@@ -94,7 +97,11 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
             ? 'border-primary/40 bg-primary/10 hover:bg-primary/20'
             : 'border-dark-600 bg-dark-700/40 opacity-40 cursor-not-allowed'
         }`}
-        title={previewAvailable ? 'Preview asset file' : 'No preview available'}
+        title={
+          previewAvailable
+            ? (hideMetaLabels ? 'View asset file' : 'Preview asset file')
+            : (hideMetaLabels ? 'No file available' : 'No preview available')
+        }
       >
         <IoEyeOutline className={`w-4.5 h-4.5 ${previewAvailable ? 'text-primary' : 'text-gray-300'}`} />
       </button>
@@ -102,7 +109,7 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
   )
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ main Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 const Assets: React.FC = () => {
   const { networks, activeNetworkId, networkAssets, networkAssetLogos, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, activity } = useWalletStore()
@@ -113,11 +120,14 @@ const Assets: React.FC = () => {
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
+  const isEvmEcosystem = activeNetwork.coinType === 'EVM'
   const supportsPreview =
     activeNetwork.coinType === 'UTXO'
     || activeNetwork.coinType === 'EVM'
     || activeModelId === 'ada'
-  const canOpenAssetSend = caps.features.assetLayer
+    || activeModelId === 'tron'
+    || activeNetwork.coinType === 'XRP'
+  const canOpenAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
 
   useEffect(() => {
@@ -154,7 +164,7 @@ const Assets: React.FC = () => {
     return a.localeCompare(b)
   }
 
-  // roots first, then subs, each group sorted alphabetically → take top 3
+  // roots first, then subs, each group sorted alphabetically Ã¢â€ â€™ take top 3
   const roots = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const subs  = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const sorted = [...roots, ...subs]
@@ -226,6 +236,7 @@ const Assets: React.FC = () => {
               navigate('/assets/preview', { state: { assetId: name } })
             }}
             previewAvailable={supportsPreview && previewByAsset[name] === true}
+            hideMetaLabels={isEvmEcosystem}
           />
         ))}
 
