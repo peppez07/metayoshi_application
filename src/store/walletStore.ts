@@ -29,7 +29,7 @@ import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
 import { deriveTronAddress } from '../lib/tronAddress'
 import { sendTronNonCustodial } from '../lib/tronNonCustodial'
 import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
-import { signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
+import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
@@ -353,12 +353,14 @@ const EVM_ERC20_METADATA_IFACE = new ethers.Interface([
 const EVM_ERC165_IFACE = new ethers.Interface(['function supportsInterface(bytes4 interfaceId) view returns (bool)'])
 const EVM_ERC721_IFACE = new ethers.Interface([
   'function ownerOf(uint256 tokenId) view returns (address)',
+  'function safeTransferFrom(address from, address to, uint256 tokenId)',
   'function tokenURI(uint256 tokenId) view returns (string)',
   'function symbol() view returns (string)',
   'function name() view returns (string)'
 ])
 const EVM_ERC1155_IFACE = new ethers.Interface([
   'function balanceOf(address owner, uint256 id) view returns (uint256)',
+  'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
   'function uri(uint256 id) view returns (string)',
   'function name() view returns (string)'
 ])
@@ -812,6 +814,33 @@ function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
   const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
   if (!m) return ''
   return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
+}
+
+function parseCosmosContractAssetId(assetId: string): {
+  kind: 'cw20' | 'cw721'
+  contract: string
+  tokenId?: string
+} | null {
+  const raw = String(assetId || '').trim()
+  if (!raw) return null
+  const cw20 = raw.match(/^cw20:([^:\s]+)$/i)
+  if (cw20) {
+    return {
+      kind: 'cw20',
+      contract: String(cw20[1] || '').trim()
+    }
+  }
+  const cw721 = raw.match(/^cw721:([^:\s]+):(.+)$/i)
+  if (cw721) {
+    const tokenId = String(cw721[2] || '').trim()
+    if (!tokenId) return null
+    return {
+      kind: 'cw721',
+      contract: String(cw721[1] || '').trim(),
+      tokenId
+    }
+  }
+  return null
 }
 
 async function detectEvmNftStandard(
@@ -2457,6 +2486,100 @@ export const useWalletStore = create<WalletState>()(
 
           const normalizedAssetId = String(assetId || '').trim()
           if (!normalizedAssetId) throw new Error('Token id is required')
+          const nft = parseEvmNftAssetKey(normalizedAssetId)
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const wallet = deriveEvmWallet(sessionMnemonic, accountIndex)
+          const fromAddress = wallet.address
+          const nonceHex = await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
+          const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
+          let gasPriceHex = '0x3b9aca00'
+          try {
+            gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
+          } catch {
+            // Keep fallback gas price.
+          }
+
+          if (nft) {
+            const tokenAddress = ethers.getAddress(nft.address)
+            let transferData = ''
+            let relayAmount = '1'
+
+            if (nft.standard === 'erc721') {
+              const qtyText = String(qty || '').trim()
+              if (qtyText && qtyText !== '1') {
+                throw new Error('ERC721 transfer quantity must be exactly 1')
+              }
+              const ownerData = EVM_ERC721_IFACE.encodeFunctionData('ownerOf', [tokenIdToBigInt(nft.tokenId)])
+              const ownerRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: tokenAddress, data: ownerData }, 'latest'])
+              const [owner] = EVM_ERC721_IFACE.decodeFunctionResult('ownerOf', String(ownerRaw || '0x'))
+              if (String(owner || '').trim().toLowerCase() !== fromAddress.toLowerCase()) {
+                throw new Error(`ERC721 token ${nft.tokenId} is not owned by active address ${fromAddress}`)
+              }
+              transferData = EVM_ERC721_IFACE.encodeFunctionData('safeTransferFrom', [
+                fromAddress,
+                recipient,
+                tokenIdToBigInt(nft.tokenId)
+              ])
+              relayAmount = '1'
+            } else {
+              const qtyText = String(qty || '').trim()
+              if (!/^\d+$/.test(qtyText) || BigInt(qtyText) <= 0n) {
+                throw new Error('ERC1155 transfer quantity must be a positive integer')
+              }
+              const quantity = BigInt(qtyText)
+              const balanceData = EVM_ERC1155_IFACE.encodeFunctionData('balanceOf', [fromAddress, tokenIdToBigInt(nft.tokenId)])
+              const balanceRaw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: tokenAddress, data: balanceData }, 'latest'])
+              const [ownedRaw] = EVM_ERC1155_IFACE.decodeFunctionResult('balanceOf', String(balanceRaw || '0x'))
+              const owned = BigInt(String(ownedRaw || '0'))
+              if (owned < quantity) {
+                throw new Error(`Insufficient ERC1155 balance for token ${nft.tokenId}. Available ${owned}, requested ${quantity}`)
+              }
+              transferData = EVM_ERC1155_IFACE.encodeFunctionData('safeTransferFrom', [
+                fromAddress,
+                recipient,
+                tokenIdToBigInt(nft.tokenId),
+                quantity,
+                '0x'
+              ])
+              relayAmount = qtyText
+            }
+
+            let gasLimitHex = '0x30d40'
+            try {
+              gasLimitHex = await callBridgeMethod(rpcConfig, 'eth_estimateGas', [{
+                from: fromAddress,
+                to: tokenAddress,
+                data: transferData,
+                value: '0x0'
+              }])
+            } catch {
+              // Keep fallback gas limit.
+            }
+
+            const signedTx = await wallet.signTransaction({
+              to: tokenAddress,
+              value: 0n,
+              nonce: Number(BigInt(String(nonceHex || '0x0'))),
+              gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
+              gasLimit: BigInt(String(gasLimitHex || '0x30d40')),
+              chainId: Number(BigInt(String(chainIdHex || net.chainId || 1))),
+              data: transferData
+            })
+            const sent = await sendBridgeTokenTransfer(rpcConfig, {
+              tokenId: normalizedAssetId,
+              toAddress: recipient,
+              fromAddress,
+              amount: relayAmount,
+              signedTxHex: signedTx
+            })
+            await get().fetchNetworkAssets()
+            return { txid: sent.txid }
+          }
+
           const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
@@ -2484,12 +2607,6 @@ export const useWalletStore = create<WalletState>()(
             tokenAddress = ethers.getAddress(matches[Math.max(0, alias.ordinal - 1)].address)
           }
 
-          const rpcConfig = await createUtxoRpcConfig(net, {
-            useLocalRpc: ulr2,
-            localRpcOverride: lro2[net.id],
-            secureBridgeSigner: get().signBackendAuthMessage
-          })
-
           let decimals = 18
           try {
             const data = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('decimals', [])
@@ -2503,17 +2620,6 @@ export const useWalletStore = create<WalletState>()(
 
           const amountRaw = ethers.parseUnits(String(qty || '').trim(), decimals)
           if (amountRaw <= 0n) throw new Error('Token amount must be greater than 0')
-
-          const wallet = deriveEvmWallet(sessionMnemonic, accountIndex)
-          const fromAddress = wallet.address
-          const nonceHex = await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
-          const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
-          let gasPriceHex = '0x3b9aca00'
-          try {
-            gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
-          } catch {
-            // Keep fallback gas price.
-          }
           const transferData = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('transfer', [recipient, amountRaw])
           let gasLimitHex = '0x186a0'
           try {
@@ -2573,6 +2679,7 @@ export const useWalletStore = create<WalletState>()(
         if (modelId === 'cosmos') {
           const recipient = String(toAddress || '').trim()
           const denom = String(assetId || '').trim()
+          const contractAsset = parseCosmosContractAssetId(denom)
           if (!recipient) throw new Error('Cosmos recipient address is required')
           if (!denom) throw new Error('Cosmos token denom is required')
           const cosmosCfg = resolveCosmosNetworkConfig(net)
@@ -2595,14 +2702,53 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: lro2[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
-          const signedTxBase64 = await signCosmosTokenTransferTxBase64({
-            rpcUrl: net.rpcUrl,
-            fromAddress: derived.address,
-            toAddress: recipient,
-            denom,
-            amountRaw: amountRawText,
-            privateKeyHex: derived.privHex
-          })
+          let signedTxBase64 = ''
+          if (contractAsset) {
+            if (!isCosmosAddressForHrp(contractAsset.contract, cosmosCfg.hrp)) {
+              throw new Error(`Cosmos contract address must be a valid ${cosmosCfg.hrp}1... address`)
+            }
+            if (contractAsset.kind === 'cw20') {
+              const executeMsg = {
+                transfer: {
+                  recipient,
+                  amount: amountRawText
+                }
+              }
+              signedTxBase64 = await signCosmosExecuteContractTxBase64({
+                rpcUrl: net.rpcUrl,
+                fromAddress: derived.address,
+                contractAddress: contractAsset.contract,
+                executeMsg,
+                privateKeyHex: derived.privHex
+              })
+            } else {
+              if (amountRawText !== '1') {
+                throw new Error('CW721 transfer quantity must be exactly 1')
+              }
+              const executeMsg = {
+                transfer_nft: {
+                  recipient,
+                  token_id: contractAsset.tokenId
+                }
+              }
+              signedTxBase64 = await signCosmosExecuteContractTxBase64({
+                rpcUrl: net.rpcUrl,
+                fromAddress: derived.address,
+                contractAddress: contractAsset.contract,
+                executeMsg,
+                privateKeyHex: derived.privHex
+              })
+            }
+          } else {
+            signedTxBase64 = await signCosmosTokenTransferTxBase64({
+              rpcUrl: net.rpcUrl,
+              fromAddress: derived.address,
+              toAddress: recipient,
+              denom,
+              amountRaw: amountRawText,
+              privateKeyHex: derived.privHex
+            })
+          }
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
             coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
             chain: String(net.serverChain || 'main').trim() || 'main',

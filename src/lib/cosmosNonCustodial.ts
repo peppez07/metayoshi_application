@@ -185,6 +185,23 @@ function encodeCosmosMsgSend(input: {
   )
 }
 
+function encodeCosmosMsgExecuteContract(input: {
+  sender: string
+  contract: string
+  msg: Uint8Array
+  funds?: Array<{ denom: string; amountRaw: bigint }>
+}): Uint8Array {
+  const chunks: Uint8Array[] = [
+    encodeFieldString(1, input.sender),
+    encodeFieldString(2, input.contract),
+    encodeFieldBytes(3, input.msg)
+  ]
+  for (const fund of input.funds || []) {
+    chunks.push(encodeFieldBytes(5, encodeCosmosCoin(fund.denom, fund.amountRaw)))
+  }
+  return concatBytes(...chunks)
+}
+
 function encodeAny(typeUrl: string, value: Uint8Array): Uint8Array {
   return concatBytes(
     encodeFieldString(1, typeUrl),
@@ -271,29 +288,26 @@ function encodeTxRaw(input: {
   )
 }
 
-export async function signCosmosTokenTransferTxBase64(input: {
+async function signCosmosAnyMessageTxBase64(input: {
   rpcUrl: string
   fromAddress: string
-  toAddress: string
-  denom: string
-  amountRaw: string | number
   privateKeyHex: string
+  msgTypeUrl: string
+  msgBytes: Uint8Array
   feeDenom?: string
   feeAmountRaw?: string | number
   gasLimit?: string | number
   memo?: string
 }): Promise<string> {
   const fromAddress = String(input.fromAddress || '').trim()
-  const toAddress = String(input.toAddress || '').trim()
-  const denom = String(input.denom || '').trim()
   const privateKeyHex = String(input.privateKeyHex || '').trim()
+  const msgTypeUrl = String(input.msgTypeUrl || '').trim()
   const memo = String(input.memo || '').trim()
   if (!fromAddress) throw new Error('Cosmos sender address is required')
-  if (!toAddress) throw new Error('Cosmos destination address is required')
-  if (!denom) throw new Error('Cosmos token denom is required')
+  if (!msgTypeUrl) throw new Error('Cosmos message type is required')
+  if (!input.msgBytes || input.msgBytes.length === 0) throw new Error('Cosmos message payload is required')
   if (!/^[0-9a-f]{64}$/i.test(privateKeyHex)) throw new Error('Cosmos private key must be 32-byte hex')
 
-  const amountRaw = normalizeAmountRaw(input.amountRaw)
   const feeDenom = String(input.feeDenom || DEFAULT_FEE_DENOM).trim() || DEFAULT_FEE_DENOM
   const feeAmount = input.feeAmountRaw === undefined
     ? DEFAULT_FEE_AMOUNT
@@ -306,13 +320,7 @@ export async function signCosmosTokenTransferTxBase64(input: {
   const privKey = secp.etc.hexToBytes(privateKeyHex)
   const compressedPubKey = secp.getPublicKey(privKey, true)
 
-  const msgSend = encodeCosmosMsgSend({
-    fromAddress,
-    toAddress,
-    denom,
-    amountRaw
-  })
-  const msgAny = encodeAny('/cosmos.bank.v1beta1.MsgSend', msgSend)
+  const msgAny = encodeAny(msgTypeUrl, input.msgBytes)
   const txBodyBytes = encodeTxBody({ msgAny, memo })
   const signerInfo = encodeSignerInfo({
     pubKeyAny: encodePubKeyAny(compressedPubKey),
@@ -344,4 +352,92 @@ export async function signCosmosTokenTransferTxBase64(input: {
     signature
   })
   return toBase64(txRawBytes)
+}
+
+export async function signCosmosTokenTransferTxBase64(input: {
+  rpcUrl: string
+  fromAddress: string
+  toAddress: string
+  denom: string
+  amountRaw: string | number
+  privateKeyHex: string
+  feeDenom?: string
+  feeAmountRaw?: string | number
+  gasLimit?: string | number
+  memo?: string
+}): Promise<string> {
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const denom = String(input.denom || '').trim()
+  const privateKeyHex = String(input.privateKeyHex || '').trim()
+  const memo = String(input.memo || '').trim()
+  if (!fromAddress) throw new Error('Cosmos sender address is required')
+  if (!toAddress) throw new Error('Cosmos destination address is required')
+  if (!denom) throw new Error('Cosmos token denom is required')
+  if (!/^[0-9a-f]{64}$/i.test(privateKeyHex)) throw new Error('Cosmos private key must be 32-byte hex')
+
+  const amountRaw = normalizeAmountRaw(input.amountRaw)
+  const msgSend = encodeCosmosMsgSend({
+    fromAddress,
+    toAddress,
+    denom,
+    amountRaw
+  })
+  return await signCosmosAnyMessageTxBase64({
+    rpcUrl: input.rpcUrl,
+    fromAddress,
+    privateKeyHex,
+    msgTypeUrl: '/cosmos.bank.v1beta1.MsgSend',
+    msgBytes: msgSend,
+    feeDenom: input.feeDenom,
+    feeAmountRaw: input.feeAmountRaw,
+    gasLimit: input.gasLimit,
+    memo
+  })
+}
+
+export async function signCosmosExecuteContractTxBase64(input: {
+  rpcUrl: string
+  fromAddress: string
+  contractAddress: string
+  executeMsg: Record<string, unknown>
+  privateKeyHex: string
+  funds?: Array<{ denom: string; amountRaw: string | number }>
+  feeDenom?: string
+  feeAmountRaw?: string | number
+  gasLimit?: string | number
+  memo?: string
+}): Promise<string> {
+  const sender = String(input.fromAddress || '').trim()
+  const contract = String(input.contractAddress || '').trim()
+  const privateKeyHex = String(input.privateKeyHex || '').trim()
+  const memo = String(input.memo || '').trim()
+  if (!sender) throw new Error('Cosmos sender address is required')
+  if (!contract) throw new Error('Cosmos contract address is required')
+  if (!/^[0-9a-f]{64}$/i.test(privateKeyHex)) throw new Error('Cosmos private key must be 32-byte hex')
+  if (!input.executeMsg || typeof input.executeMsg !== 'object' || Array.isArray(input.executeMsg)) {
+    throw new Error('Cosmos executeMsg must be an object')
+  }
+  const executeMsgBytes = utf8(JSON.stringify(input.executeMsg))
+  const funds = (input.funds || []).map((row) => ({
+    denom: String(row.denom || '').trim(),
+    amountRaw: normalizeAmountRaw(row.amountRaw)
+  })).filter((row) => row.denom && row.amountRaw > 0n)
+  const msg = encodeCosmosMsgExecuteContract({
+    sender,
+    contract,
+    msg: executeMsgBytes,
+    funds
+  })
+  return await signCosmosAnyMessageTxBase64({
+    rpcUrl: input.rpcUrl,
+    fromAddress: sender,
+    privateKeyHex,
+    msgTypeUrl: '/cosmwasm.wasm.v1.MsgExecuteContract',
+    msgBytes: msg,
+    feeDenom: input.feeDenom,
+    feeAmountRaw: input.feeAmountRaw,
+    gasLimit: input.gasLimit ?? 260000,
+    memo
+  })
 }
