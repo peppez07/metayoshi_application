@@ -1209,6 +1209,26 @@ export const useWalletStore = create<WalletState>()(
           }
         }
         if (net.derivation?.status === 'unsupported') {
+          // Server-managed fallback for bridge-only UTXO-like chains:
+          // request an address from the coin wallet when local seed derivation is unavailable.
+          if (net.coinType === 'UTXO') {
+            try {
+              const rpcConfig = await createUtxoRpcConfig(net, {
+                secureBridgeSigner: get().signBackendAuthMessage
+              })
+              const serverAddressRaw = await callBridgeMethod(rpcConfig, 'getnewaddress', [])
+              const serverAddress = String(serverAddressRaw || '').trim()
+              if (serverAddress) {
+                get().updateAccount(acc.id, {
+                  networkAddresses: { ...(acc.networkAddresses ?? {}), [networkId]: serverAddress }
+                })
+                console.info(`[${net.symbol}] Using server-managed address for ${networkId}: ${serverAddress}`)
+                return serverAddress
+              }
+            } catch (error) {
+              console.warn(`[${net.symbol}] Failed to acquire server-managed address for ${networkId}:`, error)
+            }
+          }
           console.warn(`[${net.symbol}] Derivation disabled: ${net.derivation.reason || 'unsupported in this build'}`)
           return null
         }

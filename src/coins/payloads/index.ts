@@ -8,6 +8,7 @@ import { XMR_PAYLOADS } from './monero'
 import { RTM_PAYLOADS } from './rtm'
 import { TIDE_PAYLOADS } from './tide'
 import { XRP_PAYLOADS } from './xrp'
+import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
 import type { CoinPayloadCatalog } from './types'
 
 export const PAYLOAD_CATALOG_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada'] as const
@@ -83,6 +84,8 @@ export function getCoinPayloadCatalog(networkId?: string) {
   if (!key) return undefined
   const direct = PAYLOADS_BY_NETWORK_ID[key as keyof typeof PAYLOADS_BY_NETWORK_ID]
   if (direct) return direct
+  const scaffolded = SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID[key]
+  if (scaffolded) return scaffolded
   if (dynamicPayloadCatalogCache.has(key)) return dynamicPayloadCatalogCache.get(key)
   const dynamic = createStandardPayloadCatalog(key)
   if (dynamic) dynamicPayloadCatalogCache.set(key, dynamic)

@@ -20,6 +20,7 @@ import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type Unsign
 import { PublicKey } from '@solana/web3.js'
 import { StrKey } from '@stellar/stellar-sdk'
 import { TronWeb } from 'tronweb'
+import { getTronBalance } from './tronNonCustodial'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -188,17 +189,9 @@ async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: str
 }
 
 async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
-  const tronHex = (() => {
-    try {
-      return TronWeb.address.toHex(address)
-    } catch {
-      return ''
-    }
-  })()
   const calls: Array<() => Promise<any>> = [
     () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
-    () => callBridgeMethod(rpcConfig, 'getBalance', [address]),
-    () => (tronHex ? callBridgeMethod(rpcConfig, 'eth_getBalance', [tronHex, 'latest']) : Promise.reject(new Error('Invalid TRON address')))
+    () => callBridgeMethod(rpcConfig, 'getBalance', [address])
   ]
   let lastError: unknown = null
   for (const invoke of calls) {
@@ -206,11 +199,6 @@ async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string
       const result = await invoke()
       const decimal = asDecimalString((result as any)?.balance ?? result)
       if (decimal) return decimal
-      const hex = String(result ?? '').trim()
-      if (/^0x[0-9a-f]+$/i.test(hex)) {
-        // EVM-style balance fallback; most providers expose 18-decimal unit.
-        return formatDecimalUnits(BigInt(hex), 18)
-      }
     } catch (error) {
       lastError = error
     }
@@ -259,10 +247,17 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     return { balance, syncPercent: 100, isSyncing: false }
   }
   if (modelId === 'tron') {
-    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
-      throw new Error('Bridge RPC config is required for TRON')
+    if (input.rpcConfig?.bridgeUrl) {
+      try {
+        const balance = await getTronBalanceViaBridge(input.rpcConfig, address)
+        return { balance, syncPercent: 100, isSyncing: false }
+      } catch {
+        // Fall back to direct TRON JSON-RPC if bridge compatibility is limited.
+      }
     }
-    const balance = await getTronBalanceViaBridge(input.rpcConfig, address)
+    const rpcUrl = String(input.network.rpcUrl || '').trim()
+    if (!rpcUrl) throw new Error('TRON RPC URL is not configured')
+    const balance = await getTronBalance(rpcUrl, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
 

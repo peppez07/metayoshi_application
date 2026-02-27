@@ -17,6 +17,7 @@ import { tideCoin } from './tide'
 import { tronCoin } from './tron'
 import { xlmCoin } from './xlm'
 import { xrpCoin } from './xrp'
+import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
 export type { CoinType, Network } from './types'
@@ -56,7 +57,8 @@ export const ALL_COIN_MODULES: CoinModule[] = [
   xrpCoin,
   arrCoin,
   moneroCoin,
-  cardanoCoin
+  cardanoCoin,
+  ...SERVER_SCAFFOLD_COIN_MODULES
 ]
 
 const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
@@ -219,6 +221,20 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   mantle: 'eth',
   moonbeam: 'eth',
   moonriver: 'eth',
+  'cronos-pos': 'eth',
+  'avail': 'eth',
+  'peaq': 'eth',
+  'dymension-testnet': 'eth',
+  'dymension-testnet-evm': 'eth',
+  'evmos-testnet': 'eth',
+  'evmos-testnet-evm': 'eth',
+  'fraxtal-hoodi': 'eth',
+  'opbnb-testnet': 'bnb',
+  'pulsechain-testnet': 'eth',
+  'scroll-sepolia': 'eth',
+  'soneium-minato': 'eth',
+  'sonic-blaze': 'eth',
+  'syscoin-tanenbaum-evm': 'eth',
   optimism: 'base',
   pulsechain: 'eth',
   scroll: 'eth',
@@ -313,6 +329,8 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
   const normalized = String(coinId || '').trim().toLowerCase()
   const direct = SERVER_COIN_TO_NETWORK_ID[normalized]
   if (direct) return direct
+  const scaffoldMapped = SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID[normalized]
+  if (scaffoldMapped) return scaffoldMapped
 
   // Pattern mapping for additional server coin IDs:
   // map many chain variants/testnets into the closest app network model.
@@ -457,6 +475,45 @@ function supportsEvmBridgeMethods(methodGroups: Record<string, string[]> | undef
   return methods.some((m) => m.startsWith('eth_') || m === 'web3_clientversion' || m === 'net_version')
 }
 
+function inferBridgeCapabilities(
+  coinId: string,
+  modelNetworkId: string | null,
+  methodGroups: Record<string, string[]> | undefined
+): Network['capabilities'] {
+  const methods = new Set(flattenServerMethodGroups(methodGroups))
+  const isEvmModel = Boolean(modelNetworkId && EVM_MODEL_NETWORK_IDS.has(modelNetworkId))
+  const isRtm = coinId === 'raptoreum'
+
+  const canSendCoin =
+    methods.has('sendtoaddress')
+    || methods.has('sendmany')
+    || methods.has('eth_sendrawtransaction')
+    || methods.has('submit')
+
+  const assetLayer = isEvmModel || isRtm
+  const assetSend = isEvmModel || isRtm || methods.has('sendasset')
+
+  return {
+    features: {
+      nativeSend: canSendCoin,
+      assetLayer,
+      assetSend: assetLayer && assetSend,
+      activity: true
+    },
+    ui: {
+      showAssetsTab: assetLayer,
+      showAssetsAction: assetLayer,
+      showSendAction: canSendCoin,
+      showActivityTab: true
+    }
+  }
+}
+
+function isNetworkSpendable(network: Network): boolean {
+  if (network.derivation?.status === 'unsupported') return false
+  return network.capabilities?.features?.nativeSend === true
+}
+
 function scoreCandidate(candidate: NetworkCandidate): number {
   const rpcUrl = String(candidate.network.rpcUrl || '').trim().toLowerCase()
   const isHttps = rpcUrl.startsWith('https://')
@@ -482,6 +539,43 @@ function resolveBridgeUrlForNetwork(
     return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}/wallet/${encodeURIComponent(wallet)}`
   }
   return `${API_BASE_URL}/v1/bridge/${coinId}/${chain}`
+}
+
+function createGenericServerNetwork(input: {
+  coinId: string
+  coin: ServerCoinRow
+  chain: 'main' | 'test'
+  selectedNetwork?: ServerCoinNetworkRow | null
+}): Network {
+  const suffix = sanitizeServerCoinId(input.coinId) || 'unknown'
+  const symbolRaw = String(input.coin.symbol || '').trim().toUpperCase()
+  const symbol = symbolRaw || suffix.slice(0, 6).toUpperCase()
+  const rpcWallet = String(input.selectedNetwork?.rpcWallet || '').trim()
+  return {
+    id: `generic--${suffix}`,
+    runtimeModelId: 'generic',
+    serverCoinId: input.coinId,
+    serverChain: input.chain,
+    name: String(input.coin.name || input.coinId).trim() || input.coinId,
+    symbol,
+    coinType: 'BTC',
+    coinSymbol: symbol,
+    rpcUrl: String(input.selectedNetwork?.rpcUrl || '').trim() || API_BASE_URL,
+    rpcWallet: rpcWallet || '',
+    rpcUsername: String(input.selectedNetwork?.rpcUser || '').trim(),
+    rpcPassword: '',
+    bridgeUrl: `${API_BASE_URL}/v1/bridge/${input.coinId}/${input.chain}`,
+    bridgeUsername: DEFAULT_BRIDGE_USER,
+    bridgePassword: DEFAULT_BRIDGE_PASSWORD,
+    derivation: {
+      status: 'unsupported',
+      reason: `${input.coinId} address derivation is not supported in this build`
+    },
+    capabilities: {
+      features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
+      ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+    }
+  }
 }
 
 function sanitizeServerCoinId(coinId: string): string {
@@ -587,6 +681,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
   const coins = Array.isArray(json?.coins) ? (json.coins as ServerCoinRow[]) : []
   if (coins.length === 0) return { networks: null, catalog: [] }
   const catalog = buildServerCoinCatalog(coins)
+  const spendableMainCoinIds = new Set<string>()
   const moduleById = new Map<string, Network>(ALL_NETWORKS.map((n) => [n.id, n]))
   const candidatesByAppNetworkId = new Map<string, NetworkCandidate[]>()
   for (const coin of coins) {
@@ -596,50 +691,74 @@ export async function loadServerRegistrySnapshot(): Promise<{
     if (!coinId) continue
     if (isLikelyTokenServerCoin(coin)) continue
     const modelNetworkId = mapServerCoinIdToNetworkId(coinId)
-    if (!modelNetworkId) continue
-    if (EVM_MODEL_NETWORK_IDS.has(modelNetworkId) && !supportsEvmBridgeMethods(coin.methodGroups)) {
+    const selectedNetwork = resolveActiveServerNetwork(coin.networks)
+    const chain = String(selectedNetwork?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+    const rpcWallet = String(selectedNetwork?.rpcWallet || '').trim()
+
+    const canUseMappedModel = Boolean(
+      modelNetworkId
+      && moduleById.get(modelNetworkId)
+      && (!EVM_MODEL_NETWORK_IDS.has(modelNetworkId) || supportsEvmBridgeMethods(coin.methodGroups))
+    )
+
+    if (canUseMappedModel && modelNetworkId) {
+      const base = moduleById.get(modelNetworkId)!
+      const appNetworkId = resolveAppNetworkId(modelNetworkId, coinId)
+      const mappedNetwork: Network = {
+        ...base,
+        id: appNetworkId,
+        runtimeModelId: modelNetworkId,
+        serverCoinId: coinId,
+        serverChain: chain,
+        name: String(coin.name || base.name).trim() || base.name,
+        symbol: String(coin.symbol || base.symbol).trim().toUpperCase() || base.symbol,
+        rpcUrl: String(selectedNetwork?.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
+        rpcWallet: rpcWallet || base.rpcWallet || '',
+        rpcUsername: String(selectedNetwork?.rpcUser || base.rpcUsername || '').trim(),
+        bridgeUrl: resolveBridgeUrlForNetwork(modelNetworkId, coinId, chain, rpcWallet),
+        // Always use runtime-configured bridge credentials for server-synced networks.
+        // Base modules may contain placeholder defaults (e.g. "bridgepass").
+        bridgeUsername: DEFAULT_BRIDGE_USER,
+        bridgePassword: DEFAULT_BRIDGE_PASSWORD,
+        capabilities: inferBridgeCapabilities(coinId, modelNetworkId, coin.methodGroups)
+      }
+      if (!isNetworkSpendable(mappedNetwork)) continue
+      const row = candidatesByAppNetworkId.get(appNetworkId) || []
+      row.push({
+        appNetworkId,
+        network: mappedNetwork,
+        chain,
+        isPublicnode: selectedNetwork ? isPublicnodeNetworkRow(selectedNetwork) : false
+      })
+      candidatesByAppNetworkId.set(appNetworkId, row)
+      spendableMainCoinIds.add(coinId)
       continue
     }
 
-    const base = moduleById.get(modelNetworkId)
-    if (!base) continue
-    const selectedNetwork = resolveActiveServerNetwork(coin.networks)
-    if (!selectedNetwork?.rpcUrl) continue
-    const chain = String(selectedNetwork.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
-    const rpcWallet = String(selectedNetwork.rpcWallet || '').trim()
-
-    const appNetworkId = resolveAppNetworkId(modelNetworkId, coinId)
-    const mappedNetwork: Network = {
-      ...base,
-      id: appNetworkId,
-      runtimeModelId: modelNetworkId,
-      serverCoinId: coinId,
-      serverChain: chain,
-      name: String(coin.name || base.name).trim() || base.name,
-      symbol: String(coin.symbol || base.symbol).trim().toUpperCase() || base.symbol,
-      rpcUrl: String(selectedNetwork.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
-      rpcWallet: rpcWallet || base.rpcWallet || '',
-      rpcUsername: String(selectedNetwork.rpcUser || base.rpcUsername || '').trim(),
-      bridgeUrl: resolveBridgeUrlForNetwork(modelNetworkId, coinId, chain, rpcWallet),
-      // Always use runtime-configured bridge credentials for server-synced networks.
-      // Base modules may contain placeholder defaults (e.g. "bridgepass").
-      bridgeUsername: DEFAULT_BRIDGE_USER,
-      bridgePassword: DEFAULT_BRIDGE_PASSWORD
-    }
-    const row = candidatesByAppNetworkId.get(appNetworkId) || []
-    row.push({
-      appNetworkId,
-      network: mappedNetwork,
+    // Fallback: keep server-listed chain visible in app as a generic model network
+    // when no compatible runtime model mapping exists yet.
+    const genericNetwork = createGenericServerNetwork({
+      coinId,
+      coin,
       chain,
-      isPublicnode: isPublicnodeNetworkRow(selectedNetwork)
+      selectedNetwork
     })
-    candidatesByAppNetworkId.set(appNetworkId, row)
+    if (!isNetworkSpendable(genericNetwork)) continue
+    const row = candidatesByAppNetworkId.get(genericNetwork.id) || []
+    row.push({
+      appNetworkId: genericNetwork.id,
+      network: genericNetwork,
+      chain,
+      isPublicnode: selectedNetwork ? isPublicnodeNetworkRow(selectedNetwork) : false
+    })
+    candidatesByAppNetworkId.set(genericNetwork.id, row)
   }
 
   if (candidatesByAppNetworkId.size === 0) {
+    const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
     return {
       networks: null,
-      catalog
+      catalog: filteredCatalog
     }
   }
 
@@ -662,9 +781,10 @@ export async function loadServerRegistrySnapshot(): Promise<{
       return left.localeCompare(right)
     })
   const ordered = [...canonical, ...extra]
+  const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
   return {
     networks: ordered.length > 0 ? ordered : null,
-    catalog
+    catalog: filteredCatalog
   }
 }
 

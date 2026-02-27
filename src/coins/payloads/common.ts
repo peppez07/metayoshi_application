@@ -65,3 +65,96 @@ export function createUtxoPayloadCatalog(input: {
   }
 }
 
+export type ScaffoldPayloadModel = 'evm' | 'sol' | 'xrp' | 'utxo'
+
+function modelHelperSendCoin(model: ScaffoldPayloadModel) {
+  if (model === 'evm') {
+    return {
+      to: '0x1111111111111111111111111111111111111111',
+      amount: 0.01,
+      subtractFeeFromAmount: false
+    }
+  }
+  if (model === 'sol') {
+    return {
+      to: 'So11111111111111111111111111111111111111112',
+      amount: 0.01,
+      subtractFeeFromAmount: false
+    }
+  }
+  if (model === 'xrp') {
+    return {
+      to: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+      amount: 1,
+      subtractFeeFromAmount: false
+    }
+  }
+  return {
+    to: 'RXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+    amount: 0.1,
+    subtractFeeFromAmount: false
+  }
+}
+
+function modelHelperSendAsset(model: ScaffoldPayloadModel) {
+  if (model === 'evm') {
+    return {
+      assetId: '0x0000000000000000000000000000000000000000',
+      qty: 1,
+      toAddress: '0x1111111111111111111111111111111111111111',
+      changeAddress: '',
+      assetChangeAddress: ''
+    }
+  }
+  if (model === 'sol') {
+    return {
+      assetId: 'So11111111111111111111111111111111111111112',
+      qty: 1,
+      toAddress: 'So11111111111111111111111111111111111111112',
+      changeAddress: '',
+      assetChangeAddress: ''
+    }
+  }
+  if (model === 'xrp') {
+    return {
+      assetId: 'XRP',
+      qty: 1,
+      toAddress: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+      changeAddress: '',
+      assetChangeAddress: ''
+    }
+  }
+  return {
+    assetId: 'ROOT|SUB',
+    qty: 1,
+    toAddress: 'RXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+    changeAddress: '',
+    assetChangeAddress: ''
+  }
+}
+
+/** Model-aware scaffold payload catalog.
+ *  Keeps transport-compatible payload builders while adapting helper examples
+ *  to the chain family used by the scaffolded coin. */
+export function createModelPayloadCatalog(input: {
+  networkId: string
+  symbol: string
+  coinId: string
+  chain: CoinChain
+  model: ScaffoldPayloadModel
+}): CoinPayloadCatalog {
+  const base = createUtxoPayloadCatalog({
+    networkId: input.networkId,
+    symbol: input.symbol,
+    coinId: input.coinId,
+    chain: input.chain
+  })
+  return {
+    ...base,
+    helperExamples: {
+      sendCoin: modelHelperSendCoin(input.model),
+      sendAsset: modelHelperSendAsset(input.model)
+    }
+  }
+}
+

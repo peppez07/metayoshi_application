@@ -39,6 +39,17 @@ function formatCoinAmount(v: number): string {
   return v.toFixed(8).replace(/\.?0+$/, '')
 }
 
+function formatBalanceDisplay(value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return '0'
+  const num = Number(raw)
+  if (!Number.isFinite(num)) return raw
+  return num.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 8
+  })
+}
+
 function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
   if (network.coinType === 'UTXO') {
     const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
@@ -100,6 +111,7 @@ const WalletLayout: React.FC = () => {
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
@@ -288,9 +300,15 @@ const WalletLayout: React.FC = () => {
         </div>
 
         {/* Balance */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-4xl font-bold tracking-tight">{activeAccount?.balance || '0'}</span>
-          <span className="text-4xl font-medium tracking-tight uppercase">{activeNetwork.symbol}</span>
+        <div className="mb-4 w-full px-4">
+          <div className="mx-auto max-w-full text-center">
+            <p className="text-[clamp(1.55rem,8.6vw,2.25rem)] font-bold leading-tight tracking-tight break-words">
+              {displayBalance}
+            </p>
+            <p className="text-lg font-semibold uppercase tracking-wide text-gray-300 mt-0.5">
+              {activeNetwork.symbol}
+            </p>
+          </div>
         </div>
 
         {/* Quick-action buttons */}

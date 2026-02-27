@@ -9,6 +9,10 @@ import { TIDE_API_INFO, tideApiInterceptor } from './tide'
 import { XRP_API_INFO, xrpApiInterceptor } from './xrp'
 import { createCoinApiInterceptor } from './factory'
 import { getCoinPayloadCatalog } from '../payloads'
+import {
+  SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID,
+  SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID
+} from './serverScaffolds'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
 export const COIN_API_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada'] as const
@@ -108,6 +112,8 @@ export function getCoinApiInterceptor(networkId?: string): CoinApiInterceptor | 
   if (!key) return undefined
   const direct = INTERCEPTOR_BY_NETWORK_ID[key]
   if (direct) return direct
+  const scaffolded = SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID[key]
+  if (scaffolded) return scaffolded
   const cached = DYNAMIC_INTERCEPTOR_CACHE.get(key)
   if (cached) return cached
   const info = getCoinApiInfo(key)
@@ -122,6 +128,8 @@ export function getCoinApiInfo(networkId?: string): CoinApiInfo | undefined {
   if (!key) return undefined
   const direct = API_INFO_BY_NETWORK_ID[key]
   if (direct) return direct
+  const scaffolded = SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID[key]
+  if (scaffolded) return scaffolded
   const cached = DYNAMIC_API_INFO_CACHE.get(key)
   if (cached) return cached
   const dynamic = createStandardApiInfo(key)

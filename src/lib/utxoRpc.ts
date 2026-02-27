@@ -754,6 +754,9 @@ export interface UtxoBalance {
 }
 
 const BTCZ_EXPLORER_FALLBACK_BASE = 'https://explorer.btcz.rocks'
+const BTC_EXPLORER_MAINNET_BASE = 'https://mempool.space/api'
+const BTC_EXPLORER_TESTNET_BASE = 'https://mempool.space/testnet/api'
+const BTC_EXPLORER_TESTNET4_BASE = 'https://mempool.space/testnet4/api'
 
 interface BtczExplorerAddressSummary {
   balance?: number | string
@@ -772,10 +775,67 @@ interface BtczExplorerUtxoRow {
   confirmations?: number | string
 }
 
+interface BitcoinExplorerAddressSummary {
+  chain_stats?: {
+    funded_txo_sum?: number | string
+    spent_txo_sum?: number | string
+  }
+  mempool_stats?: {
+    funded_txo_sum?: number | string
+    spent_txo_sum?: number | string
+  }
+}
+
+interface BitcoinExplorerUtxoRow {
+  txid?: string
+  vout?: number | string
+  value?: number | string
+  status?: {
+    confirmed?: boolean
+  }
+}
+
+interface BitcoinExplorerTxVoutRow {
+  n?: number | string
+  scriptpubkey?: string
+}
+
+interface BitcoinExplorerTxRow {
+  vout?: BitcoinExplorerTxVoutRow[]
+}
+
 function isBtczConfig(config: UtxoRpcConfig): boolean {
   const networkId = String(config.networkId || '').trim().toLowerCase()
   const symbol = String(config.coinSymbol || '').trim().toUpperCase()
   return networkId === 'btcz' || symbol === 'BTCZ'
+}
+
+function isBitcoinTestnetConfig(config: UtxoRpcConfig): boolean {
+  const networkId = String(config.networkId || '').trim().toLowerCase()
+  if (networkId === 'srv--bitcoin-testnet' || networkId === 'bitcoin-testnet') return true
+  const bridgeUrl = String(config.bridgeUrl || '').trim().toLowerCase()
+  return bridgeUrl.includes('/bridge/bitcoin-testnet/')
+}
+
+function isBitcoinConfig(config: UtxoRpcConfig): boolean {
+  if (config.useLocalRpc) return false
+
+  const networkId = String(config.networkId || '').trim().toLowerCase()
+  if (
+    networkId === 'srv--bitcoin'
+    || networkId === 'bitcoin'
+    || networkId === 'srv--bitcoin-testnet'
+    || networkId === 'bitcoin-testnet'
+  ) {
+    return true
+  }
+
+  const bridgeUrl = String(config.bridgeUrl || '').trim().toLowerCase()
+  if (bridgeUrl.includes('/bridge/bitcoin/') || bridgeUrl.includes('/bridge/bitcoin-testnet/')) {
+    return true
+  }
+
+  return String(config.coinSymbol || '').trim().toUpperCase() === 'BTC'
 }
 
 function buildBtczExplorerAddressUrls(address: string, suffix = ''): string[] {
@@ -815,6 +875,143 @@ async function fetchBtczExplorerJson(config: UtxoRpcConfig, url: string): Promis
   } finally {
     clearTimeout(timer)
   }
+}
+
+function buildBitcoinExplorerBases(config: UtxoRpcConfig): string[] {
+  const customMain = String(import.meta.env.VITE_BTC_EXPLORER || '').trim()
+  const customTest = String(import.meta.env.VITE_BTC_TESTNET_EXPLORER || '').trim()
+  const isTestnet = isBitcoinTestnetConfig(config)
+  if (isTestnet) {
+    return dedupeStringList([customTest, BTC_EXPLORER_TESTNET_BASE, BTC_EXPLORER_TESTNET4_BASE])
+  }
+  return dedupeStringList([customMain, BTC_EXPLORER_MAINNET_BASE])
+}
+
+function buildBitcoinExplorerAddressUrls(config: UtxoRpcConfig, address: string, suffix = ''): string[] {
+  const encodedAddress = encodeURIComponent(address)
+  return buildBitcoinExplorerBases(config)
+    .map((base) => `${base.replace(/\/+$/, '')}/address/${encodedAddress}${suffix}`)
+}
+
+function buildBitcoinExplorerTxUrls(config: UtxoRpcConfig, txid: string): string[] {
+  const encodedTxId = encodeURIComponent(txid)
+  return buildBitcoinExplorerBases(config)
+    .map((base) => `${base.replace(/\/+$/, '')}/tx/${encodedTxId}`)
+}
+
+async function fetchBitcoinExplorerJson(config: UtxoRpcConfig, url: string): Promise<any | null> {
+  const controller = new AbortController()
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    })
+    if (!res.ok) return null
+    return await res.json().catch(() => null)
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchBitcoinExplorerBalance(
+  config: UtxoRpcConfig,
+  address: string
+): Promise<UtxoBalance | null> {
+  if (!isBitcoinConfig(config)) return null
+
+  for (const url of buildBitcoinExplorerAddressUrls(config, address)) {
+    const json: BitcoinExplorerAddressSummary | null = await fetchBitcoinExplorerJson(config, url)
+    if (!json || typeof json !== 'object') continue
+
+    const chainFunded = Number(json.chain_stats?.funded_txo_sum ?? NaN)
+    const chainSpent = Number(json.chain_stats?.spent_txo_sum ?? NaN)
+    const mempoolFunded = Number(json.mempool_stats?.funded_txo_sum ?? 0)
+    const mempoolSpent = Number(json.mempool_stats?.spent_txo_sum ?? 0)
+    if (!Number.isFinite(chainFunded) || !Number.isFinite(chainSpent)) continue
+
+    const confirmedSats = Math.max(0, chainFunded - chainSpent)
+    const unconfirmedSats = Number.isFinite(mempoolFunded) && Number.isFinite(mempoolSpent)
+      ? Math.max(0, mempoolFunded - mempoolSpent)
+      : 0
+    const totalSats = confirmedSats + unconfirmedSats
+    return {
+      confirmed: Number((confirmedSats / 1e8).toFixed(8)),
+      unconfirmed: Number((unconfirmedSats / 1e8).toFixed(8)),
+      total: Number((totalSats / 1e8).toFixed(8))
+    }
+  }
+
+  return null
+}
+
+async function fetchBitcoinTxOutputScriptPubKey(
+  config: UtxoRpcConfig,
+  txid: string,
+  vout: number
+): Promise<string> {
+  if (!txid || !Number.isFinite(vout) || vout < 0) return ''
+
+  for (const url of buildBitcoinExplorerTxUrls(config, txid)) {
+    const json: BitcoinExplorerTxRow | null = await fetchBitcoinExplorerJson(config, url)
+    if (!json || typeof json !== 'object') continue
+    const outputs = Array.isArray(json.vout) ? json.vout : []
+    const match = outputs.find((row) => Number(row?.n) === vout)
+    const scriptPubKey = String(match?.scriptpubkey || '').trim()
+    if (scriptPubKey) return scriptPubKey
+  }
+
+  return ''
+}
+
+async function fetchBitcoinExplorerUtxos(
+  config: UtxoRpcConfig,
+  address: string,
+  minConf = 1
+): Promise<UtxoUnspent[] | null> {
+  if (!isBitcoinConfig(config)) return null
+
+  for (const url of buildBitcoinExplorerAddressUrls(config, address, '/utxo')) {
+    const json: BitcoinExplorerUtxoRow[] | null = await fetchBitcoinExplorerJson(config, url)
+    if (!Array.isArray(json)) continue
+
+    const rows = json
+      .map((row) => ({
+        txid: String(row?.txid || '').trim(),
+        vout: Number(row?.vout),
+        valueSats: Number(row?.value ?? NaN),
+        confirmed: Boolean(row?.status?.confirmed)
+      }))
+      .filter((row) =>
+        Boolean(row.txid)
+        && Number.isFinite(row.vout)
+        && row.vout >= 0
+        && Number.isFinite(row.valueSats)
+        && row.valueSats > 0
+        && (minConf <= 0 || row.confirmed)
+      )
+
+    const mapped = await Promise.all(rows.map(async (row) => {
+      const scriptPubKey = await fetchBitcoinTxOutputScriptPubKey(config, row.txid, row.vout)
+      if (!scriptPubKey) return null
+      return {
+        txid: row.txid,
+        vout: row.vout,
+        address,
+        scriptPubKey,
+        amount: row.valueSats / 1e8,
+        confirmations: row.confirmed ? Math.max(1, minConf) : 0
+      } satisfies UtxoUnspent
+    }))
+
+    return mapped.filter((row): row is UtxoUnspent => Boolean(row))
+  }
+
+  return null
 }
 
 async function fetchBtczExplorerBalance(
@@ -904,6 +1101,10 @@ export async function getUtxoBalance(
     const btczExplorerBalance = await fetchBtczExplorerBalance(config, address)
     if (btczExplorerBalance) return btczExplorerBalance
   }
+  if (address && isBitcoinConfig(config)) {
+    const btcExplorerBalance = await fetchBitcoinExplorerBalance(config, address)
+    if (btcExplorerBalance) return btcExplorerBalance
+  }
 
   let addressIndexFailed = false
   // Address-indexed balance path (Raptoreum family): works for non-wallet addresses.
@@ -935,7 +1136,31 @@ export async function getUtxoBalance(
   }
 
   const params = address ? [0, 9999999, [address]] : [0, 9999999]
-  const unspent: UtxoUnspent[] = await jsonRpcCall(config, 'listunspent', params)
+  let unspent: UtxoUnspent[] = []
+  try {
+    unspent = await jsonRpcCall(config, 'listunspent', params)
+  } catch (error) {
+    if (address) {
+      const btcExplorerBalance = await fetchBitcoinExplorerBalance(config, address)
+      if (btcExplorerBalance) return btcExplorerBalance
+      const btcExplorerUtxos = await fetchBitcoinExplorerUtxos(config, address, 0)
+      if (btcExplorerUtxos !== null) {
+        let btcConfirmed = 0
+        let btcUnconfirmed = 0
+        for (const utxo of btcExplorerUtxos) {
+          if (utxo.confirmations >= 1) btcConfirmed += utxo.amount
+          else btcUnconfirmed += utxo.amount
+        }
+        const btcTotal = btcConfirmed + btcUnconfirmed
+        return {
+          confirmed: Number(btcConfirmed.toFixed(8)),
+          unconfirmed: Number(btcUnconfirmed.toFixed(8)),
+          total: Number(btcTotal.toFixed(8))
+        }
+      }
+    }
+    throw error
+  }
 
   let confirmed = 0
   let unconfirmed = 0
@@ -969,6 +1194,8 @@ export async function getUtxoBalance(
 
     const btczExplorerBalance = await fetchBtczExplorerBalance(config, address)
     if (btczExplorerBalance) return btczExplorerBalance
+    const btcExplorerBalance = await fetchBitcoinExplorerBalance(config, address)
+    if (btcExplorerBalance) return btcExplorerBalance
 
     if (addressIndexFailed && isBtczConfig(config)) {
       throw new Error('BTCZ address-index RPC is disabled and explorer fallback is unavailable')
@@ -988,8 +1215,27 @@ export async function listUtxoUnspent(
   address?: string,
   minConf = 0
 ): Promise<UtxoUnspent[]> {
+  if (address && isBtczConfig(config)) {
+    const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
+    if (btczExplorer !== null) return btczExplorer
+  }
+  if (address && isBitcoinConfig(config)) {
+    const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
+    if (btcExplorer !== null) return btcExplorer
+  }
+
   const params = address ? [minConf, 9999999, [address]] : [minConf, 9999999]
-  return await jsonRpcCall(config, 'listunspent', params)
+  try {
+    return await jsonRpcCall(config, 'listunspent', params)
+  } catch (error) {
+    if (address) {
+      const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
+      if (btczExplorer !== null) return btczExplorer
+      const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
+      if (btcExplorer !== null) return btcExplorer
+    }
+    throw error
+  }
 }
 
 /**
@@ -1017,6 +1263,10 @@ export async function getAddressUtxos(
     const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
     if (btczExplorer !== null) return btczExplorer
   }
+  if (isBitcoinConfig(config)) {
+    const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
+    if (btcExplorer !== null) return btcExplorer
+  }
 
   let raw: AddressUtxoEntry[] = []
   try {
@@ -1027,7 +1277,9 @@ export async function getAddressUtxos(
     )
   } catch (error) {
     const btczExplorer = await fetchBtczExplorerUtxos(config, address, minConf)
-    if (btczExplorer) return btczExplorer
+    if (btczExplorer !== null) return btczExplorer
+    const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
+    if (btcExplorer !== null) return btcExplorer
     throw error
   }
 
@@ -1126,6 +1378,11 @@ export async function scanAddressUnspent(
   } catch {
     // final fallback below
   }
+
+  const btczExplorer = await fetchBtczExplorerUtxos(config, address, 1)
+  if (btczExplorer !== null) return btczExplorer
+  const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, 1)
+  if (btcExplorer !== null) return btcExplorer
 
   return []
 }
