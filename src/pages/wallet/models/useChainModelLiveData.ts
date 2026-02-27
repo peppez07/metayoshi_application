@@ -18,7 +18,11 @@ export function useChainModelLiveData() {
 
   useEffect(() => {
     void refresh()
-    const t = window.setInterval(() => void refresh(), 20_000)
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void refresh()
+    }
+    const t = window.setInterval(tick, 30_000)
     return () => window.clearInterval(t)
   }, [refresh, activeNetworkId, activeAccountId])
 

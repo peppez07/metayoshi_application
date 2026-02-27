@@ -151,18 +151,63 @@ function asDecimalString(value: unknown): string {
   return /^\d+(\.\d+)?$/.test(raw) ? raw : ''
 }
 
+const BRIDGE_METHOD_VARIANT_CACHE_TTL_MS = 10 * 60 * 1000
+const CHAIN_INFO_CACHE_TTL_MS = 12 * 1000
+const ADDRESS_VALIDATION_CACHE_TTL_MS = 30 * 1000
+
+const bridgeMethodVariantCache = new Map<string, { method: string; checkedAt: number }>()
+const chainInfoCache = new Map<string, { value: any; checkedAt: number }>()
+const addressValidationCache = new Map<string, { value: boolean; checkedAt: number }>()
+
+function resolveRpcCacheKey(rpcConfig: UtxoRpcConfig): string {
+  const bridgeUrl = String(rpcConfig.bridgeUrl || '').trim().toLowerCase()
+  if (bridgeUrl) return `bridge:${bridgeUrl}`
+  const rpcUrl = String(rpcConfig.rpcUrl || '').trim().toLowerCase()
+  const rpcWallet = String(rpcConfig.rpcWallet || '').trim().toLowerCase()
+  return `rpc:${rpcUrl}|wallet:${rpcWallet}`
+}
+
+function resolveBridgeVariantCacheKey(rpcConfig: UtxoRpcConfig, scope: string): string {
+  return `${resolveRpcCacheKey(rpcConfig)}|scope:${scope}`
+}
+
+function isFresh(checkedAt: number, ttlMs: number): boolean {
+  return Date.now() - checkedAt <= ttlMs
+}
+
+async function getCachedBlockchainInfo(rpcConfig: UtxoRpcConfig): Promise<any> {
+  const cacheKey = resolveRpcCacheKey(rpcConfig)
+  const cached = chainInfoCache.get(cacheKey)
+  if (cached && isFresh(cached.checkedAt, CHAIN_INFO_CACHE_TTL_MS)) {
+    return cached.value
+  }
+  const value = await getBlockchainInfo(rpcConfig)
+  chainInfoCache.set(cacheKey, { value, checkedAt: Date.now() })
+  return value
+}
+
 async function getSolanaBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
-  const calls: Array<() => Promise<any>> = [
-    () => callBridgeMethod(rpcConfig, 'getBalance', [address, { commitment: 'confirmed' }]),
-    () => callBridgeMethod(rpcConfig, 'getBalance', [address]),
-    () => callBridgeMethod(rpcConfig, 'getbalance', [address])
+  const variants: Array<{ method: string; params: any[] }> = [
+    { method: 'getBalance', params: [address, { commitment: 'confirmed' }] },
+    { method: 'getBalance', params: [address] },
+    { method: 'getbalance', params: [address] }
   ]
+  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'solana-balance')
+  const cached = bridgeMethodVariantCache.get(cacheKey)
+  const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
+    ? [
+        ...variants.filter((v) => v.method === cached.method),
+        ...variants.filter((v) => v.method !== cached.method)
+      ]
+    : variants
+
   let lastError: unknown = null
-  for (const invoke of calls) {
+  for (const call of calls) {
     try {
-      const result = await invoke()
+      const result = await callBridgeMethod(rpcConfig, call.method, call.params)
       const lamports = asNumberLike((result as any)?.value ?? result)
       if (lamports !== null) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
         return formatDecimalUnits(BigInt(Math.trunc(lamports)), 9)
       }
     } catch (error) {
@@ -182,21 +227,39 @@ async function getSolanaBalanceDirectRpc(rpcUrl: string, address: string): Promi
 }
 
 async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<string> {
-  const calls: Array<() => Promise<any>> = [
-    () => callBridgeMethod(rpcConfig, 'get_balance', []),
-    () => callBridgeMethod(rpcConfig, 'getbalance', []),
-    () => callBridgeMethod(rpcConfig, 'getBalance', [])
+  const variants: Array<{ method: string; params: any[] }> = [
+    { method: 'get_balance', params: [] },
+    { method: 'getbalance', params: [] },
+    { method: 'getBalance', params: [] }
   ]
+  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'monero-balance')
+  const cached = bridgeMethodVariantCache.get(cacheKey)
+  const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
+    ? [
+        ...variants.filter((v) => v.method === cached.method),
+        ...variants.filter((v) => v.method !== cached.method)
+      ]
+    : variants
+
   let lastError: unknown = null
-  for (const invoke of calls) {
+  for (const call of calls) {
     try {
-      const result = await invoke()
+      const result = await callBridgeMethod(rpcConfig, call.method, call.params)
       const unlockedAtomic = asNumberLike((result as any)?.unlocked_balance)
       const totalAtomic = asNumberLike((result as any)?.balance)
-      if (unlockedAtomic !== null) return formatDecimalUnits(BigInt(Math.trunc(unlockedAtomic)), 12)
-      if (totalAtomic !== null) return formatDecimalUnits(BigInt(Math.trunc(totalAtomic)), 12)
+      if (unlockedAtomic !== null) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return formatDecimalUnits(BigInt(Math.trunc(unlockedAtomic)), 12)
+      }
+      if (totalAtomic !== null) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return formatDecimalUnits(BigInt(Math.trunc(totalAtomic)), 12)
+      }
       const scalar = asDecimalString((result as any)?.balance ?? result)
-      if (scalar) return scalar
+      if (scalar) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return scalar
+      }
     } catch (error) {
       lastError = error
     }
@@ -205,21 +268,36 @@ async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<stri
 }
 
 async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
-  const calls: Array<() => Promise<any>> = [
-    () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
-    () => callBridgeMethod(rpcConfig, 'getbalance', []),
-    () => callBridgeMethod(rpcConfig, 'getAccount', [address])
+  const variants: Array<{ method: string; params: any[] }> = [
+    { method: 'getbalance', params: [address] },
+    { method: 'getbalance', params: [] },
+    { method: 'getAccount', params: [address] }
   ]
+  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'stellar-balance')
+  const cached = bridgeMethodVariantCache.get(cacheKey)
+  const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
+    ? [
+        ...variants.filter((v) => v.method === cached.method),
+        ...variants.filter((v) => v.method !== cached.method)
+      ]
+    : variants
+
   let lastError: unknown = null
-  for (const invoke of calls) {
+  for (const call of calls) {
     try {
-      const result = await invoke()
+      const result = await callBridgeMethod(rpcConfig, call.method, call.params)
       const scalar = asDecimalString((result as any)?.balance ?? result)
-      if (scalar) return scalar
+      if (scalar) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return scalar
+      }
       const balances = Array.isArray((result as any)?.balances) ? (result as any).balances : []
       const native = balances.find((b: any) => String(b?.asset_type || '').toLowerCase() === 'native')
       const nativeBalance = asDecimalString(native?.balance)
-      if (nativeBalance) return nativeBalance
+      if (nativeBalance) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return nativeBalance
+      }
     } catch (error) {
       lastError = error
     }
@@ -228,16 +306,28 @@ async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: str
 }
 
 async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
-  const calls: Array<() => Promise<any>> = [
-    () => callBridgeMethod(rpcConfig, 'getbalance', [address]),
-    () => callBridgeMethod(rpcConfig, 'getBalance', [address])
+  const variants: Array<{ method: string; params: any[] }> = [
+    { method: 'getbalance', params: [address] },
+    { method: 'getBalance', params: [address] }
   ]
+  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'tron-balance')
+  const cached = bridgeMethodVariantCache.get(cacheKey)
+  const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
+    ? [
+        ...variants.filter((v) => v.method === cached.method),
+        ...variants.filter((v) => v.method !== cached.method)
+      ]
+    : variants
+
   let lastError: unknown = null
-  for (const invoke of calls) {
+  for (const call of calls) {
     try {
-      const result = await invoke()
+      const result = await callBridgeMethod(rpcConfig, call.method, call.params)
       const decimal = asDecimalString((result as any)?.balance ?? result)
-      if (decimal) return decimal
+      if (decimal) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return decimal
+      }
     } catch (error) {
       lastError = error
     }
@@ -290,7 +380,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     let syncPercent: number | null = null
     let isSyncing = false
     try {
-      const chainInfo = await getBlockchainInfo(input.rpcConfig)
+      const chainInfo = await getCachedBlockchainInfo(input.rpcConfig)
       const parsed = resolveSyncStateFromChainInfo(chainInfo)
       syncPercent = parsed.syncPercent
       isSyncing = parsed.isSyncing
@@ -348,7 +438,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     let syncPercent: number | null = null
     let isSyncing = false
     try {
-      const chainInfo = await getBlockchainInfo(input.rpcConfig)
+      const chainInfo = await getCachedBlockchainInfo(input.rpcConfig)
       const parsed = resolveSyncStateFromChainInfo(chainInfo)
       syncPercent = parsed.syncPercent
       isSyncing = parsed.isSyncing
@@ -363,7 +453,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   let isSyncing = false
   if (!input.skipChainSyncProbe) {
     try {
-      const chainInfo = await getBlockchainInfo(input.rpcConfig)
+      const chainInfo = await getCachedBlockchainInfo(input.rpcConfig)
       const parsed = resolveSyncStateFromChainInfo(chainInfo)
       syncPercent = parsed.syncPercent
       isSyncing = parsed.isSyncing
@@ -409,8 +499,15 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
   }
   if (!rpcConfig) throw new Error(`RPC config is required for ${network.symbol}`)
+  const cacheKey = `${resolveRpcCacheKey(rpcConfig)}|addr:${value}`
+  const cached = addressValidationCache.get(cacheKey)
+  if (cached && isFresh(cached.checkedAt, ADDRESS_VALIDATION_CACHE_TTL_MS)) {
+    return cached.value
+  }
   const result = await validateAddress(rpcConfig, value)
-  return Boolean(result?.isvalid)
+  const isValid = Boolean(result?.isvalid)
+  addressValidationCache.set(cacheKey, { value: isValid, checkedAt: Date.now() })
+  return isValid
 }
 
 export async function sendChainTransaction(input: SendChainTransactionInput): Promise<{ hash: string }> {
