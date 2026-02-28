@@ -1,31 +1,4 @@
-import { arrCoin } from './arr'
-import { arbitrumCoin } from './arbitrum'
-import { avaxcCoin } from './avaxc'
-import { baseCoin } from './base'
-import { bitcoinCoin } from './bitcoin'
-import { cardanoCoin } from './cardano'
-import { BTC_ADDRESS_SPEC } from './btc'
-import { bnbCoin } from './bnb'
-import { btczCoin } from './btcz'
-import { cosmosCoin } from './cosmos'
-import { dashCoin } from './dash'
-import { dogeCoin } from './doge'
-import { ethCoin } from './eth'
-import { firoCoin } from './firo'
-import { mantaAtlanticCoin } from './manta-atlantic'
-import { moneroCoin } from './monero'
-import { pivxCoin } from './pivx'
-import { polkadotCoin } from './polkadot'
-import { polygonCoin } from './polygon'
-import { rtmCoin } from './rtm'
-import { solCoin } from './sol'
-import { terraClassicCoin } from './terra-classic'
-import { terraCoin } from './terra'
-import { tideCoin } from './tide'
-import { tronCoin } from './tron'
-import { xlmCoin } from './xlm'
-import { xrpCoin } from './xrp'
-import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
+import { SEED_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './seedCoinModules'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 import { BUILD_CONFIG } from '../buildConfig'
 
@@ -68,35 +41,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
   return out
 }
 
-const RAW_COIN_MODULES: CoinModule[] = [
-  rtmCoin,
-  ethCoin,
-  bnbCoin,
-  polygonCoin,
-  arbitrumCoin,
-  baseCoin,
-  avaxcCoin,
-  bitcoinCoin,
-  cosmosCoin,
-  dashCoin,
-  pivxCoin,
-  polkadotCoin,
-  terraCoin,
-  terraClassicCoin,
-  mantaAtlanticCoin,
-  solCoin,
-  xlmCoin,
-  tronCoin,
-  dogeCoin,
-  btczCoin,
-  tideCoin,
-  firoCoin,
-  xrpCoin,
-  arrCoin,
-  moneroCoin,
-  cardanoCoin,
-  ...SERVER_SCAFFOLD_COIN_MODULES
-]
+const RAW_COIN_MODULES: CoinModule[] = [...SEED_COIN_MODULES]
 
 export const ALL_COIN_MODULES: CoinModule[] = uniqCoinModulesById(RAW_COIN_MODULES)
 
@@ -389,7 +334,6 @@ const MODULE_BY_NETWORK_ID = new Map<string, CoinModule>(
 )
 
 const UTXO_ADDRESS_SPECS: Record<string, UtxoAddressSpec> = {}
-UTXO_ADDRESS_SPECS.BTC = BTC_ADDRESS_SPEC
 for (const coin of ALL_COIN_MODULES) {
   if (!coin.coinSymbol || !coin.utxoAddress) continue
   const symbol = coin.coinSymbol.toUpperCase()
@@ -1228,5 +1172,5 @@ export async function loadNetworksFromServerRegistry(): Promise<Network[] | null
 }
 
 // Packed per-coin feature bundles:
-// src/coins/packed/<coin-id>/coin.feature.ts
+// src/coins/<coin-id>/<coin-id>.features.ts
 export * from './packed'
