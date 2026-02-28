@@ -9,6 +9,7 @@ import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import { compareNetworksByModelFamily } from '../lib/coinModel'
 import { getModelIconRingClass } from '../buildConfig'
 
 interface WalletFrameProps {
@@ -60,6 +61,8 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
     }
     return [...networks].sort((a, b) => {
+      const familyDelta = compareNetworksByModelFamily(a, b)
+      if (familyDelta !== 0) return familyDelta
       const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
       if (usageDelta !== 0) return usageDelta
       return a.name.localeCompare(b.name)

@@ -105,6 +105,90 @@ const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 const ALLOWED_COIN_IDS = new Set([...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id)))
 const DEFAULT_ENABLED_COIN_IDS = [...ALLOWED_COIN_IDS]
+const EVM_COIN_IDS = new Set<string>(['eth', 'bnb', 'polygon', 'arb', 'base', 'avaxc'])
+const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['polygon', 'arb', 'base'])
+const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
+  1: 'eth',
+  56: 'bnb',
+  137: 'polygon',
+  42161: 'arb',
+  8453: 'base',
+  43114: 'avaxc'
+}
+const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
+  eth: 'eth',
+  ethereum: 'eth',
+  'ethereum-mainnet': 'eth',
+  'mainnet-ethereum': 'eth',
+  bnb: 'bnb',
+  bsc: 'bnb',
+  'bnb-smart-chain': 'bnb',
+  'binance-smart-chain': 'bnb',
+  'smart-chain': 'bnb',
+  polygon: 'polygon',
+  matic: 'polygon',
+  'polygon-mainnet': 'polygon',
+  'matic-mainnet': 'polygon',
+  arb: 'arb',
+  arbitrum: 'arb',
+  'arbitrum-one': 'arb',
+  base: 'base',
+  'base-mainnet': 'base',
+  avaxc: 'avaxc',
+  avax: 'avaxc',
+  avalanche: 'avaxc',
+  'avalanche-c-chain': 'avaxc',
+  'avalanche-mainnet-c-chain': 'avaxc'
+}
+
+function normalizeCoinSelectionToken(rawToken: string): string {
+  return String(rawToken || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+function mapChainlistAliasToCoinId(rawToken: string): string | null {
+  const normalized = normalizeCoinSelectionToken(rawToken)
+  if (!normalized) return null
+  const direct = CHAINLIST_EVM_ALIAS_TO_COIN_ID[normalized]
+  if (direct) return direct
+  if (/^eip155:\d+$/.test(normalized)) {
+    const chainId = Number(normalized.slice('eip155:'.length))
+    if (Number.isFinite(chainId) && chainId > 0) return EVM_CHAIN_ID_TO_COIN_ID[chainId] || null
+  }
+  if (/^\d+$/.test(normalized)) {
+    const chainId = Number(normalized)
+    if (Number.isFinite(chainId) && chainId > 0) return EVM_CHAIN_ID_TO_COIN_ID[chainId] || null
+  }
+  return null
+}
+
+function expandEnabledCoinSelectionToken(rawToken: string): string[] {
+  const token = normalizeCoinSelectionToken(rawToken)
+  if (!token) return []
+  if (token === 'evm') return [...EVM_COIN_IDS]
+  if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
+  if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))
+  const chainlistMapped = mapChainlistAliasToCoinId(token)
+  if (chainlistMapped) return [chainlistMapped]
+  return [token]
+}
+
+function normalizeEnabledCoinIdTokens(rawTokens: string[]): string[] {
+  const out: string[] = []
+  for (const rawToken of rawTokens) {
+    const expanded = expandEnabledCoinSelectionToken(rawToken)
+    for (const id of expanded) {
+      if (!id) continue
+      if (!ALLOWED_COIN_IDS.has(id)) continue
+      if (DISABLED_NETWORK_IDS.has(id)) continue
+      out.push(id)
+    }
+  }
+  return out
+}
 
 function parseEnabledCoinIdsFromBuildConfig(): Set<string> | null {
   const enabledRaw = BUILD_CONFIG.coins?.enabled
@@ -116,10 +200,11 @@ function parseEnabledCoinIdsFromBuildConfig(): Set<string> | null {
     if (!enabledRaw) return new Set(DEFAULT_ENABLED_COIN_IDS)
     if (enabledRaw === 'all' || enabledRaw === '*') return new Set(ALLOWED_COIN_IDS)
     if (Array.isArray(enabledRaw)) {
-      const selected = enabledRaw
-        .map((v) => String(v || '').trim().toLowerCase())
-        .filter(Boolean)
-        .filter((id) => ALLOWED_COIN_IDS.has(id))
+      const selected = normalizeEnabledCoinIdTokens(
+        enabledRaw
+          .map((v) => String(v || '').trim().toLowerCase())
+          .filter(Boolean)
+      )
       return selected.length > 0 ? new Set(selected) : new Set(DEFAULT_ENABLED_COIN_IDS)
     }
     return new Set(DEFAULT_ENABLED_COIN_IDS)
@@ -136,12 +221,12 @@ function parseEnabledCoinIds(raw: string | undefined): Set<string> {
 
   const selected = input
     .split(',')
-    .map((v) => v.trim())
+    .map((v) => v.trim().toLowerCase())
     .filter(Boolean)
-    .filter((id) => ALLOWED_COIN_IDS.has(id))
-    .filter((id) => !DISABLED_NETWORK_IDS.has(id))
 
-  return selected.length > 0 ? new Set(selected) : new Set(DEFAULT_ENABLED_COIN_IDS)
+  const resolved = normalizeEnabledCoinIdTokens(selected)
+
+  return resolved.length > 0 ? new Set(resolved) : new Set(DEFAULT_ENABLED_COIN_IDS)
 }
 
 export const ENABLED_NETWORK_IDS = new Set(

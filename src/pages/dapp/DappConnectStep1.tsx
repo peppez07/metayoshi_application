@@ -11,6 +11,7 @@ import {
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { compareNetworksByModelFamily } from '../../lib/coinModel'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -89,10 +90,16 @@ const DappConnectStep1: React.FC = () => {
   }
 
   const coinOptions = useMemo(
-    () => networks.map((network) => ({
-      id: network.id,
-      label: `${network.symbol} (${network.name})`
-    })).sort((a, b) => a.label.localeCompare(b.label)),
+    () => [...networks]
+      .sort((a, b) => {
+        const familyDelta = compareNetworksByModelFamily(a, b)
+        if (familyDelta !== 0) return familyDelta
+        return a.name.localeCompare(b.name)
+      })
+      .map((network) => ({
+        id: network.id,
+        label: `${network.symbol} (${network.name})`
+      })),
     [networks]
   )
 

@@ -19,6 +19,16 @@ export type CoinModelRouteKey =
   | 'monero'
   | 'generic'
 
+const COIN_MODEL_FAMILY_SORT_ORDER: Record<CoinModelFamily, number> = {
+  evm: 0,
+  'utxo-assets': 1,
+  'utxo-classic': 2,
+  'xrp-ledger': 3,
+  cardano: 4,
+  monero: 5,
+  generic: 6
+}
+
 export function resolveCoinModelFamily(network: Network): CoinModelFamily {
   const modelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
   if (modelId === 'ada') return 'cardano'
@@ -50,4 +60,13 @@ export function coinModelRouteKeyToFamily(route: string): CoinModelFamily {
     || route === 'generic'
   ) return route
   return 'generic'
+}
+
+export function getCoinModelFamilySortRank(network: Network): number {
+  const family = resolveCoinModelFamily(network)
+  return COIN_MODEL_FAMILY_SORT_ORDER[family] ?? COIN_MODEL_FAMILY_SORT_ORDER.generic
+}
+
+export function compareNetworksByModelFamily(a: Network, b: Network): number {
+  return getCoinModelFamilySortRank(a) - getCoinModelFamilySortRank(b)
 }

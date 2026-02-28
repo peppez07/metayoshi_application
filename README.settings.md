@@ -122,6 +122,25 @@ Autoload is opt-in and intended for local/private builds only.
 VITE_ENABLED_COINS=rtm
 ```
 
+`VITE_ENABLED_COINS` also supports EVM group aliases:
+
+- `evm` -> `eth,bnb,polygon,arb,base,avaxc`
+- `evm-l2` (also `eth-l2` or `l2`) -> `polygon,arb,base`
+- `evm-l1` -> `eth,bnb,avaxc`
+- Chainlist-style aliases (from https://chainlist.org/) for EVM networks:
+  `ethereum`, `bsc`, `binance-smart-chain`, `polygon-mainnet`, `arbitrum-one`, `base-mainnet`, `avalanche-c-chain`
+  and chain IDs such as `eip155:1`, `eip155:56`, `eip155:137`, `eip155:42161`, `eip155:8453`, `eip155:43114`
+
+Example:
+
+```env
+VITE_ENABLED_COINS=rtm,evm-l2,sol
+```
+
+```env
+VITE_ENABLED_COINS=rtm,eip155:1,eip155:42161,base-mainnet
+```
+
 ### Compile-time build config (recommended)
 
 For a single “main” build-time switchboard (coins, feature flags, and model test-status colors), create:
@@ -146,7 +165,7 @@ Supported keys (current):
 
 ```json
 {
-  "coins": { "enabled": ["rtm", "eth"], "disabled": ["srv--cronos-pos"] },
+  "coins": { "enabled": ["rtm", "evm-l2"], "disabled": ["srv--cronos-pos"] },
   "features": {
     "bridgeSecureWritesEnabled": true,
     "enableRemoteEvmTokenCatalog": false,

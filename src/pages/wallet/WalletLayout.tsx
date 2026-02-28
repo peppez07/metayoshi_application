@@ -20,7 +20,7 @@ import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
-import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from '../../lib/coinModel'
+import { resolveCoinModelFamily, coinModelFamilyToRouteKey, compareNetworksByModelFamily } from '../../lib/coinModel'
 import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
 import {
   DONATION_ENABLED_DEFAULT,
@@ -122,6 +122,8 @@ const WalletLayout: React.FC = () => {
       usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
     }
     return [...networks].sort((a, b) => {
+      const familyDelta = compareNetworksByModelFamily(a, b)
+      if (familyDelta !== 0) return familyDelta
       const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
       if (usageDelta !== 0) return usageDelta
       return a.name.localeCompare(b.name)
