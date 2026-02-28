@@ -2,9 +2,8 @@ import { arrCoin } from './arr'
 import { arbitrumCoin } from './arbitrum'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
-import { bitcoinCoin } from './bitcoin'
+import { bitcoinCoin, BTC_ADDRESS_SPEC } from './bitcoin'
 import { cardanoCoin } from './cardano'
-import { BTC_ADDRESS_SPEC } from './btc'
 import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
 import { cosmosCoin } from './cosmos'
@@ -168,6 +167,7 @@ function mapChainlistAliasToCoinId(rawToken: string): string | null {
 function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   const token = normalizeCoinSelectionToken(rawToken)
   if (!token) return []
+  if (token === 'btc' || token === 'bitcoin') return ['srv--bitcoin']
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))
@@ -486,6 +486,7 @@ const FORCE_ETH_COMPAT_IDS = new Set([
 
 function mapServerCoinIdToNetworkId(coinId: string): string | null {
   const normalized = String(coinId || '').trim().toLowerCase()
+  if (normalized === 'btc') return 'srv--bitcoin'
   const direct = SERVER_COIN_TO_NETWORK_ID[normalized]
   if (direct) return direct
   const scaffoldMapped = SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID[normalized]

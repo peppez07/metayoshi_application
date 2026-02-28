@@ -158,7 +158,7 @@ const DappConnectStep2: React.FC = () => {
           </div>
 
           <p className="text-[10px] text-gray-500 leading-tight">
-            Only connect with trusted sites. Asset scope includes ERC20/ERC721/ERC1155 on EVM, Cosmos denom/CW20/CW721 where enabled, and other network-native asset layers.
+            Only connect with trusted sites. Asset scope includes ERC20/ERC721/ERC1155 on EVM, SPL Tokens/SPL NFTs/Compressed NFTs on Solana, Cosmos denom/CW20/CW721 where enabled, and other network-native asset layers.
           </p>
         </div>
       </div>

@@ -21,7 +21,7 @@ function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'Read wallet addresses and balances'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
   if (scope === 'send_coin') return 'Request native coin transfers'
-  return 'Request token/NFT transfers (ERC20/721/1155, CW20/721, denom assets where supported)'
+  return 'Request token/NFT transfers (ERC20/721/1155, SPL Tokens/SPL NFTs/cNFTs, CW20/721, denom assets where supported)'
 }
 
 const DappConnectStep1: React.FC = () => {

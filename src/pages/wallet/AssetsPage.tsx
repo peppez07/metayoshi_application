@@ -18,6 +18,7 @@ import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -43,9 +44,6 @@ function parseAssetName(name: string): { root: string; sub: string | null } {
 }
 
 function isRoot(name: string) { return !parseAssetName(name).sub }
-function isEvmNftAssetKey(name: string): boolean {
-  return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(String(name || '').trim())
-}
 
 // ── AssetRow ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +51,7 @@ interface AssetRowProps {
   name: string
   displayName?: string
   nft?: boolean
+  metaLabel?: string
   logoUrl?: string
   rawAmount: number
   onClick: () => void
@@ -61,7 +60,7 @@ interface AssetRowProps {
   hideMetaLabels?: boolean
 }
 
-const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false, hideMetaLabels = false }) => {
+const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, metaLabel, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false, hideMetaLabels = false }) => {
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
@@ -93,7 +92,7 @@ const AssetRow: React.FC<AssetRowProps> = ({ name, displayName, nft = false, log
           </div>
           {(nft || !hideMetaLabels) && (
             <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-              {nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`)}
+              {metaLabel || (nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`))}
             </span>
           )}
           {!hideMetaLabels && previewAvailable && (
@@ -147,6 +146,7 @@ const AssetsPage: React.FC = () => {
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
   const isEvmEcosystem = activeNetwork.coinType === 'EVM'
+  const isSolanaEcosystem = activeNetwork.coinType === 'SOL' || activeModelId === 'sol'
   const supportsPreview =
     activeNetwork.coinType === 'UTXO'
     || activeNetwork.coinType === 'EVM'
@@ -475,6 +475,7 @@ const AssetsPage: React.FC = () => {
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={isEvmEcosystem}
+                metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
               />
             ))}
           </>
@@ -498,6 +499,7 @@ const AssetsPage: React.FC = () => {
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={true}
+                metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
               />
             ))}
           </>
@@ -525,6 +527,7 @@ const AssetsPage: React.FC = () => {
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={false}
+                metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
               />
             ))}
           </>
@@ -552,6 +555,7 @@ const AssetsPage: React.FC = () => {
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={false}
+                metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
               />
             ))}
           </>
@@ -582,11 +586,11 @@ const AssetsPage: React.FC = () => {
                 <div className="flex items-center gap-2 flex-wrap">
                   {!isEvmEcosystem && (
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
-                      isRoot(selectedAsset)
+                      (isSolanaEcosystem || isRoot(selectedAsset))
                         ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                         : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
                     }`}>
-                      {isRoot(selectedAsset) ? 'Root' : 'Sub'}
+                      {isSolanaEcosystem ? resolveSolanaAssetTypeLabel(selectedAsset) : (isRoot(selectedAsset) ? 'Root' : 'Sub')}
                     </span>
                   )}
                   <span className="text-sm font-mono font-bold text-white">{selectedAsset}</span>

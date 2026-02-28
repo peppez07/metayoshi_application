@@ -7,6 +7,8 @@ export const BITCOIN_ADDRESS_SPEC: UtxoAddressSpec = {
   bip44CoinType: 0,
   p2pkhVersion: 0x00
 }
+// Back-compat alias for legacy imports.
+export const BTC_ADDRESS_SPEC = BITCOIN_ADDRESS_SPEC
 
 export function createBitcoinNetwork(ctx: CoinRuntimeContext): Network {
   const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()

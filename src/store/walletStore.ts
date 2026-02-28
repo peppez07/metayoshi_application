@@ -42,6 +42,7 @@ import { getBuildFeatureFlag } from '../buildConfig'
 import { isCroCosmosNetwork, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import { buildSolanaAssetId, extractSolanaMintFromAssetId } from '../lib/assetTypes'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
 import { getTokenLogoForAsset } from '../coins/tokenlogos'
 import { createRequestCache } from '../lib/requestCache'
@@ -429,7 +430,7 @@ type EvmNftHolding = {
 }
 
 const DEFAULT_ETH_TRACKED_TOKENS: EvmTrackedToken[] = [
-  { address: '0xA0b73E1Ff0B80914AB6Fe0444E65848C4C34450b', symbol: 'CRO', decimals: 8 },
+  { address: '0xa0b73e1ff0b80914ab6fe0444e65848c4c34450b', symbol: 'CRO', decimals: 8 },
   { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
   { address: '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6 },
   { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 },
@@ -517,8 +518,8 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
 
   for (const entry of entries) {
     const [addressRaw, symbolRaw = '', decimalsRaw = '18'] = entry.split(':').map((part) => part.trim())
-    if (!ethers.isAddress(addressRaw)) continue
-    const checksum = ethers.getAddress(addressRaw)
+    const checksum = normalizeEvmAddressLoose(addressRaw)
+    if (!checksum) continue
     if (seen.has(checksum)) continue
     const symbol = symbolRaw || checksum.slice(0, 6)
     const decimals = Number(decimalsRaw)
@@ -533,13 +534,27 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   return parsed
 }
 
+function normalizeEvmAddressLoose(address: string): string | null {
+  const raw = String(address || '').trim()
+  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return null
+  try {
+    return ethers.getAddress(raw)
+  } catch {
+    try {
+      return ethers.getAddress(raw.toLowerCase())
+    } catch {
+      return null
+    }
+  }
+}
+
 function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[] {
   const out: EvmTrackedToken[] = []
   const byAddress = new Map<string, number>()
   for (const group of groups) {
     for (const token of group) {
-      if (!ethers.isAddress(token.address)) continue
-      const address = ethers.getAddress(token.address)
+      const address = normalizeEvmAddressLoose(token.address)
+      if (!address) continue
       const existingIndex = byAddress.get(address)
       if (existingIndex !== undefined) {
         const existing = out[existingIndex]
@@ -593,11 +608,12 @@ function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
   const out: EvmTrackedToken[] = []
   for (const row of values as any[]) {
     const candidateAddress = String(row?.address || row?.token_address || '').trim()
-    if (!ethers.isAddress(candidateAddress)) continue
+    const normalizedAddress = normalizeEvmAddressLoose(candidateAddress)
+    if (!normalizedAddress) continue
     const symbol = String(row?.symbol || '').trim().toUpperCase()
     const decimals = Number(row?.decimals)
     out.push({
-      address: ethers.getAddress(candidateAddress),
+      address: normalizedAddress,
       symbol: symbol || shortAddress(candidateAddress),
       decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18,
       logoUri: String(row?.logoURI || row?.logo_uri || row?.logo || row?.image || '').trim() || undefined
@@ -650,7 +666,7 @@ async function fetchRemoteTrackedTokensForChain(chainId: number): Promise<EvmTra
 }
 
 async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): Promise<EvmTrackedToken[]> {
-  const base = resolveTrackedEvmTokensBase(network)
+  const base = mergeTrackedEvmTokens(resolveTrackedEvmTokensBase(network))
   const chainId = resolveEvmChainId(network)
   if (!chainId) return base
 
@@ -675,8 +691,8 @@ function resolveCatalogEvmTrackedTokens(
     if (item.kind !== 'asset') continue
     if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
     const candidate = String(item.contractAddress || '').trim()
-    if (!ethers.isAddress(candidate)) continue
-    const address = ethers.getAddress(candidate)
+    const address = normalizeEvmAddressLoose(candidate)
+    if (!address) continue
     if (byAddress.has(address)) continue
     byAddress.set(address, {
       address,
@@ -697,7 +713,8 @@ function parseTrackedEvmNfts(raw: string): EvmTrackedNft[] {
   const seen = new Set<string>()
   for (const entry of entries) {
     const [addressRaw, tokenIdRaw = '', standardRaw = 'auto', ...labelParts] = entry.split(':')
-    if (!ethers.isAddress(addressRaw)) continue
+    const address = normalizeEvmAddressLoose(addressRaw)
+    if (!address) continue
     const tokenId = String(tokenIdRaw || '').trim()
     if (!tokenId) continue
     const standardNormalized = String(standardRaw || '').trim().toLowerCase()
@@ -706,7 +723,6 @@ function parseTrackedEvmNfts(raw: string): EvmTrackedNft[] {
       : standardNormalized === 'erc1155'
         ? 'erc1155'
         : 'auto'
-    const address = ethers.getAddress(addressRaw)
     const key = `${address}:${tokenId.toLowerCase()}`
     if (seen.has(key)) continue
     const label = labelParts.join(':').trim() || undefined
@@ -739,7 +755,8 @@ function resolveCatalogEvmTrackedNfts(
     if (item.kind !== 'asset') continue
     if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
     const address = String(item.contractAddress || '').trim()
-    if (!ethers.isAddress(address)) continue
+    const checksum = normalizeEvmAddressLoose(address)
+    if (!checksum) continue
 
     const source = `${String(item.coinId || '')} ${String(item.name || '')}`
     const tokenIdMatch = source.match(/(?:tokenid|token|id)\D*(0x[0-9a-f]+|\d+)/i) || source.match(/[#:/](0x[0-9a-f]+|\d+)/i)
@@ -751,7 +768,6 @@ function resolveCatalogEvmTrackedNfts(
       : /721/i.test(source)
         ? 'erc721'
         : 'auto'
-    const checksum = ethers.getAddress(address)
     const key = `${checksum}:${tokenId.toLowerCase()}`
     if (seen.has(key)) continue
     out.push({
@@ -1186,6 +1202,12 @@ function normalizeNetworkSymbol(network: Network): Network {
     symbol: 'BTC',
     coinSymbol: network.coinType === 'UTXO' ? 'BTC' : (network.coinSymbol || 'BTC')
   }
+}
+
+function normalizeNetworkIdAlias(value: string): string {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
+  return String(value || '').trim()
 }
 
 function normalizeNetworkListSymbols(networks: Network[]): Network[] {
@@ -1867,23 +1889,24 @@ export const useWalletStore = create<WalletState>()(
       },
 
       setActiveNetwork: async (id) => {
+        const normalizedId = normalizeNetworkIdAlias(id)
         set((state) => {
           const activeAccount = state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0]
           const nextAccounts = activeAccount
             ? state.accounts.map((account) => (
               account.id === activeAccount.id
-                ? { ...account, balance: getCachedBalanceForNetwork(account, id, false) }
+                ? { ...account, balance: getCachedBalanceForNetwork(account, normalizedId, false) }
                 : account
             ))
             : state.accounts
 
           return {
-            activeNetworkId: id,
+            activeNetworkId: normalizedId,
             lastActiveTimestamp: Date.now(),
             accounts: nextAccounts
           }
         })
-        await get().ensureNetworkAddress(id)
+        await get().ensureNetworkAddress(normalizedId)
         await get().refreshActiveBalance()
       },
 
@@ -2437,6 +2460,8 @@ export const useWalletStore = create<WalletState>()(
               amountRaw: string
               amountUi: string
               decimals: number
+              isNft?: boolean
+              tokenType?: string
               symbol?: string
             }> = []
 
@@ -2447,6 +2472,7 @@ export const useWalletStore = create<WalletState>()(
                 amountRaw: String(row.amountRaw || '').trim(),
                 amountUi: String(row.amountUi || '').trim(),
                 decimals: Number.isFinite(row.decimals) ? Math.max(0, Math.trunc(row.decimals)) : 0,
+                isNft: Boolean(row.isNft),
                 symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined
               }))
             } catch {
@@ -2476,6 +2502,7 @@ export const useWalletStore = create<WalletState>()(
                     amountRaw,
                     amountUi: String(row.balance || '0').trim() || '0',
                     decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+                    tokenType: String(row.tokenType || '').trim(),
                     symbol: String(row.symbol || '').trim().toUpperCase() || undefined
                   })
                 }
@@ -2495,16 +2522,23 @@ export const useWalletStore = create<WalletState>()(
               if (!tokenId || !/^\d+$/.test(amountRaw)) continue
               const displaySats = toAssetDisplaySats(BigInt(amountRaw), row.decimals)
               if (!Number.isFinite(displaySats) || displaySats <= 0) continue
-              assets[tokenId] = displaySats
+
+              const bridgeTokenType = String(row.tokenType || '').trim().toLowerCase()
+              const solAssetType = bridgeTokenType.includes('compressed') || bridgeTokenType.includes('cnft')
+                ? 'compressed-nft'
+                : (row.isNft ? 'spl-nft' : 'spl-token')
+              const assetKey = buildSolanaAssetId(tokenId, solAssetType)
+              if (!assetKey) continue
+
+              assets[assetKey] = displaySats
               const info = registry[tokenId]
               const onchainSymbol = String(row.symbol || '').trim().toUpperCase()
-              if (onchainSymbol) {
-                labels[tokenId] = onchainSymbol
-              } else if (info?.symbol) {
-                labels[tokenId] = info.symbol
-              }
+              const displayTicker = onchainSymbol || String(info?.symbol || '').trim().toUpperCase() || tokenId
+              if (solAssetType === 'spl-token') labels[assetKey] = displayTicker
+              else if (solAssetType === 'spl-nft') labels[assetKey] = `${displayTicker} (SPL NFT)`
+              else labels[assetKey] = `${displayTicker} (Compressed NFT)`
               const logoUri = String(info?.logoURI || '').trim()
-              if (logoUri) logos[tokenId] = logoUri
+              if (logoUri) logos[assetKey] = logoUri
             }
             set((state) => ({
               networkAssets: {
@@ -2895,7 +2929,7 @@ export const useWalletStore = create<WalletState>()(
           const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
           const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
           const explorerBase = String(net.explorerUrl || 'https://solscan.io').trim().replace(/\/+$/, '')
-          const mint = String(normalizedAssetId.split(':').pop() || normalizedAssetId).trim()
+          const mint = extractSolanaMintFromAssetId(normalizedAssetId)
           const tokenRef = mint ? `${explorerBase}/token/${encodeURIComponent(mint)}` : undefined
 
           let symbol = ''
@@ -3135,22 +3169,17 @@ export const useWalletStore = create<WalletState>()(
               chainId: resolvedChainId,
               data: transferData
             })
-            const sent = await sendBridgeTokenTransfer(rpcConfig, {
-              tokenId: normalizedAssetId,
-              toAddress: recipient,
-              fromAddress,
-              amount: relayAmount,
-              signedTxHex: signedTx
-            })
+            const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
+            if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
             await get().fetchNetworkAssets()
-            return { txid: sent.txid }
+            return { txid: sentHash }
           }
 
           const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
-          const trackedTokens = [...trackedDefaults, ...trackedFromCatalog]
+          const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 
           const exactAddress = ethers.isAddress(normalizedAssetId)
@@ -3219,16 +3248,10 @@ export const useWalletStore = create<WalletState>()(
             chainId: resolvedChainId,
             data: transferData
           })
-
-          const sent = await sendBridgeTokenTransfer(rpcConfig, {
-            tokenId: tokenAddress,
-            toAddress: recipient,
-            fromAddress,
-            amount: qty,
-            signedTxHex: signedTx
-          })
+          const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
+          if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
           await get().fetchNetworkAssets()
-          return { txid: sent.txid }
+          return { txid: sentHash }
         }
 
         if (modelId === 'sol') {
@@ -4522,8 +4545,9 @@ export const useWalletStore = create<WalletState>()(
         const activeAccountId = accounts.some((a) => a.id === merged.activeAccountId)
           ? merged.activeAccountId
           : (accounts[0]?.id ?? null)
-        const activeNetworkId = INITIAL_NETWORKS.some((n) => n.id === merged.activeNetworkId)
-          ? merged.activeNetworkId
+        const normalizedPersistedNetworkId = normalizeNetworkIdAlias(String(merged.activeNetworkId || ''))
+        const activeNetworkId = INITIAL_NETWORKS.some((n) => n.id === normalizedPersistedNetworkId)
+          ? normalizedPersistedNetworkId
           : DEFAULT_ACTIVE_NETWORK_ID
         const accountsWithActiveNetworkBalance = accounts.map((account) => (
           account.id === activeAccountId
