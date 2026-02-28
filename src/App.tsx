@@ -12,6 +12,7 @@ import WalletLayout from './pages/wallet/WalletLayout'
 import Assets from './pages/wallet/Assets'
 import AssetsPage from './pages/wallet/AssetsPage'
 import AssetPreviewPage from './pages/wallet/AssetPreviewPage'
+import AssetSendPage from './pages/wallet/AssetSendPage'
 import Activity from './pages/wallet/Activity'
 import Send from './pages/wallet/Send'
 import Swap from './pages/wallet/Swap'
@@ -144,6 +145,7 @@ function App() {
 
           {/* Full Assets Page */}
           <Route path="/assets" element={isLocked ? <Navigate to="/unlock" /> : <AssetsPage />} />
+          <Route path="/assets/send" element={isLocked ? <Navigate to="/unlock" /> : <AssetSendPage />} />
           <Route path="/assets/preview" element={isLocked ? <Navigate to="/unlock" /> : <AssetPreviewPage />} />
 
           {/* Dapp Flow */}

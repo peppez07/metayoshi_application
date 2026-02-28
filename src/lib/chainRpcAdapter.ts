@@ -24,6 +24,7 @@ import { TronWeb } from 'tronweb'
 import { getTronBalance } from './tronNonCustodial'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
 import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
+import { getBuildFeatureFlag } from '../buildConfig'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -97,7 +98,7 @@ export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyM
   if (modelId === 'sol' || modelId === 'xlm' || modelId === 'tron') return 'non-custodial'
   if (modelId === 'ada') return 'non-custodial'
   if (modelId === 'xmr') {
-    const enabled = /^(1|true|yes)$/i.test(String((import.meta as any)?.env?.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
+    const enabled = getBuildFeatureFlag('enableXmrNonCustodial', 'VITE_ENABLE_XMR_NON_CUSTODIAL', false)
     return enabled ? 'non-custodial' : 'unsupported'
   }
   if (network.coinType === 'EVM') return 'non-custodial'

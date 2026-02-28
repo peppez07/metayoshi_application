@@ -13,6 +13,7 @@ import { hexToBytes } from '@noble/hashes/utils'
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1Q2hvZbsiqW5xWH25efTNsLJA8knL')
+const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 
 function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
   const primary = String(rpcUrl || '').trim()
@@ -33,15 +34,19 @@ function parseSolAmount(amount: string): bigint {
 export async function getSolanaBalance(rpcUrl: string, address: string): Promise<string> {
   const pubkey = new PublicKey(String(address || '').trim())
   let lastError: unknown = null
+  let firstSuccessful: string | null = null
   for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
     try {
       const connection = new Connection(candidate, 'confirmed')
       const lamports = await connection.getBalance(pubkey, 'confirmed')
-      return (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/\.?0+$/, '')
+      const formatted = (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/\.?0+$/, '')
+      if (firstSuccessful == null) firstSuccessful = formatted
+      if (lamports > 0) return formatted
     } catch (error) {
       lastError = error
     }
   }
+  if (firstSuccessful != null) return firstSuccessful
   throw lastError instanceof Error ? lastError : new Error('Failed to query Solana balance from configured RPC endpoints')
 }
 
@@ -162,37 +167,164 @@ export type SolanaTokenBalanceRow = {
   decimals: number
   tokenProgram: string
   isNft: boolean
+  symbol?: string
+  name?: string
+}
+
+async function fetchJsonRpc(endpoint: string, method: string, params: any[]): Promise<any> {
+  const body = {
+    jsonrpc: '2.0',
+    id: 1,
+    method,
+    params
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!response.ok) throw new Error(`Solana RPC HTTP ${response.status} @ ${endpoint}`)
+  const json = await response.json().catch(() => null)
+  if (!json || json.error) {
+    throw new Error(`Solana RPC error @ ${endpoint}: ${JSON.stringify(json?.error || json)}`)
+  }
+  return json.result
+}
+
+async function fetchTokenRowsViaHttpRpc(endpoint: string, owner: string, programId: string): Promise<SolanaTokenBalanceRow[]> {
+  const result = await fetchJsonRpc(endpoint, 'getTokenAccountsByOwner', [
+    owner,
+    { programId },
+    { encoding: 'jsonParsed', commitment: 'confirmed' }
+  ])
+  const rows = Array.isArray(result?.value) ? result.value : []
+  const out: SolanaTokenBalanceRow[] = []
+  for (const row of rows) {
+    const parsed = row?.account?.data?.parsed?.info
+    const mint = String(parsed?.mint || '').trim()
+    const tokenAmount = parsed?.tokenAmount || {}
+    const amountRaw = String(tokenAmount?.amount || '').trim()
+    const amountUi = String(tokenAmount?.uiAmountString || '').trim()
+    const decimals = Number(tokenAmount?.decimals ?? 0)
+    if (!mint || !/^\d+$/.test(amountRaw)) continue
+    const rawBig = BigInt(amountRaw)
+    if (rawBig <= 0n) continue
+    out.push({
+      tokenId: mint,
+      amountRaw,
+      amountUi: amountUi || '0',
+      decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+      tokenProgram: programId,
+      isNft: decimals === 0 && rawBig === 1n
+    })
+  }
+  return out
+}
+
+function readU32LE(buffer: Buffer, offset: number): number {
+  if (offset + 4 > buffer.length) return 0
+  return buffer.readUInt32LE(offset)
+}
+
+function readBorshString(buffer: Buffer, offset: number): { value: string; next: number } {
+  const len = readU32LE(buffer, offset)
+  const start = offset + 4
+  const end = Math.min(buffer.length, start + Math.max(0, len))
+  const value = buffer.slice(start, end).toString('utf8').replace(/\0/g, '').trim()
+  return { value, next: end }
+}
+
+async function readMetaplexTokenMetadata(
+  connection: Connection,
+  mint: PublicKey
+): Promise<{ symbol?: string; name?: string }> {
+  try {
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+      METADATA_PROGRAM_ID
+    )
+    const info = await connection.getAccountInfo(pda, 'confirmed')
+    if (!info?.data || info.data.length < 70) return {}
+    const data = Buffer.from(info.data)
+
+    // Metadata account layout: key(1) + updateAuthority(32) + mint(32) + Data{name,symbol,uri,...}
+    let cursor = 1 + 32 + 32
+    const namePart = readBorshString(data, cursor)
+    cursor = namePart.next
+    const symbolPart = readBorshString(data, cursor)
+    const name = String(namePart.value || '').trim()
+    const symbol = String(symbolPart.value || '').trim().toUpperCase()
+    return {
+      name: name || undefined,
+      symbol: symbol || undefined
+    }
+  } catch {
+    return {}
+  }
 }
 
 export async function listSolanaTokenBalances(rpcUrl: string, ownerAddress: string): Promise<SolanaTokenBalanceRow[]> {
   const owner = new PublicKey(String(ownerAddress || '').trim())
-  return await withSolanaConnection(rpcUrl, async (connection) => {
-    const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
-    const rows: SolanaTokenBalanceRow[] = []
-    for (const programId of programs) {
-      const result = await connection.getParsedTokenAccountsByOwner(owner, { programId }, 'confirmed')
-      for (const accountRow of result.value) {
-        const parsed = (accountRow.account.data as any)?.parsed?.info
-        const mint = String(parsed?.mint || '').trim()
-        const tokenAmount = parsed?.tokenAmount
-        const amountRaw = String(tokenAmount?.amount || '').trim()
-        const amountUi = String(tokenAmount?.uiAmountString || '').trim()
-        const decimals = Number(tokenAmount?.decimals ?? 0)
-        if (!mint || !/^\d+$/.test(amountRaw)) continue
-        const rawBig = BigInt(amountRaw)
-        if (rawBig <= 0n) continue
-        rows.push({
-          tokenId: mint,
-          amountRaw,
-          amountUi: amountUi || '0',
-          decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
-          tokenProgram: programId.toBase58(),
-          isNft: decimals === 0 && rawBig === 1n
-        })
+  const ownerBase58 = owner.toBase58()
+  let lastError: unknown = null
+  let firstSuccessful: SolanaTokenBalanceRow[] | null = null
+  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
+    try {
+      const connection = new Connection(candidate, 'confirmed')
+      const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
+      const rows: SolanaTokenBalanceRow[] = []
+      const metadataByMint = new Map<string, { symbol?: string; name?: string }>()
+      for (const programId of programs) {
+        const result = await connection.getParsedTokenAccountsByOwner(owner, { programId }, 'confirmed')
+        for (const accountRow of result.value) {
+          const parsed = (accountRow.account.data as any)?.parsed?.info
+          const mint = String(parsed?.mint || '').trim()
+          const tokenAmount = parsed?.tokenAmount
+          const amountRaw = String(tokenAmount?.amount || '').trim()
+          const amountUi = String(tokenAmount?.uiAmountString || '').trim()
+          const decimals = Number(tokenAmount?.decimals ?? 0)
+          if (!mint || !/^\d+$/.test(amountRaw)) continue
+          const rawBig = BigInt(amountRaw)
+          if (rawBig <= 0n) continue
+          let metadata = metadataByMint.get(mint)
+          if (!metadata) {
+            metadata = await readMetaplexTokenMetadata(connection, new PublicKey(mint))
+            metadataByMint.set(mint, metadata)
+          }
+          rows.push({
+            tokenId: mint,
+            amountRaw,
+            amountUi: amountUi || '0',
+            decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+            tokenProgram: programId.toBase58(),
+            isNft: decimals === 0 && rawBig === 1n,
+            symbol: metadata.symbol,
+            name: metadata.name
+          })
+        }
       }
+      if (firstSuccessful == null) firstSuccessful = rows
+      if (rows.length > 0) return rows
+    } catch (error) {
+      lastError = error
     }
-    return rows
-  })
+  }
+  // Final fallback: direct JSON-RPC calls to public mainnet endpoints.
+  try {
+    const fallbackEndpoints = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+    for (const endpoint of fallbackEndpoints) {
+      const tokenkegRows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_PROGRAM_ID.toBase58())
+      const token2022Rows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_2022_PROGRAM_ID.toBase58())
+      const merged = [...tokenkegRows, ...token2022Rows]
+      if (firstSuccessful == null) firstSuccessful = merged
+      if (merged.length > 0) return merged
+    }
+  } catch (error) {
+    lastError = error
+  }
+  if (firstSuccessful != null) return firstSuccessful
+  if (lastError) throw lastError instanceof Error ? lastError : new Error('Failed to list Solana token balances')
+  return []
 }
 
 export async function sendSolanaSplTokenNonCustodial(params: {

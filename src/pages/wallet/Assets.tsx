@@ -24,6 +24,7 @@ function isEvmNftAssetKey(name: string): boolean {
   return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(String(name || '').trim())
 }
 
+
 // Ã¢â€â‚¬Ã¢â€â‚¬ compact asset row (mirrors ActivityRow look) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 interface AssetPreviewRowProps {
@@ -112,23 +113,38 @@ const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nf
 // Ã¢â€â‚¬Ã¢â€â‚¬ main Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 const Assets: React.FC = () => {
-  const { networks, activeNetworkId, networkAssets, networkAssetLogos, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, activity } = useWalletStore()
+  const {
+    networks,
+    activeNetworkId,
+    accounts,
+    activeAccountId,
+    networkAssets,
+    networkAssetLogos,
+    networkAssetLabels,
+    evmNftAssets,
+    fetchNetworkAssets,
+    fetchAssetDetails,
+    activity
+  } = useWalletStore()
   const navigate = useNavigate()
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
 
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
   const isEvmEcosystem = activeNetwork.coinType === 'EVM'
   const supportsPreview =
     activeNetwork.coinType === 'UTXO'
     || activeNetwork.coinType === 'EVM'
+    || activeModelId === 'sol'
     || activeModelId === 'ada'
     || activeModelId === 'tron'
     || activeNetwork.coinType === 'XRP'
   const canOpenAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
+  const isPreviewableAssetName = (name: string): boolean => supportsPreview
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
@@ -145,8 +161,10 @@ const Assets: React.FC = () => {
     )
   }
 
-  const rawAssets = networkAssets[activeNetworkId] ?? {}
+  const baseRawAssets = networkAssets[activeNetworkId] ?? {}
+  const rawAssets = baseRawAssets
   const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
+  const assetLabels = networkAssetLabels[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
   const assetUsage = useMemo(() => {
     const out = new Map<string, number>()
@@ -220,23 +238,23 @@ const Assets: React.FC = () => {
           <AssetPreviewRow
             key={name}
             name={name}
-            displayName={nftLookup[name]?.label}
             nft={isEvmNftAssetKey(name)}
             logoUrl={assetLogos[name]}
             rawAmount={raw}
             onClick={() => {
               if (canOpenAssetSend && !isEvmNftAssetKey(name)) {
-                navigate('/assets', { state: { sendAsset: name } })
+                navigate('/assets/send', { state: { assetId: name } })
                 return
               }
               navigate('/assets')
             }}
             onPreview={() => {
-              if (!supportsPreview) return
+              if (!isPreviewableAssetName(name)) return
               navigate('/assets/preview', { state: { assetId: name } })
             }}
-            previewAvailable={supportsPreview && previewByAsset[name] === true}
+            previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
             hideMetaLabels={isEvmEcosystem}
+            displayName={nftLookup[name]?.label || assetLabels[name]}
           />
         ))}
 

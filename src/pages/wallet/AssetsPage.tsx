@@ -136,7 +136,7 @@ const AssetsPage: React.FC = () => {
     accounts, activeAccountId,
     networks, activeNetworkId,
     serverCoinCatalog,
-    networkAssets, networkAssetLogos, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendRtmAsset, addActivity,
+    networkAssets, networkAssetLogos, networkAssetLabels, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendAssetTransfer, addActivity,
     activity,
     isConnected,
     isSyncing, syncPercent, lowSyncStreak
@@ -150,6 +150,7 @@ const AssetsPage: React.FC = () => {
   const supportsPreview =
     activeNetwork.coinType === 'UTXO'
     || activeNetwork.coinType === 'EVM'
+    || activeModelId === 'sol'
     || activeModelId === 'ada'
     || activeModelId === 'tron'
     || activeNetwork.coinType === 'XRP'
@@ -190,8 +191,9 @@ const AssetsPage: React.FC = () => {
     if (delta !== 0) return delta
     return a.localeCompare(b)
   }
-  const rawAssets  = networkAssets[activeNetworkId] ?? {}
+  const rawAssets = networkAssets[activeNetworkId] ?? {}
   const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
+  const assetLabels = networkAssetLabels[activeNetworkId] ?? {}
   const allEntries = Object.entries(rawAssets)
   const roots      = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
   const subs       = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
@@ -206,13 +208,25 @@ const AssetsPage: React.FC = () => {
   const isSearching = search.trim().length > 0
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return q ? sorted.filter(([n]) => n.toLowerCase().includes(q)) : sorted
-  }, [sorted, search])
+    if (!q) return sorted
+    return sorted.filter(([n]) => {
+      if (n.toLowerCase().includes(q)) return true
+      const label = String(assetLabels[n] || '').trim().toLowerCase()
+      return Boolean(label && label.includes(q))
+    })
+  }, [sorted, search, assetLabels])
 
   const visibleAssetNames = useMemo(() => {
     const rows = (isSearching ? filtered : sorted).slice(0, 40)
     return rows.map(([name]) => name)
   }, [filtered, isSearching, sorted])
+  const resolveAssetDisplayName = (name: string): string => nftLookup[name]?.label || assetLabels[name] || name
+  const isPreviewableAssetName = (name: string): boolean => supportsPreview
+  const handleAssetRowClick = (name: string): void => {
+    if (canOpenAssetSend && !isEvmNftAssetKey(name)) {
+      navigate('/assets/send', { state: { assetId: name } })
+    }
+  }
 
   const deepLinkedSendAsset = String((location.state as { sendAsset?: string } | null)?.sendAsset || '').trim()
 
@@ -221,13 +235,9 @@ const AssetsPage: React.FC = () => {
     if (isEvmNftAssetKey(deepLinkedSendAsset)) return
     if (deepLinkHandledRef.current === deepLinkedSendAsset) return
     if (!sorted.some(([name]) => name === deepLinkedSendAsset)) return
-    setSelectedAsset(deepLinkedSendAsset)
-    setToAddress('')
-    setQty('')
-    setSendError('')
-    setTxid(null)
+    navigate('/assets/send', { state: { assetId: deepLinkedSendAsset } })
     deepLinkHandledRef.current = deepLinkedSendAsset
-  }, [canOpenAssetSend, deepLinkedSendAsset, sorted])
+  }, [canOpenAssetSend, deepLinkedSendAsset, sorted, navigate])
 
   useEffect(() => {
     if (!supportsPreview) return
@@ -304,7 +314,7 @@ const AssetsPage: React.FC = () => {
 
     setSending(true)
     try {
-      const result = await sendRtmAsset({ assetId: selectedAsset, qty, toAddress: toAddress.trim() })
+      const result = await sendAssetTransfer({ assetId: selectedAsset, qty, toAddress: toAddress.trim() })
       const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
         || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '') || ''
       addActivity({
@@ -327,7 +337,7 @@ const AssetsPage: React.FC = () => {
       {/* ── top bar ── */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-dark-600 shrink-0 bg-dark-900/60">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate('/wallet/assets', { replace: true })}
           className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-dark-700 transition-colors shrink-0"
         >
           <IoArrowBackOutline className="w-5 h-5 text-gray-300" />
@@ -373,7 +383,7 @@ const AssetsPage: React.FC = () => {
 
       {/* ── scrollable content ── */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {catalogForModel.length > 0 && (
+        {catalogAssetRows.length > 0 && (
           <div className="px-4 pt-3 pb-2 border-b border-dark-600/40">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
               Server Catalog · Main {catalogMainCount} · Assets {catalogAssetRows.length}
@@ -454,16 +464,16 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
-                displayName={nftLookup[name]?.label}
+                displayName={resolveAssetDisplayName(name)}
                 nft={isEvmNftAssetKey(name)}
                 logoUrl={assetLogos[name]}
                 rawAmount={raw}
-                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => handleAssetRowClick(name)}
                 onPreview={() => {
-                  if (!supportsPreview) return
+                  if (!isPreviewableAssetName(name)) return
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
-                previewAvailable={supportsPreview && previewByAsset[name] === true}
+                previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={isEvmEcosystem}
               />
             ))}
@@ -477,16 +487,16 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
-                displayName={nftLookup[name]?.label}
+                displayName={resolveAssetDisplayName(name)}
                 nft={isEvmNftAssetKey(name)}
                 logoUrl={assetLogos[name]}
                 rawAmount={raw}
-                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => handleAssetRowClick(name)}
                 onPreview={() => {
-                  if (!supportsPreview) return
+                  if (!isPreviewableAssetName(name)) return
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
-                previewAvailable={supportsPreview && previewByAsset[name] === true}
+                previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={true}
               />
             ))}
@@ -504,16 +514,16 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
-                displayName={nftLookup[name]?.label}
+                displayName={resolveAssetDisplayName(name)}
                 nft={isEvmNftAssetKey(name)}
                 logoUrl={assetLogos[name]}
                 rawAmount={raw}
-                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => handleAssetRowClick(name)}
                 onPreview={() => {
-                  if (!supportsPreview) return
+                  if (!isPreviewableAssetName(name)) return
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
-                previewAvailable={supportsPreview && previewByAsset[name] === true}
+                previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={false}
               />
             ))}
@@ -531,16 +541,16 @@ const AssetsPage: React.FC = () => {
               <AssetRow
                 key={name}
                 name={name}
-                displayName={nftLookup[name]?.label}
+                displayName={resolveAssetDisplayName(name)}
                 nft={isEvmNftAssetKey(name)}
                 logoUrl={assetLogos[name]}
                 rawAmount={raw}
-                onClick={() => { if (canOpenAssetSend && !isEvmNftAssetKey(name)) openSend(name) }}
+                onClick={() => handleAssetRowClick(name)}
                 onPreview={() => {
-                  if (!supportsPreview) return
+                  if (!isPreviewableAssetName(name)) return
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
-                previewAvailable={supportsPreview && previewByAsset[name] === true}
+                previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
                 hideMetaLabels={false}
               />
             ))}

@@ -15,6 +15,7 @@ const Register: React.FC = () => {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [ack, setAck] = useState(false)
+  const [betaAck, setBetaAck] = useState(false)
   const [termsAck, setTermsAck] = useState(false)
   const [createStep, setCreateStep] = useState<'form' | 'verify'>('form')
   const [challengeIndex, setChallengeIndex] = useState<number | null>(null)
@@ -93,8 +94,12 @@ const Register: React.FC = () => {
       setError('Please confirm you saved your recovery phrase')
       return
     }
+    if (!betaAck) {
+      setError('Please confirm you understand MetaYoshi is still in beta')
+      return
+    }
     if (!termsAck) {
-      setError('Please accept MetaYoshi Terms and Rules')
+      setError('Please accept MetaYoshi Terms of Service')
       return
     }
 
@@ -262,9 +267,21 @@ const Register: React.FC = () => {
                 </span>
               </label>
 
+              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={betaAck}
+                  onChange={(e) => setBetaAck(e.target.checked)}
+                  className="w-4 h-4 accent-primary"
+                />
+                <span className="text-xs font-bold text-gray-300">
+                  I understand MetaYoshi is still in beta and may contain bugs
+                </span>
+              </label>
+
               <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-3 space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Terms And Rules</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Terms of Service</p>
                   <button
                     type="button"
                     onClick={openTermsInInternalTab}
@@ -290,7 +307,7 @@ const Register: React.FC = () => {
                   className="w-4 h-4 accent-primary"
                 />
                 <span className="text-xs font-bold text-gray-300">
-                  I accept MetaYoshi Terms and Rules
+                  I accept MetaYoshi Terms of Service
                 </span>
               </label>
 

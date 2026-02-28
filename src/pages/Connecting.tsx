@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { IoRefresh, IoWarningOutline, IoCloseCircleOutline } from 'react-icons/io5'
+import clsx from 'clsx'
 import { useWalletStore } from '../store/walletStore'
 import type { Network } from '../store/walletStore'
+import { getModelIconFrameClass } from '../buildConfig'
 
 type Phase = 'connecting' | 'error' | 'bridge-warning'
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -223,7 +225,10 @@ const Connecting: React.FC = () => {
         />
 
         {/* Coin Icon */}
-        <div className="z-10 w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/35 flex items-center justify-center overflow-hidden shadow-[0_0_14px_rgba(245,132,31,0.2)] animate-breathe">
+        <div className={clsx(
+          'z-10 w-16 h-16 rounded-full bg-primary/10 border-2 flex items-center justify-center overflow-hidden animate-breathe',
+          getModelIconFrameClass(activeNetwork?.id || '')
+        )}>
           {activeNetwork?.logo
             ? <img src={activeNetwork.logo} alt={activeNetwork?.name} className="w-11 h-11 object-contain" />
             : <div className="w-8 h-8 bg-blue-500 rounded-full" />

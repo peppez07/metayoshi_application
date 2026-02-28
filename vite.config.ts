@@ -5,6 +5,32 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
 
+type BuildConfig = {
+  coins?: { enabled?: 'all' | '*' | string[]; disabled?: string[] }
+  features?: Record<string, boolean | undefined>
+  modelStatus?: { tested?: string[]; untested?: string[]; blocked?: string[] }
+}
+
+function loadBuildConfig(): BuildConfig {
+  const explicit = String(process.env.METAYOSHI_BUILD_CONFIG_PATH || '').trim()
+  const defaultPath = path.resolve(__dirname, 'metayoshi.build.json')
+  const configPath = explicit ? path.resolve(__dirname, explicit) : defaultPath
+  if (!existsSync(configPath)) return {}
+
+  try {
+    const raw = readFileSync(configPath, 'utf-8')
+    const json = JSON.parse(raw) as any
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return {}
+    console.log(`[metayoshi] Build config loaded from ${configPath}`)
+    return json as BuildConfig
+  } catch (err) {
+    console.warn(`[metayoshi] Failed to load build config from ${configPath}:`, err)
+    return {}
+  }
+}
+
+const buildConfig = loadBuildConfig()
+
 function parseBooleanLike(value: unknown, fallback: boolean): boolean {
   const normalized = String(value ?? '').trim().toLowerCase()
   if (!normalized) return fallback
@@ -133,7 +159,7 @@ export default defineConfig({
         // Copy manifest.json
         try {
           copyFileSync('public/manifest.json', 'dist/manifest.json')
-          console.log('✓ Copied manifest.json to dist/')
+          console.log('[OK] Copied manifest.json to dist/')
         } catch (err) {
           console.error('Failed to copy manifest.json:', err)
         }
@@ -152,7 +178,7 @@ export default defineConfig({
           console.error('Failed to copy MetayoshiLogo.png:', err)
         }
 
-        // Copy icons: public/icons/icon-*.png → dist/assets/metayoshi-*.png
+        // Copy icons: public/icons/icon-*.png -> dist/assets/metayoshi-*.png
         try {
           const publicIconsDir = path.resolve(__dirname, 'public/icons')
           if (existsSync(publicIconsDir)) {
@@ -167,7 +193,7 @@ export default defineConfig({
               const destPath = path.join(assetsDir, dest)
               if (existsSync(srcPath)) {
                 copyFileSync(srcPath, destPath)
-                console.log(`✓ Copied ${src} → dist/assets/${dest}`)
+                console.log(`[OK] Copied ${src} -> dist/assets/${dest}`)
               }
             }
           }
@@ -175,13 +201,13 @@ export default defineConfig({
           console.error('Failed to copy icons:', err)
         }
 
-        // Rename bootstrap.css → ui.css (Vite names CSS after the chunk that imports it)
+        // Rename bootstrap.css -> ui.css (Vite names CSS after the chunk that imports it)
         try {
           const bootstrapCss = path.resolve(__dirname, 'dist/assets/bootstrap.css')
           const uiCss = path.resolve(__dirname, 'dist/assets/ui.css')
           if (existsSync(bootstrapCss) && !existsSync(uiCss)) {
             copyFileSync(bootstrapCss, uiCss)
-            console.log('✓ Renamed bootstrap.css → ui.css')
+            console.log('[OK] Renamed bootstrap.css -> ui.css')
           }
         } catch (err) {
           console.error('Failed to rename CSS:', err)
@@ -196,11 +222,11 @@ export default defineConfig({
             // Remove the dev-only script tag pointing to /src/main.tsx (Vite injects the real one)
             html = html.replace(/<script[^>]*src="\/src\/main\.tsx"[^>]*><\/script>\n?\s*/g, '')
 
-            // Normalise any auto-generated asset paths → absolute /assets/...
+            // Normalise any auto-generated asset paths -> absolute /assets/...
             html = html.replace(/src="\.+\/assets\//g, 'src="/assets/')
             html = html.replace(/href="\.+\/assets\//g, 'href="/assets/')
 
-            // Fix any bootstrap.css reference → ui.css
+            // Fix any bootstrap.css reference -> ui.css
             html = html.replace(/bootstrap\.css/g, 'ui.css')
 
             // Ensure script tag is present
@@ -220,9 +246,9 @@ export default defineConfig({
             }
 
             writeFileSync(htmlPath, html, 'utf-8')
-            console.log('✓ Fixed popup HTML asset paths')
+            console.log('[OK] Fixed popup HTML asset paths')
           } else {
-            console.warn('⚠ dist/app/src/ui/index.html not found after build')
+            console.warn('[WARN] dist/app/src/ui/index.html not found after build')
           }
         } catch (err) {
           console.error('Failed to fix popup HTML:', err)
@@ -232,9 +258,9 @@ export default defineConfig({
         for (const f of ['dist/background.js', 'dist/assets/ui.js', 'dist/assets/ui.css']) {
           const p = path.resolve(__dirname, f)
           if (existsSync(p)) {
-            console.log(`✓ ${f}`)
+            console.log(`[OK] ${f}`)
           } else {
-            console.warn(`⚠ MISSING: ${f}`)
+            console.warn(`[WARN] MISSING: ${f}`)
           }
         }
       }
@@ -257,12 +283,30 @@ export default defineConfig({
     process: 'globalThis.process',
     'globalThis.Buffer': 'globalThis.Buffer',
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+    __METAYOSHI_BUILD_CONFIG__: JSON.stringify(buildConfig ?? {}),
   },
   optimizeDeps: {
     include: ['buffer', 'stream-browserify', 'events', 'process'],
   },
   build: {
     rollupOptions: {
+      onwarn(warning, warn) {
+        const message = String((warning as any)?.message ?? '')
+        const id = String((warning as any)?.id ?? (warning as any)?.loc?.file ?? '')
+
+        // Rollup (via Vite) sometimes emits a benign warning for misplaced `/*#__PURE__*/`
+        // annotations in certain `ox` versions bundled under WalletConnect/Reown deps.
+        // The warning already states Rollup will remove the comment; build output is otherwise correct.
+        if (
+          (message.includes('contains an annotation that Rollup cannot interpret')
+            || message.includes('Rollup cannot interpret due to the position of the comment'))
+          && (message.includes('ox/_esm/core/Base64.js') || id.includes('ox/_esm/core/Base64.js'))
+        ) {
+          return
+        }
+
+        warn(warning)
+      },
       input: {
         ui:         path.resolve(__dirname, 'app/src/ui/index.html'),
         background: path.resolve(__dirname, 'src/background/service-worker.ts'),

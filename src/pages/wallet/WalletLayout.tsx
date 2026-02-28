@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import clsx from 'clsx'
 import { WalletFrame } from '../../components/WalletFrame'
 import { useWalletStore } from '../../store/walletStore'
 import {
@@ -20,6 +21,7 @@ import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../..
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from '../../lib/coinModel'
+import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
 import {
   DONATION_ENABLED_DEFAULT,
   DONATION_PERCENT_DEFAULT,
@@ -292,7 +294,10 @@ const WalletLayout: React.FC = () => {
     <WalletFrame>
       <div className="flex flex-col items-center pt-3 pb-4 shrink-0">
         {/* Coin logo */}
-        <div className="w-14 h-14 rounded-full bg-primary/10 border-2 border-primary/40 shadow-[0_0_14px_rgba(245,132,31,0.2)] flex items-center justify-center overflow-hidden mb-3">
+        <div className={clsx(
+          'w-14 h-14 rounded-full bg-primary/10 border-2 flex items-center justify-center overflow-hidden mb-3',
+          getModelIconFrameClass(activeNetwork.id)
+        )}>
           {activeNetwork.logo
             ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-10 h-10 object-contain" />
             : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-10 h-10 object-contain object-center scale-[1.05] translate-y-[1px]" />
@@ -460,7 +465,11 @@ const WalletLayout: React.FC = () => {
                   >
                     <div className="flex items-center gap-3">
                       {net.logo
-                        ? <img src={net.logo} alt={net.name} className="w-7 h-7 rounded-full object-cover" />
+                        ? (
+                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(net.id))}>
+                            <img src={net.logo} alt={net.name} className="w-full h-full object-cover" />
+                          </div>
+                        )
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
                       }
                       <div className="flex flex-col items-start">

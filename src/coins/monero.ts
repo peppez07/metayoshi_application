@@ -1,8 +1,9 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { XMR_API_INFO } from './interceptors'
 import moneroLogo from './coinlogos/monero.png'
+import { getBuildFeatureFlag } from '../buildConfig'
 
-const XMR_NON_CUSTODIAL_ENABLED = /^(1|true|yes)$/i.test(String(import.meta.env.VITE_ENABLE_XMR_NON_CUSTODIAL || 'false'))
+const XMR_NON_CUSTODIAL_ENABLED = getBuildFeatureFlag('enableXmrNonCustodial', 'VITE_ENABLE_XMR_NON_CUSTODIAL', false)
 
 export const XMR_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: XMR_NON_CUSTODIAL_ENABLED, assetLayer: false, assetSend: false, activity: true },

@@ -3,6 +3,7 @@ import type { CoinApiInterceptor, RpcInterceptorErrorContext } from '../coins/in
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { recordRuntimeError } from './runtimeErrorMonitor'
 import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
+import { getBuildFeatureFlag } from '../buildConfig'
 
 // UTXO JSON-RPC client — all production connections go through the public bridge gateway.
 //
@@ -238,7 +239,7 @@ function isSecureBridgeWriteMethod(method: string): boolean {
 
 function isSecureBridgeWritesEnabled(config: UtxoRpcConfig): boolean {
   if (typeof config.secureBridgeWritesEnabled === 'boolean') return config.secureBridgeWritesEnabled
-  return parseBoolWithDefault(import.meta.env.VITE_BRIDGE_SECURE_WRITES_ENABLED, true)
+  return getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)
 }
 
 function resolveSecureBridgeApiBase(config: UtxoRpcConfig, bridgeUrl: string): string {

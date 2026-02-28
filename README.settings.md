@@ -122,6 +122,43 @@ Autoload is opt-in and intended for local/private builds only.
 VITE_ENABLED_COINS=rtm
 ```
 
+### Compile-time build config (recommended)
+
+For a single “main” build-time switchboard (coins, feature flags, and model test-status colors), create:
+
+- `metayoshi.build.json` (ignored by git)
+
+Start from:
+
+- `metayoshi.build.example.json`
+
+This file is loaded by `vite.config.ts` during `npm run build` and injected into the bundle as a constant.
+It takes precedence over `VITE_ENABLED_COINS` for coin enablement and can also drive feature flags and icon coloring.
+To avoid “duplicate switches”, prefer configuring these values in `metayoshi.build.json` only; the `VITE_*` envs are treated as legacy fallbacks when a build-config key is not set.
+
+Optional override path:
+
+```env
+METAYOSHI_BUILD_CONFIG_PATH=./metayoshi.build.json
+```
+
+Supported keys (current):
+
+```json
+{
+  "coins": { "enabled": ["rtm", "eth"], "disabled": ["srv--cronos-pos"] },
+  "features": {
+    "bridgeSecureWritesEnabled": true,
+    "enableRemoteEvmTokenCatalog": false,
+    "enableXmrNonCustodial": false
+  },
+  "modelStatus": {
+    "tested": ["rtm", "eth"],
+    "blocked": ["srv--cronos-pos"]
+  }
+}
+```
+
 Allowed ids include currently bundled runtime networks such as:
 - `rtm`
 - `eth`

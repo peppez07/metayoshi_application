@@ -32,7 +32,7 @@ const DappRequestConfirm: React.FC = () => {
     sendStellarTransaction,
     sendTronTransaction,
     sendUtxoTransaction,
-    sendRtmAsset,
+    sendAssetTransfer,
     refreshActiveBalance,
     addActivity,
     isConnected,
@@ -167,7 +167,7 @@ const DappRequestConfirm: React.FC = () => {
       }
 
       const tx = requestIsAssetSend
-        ? await sendRtmAsset({
+        ? await sendAssetTransfer({
             assetId: requestAssetId,
             qty: requestAmount,
             toAddress: requestTo

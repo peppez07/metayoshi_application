@@ -99,8 +99,8 @@ Source: C:\Users\Giuseppe Grecu\metayoshi_SERVER\reports\active-coins-list.txt
 - nolus -> eth
 - opbnb -> bnb
 - opbnb-testnet -> bnb
-- optimism -> base
-- optimism-sepolia -> base
+- optimism -> eth
+- optimism-sepolia -> eth
 - oraichain -> eth
 - osmosis -> eth
 - passage -> eth
@@ -145,8 +145,8 @@ Source: C:\Users\Giuseppe Grecu\metayoshi_SERVER\reports\active-coins-list.txt
 - terra-classic -> eth
 - tidecoin -> tide
 - tron-evm -> eth
-- unichain -> base
-- unichain-sepolia -> base
+- unichain -> eth
+- unichain-sepolia -> eth
 - warden -> eth
 - warden-evm -> eth
 - xpla -> eth

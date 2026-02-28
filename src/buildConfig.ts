@@ -1,0 +1,134 @@
+export type BuildModelStatus = 'tested' | 'untested' | 'blocked'
+
+export type BuildConfig = {
+  coins?: {
+    enabled?: 'all' | '*' | string[]
+    disabled?: string[]
+  }
+  features?: Record<string, boolean | undefined>
+  modelStatus?: {
+    tested?: string[]
+    untested?: string[]
+    blocked?: string[]
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null
+  if (Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function normalizeId(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function normalizeIdList(value: unknown): string[] {
+  if (!value) return []
+  if (Array.isArray(value)) return value.map(normalizeId).filter(Boolean)
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    return trimmed.split(',').map((v) => normalizeId(v)).filter(Boolean)
+  }
+  return []
+}
+
+function parseBooleanLike(value: unknown, fallback: boolean): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return fallback
+}
+
+function normalizeBuildConfig(raw: unknown): BuildConfig {
+  const obj = asRecord(raw) || {}
+  const coins = asRecord(obj.coins)
+  const features = asRecord(obj.features)
+  const modelStatus = asRecord(obj.modelStatus)
+
+  const enabledRaw = coins?.enabled
+  const enabled =
+    typeof enabledRaw === 'string' && ['all', '*'].includes(enabledRaw.trim().toLowerCase())
+      ? (enabledRaw.trim().toLowerCase() as 'all' | '*')
+      : Array.isArray(enabledRaw)
+        ? enabledRaw.map(normalizeId).filter(Boolean)
+        : undefined
+
+  const out: BuildConfig = {
+    coins: {
+      enabled,
+      disabled: normalizeIdList(coins?.disabled)
+    },
+    features: {},
+    modelStatus: {
+      tested: normalizeIdList(modelStatus?.tested),
+      untested: normalizeIdList(modelStatus?.untested),
+      blocked: normalizeIdList(modelStatus?.blocked)
+    }
+  }
+
+  if (features) {
+    for (const [key, value] of Object.entries(features)) {
+      if (typeof value === 'boolean') out.features![key] = value
+      else if (typeof value === 'string') out.features![key] = parseBooleanLike(value, false)
+    }
+  }
+
+  if (!out.coins?.enabled && (out.coins?.disabled?.length ?? 0) === 0) delete out.coins
+  if (Object.keys(out.features || {}).length === 0) delete out.features
+  if (
+    (out.modelStatus?.tested?.length ?? 0) === 0
+    && (out.modelStatus?.untested?.length ?? 0) === 0
+    && (out.modelStatus?.blocked?.length ?? 0) === 0
+  ) {
+    delete out.modelStatus
+  }
+
+  return out
+}
+
+export const BUILD_CONFIG: BuildConfig = normalizeBuildConfig(
+  // Provided at compile-time via vite define().
+  typeof __METAYOSHI_BUILD_CONFIG__ === 'undefined' ? undefined : __METAYOSHI_BUILD_CONFIG__
+)
+
+export function getBuildFeatureFlag(featureKey: string, envKey: string, fallback: boolean): boolean {
+  const fromConfig = BUILD_CONFIG.features?.[featureKey]
+  if (typeof fromConfig === 'boolean') return fromConfig
+  return parseBooleanLike((import.meta.env as any)?.[envKey], fallback)
+}
+
+export function getModelStatus(modelId: string): BuildModelStatus {
+  const id = normalizeId(modelId)
+  if (!id) return 'untested'
+
+  const blocked = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.blocked))
+  if (blocked.has(id)) return 'blocked'
+
+  const tested = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.tested))
+  if (tested.has(id)) return 'tested'
+
+  const explicitUntested = normalizeIdList(BUILD_CONFIG.modelStatus?.untested)
+  if (explicitUntested.length > 0) {
+    const untested = new Set(explicitUntested)
+    if (untested.has(id)) return 'untested'
+  }
+
+  return 'untested'
+}
+
+export function getModelIconRingClass(modelId: string): string {
+  const status = getModelStatus(modelId)
+  if (status === 'tested') return 'ring-2 ring-green-500/70'
+  if (status === 'blocked') return 'ring-2 ring-red-500/70'
+  return 'ring-2 ring-orange-500/70'
+}
+
+export function getModelIconFrameClass(modelId: string): string {
+  const status = getModelStatus(modelId)
+  if (status === 'tested') return 'border-green-500/50 shadow-[0_0_14px_rgba(34,197,94,0.24)]'
+  if (status === 'blocked') return 'border-red-500/50 shadow-[0_0_14px_rgba(239,68,68,0.24)]'
+  return 'border-primary/40 shadow-[0_0_14px_rgba(245,132,31,0.2)]'
+}

@@ -1,6 +1,7 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
+import clsx from 'clsx'
 import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline } from 'react-icons/io5'
@@ -8,6 +9,7 @@ import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import { getModelIconRingClass } from '../buildConfig'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -218,7 +220,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 onClick={() => setShowNetworkMenu(!showNetworkMenu)}
               >
                 {activeNetwork.logo
-                  ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-4 h-4 rounded-full object-cover" />
+                  ? (
+                    <div className={clsx('w-4 h-4 rounded-full overflow-hidden', getModelIconRingClass(activeNetwork.id))}>
+                      <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover" />
+                    </div>
+                  )
                   : <div className="w-2 h-2 rounded-full bg-yellow-500" />
                 }
                 <span className="text-[11px] font-bold text-gray-200 uppercase tracking-tight">{activeNetwork.name}</span>
@@ -328,7 +334,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   >
                     <div className="flex items-center gap-3">
                       {n.logo
-                        ? <img src={n.logo} alt={n.name} className="w-7 h-7 rounded-full object-cover" />
+                        ? (
+                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(n.id))}>
+                            <img src={n.logo} alt={n.name} className="w-full h-full object-cover" />
+                          </div>
+                        )
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
                       }
                       <div className="flex flex-col leading-tight">

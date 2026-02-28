@@ -27,6 +27,7 @@ import { xlmCoin } from './xlm'
 import { xrpCoin } from './xrp'
 import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
+import { BUILD_CONFIG } from '../buildConfig'
 
 export type { CoinType, Network } from './types'
 export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile'
@@ -102,25 +103,49 @@ const ALL_COIN_IDS = new Set(ALL_COIN_MODULES.map((coin) => coin.id))
 const DISABLED_NETWORK_IDS = new Set<string>([
   'srv--cronos-pos'
 ])
-const DEFAULT_ENABLED_COIN_IDS = [...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id))
+const ALLOWED_COIN_IDS = new Set([...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id)))
+const DEFAULT_ENABLED_COIN_IDS = [...ALLOWED_COIN_IDS]
+
+function parseEnabledCoinIdsFromBuildConfig(): Set<string> | null {
+  const enabledRaw = BUILD_CONFIG.coins?.enabled
+  const disabled = new Set((BUILD_CONFIG.coins?.disabled || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean))
+
+  if (!enabledRaw && disabled.size === 0) return null
+
+  const base = (() => {
+    if (!enabledRaw) return new Set(DEFAULT_ENABLED_COIN_IDS)
+    if (enabledRaw === 'all' || enabledRaw === '*') return new Set(ALLOWED_COIN_IDS)
+    if (Array.isArray(enabledRaw)) {
+      const selected = enabledRaw
+        .map((v) => String(v || '').trim().toLowerCase())
+        .filter(Boolean)
+        .filter((id) => ALLOWED_COIN_IDS.has(id))
+      return selected.length > 0 ? new Set(selected) : new Set(DEFAULT_ENABLED_COIN_IDS)
+    }
+    return new Set(DEFAULT_ENABLED_COIN_IDS)
+  })()
+
+  for (const id of disabled) base.delete(id)
+  return base.size > 0 ? base : new Set(DEFAULT_ENABLED_COIN_IDS)
+}
 
 function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   const input = String(raw || '').trim().toLowerCase()
   if (!input) return new Set(DEFAULT_ENABLED_COIN_IDS)
-  if (input === 'all' || input === '*') return new Set(ALL_COIN_IDS)
+  if (input === 'all' || input === '*') return new Set(ALLOWED_COIN_IDS)
 
   const selected = input
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean)
-    .filter((id) => ALL_COIN_IDS.has(id))
+    .filter((id) => ALLOWED_COIN_IDS.has(id))
     .filter((id) => !DISABLED_NETWORK_IDS.has(id))
 
   return selected.length > 0 ? new Set(selected) : new Set(DEFAULT_ENABLED_COIN_IDS)
 }
 
 export const ENABLED_NETWORK_IDS = new Set(
-  [...parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined)]
+  [...(parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined))]
     .filter((id) => !DISABLED_NETWORK_IDS.has(id))
 )
 
@@ -288,14 +313,14 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   'avail': 'eth',
   'peaq': 'eth',
   'syscoin-tanenbaum-evm': 'eth',
-  optimism: 'base',
+  optimism: 'eth',
   pulsechain: 'eth',
   scroll: 'eth',
   somnia: 'eth',
   soneium: 'eth',
   sonic: 'eth',
   taiko: 'eth',
-  unichain: 'base',
+  unichain: 'eth',
   'tron-evm': 'eth'
 }
 
@@ -650,6 +675,50 @@ function sanitizeServerCoinId(coinId: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+const ETHEREUM_L2_SERVER_COIN_IDS = new Set<string>([
+  'arbitrum-one',
+  'arbitrum-nova',
+  'base',
+  'blast',
+  'fraxtal',
+  'linea',
+  'mantle',
+  'metis',
+  'optimism',
+  'scroll',
+  'soneium',
+  'taiko',
+  'unichain'
+])
+
+const SERVER_COIN_VARIANT_SUFFIXES = [
+  'testnet',
+  'sepolia',
+  'holesky',
+  'hoodi',
+  'fuji',
+  'amoy',
+  'minato',
+  'blaze',
+  'spicy',
+  'tanenbaum'
+]
+
+function stripServerCoinVariantSuffix(coinId: string): string {
+  const normalized = String(coinId || '').trim().toLowerCase()
+  if (!normalized) return ''
+  for (const suffix of SERVER_COIN_VARIANT_SUFFIXES) {
+    const token = `-${suffix}`
+    if (normalized.endsWith(token)) return normalized.slice(0, -token.length)
+  }
+  return normalized
+}
+
+function isEthereumLayer2ServerCoinId(coinId: string): boolean {
+  const baseId = stripServerCoinVariantSuffix(coinId)
+  return ETHEREUM_L2_SERVER_COIN_IDS.has(baseId)
+}
+
 function normalizeServerCoinSymbol(coinId: string, symbol: string, fallback?: string): string {
   const normalizedCoinId = String(coinId || '').trim().toLowerCase()
   const override = SERVER_SYMBOL_OVERRIDES[normalizedCoinId]
@@ -661,15 +730,57 @@ function normalizeServerCoinSymbol(coinId: string, symbol: string, fallback?: st
 
 function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): string {
   const normalizedBaseNetworkId = String(baseNetworkId || '').trim().toLowerCase()
+  const normalizedServerCoinId = stripServerCoinVariantSuffix(serverCoinId)
   if (normalizedBaseNetworkId.startsWith('srv--')) {
     const parts = normalizedBaseNetworkId.split('--')
     if (parts.length >= 2 && parts[1]) return `srv--${parts[1]}`
     return normalizedBaseNetworkId
   }
-  // Collapse server aliases (e.g. eth--linea, eth--mantle) into canonical
-  // menu network IDs to keep the selectable network set minimal.
+
+  // Avoid collisions when multiple distinct server chains are forced through the same
+  // runtime model (common for Ethereum L2s and EVM lookalikes). Collisions would cause
+  // one chain to hide another during server-registry sync (candidates are keyed by id).
+  if (EVM_MODEL_NETWORK_IDS.has(normalizedBaseNetworkId)) {
+    const canonicalServerIdByModel: Record<string, string> = {
+      eth: 'ethereum',
+      arb: 'arbitrum-one',
+      base: 'base',
+      bnb: 'bsc',
+      polygon: 'polygon-bor',
+      avaxc: 'avalanche-c-chain'
+    }
+
+    const canonicalServerId = canonicalServerIdByModel[normalizedBaseNetworkId]
+    if (canonicalServerId && normalizedServerCoinId === canonicalServerId) {
+      return normalizedBaseNetworkId
+    }
+
+    if (isEthereumLayer2ServerCoinId(normalizedServerCoinId)) {
+      return `eth-l2--${sanitizeServerCoinId(normalizedServerCoinId)}`
+    }
+
+    return `${normalizedBaseNetworkId}--${sanitizeServerCoinId(normalizedServerCoinId)}`
+  }
+
   return normalizedBaseNetworkId
 }
+
+function validateEthereumLayer2NetworkIdMapping(): void {
+  const seen = new Map<string, string>()
+  for (const serverCoinId of ETHEREUM_L2_SERVER_COIN_IDS) {
+    const model = mapServerCoinIdToNetworkId(serverCoinId) || 'eth'
+    const appNetworkId = resolveAppNetworkId(model, serverCoinId)
+    const existing = seen.get(appNetworkId)
+    if (existing && existing !== serverCoinId) {
+      throw new Error(
+        `Duplicate appNetworkId "${appNetworkId}" for Ethereum L2 server coin IDs: "${existing}" and "${serverCoinId}".`
+      )
+    }
+    seen.set(appNetworkId, serverCoinId)
+  }
+}
+
+validateEthereumLayer2NetworkIdMapping()
 
 function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | null {
   const normalized = String(coinId || '').trim().toLowerCase()

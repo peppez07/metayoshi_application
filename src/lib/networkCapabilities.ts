@@ -44,14 +44,14 @@ export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabil
     ...DEFAULT_CAPABILITIES,
     features: {
       ...DEFAULT_CAPABILITIES.features,
-      // Back-compat: EVM and old supportsAssets flag both imply asset support
-      assetLayer: net.coinType === 'EVM' || net.supportsAssets === true,
-      assetSend: net.coinType === 'EVM' || net.supportsAssets === true
+      // Back-compat: EVM/SOL and old supportsAssets flag imply asset support
+      assetLayer: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
+      assetSend: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true
     },
     ui: {
       ...DEFAULT_CAPABILITIES.ui,
-      showAssetsTab: net.coinType === 'EVM' || net.supportsAssets === true,
-      showAssetsAction: net.coinType === 'EVM' || net.supportsAssets === true
+      showAssetsTab: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
+      showAssetsAction: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true
     }
   }
 
@@ -70,6 +70,16 @@ export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabil
   // capability object still has legacy false flags.
   if (net.coinType === 'EVM') {
     merged.features.assetLayer = true
+    merged.features.assetSend = true
+    merged.ui.showAssetsTab = true
+    merged.ui.showAssetsAction = true
+  }
+
+  // Solana must always expose asset listing UI (SPL tokens), even if a stale persisted
+  // capability object still has legacy false flags.
+  if (net.coinType === 'SOL') {
+    merged.features.assetLayer = true
+    merged.features.assetSend = true
     merged.ui.showAssetsTab = true
     merged.ui.showAssetsAction = true
   }

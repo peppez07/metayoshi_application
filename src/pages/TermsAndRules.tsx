@@ -3,47 +3,163 @@ import { useNavigate } from 'react-router-dom'
 import { PageTransition } from '../components/PageTransition'
 import { Button } from '../components/Button'
 
-type RuleSection = {
+type TermSection = {
   id: string
   title: string
-  body: string
+  body: React.ReactNode
 }
 
-const SECTIONS: RuleSection[] = [
+const SECTIONS: TermSection[] = [
   {
-    id: 'non-custodial',
-    title: '1. Non-Custodial Wallet',
-    body: 'MetaYoshi is a non-custodial wallet. You control your private keys and recovery phrase at all times. We cannot access, recover, reset, or reverse your wallet data.',
+    id: 'acceptance',
+    title: '1. Acceptance of Terms',
+    body: (
+      <p>
+        By using MetaYoshi, you agree to these Terms of Service. If you do not agree, do not use the application.
+      </p>
+    ),
   },
   {
-    id: 'recovery-phrase',
-    title: '2. Recovery Phrase Responsibility',
-    body: 'You are solely responsible for safely storing your recovery phrase and private keys. If they are lost, forgotten, or exposed, your funds may become permanently inaccessible or compromised.',
+    id: 'services',
+    title: '2. The Services',
+    body: (
+      <p>
+        MetaYoshi provides non-custodial wallet software and related tooling that helps you interact with multiple
+        blockchain networks. Some functionality may rely on bridge/API endpoints, third-party nodes, or RPC providers.
+      </p>
+    ),
+  },
+  {
+    id: 'non-custodial',
+    title: '3. Non-Custodial Notice',
+    body: (
+      <div className="space-y-2">
+        <p>You control your private keys, seed phrase, and signing environment.</p>
+        <p>MetaYoshi cannot recover, reset, or restore your wallet if you lose your recovery data.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'responsibility',
+    title: '4. Your Responsibilities',
+    body: (
+      <div className="space-y-2">
+        <p>
+          You are responsible for verifying addresses, amounts, network selection, and any transaction or signature
+          details before approving.
+        </p>
+        <p>
+          Blockchain transactions are often irreversible. Mistakes, phishing, malware, or compromised devices can lead
+          to permanent loss of assets.
+        </p>
+      </div>
+    ),
+  },
+  {
+    id: 'security',
+    title: '5. Security of Your Device',
+    body: (
+      <p>
+        You are responsible for device security (malware protection, OS/browser updates, password strength, and physical
+        access). Unauthorized access to your device or browser profile may result in loss of assets.
+      </p>
+    ),
+  },
+  {
+    id: 'compliance',
+    title: '6. Eligibility and Compliance',
+    body: (
+      <p>
+        You are responsible for ensuring your use is legal in your jurisdiction, including any sanctions, tax, and
+        regulatory compliance obligations.
+      </p>
+    ),
+  },
+  {
+    id: 'acceptable-use',
+    title: '7. Acceptable Use',
+    body: (
+      <div className="space-y-2">
+        <p>You agree not to misuse MetaYoshi or any related endpoints, including by:</p>
+        <ul className="list-disc pl-5 space-y-1 text-gray-300">
+          <li>attempting to bypass security, rate limits, or access controls</li>
+          <li>probing, scanning, or exploiting systems, dependencies, or infrastructure</li>
+          <li>using the Services for fraud, theft, malware, or other unlawful activity</li>
+          <li>overloading endpoints with excessive automated requests</li>
+        </ul>
+      </div>
+    ),
+  },
+  {
+    id: 'third-parties',
+    title: '8. Third-Party Networks and Services',
+    body: (
+      <p>
+        MetaYoshi may interact with third-party blockchain networks, validators, RPC providers, nodes, explorers, and
+        protocols. Those third parties are not controlled by MetaYoshi and may have their own terms, policies, fees,
+        and availability constraints.
+      </p>
+    ),
+  },
+  {
+    id: 'no-advice',
+    title: '9. No Professional Advice',
+    body: (
+      <p>
+        MetaYoshi does not provide financial, legal, tax, or investment advice. Any decision to use digital assets,
+        protocols, or networks is entirely your own.
+      </p>
+    ),
+  },
+  {
+    id: 'availability',
+    title: '10. Availability and Changes',
+    body: (
+      <p>
+        MetaYoshi may change, suspend, or discontinue features at any time. We do not guarantee that any chain, feature,
+        endpoint, or integration will be available or supported indefinitely.
+      </p>
+    ),
+  },
+  {
+    id: 'disclaimers',
+    title: '11. Disclaimers',
+    body: (
+      <p>
+        MetaYoshi is provided on an "as is" and "as available" basis without warranties of any kind. Blockchain
+        software involves risk, including risk of loss of digital assets due to user error, software defects, network
+        conditions, or third-party actions.
+      </p>
+    ),
   },
   {
     id: 'liability',
-    title: '3. No Liability For Losses',
-    body: 'MetaYoshi is provided as-is. To the maximum extent allowed by law, MetaYoshi is not liable for any direct, indirect, incidental, or consequential damages, including loss of funds, data, business, or opportunities resulting from wallet usage, software defects, user mistakes, or third-party actions.',
+    title: '12. Limitation of Liability',
+    body: (
+      <p>
+        To the maximum extent permitted by law, MetaYoshi is not liable for any indirect, incidental, special,
+        consequential, or punitive damages, or any loss of profits, data, or digital assets arising out of or related to
+        your use of MetaYoshi.
+      </p>
+    ),
   },
   {
-    id: 'finality',
-    title: '4. Transaction Finality',
-    body: 'Blockchain transactions are generally irreversible. You must verify recipient addresses, amounts, and network details before approving a transaction or signature.',
+    id: 'privacy',
+    title: '13. Privacy',
+    body: (
+      <p>
+        Privacy details for MetaYoshi websites and bridge endpoints are published at <code>metayoshi.app/privacy.html</code>.
+      </p>
+    ),
   },
   {
-    id: 'device-security',
-    title: '5. Security Of Your Device',
-    body: 'You are responsible for device security, including malware protection, password strength, and physical access. Unauthorized access to your device may result in loss of assets.',
-  },
-  {
-    id: 'legal-compliance',
-    title: '6. Legal And Compliance Duties',
-    body: 'You confirm you are legally allowed to use this wallet in your jurisdiction and are responsible for all legal, tax, sanctions, and regulatory compliance obligations related to your activity.',
-  },
-  {
-    id: 'advice',
-    title: '7. No Professional Advice',
-    body: 'MetaYoshi does not provide financial, legal, tax, or investment advice. Any decision to use assets, protocols, or networks is entirely your own.',
+    id: 'contact',
+    title: '14. Contact',
+    body: (
+      <p>
+        Questions about these Terms can be sent to <code>admin@metayoshi.app</code>.
+      </p>
+    ),
   },
 ]
 
@@ -59,9 +175,9 @@ const TermsAndRules: React.FC = () => {
     <PageTransition>
       <div className="flex flex-col h-full p-6 bg-dark-800 text-left overflow-y-auto hide-scrollbar">
         <div className="space-y-2 mb-5">
-          <h1 className="text-xl font-black uppercase tracking-tight text-white">Terms And Rules</h1>
+          <h1 className="text-xl font-black uppercase tracking-tight text-white">Terms of Service</h1>
           <p className="text-xs text-gray-400">
-            Effective date: February 23, 2026
+            Last updated: February 28, 2026
           </p>
         </div>
 
@@ -82,7 +198,7 @@ const TermsAndRules: React.FC = () => {
                 </button>
                 {isExpanded && (
                   <div id={`section-content-${section.id}`} className="px-3 pb-3 text-gray-300">
-                    <p>{section.body}</p>
+                    <div className="space-y-2">{section.body}</div>
                   </div>
                 )}
               </section>
