@@ -1,4 +1,4 @@
-// Inpage Provider Script - Injected into web pages
+﻿// Inpage Provider Script - Injected into web pages
 // Provides window.metayoshi API for DApps
 
 const IP_CONTENT_CHANNEL = 'metayoshi:content'
@@ -7,8 +7,13 @@ const INIT_EVENT = 'metayoshi#initialized'
 const PROVIDER_STATE_METHOD = 'wallet_getProviderState'
 const PROVIDER_ENABLE_METHOD = 'wallet_requestAccounts'
 
-const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
-const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
+const REQUEST_ACCOUNTS_METHODS = new Set([
+  'wallet_requestAccounts',
+  'metayoshi_requestAccounts',
+  'rtm_requestAccounts',
+  'eth_requestAccounts'
+])
+const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts', 'eth_accounts'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
@@ -35,6 +40,7 @@ type ProviderNetwork = {
   symbol: string
   coinType: string
   chainId: number | null
+  chainIdHex?: string | null
   active: boolean
   capabilities: {
     nativeSend: boolean
@@ -153,7 +159,7 @@ function applyProviderState(next: any): void {
   state.coinName = next.coinName ?? state.coinName
   state.coinSymbol = next.coinSymbol ?? state.coinSymbol
   state.coinDecimals = next.coinDecimals ?? state.coinDecimals
-  state.chainId = next.networkId ?? next.chainId ?? state.chainId
+  state.chainId = next.chainIdHex ?? next.networkId ?? next.chainId ?? state.chainId
   state.networkLabel = next.networkLabel ?? state.networkLabel
   updateAccounts(normalizeAccountAddresses(next.accounts))
   if (next.selectedAddress) {
@@ -197,11 +203,29 @@ function request({ method, params }: { method: string; params?: any }): Promise<
   })
 }
 
+function requestCompat(method: string, params?: any): Promise<any> {
+  return request({ method, params })
+}
+
+type SendAsyncCallback = (error: any, response?: any) => void
+
+function sendCompat(
+  payloadOrMethod: { method?: string; params?: any; id?: string | number | null } | string,
+  maybeParams?: any
+): Promise<any> {
+  if (typeof payloadOrMethod === 'string') {
+    return requestCompat(payloadOrMethod, maybeParams)
+  }
+  const method = String(payloadOrMethod?.method || '').trim()
+  if (!method) return Promise.reject(new Error('method is required'))
+  return requestCompat(method, payloadOrMethod?.params)
+}
+
 window.addEventListener('message', (event) => {
   if (event.source !== window) return
   const data = event.data as any
   if (!data || data.target !== IP_INPAGE_CHANNEL) return
-  
+
   if (data.type === 'response') {
     const response = data.response
     const id = response?.id ?? data.id
@@ -219,14 +243,13 @@ window.addEventListener('message', (event) => {
     pendingReq.resolve(response?.result)
     return
   }
-  
+
   if (data.type === 'bridge_error') {
     const bridgeError = data.error ?? {}
     const err: any = new Error(String(bridgeError.message ?? 'Extension context invalidated'))
     err.code = Number(bridgeError.code ?? 4900)
     err.data = bridgeError.data
-    
-    // Reject all pending requests
+
     const pendingEntries = Array.from(pending.values())
     pending.clear()
     for (const req of pendingEntries) {
@@ -236,14 +259,16 @@ window.addEventListener('message', (event) => {
         // ignore
       }
     }
+    emit('disconnect', { code: err.code, message: err.message })
     return
   }
-  
+
   if (data.type === 'event') {
     const eventName = String(data.event ?? '')
     const payload = data.payload ?? {}
-    
+
     if (eventName === 'accountsChanged') {
+      const wasConnected = state.connected
       if (Array.isArray(payload.accounts)) {
         updateAccounts(payload.accounts.map((a: any) => String(a.address ?? a)))
       } else if (payload.address) {
@@ -253,35 +278,39 @@ window.addEventListener('message', (event) => {
         state.selectedAddress = String(payload.address)
       }
       state.connected = state.accounts.length > 0
+      if (!wasConnected && state.connected) emit('connect', { chainId: state.chainId ?? null })
+      if (wasConnected && !state.connected) emit('disconnect', { code: 4900, message: 'Provider disconnected' })
       emit('accountsChanged', payload)
     }
-    
+
     if (eventName === 'networkChanged') {
-      state.chainId = payload.networkId ?? state.chainId
+      state.chainId = payload.chainIdHex ?? payload.chainId ?? payload.networkId ?? state.chainId
       state.networkLabel = payload.networkLabel ?? state.networkLabel
       if (payload.coinId !== undefined) state.coinId = payload.coinId ?? state.coinId
       if (payload.coinName !== undefined) state.coinName = payload.coinName ?? state.coinName
       if (payload.coinSymbol !== undefined) state.coinSymbol = payload.coinSymbol ?? state.coinSymbol
       if (payload.coinDecimals !== undefined) state.coinDecimals = payload.coinDecimals ?? state.coinDecimals
-      
-      // Refresh provider state
+
       void request({ method: PROVIDER_STATE_METHOD })
         .then((providerState) => applyProviderState(providerState))
         .catch(() => {})
-      
+
+      emit('chainChanged', state.chainId)
       emit('networkChanged', payload)
     }
-    
+
     if (eventName === 'lockChanged') {
+      const wasConnected = state.connected
       state.unlocked = !!payload.unlocked
       if (!state.unlocked) {
         state.connected = false
         state.accounts = []
         state.selectedAddress = null
       }
+      if (wasConnected && !state.connected) emit('disconnect', { code: 4901, message: 'Wallet locked' })
       emit('lockChanged', payload)
     }
-    
+
     emit(eventName, payload)
   }
 })
@@ -292,13 +321,12 @@ function initState(): void {
   })
 }
 
-// MetaYoshi provider interface (multi-chain)
 const provider = {
   isMetaYoshi: true,
   isRtm: true,
   isMultiChain: true,
-  
-  // Coin/Network info
+  isMetaMask: false,
+
   get coinId() {
     return state.coinId
   },
@@ -320,8 +348,7 @@ const provider = {
   get networkLabel() {
     return state.networkLabel
   },
-  
-  // Account info
+
   get selectedAddress() {
     return state.selectedAddress
   },
@@ -334,10 +361,23 @@ const provider = {
   get isUnlocked() {
     return state.unlocked
   },
-  
-  // RPC methods
+
   request,
-  send: request,
+  send: sendCompat,
+  sendAsync: (
+    payload: { method?: string; params?: any; id?: string | number | null } | string,
+    callback: SendAsyncCallback
+  ) => {
+    const cb = typeof callback === 'function' ? callback : (() => undefined)
+    void sendCompat(payload as any)
+      .then((result) => {
+        const id = typeof payload === 'object' && payload ? (payload as any).id ?? null : null
+        cb(null, { jsonrpc: '2.0', id, result })
+      })
+      .catch((error: any) => {
+        cb(error ?? new Error('Request failed'))
+      })
+  },
   enable: () => request({ method: PROVIDER_ENABLE_METHOD }),
   connect: () => request({ method: 'wallet_connect' }),
   getProviderState: () => request({ method: PROVIDER_STATE_METHOD }),
@@ -360,27 +400,24 @@ const provider = {
       networks
     }
   },
-  
-  // Event methods
+
   on,
   removeListener,
   off: removeListener,
   once,
-  
-  // Multi-chain methods
+
   switchNetwork: (networkId: string) => {
     return request({ method: 'wallet_switchNetwork', params: { networkId } })
   },
-  
-  // Metadata
+
   _metayoshi: {
     hardwareWallet: String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || '').trim().toLowerCase() === 'hardware',
     version: import.meta.env.VITE_APP_VERSION ?? '0.1.0-beta',
-    multiChain: true
+    multiChain: true,
+    eip1193: true
   }
 }
 
-// Inject provider into window
 if (!(window as any).metayoshi) {
   Object.defineProperty(window, 'metayoshi', {
     value: provider,
@@ -397,7 +434,14 @@ if (!(window as any).rtm) {
   })
 }
 
-// Dispatch initialization event
+if (!(window as any).ethereum) {
+  Object.defineProperty(window, 'ethereum', {
+    value: provider,
+    writable: false,
+    configurable: false
+  })
+}
+
 window.dispatchEvent(new Event(INIT_EVENT))
 initState()
 

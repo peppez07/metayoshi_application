@@ -293,6 +293,7 @@ const DappRequestConfirm: React.FC = () => {
             </div>
 
             <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
+              <Row label="RPC Method" value={pendingRequest.method} mono />
               <Row label="Network" value={requestNetwork?.name || pendingRequest.networkId} />
               <Row label="Runtime Model" value={String(requestNetwork?.runtimeModelId || requestNetwork?.id || 'unknown')} mono />
               <Row label="Type" value={requestIsAssetSend ? 'Asset Transfer' : 'Native Coin Transfer'} />

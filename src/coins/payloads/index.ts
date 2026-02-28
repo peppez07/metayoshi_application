@@ -1,103 +1,126 @@
-import { ARR_PAYLOADS } from './arr'
-import { BITCOIN_PAYLOADS } from './bitcoin'
-import { ADA_PAYLOADS } from './cardano'
-import { BTCZ_PAYLOADS } from './btcz'
-import { createUtxoPayloadCatalog } from './common'
-import { DASH_PAYLOADS } from './dash'
-import { DOGE_PAYLOADS } from './doge'
-import { FIRO_PAYLOADS } from './firo'
-import { MANTAATLANTIC_PAYLOADS } from './manta-atlantic'
-import { XMR_PAYLOADS } from './monero'
-import { PIVX_PAYLOADS } from './pivx'
-import { POLKADOT_PAYLOADS } from './polkadot'
-import { RTM_PAYLOADS } from './rtm'
-import { TERRACLASSIC_PAYLOADS } from './terra-classic'
-import { TERRA_PAYLOADS } from './terra'
-import { TIDE_PAYLOADS } from './tide'
-import { XRP_PAYLOADS } from './xrp'
+﻿import { createUtxoPayloadCatalog } from './common'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
-import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
+import { getPackedCoinFeatureByCoinId, getPackedCoinFeatureByNetworkId } from '../packed'
 import type { CoinPayloadCatalog } from './types'
-
-export const PAYLOAD_CATALOG_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada'] as const
-
-const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
-  networkId: (typeof PAYLOAD_CATALOG_ORDER)[number]
-  catalog: CoinPayloadCatalog
-}> = [
-  { networkId: 'rtm', catalog: RTM_PAYLOADS },
-  { networkId: 'doge', catalog: DOGE_PAYLOADS },
-  { networkId: 'btcz', catalog: BTCZ_PAYLOADS },
-  { networkId: 'tide', catalog: TIDE_PAYLOADS },
-  { networkId: 'firo', catalog: FIRO_PAYLOADS },
-  { networkId: 'xrp', catalog: XRP_PAYLOADS },
-  { networkId: 'arr', catalog: ARR_PAYLOADS },
-  { networkId: 'xmr', catalog: XMR_PAYLOADS },
-  { networkId: 'ada', catalog: ADA_PAYLOADS }
-]
-
-export const PAYLOADS_BY_NETWORK_ID = Object.fromEntries(
-  PAYLOAD_CATALOG_REGISTRY.map((entry) => [entry.networkId, entry.catalog])
-) as Record<(typeof PAYLOAD_CATALOG_ORDER)[number], CoinPayloadCatalog>
-
-const dynamicPayloadCatalogCache = new Map<string, CoinPayloadCatalog>()
 
 function normalizePayloadNetworkId(networkId?: string): string {
   const normalized = String(networkId || '').trim().toLowerCase()
   if (!normalized) return ''
-  // Preserve scaffold IDs like "srv--bitcoin" and collapse only extra aliases
-  // like "srv--bitcoin--alt" to their base scaffold key.
-  if (normalized.startsWith('srv--')) {
-    const parts = normalized.split('--')
-    if (parts.length >= 2 && parts[1]) return `srv--${parts[1]}`
-    return normalized
-  }
-  const aliasSep = normalized.indexOf('--')
-  if (aliasSep > 0) return normalized.slice(0, aliasSep)
   return normalized
 }
 
-function createStandardPayloadCatalog(networkId: string): CoinPayloadCatalog | undefined {
-  const meta = STANDARD_RUNTIME_META[networkId]
-  if (!meta) return undefined
-  return createUtxoPayloadCatalog({
-    networkId,
-    symbol: meta.symbol,
-    coinId: meta.coinId,
-    chain: 'main'
-  })
+function resolvePackedFeature(networkId?: string) {
+  const key = normalizePayloadNetworkId(networkId)
+  if (!key) return null
+
+  const directByNetwork = getPackedCoinFeatureByNetworkId(key)
+  if (directByNetwork) return directByNetwork
+
+  const directByCoin = getPackedCoinFeatureByCoinId(key)
+  if (directByCoin) return directByCoin
+
+  if (key.startsWith('srv--')) {
+    const srvCoinId = key.slice('srv--'.length)
+    if (srvCoinId) {
+      const bySrvCoin = getPackedCoinFeatureByCoinId(srvCoinId)
+      if (bySrvCoin) return bySrvCoin
+    }
+  }
+
+  const aliasSep = key.lastIndexOf('--')
+  if (aliasSep > 0 && aliasSep < key.length - 2) {
+    const suffix = key.slice(aliasSep + 2)
+    const bySuffixNetwork = getPackedCoinFeatureByNetworkId(suffix)
+    if (bySuffixNetwork) return bySuffixNetwork
+    const bySuffixCoin = getPackedCoinFeatureByCoinId(suffix)
+    if (bySuffixCoin) return bySuffixCoin
+    const byPrefixNetwork = getPackedCoinFeatureByNetworkId(key.slice(0, aliasSep))
+    if (byPrefixNetwork) return byPrefixNetwork
+  }
+
+  const standardMeta = STANDARD_RUNTIME_META[key]
+  if (standardMeta?.coinId) {
+    const byStandard = getPackedCoinFeatureByCoinId(standardMeta.coinId)
+    if (byStandard) return byStandard
+  }
+
+  return null
 }
 
-export function getCoinPayloadCatalog(networkId?: string) {
+function catalogFromFeature(feature: any, requestedNetworkId: string): CoinPayloadCatalog {
+  const networkId = String(requestedNetworkId || feature?.networkId || feature?.coinId || '').trim().toLowerCase()
+  const symbol = String(feature?.symbol || '').trim().toUpperCase() || 'COIN'
+  const coinId = String(feature?.bridgeCoinId || feature?.coinId || '').trim().toLowerCase() || networkId
+  const chain = String(feature?.settings?.bridge?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+
+  const base = createUtxoPayloadCatalog({
+    networkId,
+    symbol,
+    coinId,
+    chain
+  })
+
+  const sendCoinTemplate = feature?.payloadTemplates?.sendCoin || {}
+  const sendAssetTemplate = feature?.payloadTemplates?.sendAsset || {}
+
+  return {
+    ...base,
+    helperExamples: {
+      sendCoin: {
+        to: String(sendCoinTemplate?.toAddress || sendCoinTemplate?.to || base.helperExamples.sendCoin.to),
+        amount: Number(sendCoinTemplate?.amount ?? base.helperExamples.sendCoin.amount) || base.helperExamples.sendCoin.amount,
+        subtractFeeFromAmount: Boolean(sendCoinTemplate?.subtractFeeFromAmount ?? base.helperExamples.sendCoin.subtractFeeFromAmount)
+      },
+      sendAsset: {
+        assetId: String(sendAssetTemplate?.assetId || base.helperExamples.sendAsset.assetId),
+        qty: Number(sendAssetTemplate?.qty ?? base.helperExamples.sendAsset.qty) || base.helperExamples.sendAsset.qty,
+        toAddress: String(sendAssetTemplate?.toAddress || base.helperExamples.sendAsset.toAddress),
+        changeAddress: String(sendAssetTemplate?.changeAddress || base.helperExamples.sendAsset.changeAddress),
+        assetChangeAddress: String(sendAssetTemplate?.assetChangeAddress || base.helperExamples.sendAsset.assetChangeAddress)
+      }
+    }
+  }
+}
+
+const dynamicPayloadCatalogCache = new Map<string, CoinPayloadCatalog>()
+
+export function getCoinPayloadCatalog(networkId?: string): CoinPayloadCatalog | undefined {
   const key = normalizePayloadNetworkId(networkId)
   if (!key) return undefined
-  const direct = PAYLOADS_BY_NETWORK_ID[key as keyof typeof PAYLOADS_BY_NETWORK_ID]
-  if (direct) return direct
-  const scaffolded = SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID[key]
-  if (scaffolded) return scaffolded
-  if (dynamicPayloadCatalogCache.has(key)) return dynamicPayloadCatalogCache.get(key)
-  const dynamic = createStandardPayloadCatalog(key)
-  if (dynamic) dynamicPayloadCatalogCache.set(key, dynamic)
-  return dynamic
+  const cached = dynamicPayloadCatalogCache.get(key)
+  if (cached) return cached
+
+  const feature = resolvePackedFeature(key)
+  if (!feature) return undefined
+
+  const catalog = catalogFromFeature(feature, key)
+  dynamicPayloadCatalogCache.set(key, catalog)
+  return catalog
 }
 
-export {
-  RTM_PAYLOADS,
-  DOGE_PAYLOADS,
-  TIDE_PAYLOADS,
-  BTCZ_PAYLOADS,
-  FIRO_PAYLOADS,
-  ARR_PAYLOADS,
-  XRP_PAYLOADS,
-  XMR_PAYLOADS,
-  ADA_PAYLOADS,
-  BITCOIN_PAYLOADS,
-  PIVX_PAYLOADS,
-  DASH_PAYLOADS,
-  TERRA_PAYLOADS,
-  TERRACLASSIC_PAYLOADS,
-  POLKADOT_PAYLOADS,
-  MANTAATLANTIC_PAYLOADS
+function mustCatalog(id: string): CoinPayloadCatalog {
+  const value = getCoinPayloadCatalog(id)
+  if (!value) {
+    throw new Error(`Missing payload catalog for networkId=${id}`)
+  }
+  return value
 }
+
+export const RTM_PAYLOADS = mustCatalog('rtm')
+export const DOGE_PAYLOADS = mustCatalog('doge')
+export const TIDE_PAYLOADS = mustCatalog('tide')
+export const BTCZ_PAYLOADS = mustCatalog('btcz')
+export const FIRO_PAYLOADS = mustCatalog('firo')
+export const ARR_PAYLOADS = mustCatalog('arr')
+export const XRP_PAYLOADS = mustCatalog('xrp')
+export const XMR_PAYLOADS = mustCatalog('xmr')
+export const ADA_PAYLOADS = mustCatalog('ada')
+export const BITCOIN_PAYLOADS = mustCatalog('bitcoin')
+export const PIVX_PAYLOADS = mustCatalog('pivx')
+export const DASH_PAYLOADS = mustCatalog('dash')
+export const TERRA_PAYLOADS = mustCatalog('terra')
+export const TERRACLASSIC_PAYLOADS = mustCatalog('terra-classic')
+export const POLKADOT_PAYLOADS = mustCatalog('polkadot')
+export const MANTAATLANTIC_PAYLOADS = mustCatalog('manta-atlantic')
 
 export type { CoinPayloadCatalog, CoinPayloadBuilders, JsonRpcEnvelope, UtxoTxInputRef } from './types'

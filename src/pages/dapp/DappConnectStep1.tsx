@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IoCheckmarkCircle } from 'react-icons/io5'
 import { Button } from '../../components/Button'
@@ -17,10 +17,10 @@ function canUseChromeStorage(): boolean {
 }
 
 function scopeLabel(scope: DappScope): string {
-  if (scope === 'read') return 'Read wallet addresses and balances'
-  if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
-  if (scope === 'send_coin') return 'Request native coin transfers'
-  return 'Request token/NFT transfers (ERC20/721/1155, CW20/721, denom assets where supported)'
+  if (scope === 'read') return 'Read accounts, chain/network, and capability state (EIP-1193 compatible)'
+  if (scope === 'sign') return 'Request message signatures (currently disabled)'
+  if (scope === 'send_coin') return 'Request native transfers (wallet_sendTransaction / eth_sendTransaction)'
+  return 'Request asset transfers (wallet_sendAsset)'
 }
 
 const DappConnectStep1: React.FC = () => {
@@ -102,7 +102,7 @@ const DappConnectStep1: React.FC = () => {
     return accounts.filter((account) => {
       const filteredCoinAddress = coinFilter === 'all' ? '' : String(account.networkAddresses[coinFilter] || '').trim()
       const displayNameNetworkId = coinFilter === 'all' ? activeNetworkId : coinFilter
-      const displayName = getAccountDisplayName(account, displayNameNetworkId, account.name)
+      const displayName = getAccountDisplayName(account, displayNameNetworkId, `Account ${account.derivationIndex + 1}`)
       if (coinFilter !== 'all' && !filteredCoinAddress) return false
 
       if (!normalizedQuery) return true
@@ -233,7 +233,7 @@ const DappConnectStep1: React.FC = () => {
               const displayName = getAccountDisplayName(
                 account,
                 coinFilter === 'all' ? activeNetworkId : coinFilter,
-                account.name
+                `Account ${account.derivationIndex + 1}`
               )
               return (
                 <div
@@ -303,3 +303,4 @@ const DappConnectStep1: React.FC = () => {
 }
 
 export default DappConnectStep1
+

@@ -36,6 +36,7 @@ const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim().repl
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 const GLOBAL_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || '').trim()
 const GLOBAL_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || '').trim()
+const ENV = (import.meta as any)?.env as Record<string, unknown>
 
 if (!API_BASE_URL) {
   throw new Error('VITE_API_BASE_URL is required. Set it in your environment (for example .env.local).')
@@ -106,6 +107,240 @@ const DISABLED_NETWORK_IDS = new Set<string>([
 const ALLOWED_COIN_IDS = new Set([...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id)))
 const DEFAULT_ENABLED_COIN_IDS = [...ALLOWED_COIN_IDS]
 
+type CoinChecklistEntry = {
+  enabled?: boolean
+  features?: Partial<NonNullable<Network['capabilities']>['features']>
+  ui?: Partial<NonNullable<Network['capabilities']>['ui']>
+}
+
+type CoinChecklist = Record<string, CoinChecklistEntry>
+
+function parseBooleanLike(value: unknown): boolean | undefined {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return undefined
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return undefined
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null
+  if (Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function normalizeCoinId(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function parseChecklistFeatureBag(raw: unknown): CoinChecklistEntry['features'] {
+  const out: CoinChecklistEntry['features'] = {}
+  const rec = asRecord(raw)
+  if (!rec) return out
+  const nativeSend = parseBooleanLike(rec.nativeSend)
+  const assetLayer = parseBooleanLike(rec.assetLayer)
+  const assetSend = parseBooleanLike(rec.assetSend)
+  const activity = parseBooleanLike(rec.activity)
+  if (nativeSend !== undefined) out.nativeSend = nativeSend
+  if (assetLayer !== undefined) out.assetLayer = assetLayer
+  if (assetSend !== undefined) out.assetSend = assetSend
+  if (activity !== undefined) out.activity = activity
+  return out
+}
+
+function parseChecklistUiBag(raw: unknown): CoinChecklistEntry['ui'] {
+  const out: CoinChecklistEntry['ui'] = {}
+  const rec = asRecord(raw)
+  if (!rec) return out
+  const showAssetsTab = parseBooleanLike(rec.showAssetsTab)
+  const showAssetsAction = parseBooleanLike(rec.showAssetsAction)
+  const showSendAction = parseBooleanLike(rec.showSendAction)
+  const showActivityTab = parseBooleanLike(rec.showActivityTab)
+  if (showAssetsTab !== undefined) out.showAssetsTab = showAssetsTab
+  if (showAssetsAction !== undefined) out.showAssetsAction = showAssetsAction
+  if (showSendAction !== undefined) out.showSendAction = showSendAction
+  if (showActivityTab !== undefined) out.showActivityTab = showActivityTab
+  return out
+}
+
+function parseCoinChecklistFromJson(raw: unknown): CoinChecklist {
+  const value = String(raw ?? '').trim()
+  if (!value) return {}
+  try {
+    const json = JSON.parse(value)
+    const root = asRecord(json)
+    if (!root) return {}
+    const out: CoinChecklist = {}
+    for (const [coinIdRaw, entryRaw] of Object.entries(root)) {
+      const coinId = normalizeCoinId(coinIdRaw)
+      if (!coinId) continue
+      const entryRec = asRecord(entryRaw)
+      if (!entryRec) continue
+      const entry: CoinChecklistEntry = {}
+      const enabled = parseBooleanLike(entryRec.enabled)
+      if (enabled !== undefined) entry.enabled = enabled
+      const features = parseChecklistFeatureBag(entryRec.features)
+      const ui = parseChecklistUiBag(entryRec.ui)
+      if (Object.keys(features || {}).length > 0) entry.features = features
+      if (Object.keys(ui || {}).length > 0) entry.ui = ui
+      out[coinId] = entry
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function decodeCoinTokenToId(token: string): string {
+  return token
+    .trim()
+    .toLowerCase()
+    .replace(/__/g, '::double-dash::')
+    .replace(/_/g, '-')
+    .replace(/::double-dash::/g, '--')
+}
+
+function parseCoinChecklistFromEnvRows(rawEnv: Record<string, unknown>): CoinChecklist {
+  const out: CoinChecklist = {}
+  const re = /^VITE_COIN_([A-Z0-9_]+)_(ENABLED|NATIVE_SEND|ASSET_LAYER|ASSET_SEND|ACTIVITY|SHOW_ASSETS_TAB|SHOW_ASSETS_ACTION|SHOW_SEND_ACTION|SHOW_ACTIVITY_TAB)$/
+  for (const [key, value] of Object.entries(rawEnv)) {
+    const match = key.match(re)
+    if (!match) continue
+    const coinId = decodeCoinTokenToId(match[1])
+    if (!coinId) continue
+    const boolValue = parseBooleanLike(value)
+    if (boolValue === undefined) continue
+
+    const field = String(match[2]).toUpperCase()
+    const entry: CoinChecklistEntry = out[coinId] || {}
+    if (field === 'ENABLED') {
+      entry.enabled = boolValue
+      out[coinId] = entry
+      continue
+    }
+
+    if (field === 'NATIVE_SEND') {
+      entry.features = { ...(entry.features || {}), nativeSend: boolValue }
+    } else if (field === 'ASSET_LAYER') {
+      entry.features = { ...(entry.features || {}), assetLayer: boolValue }
+    } else if (field === 'ASSET_SEND') {
+      entry.features = { ...(entry.features || {}), assetSend: boolValue }
+    } else if (field === 'ACTIVITY') {
+      entry.features = { ...(entry.features || {}), activity: boolValue }
+    } else if (field === 'SHOW_ASSETS_TAB') {
+      entry.ui = { ...(entry.ui || {}), showAssetsTab: boolValue }
+    } else if (field === 'SHOW_ASSETS_ACTION') {
+      entry.ui = { ...(entry.ui || {}), showAssetsAction: boolValue }
+    } else if (field === 'SHOW_SEND_ACTION') {
+      entry.ui = { ...(entry.ui || {}), showSendAction: boolValue }
+    } else if (field === 'SHOW_ACTIVITY_TAB') {
+      entry.ui = { ...(entry.ui || {}), showActivityTab: boolValue }
+    }
+    out[coinId] = entry
+  }
+  return out
+}
+
+const COIN_CHECKLIST_FROM_JSON = parseCoinChecklistFromJson(
+  ENV?.VITE_COIN_FEATURE_CHECKLIST ?? ENV?.VITE_COIN_CHECKLIST
+)
+const COIN_CHECKLIST_FROM_ROWS = parseCoinChecklistFromEnvRows(ENV || {})
+const COIN_CHECKLIST: CoinChecklist = {}
+for (const [coinId, entry] of Object.entries(COIN_CHECKLIST_FROM_JSON)) {
+  COIN_CHECKLIST[coinId] = { ...entry }
+}
+for (const [coinId, entry] of Object.entries(COIN_CHECKLIST_FROM_ROWS)) {
+  const previous = COIN_CHECKLIST[coinId] || {}
+  COIN_CHECKLIST[coinId] = {
+    ...previous,
+    ...entry,
+    features: {
+      ...(previous.features || {}),
+      ...(entry.features || {})
+    },
+    ui: {
+      ...(previous.ui || {}),
+      ...(entry.ui || {})
+    }
+  }
+}
+
+function resolveChecklistEntriesForNetwork(network: Network): CoinChecklistEntry[] {
+  const keys: string[] = []
+  const networkId = normalizeCoinId(network.id)
+  if (networkId) keys.push(networkId)
+
+  const serverCoinId = normalizeCoinId(network.serverCoinId)
+  if (serverCoinId && !keys.includes(serverCoinId)) keys.push(serverCoinId)
+
+  const strippedServerCoinId = stripServerCoinVariantSuffix(serverCoinId)
+  if (strippedServerCoinId && !keys.includes(strippedServerCoinId)) keys.push(strippedServerCoinId)
+
+  const out: CoinChecklistEntry[] = []
+  for (const key of keys) {
+    const entry = COIN_CHECKLIST[key]
+    if (entry) out.push(entry)
+  }
+  return out
+}
+
+function applyChecklistToEnabledCoinIds(base: Set<string>): Set<string> {
+  const out = new Set(base)
+  for (const [coinId, entry] of Object.entries(COIN_CHECKLIST)) {
+    if (entry.enabled === undefined) continue
+    if (entry.enabled) {
+      if (ALLOWED_COIN_IDS.has(coinId) && !DISABLED_NETWORK_IDS.has(coinId)) out.add(coinId)
+    } else {
+      out.delete(coinId)
+    }
+  }
+  return out.size > 0 ? out : new Set(DEFAULT_ENABLED_COIN_IDS)
+}
+
+function isNetworkEnabledByChecklist(network: Network): boolean {
+  const entries = resolveChecklistEntriesForNetwork(network)
+  if (entries.length === 0) return true
+  let enabled: boolean | undefined
+  for (const entry of entries) {
+    if (entry.enabled !== undefined) enabled = entry.enabled
+  }
+  return enabled !== false
+}
+
+function applyChecklistFeatureOverrides(network: Network): Network {
+  const entries = resolveChecklistEntriesForNetwork(network)
+  if (entries.length === 0) return network
+
+  let features: CoinChecklistEntry['features'] = {}
+  let ui: CoinChecklistEntry['ui'] = {}
+  for (const entry of entries) {
+    if (entry.features) features = { ...features, ...entry.features }
+    if (entry.ui) ui = { ...ui, ...entry.ui }
+  }
+  if (Object.keys(features).length === 0 && Object.keys(ui).length === 0) return network
+
+  return {
+    ...network,
+    capabilities: {
+      ...(network.capabilities || {}),
+      features: {
+        ...(network.capabilities?.features || {}),
+        ...features
+      },
+      ui: {
+        ...(network.capabilities?.ui || {}),
+        ...ui
+      }
+    }
+  }
+}
+
+function applyCoinChecklistToNetworks(networks: Network[]): Network[] {
+  return networks
+    .filter((network) => isNetworkEnabledByChecklist(network))
+    .map((network) => applyChecklistFeatureOverrides(network))
+}
+
 function parseEnabledCoinIdsFromBuildConfig(): Set<string> | null {
   const enabledRaw = BUILD_CONFIG.coins?.enabled
   const disabled = new Set((BUILD_CONFIG.coins?.disabled || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean))
@@ -145,7 +380,7 @@ function parseEnabledCoinIds(raw: string | undefined): Set<string> {
 }
 
 export const ENABLED_NETWORK_IDS = new Set(
-  [...(parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined))]
+  [...applyChecklistToEnabledCoinIds(parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined))]
     .filter((id) => !DISABLED_NETWORK_IDS.has(id))
 )
 
@@ -172,9 +407,10 @@ function withGlobalBridgeCredentials(network: Network): Network {
   }
 }
 
-export const ALL_NETWORKS: Network[] = ALL_COIN_MODULES
+const RAW_ALL_NETWORKS: Network[] = ALL_COIN_MODULES
   .map((coin) => coin.createNetwork(runtimeContext))
   .map(withGlobalBridgeCredentials)
+export const ALL_NETWORKS: Network[] = applyCoinChecklistToNetworks(RAW_ALL_NETWORKS)
 export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => ENABLED_NETWORK_IDS.has(network.id))
 
 export const DEFAULT_ACTIVE_NETWORK_ID =
@@ -979,8 +1215,9 @@ export async function loadServerRegistrySnapshot(): Promise<{
     if (fallback) withRequired.push(fallback)
   }
   const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
+  const checklistNetworks = applyCoinChecklistToNetworks(withRequired)
   return {
-    networks: withRequired.length > 0 ? withRequired : null,
+    networks: checklistNetworks.length > 0 ? checklistNetworks : null,
     catalog: filteredCatalog
   }
 }
@@ -989,3 +1226,7 @@ export async function loadNetworksFromServerRegistry(): Promise<Network[] | null
   const snapshot = await loadServerRegistrySnapshot()
   return snapshot.networks
 }
+
+// Packed per-coin feature bundles:
+// src/coins/packed/<coin-id>/coin.feature.ts
+export * from './packed'

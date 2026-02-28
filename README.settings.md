@@ -122,6 +122,55 @@ Autoload is opt-in and intended for local/private builds only.
 VITE_ENABLED_COINS=rtm
 ```
 
+### Env checklist for all coins + features
+
+You can manage coin enablement and per-coin capability/UI flags directly from env.
+
+Supported env formats:
+
+1. JSON map:
+
+```env
+VITE_COIN_FEATURE_CHECKLIST={"eth":{"enabled":true,"features":{"nativeSend":true,"assetLayer":true,"assetSend":true,"activity":true},"ui":{"showAssetsTab":true,"showAssetsAction":true,"showSendAction":true,"showActivityTab":true}}}
+```
+
+2. Row-style checklist (recommended for large lists):
+
+```env
+VITE_COIN_ETH_ENABLED=true
+VITE_COIN_ETH_NATIVE_SEND=true
+VITE_COIN_ETH_ASSET_LAYER=true
+VITE_COIN_ETH_ASSET_SEND=true
+VITE_COIN_ETH_ACTIVITY=true
+VITE_COIN_ETH_SHOW_ASSETS_TAB=true
+VITE_COIN_ETH_SHOW_ASSETS_ACTION=true
+VITE_COIN_ETH_SHOW_SEND_ACTION=true
+VITE_COIN_ETH_SHOW_ACTIVITY_TAB=true
+```
+
+Row key format:
+- `VITE_COIN_<COIN_TOKEN>_<FIELD>=true|false`
+- `COIN_TOKEN` conversion:
+  - lowercase coin id
+  - replace `--` with `__`
+  - replace `-` with `_`
+  - uppercase the result
+  - example: `srv--terra-classic` -> `SRV__TERRA_CLASSIC`
+
+Fields:
+- `ENABLED`
+- `NATIVE_SEND`
+- `ASSET_LAYER`
+- `ASSET_SEND`
+- `ACTIVITY`
+- `SHOW_ASSETS_TAB`
+- `SHOW_ASSETS_ACTION`
+- `SHOW_SEND_ACTION`
+- `SHOW_ACTIVITY_TAB`
+
+Template with all current app coin ids:
+- `.env.coin-checklist.example`
+
 ### Compile-time build config (recommended)
 
 For a single “main” build-time switchboard (coins, feature flags, and model test-status colors), create:

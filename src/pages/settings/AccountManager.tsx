@@ -168,7 +168,7 @@ const AccountManager: React.FC = () => {
             </p>
             <p className="text-[11px] text-gray-400 leading-relaxed">
               Seed derivation is disabled for {activeNetwork.name} in this build. Import a public address for account{' '}
-              <span className="text-gray-200 font-bold">{getAccountDisplayName(activeAccount, activeNetwork.id, activeAccount.name)}</span>.
+              <span className="text-gray-200 font-bold">{getAccountDisplayName(activeAccount, activeNetwork.id, `Account ${activeAccount.derivationIndex + 1}`)}</span>.
             </p>
             <Input
               label={`${activeNetwork.name} Address`}
@@ -239,7 +239,7 @@ const AccountManager: React.FC = () => {
                   <div className="w-10 h-10 rounded-full bg-yellow-500 flex-shrink-0" />
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-200">{getAccountDisplayName(account, activeNetworkId, account.name)}</span>
+                      <span className="text-xs font-bold text-gray-200">{getAccountDisplayName(account, activeNetworkId, `Account ${account.derivationIndex + 1}`)}</span>
                       {activeAccountId === account.id && <IoCheckmarkCircle className="text-primary w-4 h-4 flex-shrink-0" />}
                     </div>
                     <span className="text-[10px] text-gray-500 font-mono truncate">

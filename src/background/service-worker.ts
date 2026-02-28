@@ -87,6 +87,21 @@ const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_s
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
+const ETH_REQUEST_ACCOUNTS_METHODS = new Set(['eth_requestAccounts'])
+const ETH_ACCOUNTS_METHODS = new Set(['eth_accounts'])
+const ETH_CHAIN_ID_METHODS = new Set(['eth_chainId'])
+const NET_VERSION_METHODS = new Set(['net_version'])
+const ETH_SEND_TRANSACTION_METHODS = new Set(['eth_sendTransaction'])
+const SWITCH_ETHEREUM_CHAIN_METHODS = new Set(['wallet_switchEthereumChain'])
+const ADD_ETHEREUM_CHAIN_METHODS = new Set(['wallet_addEthereumChain'])
+const ETH_SIGN_UNSUPPORTED_METHODS = new Set([
+  'eth_sign',
+  'personal_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v1',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4'
+])
 const DAPP_SDK_METHODS = [
   'wallet_getProviderState',
   'metayoshi_getProviderState',
@@ -117,7 +132,14 @@ const DAPP_SDK_METHODS = [
   'rtm_sendTransaction',
   'wallet_sendAsset',
   'metayoshi_sendAsset',
-  'rtm_sendAsset'
+  'rtm_sendAsset',
+  'eth_requestAccounts',
+  'eth_accounts',
+  'eth_chainId',
+  'net_version',
+  'eth_sendTransaction',
+  'wallet_switchEthereumChain',
+  'wallet_addEthereumChain'
 ] as const
 
 // Event ports for broadcasting events to content scripts
@@ -145,6 +167,7 @@ type DappNetworkDescriptor = {
   symbol: string
   coinType: string
   chainId: number | null
+  chainIdHex: string | null
   capabilities: {
     nativeSend: boolean
     assetLayer: boolean
@@ -165,6 +188,7 @@ function buildDappNetworkDescriptor(
     symbol: String(network?.symbol || '').trim(),
     coinType: String(network?.coinType || '').trim(),
     chainId: typeof network?.chainId === 'number' ? network.chainId : null,
+    chainIdHex: typeof network?.chainId === 'number' ? toHexChainId(network.chainId) : null,
     active,
     capabilities: {
       nativeSend: Boolean(caps.features.nativeSend),
@@ -182,6 +206,8 @@ function resolveDappNetworks(state: WalletState): Array<{ id: string; runtimeMod
   })
 }
 
+type ResolvedDappNetwork = ReturnType<typeof resolveDappNetworks>[number]
+
 function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?: string }): number {
   const symbol = String(network?.symbol || '').trim().toUpperCase()
   const id = String(network?.id || '').trim().toLowerCase()
@@ -193,6 +219,46 @@ function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?
   if (symbol === 'ADA' || id === 'ada') return 6
   if (symbol === 'XMR' || id === 'xmr') return 12
   return 8
+}
+
+function decimalFromBaseUnits(value: bigint, decimals: number): string {
+  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0
+  if (safeDecimals === 0) return value.toString()
+  const scale = 10n ** BigInt(safeDecimals)
+  const whole = value / scale
+  const fraction = value % scale
+  if (fraction === 0n) return whole.toString()
+  const fractionText = fraction.toString().padStart(safeDecimals, '0').replace(/0+$/, '')
+  return `${whole.toString()}.${fractionText}`
+}
+
+function parseAnyChainIdToNumber(input: unknown): number | null {
+  if (typeof input === 'number' && Number.isFinite(input) && input > 0) return Math.trunc(input)
+  const raw = String(input ?? '').trim().toLowerCase()
+  if (!raw) return null
+  if (raw.startsWith('0x')) {
+    const parsed = Number.parseInt(raw, 16)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function toHexChainId(value: number | null | undefined): string {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '0x0'
+  return `0x${Math.trunc(Number(value)).toString(16)}`
+}
+
+function findDappNetworkByChainId(
+  dappNetworks: ResolvedDappNetwork[],
+  inputChainId: unknown
+): ResolvedDappNetwork | null {
+  const target = parseAnyChainIdToNumber(inputChainId)
+  if (!target) return null
+  for (const net of dappNetworks) {
+    if (Number(net?.chainId || 0) === target) return net
+  }
+  return null
 }
 
 installGlobalErrorMonitor('background-sw')
@@ -744,6 +810,46 @@ function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTrans
   return { to, amount }
 }
 
+function parseEthSendTransactionParams(params: unknown, maxDecimals = 18): SendTransactionParams {
+  const candidate = Array.isArray(params) ? params[0] : params
+  if (!candidate || typeof candidate !== 'object') {
+    throw { code: -32602, message: 'eth_sendTransaction requires params [{ to, value }]' }
+  }
+
+  const payload = candidate as Record<string, unknown>
+  const to = String(payload.to ?? '').trim()
+  if (!to) throw { code: -32602, message: 'eth_sendTransaction requires `to`' }
+
+  const valueRaw = payload.value
+  if (valueRaw == null) throw { code: -32602, message: 'eth_sendTransaction requires `value` in wei' }
+
+  let wei: bigint
+  if (typeof valueRaw === 'string') {
+    const raw = valueRaw.trim().toLowerCase()
+    if (!raw) throw { code: -32602, message: 'eth_sendTransaction requires non-empty `value`' }
+    if (raw.startsWith('0x')) {
+      try {
+        wei = BigInt(raw)
+      } catch {
+        throw { code: -32602, message: 'eth_sendTransaction value must be valid hex wei' }
+      }
+    } else if (/^\d+$/.test(raw)) {
+      wei = BigInt(raw)
+    } else {
+      throw { code: -32602, message: 'eth_sendTransaction value must be wei integer (hex or decimal)' }
+    }
+  } else if (typeof valueRaw === 'number' && Number.isFinite(valueRaw)) {
+    if (valueRaw < 0) throw { code: -32602, message: 'eth_sendTransaction value must be >= 0' }
+    wei = BigInt(Math.trunc(valueRaw))
+  } else {
+    throw { code: -32602, message: 'eth_sendTransaction value must be wei integer (hex or decimal)' }
+  }
+
+  if (wei <= 0n) throw { code: -32602, message: 'eth_sendTransaction value must be > 0' }
+  const amount = decimalFromBaseUnits(wei, maxDecimals)
+  return { to, amount }
+}
+
 function parseSendAssetParams(params: unknown): SendAssetParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
@@ -908,6 +1014,7 @@ type DappRuntimeContext = {
     coinSymbol: string | null
     coinDecimals: number
     chainId: string | null
+    chainIdHex: string | null
     networkId: string | null
     networkLabel: string | null
     accounts: string[]
@@ -939,6 +1046,7 @@ function buildDappRuntimeContext(state: WalletState): DappRuntimeContext {
       coinSymbol: network?.symbol || null,
       coinDecimals: resolveCoinDecimals(network),
       chainId: network?.chainId?.toString() || network?.id || null,
+      chainIdHex: Number(network?.chainId || 0) > 0 ? toHexChainId(Number(network?.chainId || 0)) : null,
       networkId: network?.id || null,
       networkLabel: network?.name || null,
       accounts: address ? [address] : [],
@@ -1027,7 +1135,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Request accounts / enable
-  if (REQUEST_ACCOUNTS_METHODS.has(method)) {
+  if (REQUEST_ACCOUNTS_METHODS.has(method) || ETH_REQUEST_ACCOUNTS_METHODS.has(method)) {
     if (origin) {
       const approved = await requestScope(origin, 'read')
       if (!approved) {
@@ -1056,7 +1164,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
   
   // Get accounts
-  if (ACCOUNTS_METHODS.has(method)) {
+  if (ACCOUNTS_METHODS.has(method) || ETH_ACCOUNTS_METHODS.has(method)) {
     if ((state.isLocked ?? true) || !(state.isInitialized ?? false)) {
       return []
     }
@@ -1065,11 +1173,19 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     return currentAddress ? [currentAddress] : []
   }
   
-  if (SIGN_MESSAGE_METHODS.has(method)) {
+  if (ETH_CHAIN_ID_METHODS.has(method)) {
+    return toHexChainId(Number(network?.chainId || 0))
+  }
+
+  if (NET_VERSION_METHODS.has(method)) {
+    return String(parseAnyChainIdToNumber(network?.chainId) || 0)
+  }
+
+  if (SIGN_MESSAGE_METHODS.has(method) || ETH_SIGN_UNSUPPORTED_METHODS.has(method)) {
     throw { code: -32601, message: `Method not supported: ${method}` }
   }
 
-  if (SEND_TRANSACTION_METHODS.has(method)) {
+  if (SEND_TRANSACTION_METHODS.has(method) || ETH_SEND_TRANSACTION_METHODS.has(method)) {
     if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
@@ -1089,7 +1205,9 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       await touchLastConnected(origin)
     }
 
-    const parsedSend = parseSendTransactionParams(params, resolveCoinDecimals(network))
+    const parsedSend = ETH_SEND_TRANSACTION_METHODS.has(method)
+      ? parseEthSendTransactionParams(params, resolveCoinDecimals(network))
+      : parseSendTransactionParams(params, resolveCoinDecimals(network))
     const result = await requestDappActionApproval(
       origin || 'unknown',
       network.id,
@@ -1184,10 +1302,70 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       coinId: network.id,
       coinName: network.name,
       coinSymbol: network.symbol,
-      coinDecimals: resolveCoinDecimals(network)
+      coinDecimals: resolveCoinDecimals(network),
+      chainId: String(network.chainId ?? ''),
+      chainIdHex: toHexChainId(network.chainId)
     })
     
     return { networkId: normalizedNetworkId, networkLabel: network.name }
+  }
+
+  if (SWITCH_ETHEREUM_CHAIN_METHODS.has(method)) {
+    const candidate = Array.isArray(params) ? params[0] : params
+    const targetChainId = (candidate && typeof candidate === 'object')
+      ? (candidate as any).chainId
+      : undefined
+    const targetNetwork = findDappNetworkByChainId(dappNetworks, targetChainId)
+    if (!targetNetwork) {
+      throw { code: 4902, message: `Unrecognized chainId: ${String(targetChainId ?? '')}` }
+    }
+
+    await updateWalletStateInStorage((current) => ({
+      ...current,
+      activeNetworkId: targetNetwork.id
+    }))
+
+    broadcastEvent('networkChanged', {
+      networkId: targetNetwork.id,
+      networkLabel: targetNetwork.name,
+      coinId: targetNetwork.id,
+      coinName: targetNetwork.name,
+      coinSymbol: targetNetwork.symbol,
+      coinDecimals: resolveCoinDecimals(targetNetwork),
+      chainId: String(targetNetwork.chainId ?? ''),
+      chainIdHex: toHexChainId(targetNetwork.chainId)
+    })
+
+    return null
+  }
+
+  if (ADD_ETHEREUM_CHAIN_METHODS.has(method)) {
+    const candidate = Array.isArray(params) ? params[0] : params
+    const targetChainId = (candidate && typeof candidate === 'object')
+      ? (candidate as any).chainId
+      : undefined
+    const targetNetwork = findDappNetworkByChainId(dappNetworks, targetChainId)
+    if (!targetNetwork) {
+      throw { code: 4902, message: `Unsupported chain for this wallet: ${String(targetChainId ?? '')}` }
+    }
+
+    await updateWalletStateInStorage((current) => ({
+      ...current,
+      activeNetworkId: targetNetwork.id
+    }))
+
+    broadcastEvent('networkChanged', {
+      networkId: targetNetwork.id,
+      networkLabel: targetNetwork.name,
+      coinId: targetNetwork.id,
+      coinName: targetNetwork.name,
+      coinSymbol: targetNetwork.symbol,
+      coinDecimals: resolveCoinDecimals(targetNetwork),
+      chainId: String(targetNetwork.chainId ?? ''),
+      chainIdHex: toHexChainId(targetNetwork.chainId)
+    })
+
+    return null
   }
   
   // Unsupported method
@@ -1312,7 +1490,9 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
                 coinId: network.id,
                 coinName: network.name,
                 coinSymbol: network.symbol,
-                coinDecimals: resolveCoinDecimals(network)
+                coinDecimals: resolveCoinDecimals(network),
+                chainId: String(network.chainId ?? ''),
+                chainIdHex: toHexChainId(network.chainId)
               })
             }
           }

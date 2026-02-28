@@ -17,10 +17,10 @@ function canUseChromeStorage(): boolean {
 }
 
 function scopeLabel(scope: DappScope): string {
-  if (scope === 'read') return 'View your wallet address and balances'
+  if (scope === 'read') return 'Read accounts, network/chain context, and capability state'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
-  if (scope === 'send_coin') return 'Suggest native coin transactions'
-  return 'Suggest token and NFT transfer transactions'
+  if (scope === 'send_coin') return 'Request native transfers (wallet_sendTransaction / eth_sendTransaction)'
+  return 'Request token/NFT or network-native asset transfers'
 }
 
 const DappConnectStep2: React.FC = () => {
@@ -158,7 +158,7 @@ const DappConnectStep2: React.FC = () => {
           </div>
 
           <p className="text-[10px] text-gray-500 leading-tight">
-            Only connect with trusted sites. Asset scope includes ERC20/ERC721/ERC1155 on EVM, Cosmos denom/CW20/CW721 where enabled, and other network-native asset layers.
+            Only connect with trusted sites. MetaYoshi exposes EIP-1193-compatible account and chain methods, plus wallet-specific methods for multichain capabilities.
           </p>
         </div>
       </div>

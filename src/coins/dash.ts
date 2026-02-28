@@ -1,6 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput, UtxoAddressSpec } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
-import { DASH_API_INFO } from './interceptors/dash'
+import { DASH_API_INFO } from './interceptors'
 import utxoLogo from './coinlogos/dash.png'
 
 export const DASH_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES

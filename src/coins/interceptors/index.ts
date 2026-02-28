@@ -1,134 +1,142 @@
-import { ARR_API_INFO, arrApiInterceptor } from './arr'
-import { ADA_API_INFO, adaApiInterceptor } from './cardano'
-import { BTCZ_API_INFO, btczApiInterceptor } from './btcz'
-import { DOGE_API_INFO, dogeApiInterceptor } from './doge'
-import { FIRO_API_INFO, firoApiInterceptor } from './firo'
-import { XMR_API_INFO, xmrApiInterceptor } from './monero'
-import { RTM_API_INFO, rtmApiInterceptor } from './rtm'
-import { TIDE_API_INFO, tideApiInterceptor } from './tide'
-import { XRP_API_INFO, xrpApiInterceptor } from './xrp'
-import { createCoinApiInterceptor } from './factory'
+﻿import { createCoinApiInterceptor } from './factory'
 import { getCoinPayloadCatalog } from '../payloads'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
-import {
-  SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID,
-  SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID
-} from './serverScaffolds'
-import type { CoinApiInfo, CoinApiInterceptor } from './types'
+import { getPackedCoinFeatureByCoinId, getPackedCoinFeatureByNetworkId } from '../packed'
+import type { CoinApiInfo, CoinApiInterceptor, CoinRpcProtocol } from './types'
 
-export const COIN_API_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada'] as const
+function normalizeRegistryNetworkId(networkId?: string): string {
+  return String(networkId || '').trim().toLowerCase()
+}
 
-const COIN_API_REGISTRY: ReadonlyArray<{
-  networkId: (typeof COIN_API_ORDER)[number]
-  interceptor: CoinApiInterceptor
-  info: CoinApiInfo
-}> = [
-  { networkId: 'rtm', interceptor: rtmApiInterceptor, info: RTM_API_INFO },
-  { networkId: 'doge', interceptor: dogeApiInterceptor, info: DOGE_API_INFO },
-  { networkId: 'btcz', interceptor: btczApiInterceptor, info: BTCZ_API_INFO },
-  { networkId: 'tide', interceptor: tideApiInterceptor, info: TIDE_API_INFO },
-  { networkId: 'firo', interceptor: firoApiInterceptor, info: FIRO_API_INFO },
-  { networkId: 'xrp', interceptor: xrpApiInterceptor, info: XRP_API_INFO },
-  { networkId: 'arr', interceptor: arrApiInterceptor, info: ARR_API_INFO },
-  { networkId: 'xmr', interceptor: xmrApiInterceptor, info: XMR_API_INFO },
-  { networkId: 'ada', interceptor: adaApiInterceptor, info: ADA_API_INFO }
-]
+function resolvePackedFeature(networkId?: string) {
+  const key = normalizeRegistryNetworkId(networkId)
+  if (!key) return null
 
-const INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = Object.fromEntries(
-  COIN_API_REGISTRY.map((entry) => [entry.networkId, entry.interceptor])
-)
+  const directByNetwork = getPackedCoinFeatureByNetworkId(key)
+  if (directByNetwork) return directByNetwork
 
-const API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = Object.fromEntries(
-  COIN_API_REGISTRY.map((entry) => [entry.networkId, entry.info])
-)
+  const directByCoin = getPackedCoinFeatureByCoinId(key)
+  if (directByCoin) return directByCoin
+
+  if (key.startsWith('srv--')) {
+    const srvCoinId = key.slice('srv--'.length)
+    if (srvCoinId) {
+      const bySrvCoin = getPackedCoinFeatureByCoinId(srvCoinId)
+      if (bySrvCoin) return bySrvCoin
+    }
+  }
+
+  const aliasSep = key.lastIndexOf('--')
+  if (aliasSep > 0 && aliasSep < key.length - 2) {
+    const suffix = key.slice(aliasSep + 2)
+    const bySuffixNetwork = getPackedCoinFeatureByNetworkId(suffix)
+    if (bySuffixNetwork) return bySuffixNetwork
+    const bySuffixCoin = getPackedCoinFeatureByCoinId(suffix)
+    if (bySuffixCoin) return bySuffixCoin
+    const byPrefixNetwork = getPackedCoinFeatureByNetworkId(key.slice(0, aliasSep))
+    if (byPrefixNetwork) return byPrefixNetwork
+  }
+
+  const standardMeta = STANDARD_RUNTIME_META[key]
+  if (standardMeta?.coinId) {
+    const byStandard = getPackedCoinFeatureByCoinId(standardMeta.coinId)
+    if (byStandard) return byStandard
+  }
+
+  return null
+}
+
+function resolveProtocol(feature: any): CoinRpcProtocol {
+  const coinType = String(feature?.coinType || '').trim().toUpperCase()
+  if (coinType === 'EVM') return 'evm-jsonrpc'
+  if (coinType === 'XRP') return 'xrp-jsonrpc-compat'
+  if (coinType === 'ADA') return 'cardano-wallet-compat'
+  if (coinType === 'XMR') return 'monero-wallet-compat'
+  return 'utxo-jsonrpc'
+}
+
+function defaultWalletForFeature(feature: any): string {
+  const walletScoped = Boolean(feature?.settings?.bridge?.walletScopedPath)
+  return walletScoped ? 'mainwallet' : ''
+}
+
+function createApiInfoFromPacked(feature: any, requestedNetworkId: string): CoinApiInfo {
+  const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
+  const coinId = String(feature?.bridgeCoinId || feature?.coinId || requestedNetworkId || '').trim().toLowerCase() || requestedNetworkId
+  const chain = String(feature?.settings?.bridge?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+  const wallet = defaultWalletForFeature(feature)
+  const bridgeBasePath = `/v1/bridge/${coinId}/${chain}`
+  const defaultBridgePath = wallet ? `${bridgeBasePath}/wallet/${encodeURIComponent(wallet)}` : bridgeBasePath
+
+  return {
+    networkId: String(requestedNetworkId || feature?.networkId || feature?.coinId || '').trim().toLowerCase(),
+    symbol: String(feature?.symbol || 'COIN').trim().toUpperCase(),
+    coinId,
+    chain,
+    protocol: resolveProtocol(feature),
+    apiBaseUrl,
+    defaultRpcUrl: apiBaseUrl,
+    defaultBridgeUrl: `${apiBaseUrl}${defaultBridgePath}`,
+    defaultWallet: wallet,
+    defaultExplorerUrl: String(feature?.settings?.explorer?.txUrlTemplate || '').trim(),
+    healthUrl: `${apiBaseUrl}/health`,
+    bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/${coinId}`,
+    sendCoinPathTemplate: `${bridgeBasePath}${wallet ? '/:wallet' : ''}`,
+    sendAssetPathTemplate: `/v1/bridge/send/asset/${coinId}/${chain}${wallet ? '/:wallet' : ''}`,
+    payloads: getCoinPayloadCatalog(requestedNetworkId)
+  }
+}
 
 const DYNAMIC_API_INFO_CACHE = new Map<string, CoinApiInfo>()
 const DYNAMIC_INTERCEPTOR_CACHE = new Map<string, CoinApiInterceptor>()
 
-function normalizeRegistryNetworkId(networkId?: string): string {
-  const normalized = String(networkId || '').trim().toLowerCase()
-  if (!normalized) return ''
-  // Preserve scaffold IDs like "srv--bitcoin" and collapse only extra aliases
-  // like "srv--bitcoin--alt" to their base scaffold key.
-  if (normalized.startsWith('srv--')) {
-    const parts = normalized.split('--')
-    if (parts.length >= 2 && parts[1]) return `srv--${parts[1]}`
-    return normalized
-  }
-  const aliasSep = normalized.indexOf('--')
-  if (aliasSep > 0) return normalized.slice(0, aliasSep)
-  return normalized
-}
+export function getCoinApiInfo(networkId?: string): CoinApiInfo | undefined {
+  const key = normalizeRegistryNetworkId(networkId)
+  if (!key) return undefined
 
-function resolveDefaultBridgePath(coinId: string): string {
-  if (coinId === 'raptoreum' || coinId === 'xrp') return `/v1/bridge/${coinId}/main/wallet/mainwallet`
-  return `/v1/bridge/${coinId}/main`
-}
+  const cached = DYNAMIC_API_INFO_CACHE.get(key)
+  if (cached) return cached
 
-function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
-  const meta = STANDARD_RUNTIME_META[networkId]
-  if (!meta) return undefined
-  const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
-  const bridgePath = resolveDefaultBridgePath(meta.coinId)
-  return {
-    networkId,
-    symbol: meta.symbol,
-    coinId: meta.coinId,
-    chain: 'main',
-    protocol: 'utxo-jsonrpc',
-    apiBaseUrl,
-    defaultRpcUrl: apiBaseUrl,
-    defaultBridgeUrl: `${apiBaseUrl}${bridgePath}`,
-    defaultWallet: meta.coinId === 'raptoreum' || meta.coinId === 'xrp' ? 'mainwallet' : '',
-    defaultExplorerUrl: '',
-    healthUrl: `${apiBaseUrl}/health`,
-    bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/${meta.coinId}`,
-    sendCoinPathTemplate: `/v1/bridge/send/coin/${meta.coinId}/main/:wallet`,
-    sendAssetPathTemplate: `/v1/bridge/send/asset/${meta.coinId}/main/:wallet`,
-    payloads: getCoinPayloadCatalog(networkId)
-  }
+  const feature = resolvePackedFeature(key)
+  if (!feature) return undefined
+
+  const info = createApiInfoFromPacked(feature, key)
+  DYNAMIC_API_INFO_CACHE.set(key, info)
+  return info
 }
 
 export function getCoinApiInterceptor(networkId?: string): CoinApiInterceptor | undefined {
   const key = normalizeRegistryNetworkId(networkId)
   if (!key) return undefined
-  const direct = INTERCEPTOR_BY_NETWORK_ID[key]
-  if (direct) return direct
-  const scaffolded = SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID[key]
-  if (scaffolded) return scaffolded
+
   const cached = DYNAMIC_INTERCEPTOR_CACHE.get(key)
   if (cached) return cached
+
   const info = getCoinApiInfo(key)
   if (!info) return undefined
+
   const interceptor = createCoinApiInterceptor(info)
   DYNAMIC_INTERCEPTOR_CACHE.set(key, interceptor)
   return interceptor
 }
 
-export function getCoinApiInfo(networkId?: string): CoinApiInfo | undefined {
-  const key = normalizeRegistryNetworkId(networkId)
-  if (!key) return undefined
-  const direct = API_INFO_BY_NETWORK_ID[key]
-  if (direct) return direct
-  const scaffolded = SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID[key]
-  if (scaffolded) return scaffolded
-  const cached = DYNAMIC_API_INFO_CACHE.get(key)
-  if (cached) return cached
-  const dynamic = createStandardApiInfo(key)
-  if (dynamic) DYNAMIC_API_INFO_CACHE.set(key, dynamic)
-  return dynamic
+function mustApiInfo(networkId: string): CoinApiInfo {
+  const value = getCoinApiInfo(networkId)
+  if (!value) {
+    throw new Error(`Missing API info for networkId=${networkId}`)
+  }
+  return value
 }
 
-export {
-  RTM_API_INFO,
-  DOGE_API_INFO,
-  TIDE_API_INFO,
-  BTCZ_API_INFO,
-  FIRO_API_INFO,
-  XRP_API_INFO,
-  ARR_API_INFO,
-  XMR_API_INFO,
-  ADA_API_INFO
-}
+export const RTM_API_INFO = mustApiInfo('rtm')
+export const DOGE_API_INFO = mustApiInfo('doge')
+export const TIDE_API_INFO = mustApiInfo('tide')
+export const BTCZ_API_INFO = mustApiInfo('btcz')
+export const FIRO_API_INFO = mustApiInfo('firo')
+export const XRP_API_INFO = mustApiInfo('xrp')
+export const ARR_API_INFO = mustApiInfo('arr')
+export const XMR_API_INFO = mustApiInfo('xmr')
+export const ADA_API_INFO = mustApiInfo('ada')
+export const DASH_API_INFO = mustApiInfo('srv--dash')
 
 export type { CoinApiInfo, CoinApiInterceptor } from './types'

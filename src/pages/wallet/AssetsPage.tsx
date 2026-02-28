@@ -18,6 +18,7 @@ import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { resolveCoinWalletUiProfile } from '../../coins/walletUi'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -144,16 +145,11 @@ const AssetsPage: React.FC = () => {
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const coinWalletUi = resolveCoinWalletUiProfile(activeNetwork)
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
-  const isEvmEcosystem = activeNetwork.coinType === 'EVM'
-  const supportsPreview =
-    activeNetwork.coinType === 'UTXO'
-    || activeNetwork.coinType === 'EVM'
-    || activeModelId === 'sol'
-    || activeModelId === 'ada'
-    || activeModelId === 'tron'
-    || activeNetwork.coinType === 'XRP'
+  const isFlatAssetLayout = coinWalletUi.assetListLayout === 'flat'
+  const supportsPreview = coinWalletUi.showAssetPreview
   const canOpenAssetSend = caps.features.assetSend
   const canSubmitAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
@@ -284,10 +280,6 @@ const AssetsPage: React.FC = () => {
     try { await fetchNetworkAssets({ force: true }) } finally { setRefreshing(false) }
   }
 
-  const openSend = (name: string) => {
-    setSelectedAsset(name); setToAddress(''); setQty('')
-    setSendError(''); setTxid(null)
-  }
   const closeSheet = () => {
     setSelectedAsset(null); setToAddress(''); setQty('')
     setSendError(''); setTxid(null)
@@ -474,14 +466,14 @@ const AssetsPage: React.FC = () => {
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
-                hideMetaLabels={isEvmEcosystem}
+                hideMetaLabels={coinWalletUi.hideAssetMetaLabels}
               />
             ))}
           </>
         )}
 
         {/* normal: EVM assets (flat, no root/sub labels) */}
-        {caps.features.assetLayer && !isSearching && isEvmEcosystem && sorted.length > 0 && (
+        {caps.features.assetLayer && !isSearching && isFlatAssetLayout && sorted.length > 0 && (
           <>
             {sorted.map(([name, raw]) => (
               <AssetRow
@@ -497,14 +489,14 @@ const AssetsPage: React.FC = () => {
                   navigate('/assets/preview', { state: { assetId: name } })
                 }}
                 previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
-                hideMetaLabels={true}
+                hideMetaLabels={coinWalletUi.hideAssetMetaLabels}
               />
             ))}
           </>
         )}
 
         {/* normal: Root Assets */}
-        {caps.features.assetLayer && !isSearching && !isEvmEcosystem && roots.length > 0 && (
+        {caps.features.assetLayer && !isSearching && !isFlatAssetLayout && roots.length > 0 && (
           <>
             <div className="px-4 pt-3 pb-1 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-yellow-500 shrink-0" />
@@ -531,7 +523,7 @@ const AssetsPage: React.FC = () => {
         )}
 
         {/* normal: Sub Assets */}
-        {caps.features.assetLayer && !isSearching && !isEvmEcosystem && subs.length > 0 && (
+        {caps.features.assetLayer && !isSearching && !isFlatAssetLayout && subs.length > 0 && (
           <>
             <div className="px-4 pt-3 pb-1 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
@@ -580,7 +572,7 @@ const AssetsPage: React.FC = () => {
               <div className="flex flex-col gap-1.5">
                 <h2 className="text-sm font-black uppercase tracking-widest">Send Asset</h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {!isEvmEcosystem && (
+                  {!isFlatAssetLayout && (
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
                       isRoot(selectedAsset)
                         ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
@@ -674,7 +666,7 @@ const AssetsPage: React.FC = () => {
                 <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
                   <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
                   <p className="text-[10px] text-gray-600 leading-relaxed">
-                    {activeNetwork.coinType === 'EVM'
+                    {isFlatAssetLayout
                       ? 'Network gas is estimated automatically at signing.'
                       : `Estimated required fee: ~${formatCoinAmount(estimatedFeeCoin)} ${activeNetwork.symbol}. Change is returned automatically.`}
                   </p>

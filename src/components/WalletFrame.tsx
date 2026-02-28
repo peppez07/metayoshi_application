@@ -180,14 +180,14 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const editAccountName = (accountId: string) => {
     const target = accounts.find((a) => a.id === accountId)
     if (!target) return
-    const currentName = getAccountDisplayName(target, activeNetworkId, target.name)
+    const currentName = getAccountDisplayName(target, activeNetworkId, `Account ${target.derivationIndex + 1}`)
     const next = window.prompt(`Rename ${activeNetwork.symbol} account`, currentName)
     if (next === null) return
     const trimmed = next.trim()
     if (!trimmed || trimmed === currentName) return
     const duplicate = accounts.some((a) => (
       a.id !== accountId
-      && getAccountDisplayName(a, activeNetworkId, a.name).toLowerCase() === trimmed.toLowerCase()
+      && getAccountDisplayName(a, activeNetworkId, `Account ${a.derivationIndex + 1}`).toLowerCase() === trimmed.toLowerCase()
     ))
     if (duplicate) {
       window.alert(`Another ${activeNetwork.symbol} account already uses this name.`)
@@ -404,7 +404,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                         style={{ background: SESSION_GRADIENT }}
                       />
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, acc.name)}</span>
+                        <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, `Account ${acc.derivationIndex + 1}`)}</span>
                         <span className="text-[10px] text-gray-400 font-mono">
                           {addr ? `${addr.slice(0, 10)}…` : '—'}
                         </span>

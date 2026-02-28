@@ -22,6 +22,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import { getAccountDisplayName } from '../../lib/accountName'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from '../../lib/coinModel'
 import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
+import { resolveCoinWalletUiProfile } from '../../coins/walletUi'
 import {
   DONATION_ENABLED_DEFAULT,
   DONATION_PERCENT_DEFAULT,
@@ -197,6 +198,7 @@ const WalletLayout: React.FC = () => {
 
   // ── tabs — only show Assets if the network supports token assets ───────────
   const caps = networkCapabilities(activeNetwork)
+  const coinWalletUi = resolveCoinWalletUiProfile(activeNetwork)
   const coinModel = resolveCoinModelFamily(activeNetwork)
   const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
   const isModelRoute = location.pathname.startsWith('/wallet/model/')
@@ -333,11 +335,13 @@ const WalletLayout: React.FC = () => {
               disabled={sendBlockedBySync}
             />
           )}
-          <QuickAction
-            icon={<IoSearchOutline className="w-5 h-5" />}
-            label="Model"
-            onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
-          />
+          {coinWalletUi.showModelAction && (
+            <QuickAction
+              icon={<IoSearchOutline className="w-5 h-5" />}
+              label="Model"
+              onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
+            />
+          )}
         </div>
       </div>
 
@@ -389,7 +393,7 @@ const WalletLayout: React.FC = () => {
                   >
                     <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-yellow-400 shrink-0" />
                     <div className="flex flex-col min-w-0">
-                      <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, acc.name)}</span>
+                      <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, `Account ${acc.derivationIndex + 1}`)}</span>
                       <span className="text-[10px] text-gray-500 font-mono truncate max-w-[160px]">
                         {addr ? `${addr.slice(0, 8)}…${addr.slice(-6)}` : '—'}
                       </span>
@@ -527,7 +531,7 @@ const WalletLayout: React.FC = () => {
               <div className="p-3 rounded-xl border border-dark-600 bg-dark-700/30 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 rounded-full bg-yellow-500" />
-                  <span className="text-xs font-bold">{getAccountDisplayName(activeAccount, activeNetworkId, activeAccount?.name || 'Account')}</span>
+                  <span className="text-xs font-bold">{getAccountDisplayName(activeAccount, activeNetworkId, activeAccount ? `Account ${activeAccount.derivationIndex + 1}` : 'Account')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-dark-700/50 border border-dark-600">
                   <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />

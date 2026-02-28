@@ -1400,7 +1400,7 @@ async function deriveAccountAddresses(
   }
 }
 
-function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
+function normalizePersistedAccounts(rawAccounts: unknown, networkIds: string[] = []): Account[] {
   if (!Array.isArray(rawAccounts)) return []
 
   return rawAccounts.map((raw, index) => {
@@ -1410,10 +1410,19 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
     const networkNames = candidate.networkNames ?? {}
     const networkBalances = candidate.networkBalances ?? {}
 
+    const baseName = typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`
+    const normalizedNetworkNames: Record<string, string> = { ...networkNames }
+    for (const networkId of networkIds) {
+      const key = String(networkId || '').trim()
+      if (!key) continue
+      if (String(normalizedNetworkNames[key] || '').trim()) continue
+      normalizedNetworkNames[key] = baseName
+    }
+
     return {
       id: typeof candidate.id === 'string' ? candidate.id : `acc-${index + 1}`,
-      name: typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`,
-      networkNames: { ...networkNames },
+      name: baseName,
+      networkNames: normalizedNetworkNames,
       derivationIndex: resolveDerivationIndex(candidate, index),
       addresses: {
         EVM: addresses.EVM ?? '',
@@ -3401,16 +3410,31 @@ export const useWalletStore = create<WalletState>()(
         const newVault = await encryptVaultV1({ password: newPassword, mnemonic: normalizedMnemonic })
 
         // 3. Normalize the persisted accounts so they satisfy the Account shape.
-        const restoredAccounts = normalizePersistedAccounts(backup.accounts)
+        const currentNetworks = normalizeNetworkListSymbols(get().networks || INITIAL_NETWORKS)
+        const currentNetworkIds = currentNetworks.map((n) => String(n.id || '').trim()).filter(Boolean)
+        const currentNetworkIdSet = new Set(currentNetworkIds)
+
+        const restoredAccounts = normalizePersistedAccounts(
+          backup.accounts,
+          currentNetworkIds
+        )
 
         // 4. Re-derive fresh network addresses for every account so they are
         //    guaranteed to match the restored mnemonic.
-        const networks = get().networks
+        const networks = currentNetworks
         const reHydratedAccounts: Account[] = []
         for (const acc of restoredAccounts) {
           const derived = await deriveAccountAddresses(normalizedMnemonic, networks, acc.derivationIndex)
+          const nextNetworkNames: Record<string, string> = { ...(acc.networkNames ?? {}) }
+          for (const net of networks) {
+            const networkId = String(net.id || '').trim()
+            if (!networkId) continue
+            if (String(nextNetworkNames[networkId] || '').trim()) continue
+            nextNetworkNames[networkId] = String(acc.name || `Account ${acc.derivationIndex + 1}`).trim() || `Account ${acc.derivationIndex + 1}`
+          }
           reHydratedAccounts.push({
             ...acc,
+            networkNames: nextNetworkNames,
             addresses: {
               EVM:  derived.addresses.EVM  || acc.addresses?.EVM  || '',
               UTXO: derived.addresses.UTXO || acc.addresses?.UTXO || '',
@@ -3429,6 +3453,14 @@ export const useWalletStore = create<WalletState>()(
           ? backup.activeAccountId
           : (reHydratedAccounts[0]?.id ?? null)
 
+        const safeActiveNetworkId = (() => {
+          const fromBackup = String(backup.activeNetworkId || '').trim()
+          if (fromBackup && currentNetworkIdSet.has(fromBackup)) return fromBackup
+          const fromCurrent = String(get().activeNetworkId || '').trim()
+          if (fromCurrent && currentNetworkIdSet.has(fromCurrent)) return fromCurrent
+          return currentNetworks[0]?.id || DEFAULT_ACTIVE_NETWORK_ID
+        })()
+
         // 5. Write everything back into the store.
         set({
           isInitialized:    true,
@@ -3441,7 +3473,8 @@ export const useWalletStore = create<WalletState>()(
           accounts:         reHydratedAccounts,
           nextAccountIndex: backup.nextAccountIndex ?? reHydratedAccounts.length,
           activeAccountId:  safeActiveAccountId,
-          activeNetworkId:  backup.activeNetworkId ?? get().activeNetworkId,
+          activeNetworkId:  safeActiveNetworkId,
+          networks:         currentNetworks,
           activity:         Array.isArray(backup.activity) ? backup.activity : [],
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
@@ -3556,7 +3589,12 @@ export const useWalletStore = create<WalletState>()(
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
           name: `Account ${derivationIndex + 1}`,
-          networkNames: { [selectedNetwork.id]: normalizedName },
+          networkNames: Object.fromEntries(
+            (networks || [])
+              .map((n) => String(n.id || '').trim())
+              .filter(Boolean)
+              .map((networkId) => [networkId, normalizedName])
+          ),
           derivationIndex,
           addresses,
           networkAddresses: { [selectedNetwork.id]: selectedAddress },
@@ -4511,7 +4549,10 @@ export const useWalletStore = create<WalletState>()(
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
         const merged = { ...currentState, ...persisted } as WalletState
-        const accounts = normalizePersistedAccounts(persisted.accounts ?? merged.accounts)
+        const accounts = normalizePersistedAccounts(
+          persisted.accounts ?? merged.accounts,
+          INITIAL_NETWORKS.map((n) => String(n.id || '').trim()).filter(Boolean)
+        )
         const highestDerivationIndex = accounts.reduce((max, account) => Math.max(max, account.derivationIndex), -1)
         const nextAccountIndex = Math.max(
           1,
