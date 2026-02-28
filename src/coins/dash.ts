@@ -1,5 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput, UtxoAddressSpec } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
+import { DASH_API_INFO } from './interceptors/dash'
 import utxoLogo from './coinlogos/dash.png'
 
 export const DASH_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
@@ -26,6 +27,7 @@ export function createDashNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('dash', 'main'),
     bridgeUsername,
     bridgePassword,
+    explorerUrl: import.meta.env.VITE_DASH_EXPLORER || DASH_API_INFO.defaultExplorerUrl || 'https://insight.dash.org/insight',
     capabilities: DASH_CAPABILITIES,
     logo: utxoLogo
   }
