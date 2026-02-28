@@ -1,12 +1,12 @@
 import type { CoinModule } from './types'
-import { cosmosCoin } from './cosmos.legacy'
-import { bitcoinCoin } from './bitcoin.legacy'
-import { pivxCoin } from './pivx.legacy'
-import { dashCoin } from './dash.legacy'
-import { terraCoin } from './terra.legacy'
-import { terraClassicCoin } from './terra-classic.legacy'
-import { polkadotCoin } from './polkadot.legacy'
-import { mantaAtlanticCoin } from './manta-atlantic.legacy'
+import { cosmosCoin } from './cosmos'
+import { bitcoinCoin } from './bitcoin'
+import { pivxCoin } from './pivx'
+import { dashCoin } from './dash'
+import { terraCoin } from './terra'
+import { terraClassicCoin } from './terra-classic'
+import { polkadotCoin } from './polkadot'
+import { mantaAtlanticCoin } from './manta-atlantic'
 
 const ALL_SERVER_SCAFFOLD_COIN_MODULES: CoinModule[] = [
   cosmosCoin,
