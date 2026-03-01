@@ -1,29 +1,7 @@
-import { arrCoin } from './arr'
-import { arbitrumCoin } from './arbitrum'
-import { avaxcCoin } from './avaxc'
-import { baseCoin } from './base'
-import { bitcoinCoin, BTC_ADDRESS_SPEC } from './bitcoin'
-import { cardanoCoin } from './cardano'
-import { bnbCoin } from './bnb'
 import { btczCoin } from './btcz'
-import { cosmosCoin } from './cosmos'
 import { dashCoin } from './dash'
-import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
-import { firoCoin } from './firo'
-import { mantaAtlanticCoin } from './manta-atlantic'
-import { moneroCoin } from './monero'
-import { pivxCoin } from './pivx'
-import { polkadotCoin } from './polkadot'
-import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
-import { solCoin } from './sol'
-import { terraClassicCoin } from './terra-classic'
-import { terraCoin } from './terra'
-import { tideCoin } from './tide'
-import { tronCoin } from './tron'
-import { xlmCoin } from './xlm'
-import { xrpCoin } from './xrp'
 import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 import { BUILD_CONFIG } from '../buildConfig'
@@ -69,30 +47,8 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
-  bnbCoin,
-  polygonCoin,
-  arbitrumCoin,
-  baseCoin,
-  avaxcCoin,
-  bitcoinCoin,
-  cosmosCoin,
   dashCoin,
-  pivxCoin,
-  polkadotCoin,
-  terraCoin,
-  terraClassicCoin,
-  mantaAtlanticCoin,
-  solCoin,
-  xlmCoin,
-  tronCoin,
-  dogeCoin,
   btczCoin,
-  tideCoin,
-  firoCoin,
-  xrpCoin,
-  arrCoin,
-  moneroCoin,
-  cardanoCoin,
   ...SERVER_SCAFFOLD_COIN_MODULES
 ]
 
@@ -104,40 +60,16 @@ const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 const ALLOWED_COIN_IDS = new Set([...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id)))
 const DEFAULT_ENABLED_COIN_IDS = [...ALLOWED_COIN_IDS]
-const EVM_COIN_IDS = new Set<string>(['eth', 'bnb', 'polygon', 'arb', 'base', 'avaxc'])
-const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['polygon', 'arb', 'base'])
+const EVM_COIN_IDS = new Set<string>(['eth'])
+const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>()
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
-  1: 'eth',
-  56: 'bnb',
-  137: 'polygon',
-  42161: 'arb',
-  8453: 'base',
-  43114: 'avaxc'
+  1: 'eth'
 }
 const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   eth: 'eth',
   ethereum: 'eth',
   'ethereum-mainnet': 'eth',
-  'mainnet-ethereum': 'eth',
-  bnb: 'bnb',
-  bsc: 'bnb',
-  'bnb-smart-chain': 'bnb',
-  'binance-smart-chain': 'bnb',
-  'smart-chain': 'bnb',
-  polygon: 'polygon',
-  matic: 'polygon',
-  'polygon-mainnet': 'polygon',
-  'matic-mainnet': 'polygon',
-  arb: 'arb',
-  arbitrum: 'arb',
-  'arbitrum-one': 'arb',
-  base: 'base',
-  'base-mainnet': 'base',
-  avaxc: 'avaxc',
-  avax: 'avaxc',
-  avalanche: 'avaxc',
-  'avalanche-c-chain': 'avaxc',
-  'avalanche-mainnet-c-chain': 'avaxc'
+  'mainnet-ethereum': 'eth'
 }
 
 function normalizeCoinSelectionToken(rawToken: string): string {
@@ -257,7 +189,6 @@ const MODULE_BY_NETWORK_ID = new Map<string, CoinModule>(
 )
 
 const UTXO_ADDRESS_SPECS: Record<string, UtxoAddressSpec> = {}
-UTXO_ADDRESS_SPECS.BTC = BTC_ADDRESS_SPEC
 for (const coin of ALL_COIN_MODULES) {
   if (!coin.coinSymbol || !coin.utxoAddress) continue
   const symbol = coin.coinSymbol.toUpperCase()

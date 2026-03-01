@@ -1867,7 +1867,7 @@ export const useWalletStore = create<WalletState>()(
             if (forceCanonicalUtxoAddress && existing && existing !== address) {
               console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
             } else {
-              console.log(`Ã¢Å“â€œ Derived ${net.symbol} address on demand: ${address}`)
+              console.info(`[${net.symbol}] derived address on demand: ${address}`)
             }
           } else if (modelId === 'ada') {
             const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)

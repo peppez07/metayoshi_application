@@ -1,39 +1,20 @@
-import { ARR_PAYLOADS } from './arr'
-import { BITCOIN_PAYLOADS } from './bitcoin'
-import { ADA_PAYLOADS } from './cardano'
 import { BTCZ_PAYLOADS } from './btcz'
 import { createUtxoPayloadCatalog } from './common'
 import { DASH_PAYLOADS } from './dash'
-import { DOGE_PAYLOADS } from './doge'
-import { FIRO_PAYLOADS } from './firo'
-import { MANTAATLANTIC_PAYLOADS } from './manta-atlantic'
-import { XMR_PAYLOADS } from './monero'
-import { PIVX_PAYLOADS } from './pivx'
-import { POLKADOT_PAYLOADS } from './polkadot'
 import { RTM_PAYLOADS } from './rtm'
-import { TERRACLASSIC_PAYLOADS } from './terra-classic'
-import { TERRA_PAYLOADS } from './terra'
-import { TIDE_PAYLOADS } from './tide'
-import { XRP_PAYLOADS } from './xrp'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
 import type { CoinPayloadCatalog } from './types'
 
-export const PAYLOAD_CATALOG_ORDER = ['rtm', 'doge', 'btcz', 'tide', 'firo', 'xrp', 'arr', 'xmr', 'ada'] as const
+export const PAYLOAD_CATALOG_ORDER = ['rtm', 'srv--dash', 'btcz'] as const
 
 const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   networkId: (typeof PAYLOAD_CATALOG_ORDER)[number]
   catalog: CoinPayloadCatalog
 }> = [
   { networkId: 'rtm', catalog: RTM_PAYLOADS },
-  { networkId: 'doge', catalog: DOGE_PAYLOADS },
+  { networkId: 'srv--dash', catalog: DASH_PAYLOADS },
   { networkId: 'btcz', catalog: BTCZ_PAYLOADS },
-  { networkId: 'tide', catalog: TIDE_PAYLOADS },
-  { networkId: 'firo', catalog: FIRO_PAYLOADS },
-  { networkId: 'xrp', catalog: XRP_PAYLOADS },
-  { networkId: 'arr', catalog: ARR_PAYLOADS },
-  { networkId: 'xmr', catalog: XMR_PAYLOADS },
-  { networkId: 'ada', catalog: ADA_PAYLOADS }
 ]
 
 export const PAYLOADS_BY_NETWORK_ID = Object.fromEntries(
@@ -84,21 +65,8 @@ export function getCoinPayloadCatalog(networkId?: string) {
 
 export {
   RTM_PAYLOADS,
-  DOGE_PAYLOADS,
-  TIDE_PAYLOADS,
-  BTCZ_PAYLOADS,
-  FIRO_PAYLOADS,
-  ARR_PAYLOADS,
-  XRP_PAYLOADS,
-  XMR_PAYLOADS,
-  ADA_PAYLOADS,
-  BITCOIN_PAYLOADS,
-  PIVX_PAYLOADS,
   DASH_PAYLOADS,
-  TERRA_PAYLOADS,
-  TERRACLASSIC_PAYLOADS,
-  POLKADOT_PAYLOADS,
-  MANTAATLANTIC_PAYLOADS
+  BTCZ_PAYLOADS,
 }
 
 export type { CoinPayloadCatalog, CoinPayloadBuilders, JsonRpcEnvelope, UtxoTxInputRef } from './types'

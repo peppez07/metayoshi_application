@@ -1373,6 +1373,3 @@ setInterval(() => {
   void enforceSingleManagedPopupWindow()
 }, 1500)
 
-// Initialize
-console.log('MetaYoshi Wallet Background Service Worker initialized')
-

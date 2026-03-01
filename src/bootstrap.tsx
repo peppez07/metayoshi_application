@@ -56,21 +56,14 @@ class ErrorBoundary extends React.Component<
 
 installGlobalErrorMonitor('popup-ui')
 
-console.log('MetaYoshi Wallet: Initializing...')
-console.log('Document ready state:', document.readyState)
-console.log('App element exists:', !!document.getElementById('app'))
-
 const rootElement = document.getElementById('app')
 if (!rootElement) {
   console.error('App element not found!')
   throw new Error('App element not found')
 }
 
-console.log('App element found, creating React root...')
-
 try {
   const root = ReactDOM.createRoot(rootElement)
-  console.log('React root created, rendering app...')
 
   root.render(
     <React.StrictMode>
@@ -83,8 +76,6 @@ try {
       </ErrorBoundary>
     </React.StrictMode>
   )
-
-  console.log('React app rendered successfully')
 } catch (error) {
   console.error('Failed to render React app:', error)
   void recordRuntimeError('popup-ui', error, { kind: 'bootstrap-render' })
