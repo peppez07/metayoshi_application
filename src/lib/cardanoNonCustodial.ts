@@ -1,13 +1,13 @@
 import * as bip39 from 'bip39'
 import type { Network } from '../coins'
 
-type CardanoLib = typeof import('@emurgo/cardano-serialization-lib-asmjs')
+type CardanoLib = typeof import('@emurgo/cardano-serialization-lib-browser')
 
 let cardanoLibPromise: Promise<CardanoLib> | null = null
 
 function loadCardanoLib(): Promise<CardanoLib> {
   if (!cardanoLibPromise) {
-    cardanoLibPromise = import('@emurgo/cardano-serialization-lib-asmjs')
+    cardanoLibPromise = import('@emurgo/cardano-serialization-lib-browser')
   }
   return cardanoLibPromise
 }
