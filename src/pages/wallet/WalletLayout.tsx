@@ -301,7 +301,7 @@ const WalletLayout: React.FC = () => {
           getModelIconFrameClass(activeNetwork.id)
         )}>
           {activeNetwork.logo
-            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover" />
+            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover rounded-full" />
             : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.05] translate-y-[1px]" />
           }
         </div>
@@ -469,7 +469,7 @@ const WalletLayout: React.FC = () => {
                       {net.logo
                         ? (
                           <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(net.id))}>
-                            <img src={net.logo} alt={net.name} className="w-full h-full object-cover" />
+                            <img src={net.logo} alt={net.name} className="w-full h-full object-cover rounded-full" />
                           </div>
                         )
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>

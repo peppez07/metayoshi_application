@@ -25,6 +25,7 @@ import { getTronBalance } from './tronNonCustodial'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
 import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
 import { getBuildFeatureFlag } from '../buildConfig'
+import { estimateEvmTxFee } from './evmFee'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -541,28 +542,27 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
     const valueHex = ethers.toQuantity(valueWei)
     const chainIdHex = await callBridgeMethod(input.rpcConfig, 'eth_chainId', [])
     const nonceHex = await callBridgeMethod(input.rpcConfig, 'eth_getTransactionCount', [from, 'pending'])
-    let gasPriceHex = '0x0'
-    try {
-      gasPriceHex = await callBridgeMethod(input.rpcConfig, 'eth_gasPrice', [])
-    } catch {
-      gasPriceHex = '0x3b9aca00' // 1 gwei fallback
-    }
-    let gasLimitHex = '0x5208' // 21000
-    try {
-      gasLimitHex = await callBridgeMethod(input.rpcConfig, 'eth_estimateGas', [
-        { from, to, value: valueHex }
-      ])
-    } catch {
-      gasLimitHex = '0x5208'
-    }
+    const feeQuote = await estimateEvmTxFee({
+      rpcConfig: input.rpcConfig,
+      from,
+      to,
+      valueWei,
+      fallbackGasLimitHex: '0x5208'
+    })
 
-    const tx = {
+    const tx: any = {
       to,
       value: valueWei,
       nonce: Number(BigInt(String(nonceHex || '0x0'))),
-      gasPrice: BigInt(String(gasPriceHex || '0x0')),
-      gasLimit: BigInt(String(gasLimitHex || '0x5208')),
+      gasLimit: feeQuote.gasLimit,
       chainId: Number(BigInt(String(chainIdHex || input.network.chainId || 1)))
+    }
+    if (feeQuote.type === 2) {
+      tx.type = 2
+      tx.maxFeePerGas = feeQuote.maxFeePerGas
+      tx.maxPriorityFeePerGas = feeQuote.maxPriorityFeePerGas
+    } else {
+      tx.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
     }
     const signed = await wallet.signTransaction(tx)
     const hash = await callBridgeMethod(input.rpcConfig, 'eth_sendRawTransaction', [signed])
@@ -688,8 +688,9 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const OUTPUT_BYTES = 34
   const MAX_REASONABLE_FEE_SATS = 10_000_000
   const DUST_THRESHOLD_SATS = 1_000
-  const amountToSendSats = sat(amountToSend)
+  let amountToSendSats = sat(amountToSend)
   const outputsWithoutChange = 1 + (donationAmountSats > 0 ? 1 : 0)
+  const isRtmSelfSend = resolveModelId(net) === 'rtm' && String(input.to || '').trim() === senderAddress
 
   const sorted = [...unspent].sort((a, b) => b.amount - a.amount)
   const selectedUtxos: UtxoUnspent[] = []
@@ -706,6 +707,16 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const txBytes = OVERHEAD_BYTES + INPUT_BYTES * selectedUtxos.length + OUTPUT_BYTES * (outputsWithoutChange + 1)
   const estimatedFeeSats = txBytes * feePerByteSats
   const totalAvailableSats = selectedUtxos.reduce((sum, utxo) => sum + sat(utxo.amount), 0)
+
+  // RTM self-send should remain usable for consolidation/sweep flows.
+  // If user enters full balance (or close), auto-reduce recipient amount by fee instead of failing.
+  if (isRtmSelfSend && amountToSendSats + donationAmountSats + estimatedFeeSats > totalAvailableSats) {
+    amountToSendSats = Math.max(0, totalAvailableSats - donationAmountSats - estimatedFeeSats)
+  }
+  if (amountToSendSats <= 0) {
+    throw new Error(`Amount is too low after network fee for ${net.coinSymbol}`)
+  }
+
   if (estimatedFeeSats > MAX_REASONABLE_FEE_SATS) {
     throw new Error(`Estimated fee too high: ${coins8(estimatedFeeSats)} ${net.coinSymbol}. Check fee settings / UTXO fragmentation.`)
   }

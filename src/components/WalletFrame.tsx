@@ -225,7 +225,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 {activeNetwork.logo
                   ? (
                     <div className={clsx('w-4 h-4 rounded-full overflow-hidden', getModelIconRingClass(activeNetwork.id))}>
-                      <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover" />
+                      <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover rounded-full" />
                     </div>
                   )
                   : <div className="w-2 h-2 rounded-full bg-yellow-500" />
@@ -339,7 +339,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                       {n.logo
                         ? (
                           <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(n.id))}>
-                            <img src={n.logo} alt={n.name} className="w-full h-full object-cover" />
+                            <img src={n.logo} alt={n.name} className="w-full h-full object-cover rounded-full" />
                           </div>
                         )
                         : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>

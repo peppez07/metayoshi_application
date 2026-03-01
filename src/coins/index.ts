@@ -168,6 +168,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   const token = normalizeCoinSelectionToken(rawToken)
   if (!token) return []
   if (token === 'btc' || token === 'bitcoin') return ['srv--bitcoin']
+  if (token === 'dash') return ['srv--dash']
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))
@@ -229,8 +230,25 @@ function parseEnabledCoinIds(raw: string | undefined): Set<string> {
   return resolved.length > 0 ? new Set(resolved) : new Set(DEFAULT_ENABLED_COIN_IDS)
 }
 
+function parseDisabledCoinIds(raw: string | undefined): Set<string> {
+  const input = String(raw || '').trim().toLowerCase()
+  if (!input) return new Set()
+  const selected = input
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean)
+  const resolved = normalizeEnabledCoinIdTokens(selected)
+  return new Set(resolved)
+}
+
+const enabledFromConfigOrEnv = parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined)
+const disabledFromEnv = parseEnabledCoinIdsFromBuildConfig()
+  ? new Set<string>() // Build config coins.* takes precedence over legacy VITE_* toggles.
+  : parseDisabledCoinIds(import.meta.env.VITE_DISABLED_COINS as string | undefined)
+
 export const ENABLED_NETWORK_IDS = new Set(
-  [...(parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined))]
+  [...enabledFromConfigOrEnv]
+    .filter((id) => !disabledFromEnv.has(id))
     .filter((id) => !DISABLED_NETWORK_IDS.has(id))
 )
 

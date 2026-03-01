@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { ethers } from 'ethers'
 import { Button } from '../../components/Button'
 import { Tabs } from '../../components/Tabs'
 import { useWalletStore } from '../../store/walletStore'
@@ -7,6 +8,8 @@ import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInform
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { callBridgeMethod, type UtxoRpcConfig } from '../../lib/utxoRpc'
+import { estimateEvmTxFee } from '../../lib/evmFee'
 
 interface TxLayoutProps {
   title: string
@@ -48,6 +51,60 @@ function estimateTransferFee(network: { coinType: string; feePerByte?: number })
   return 0.002151
 }
 
+const EVM_ERC20_IFACE = new ethers.Interface([
+  'function transfer(address to, uint256 value) returns (bool)',
+  'function decimals() view returns (uint8)'
+])
+const EVM_ERC721_IFACE = new ethers.Interface([
+  'function safeTransferFrom(address from, address to, uint256 tokenId)'
+])
+const EVM_ERC1155_IFACE = new ethers.Interface([
+  'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)'
+])
+
+function parseEvmNftAssetKey(assetId: string): { standard: 'erc721' | 'erc1155'; address: string; tokenId: string } | null {
+  const m = String(assetId || '').trim().match(/^EVMNFT:(erc721|erc1155):(0x[a-fA-F0-9]{40}):(.+)$/)
+  if (!m) return null
+  return {
+    standard: m[1] as 'erc721' | 'erc1155',
+    address: ethers.getAddress(m[2]),
+    tokenId: m[3]
+  }
+}
+
+function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
+  const raw = String(logoUri || '').trim()
+  if (!raw) return ''
+  const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
+  if (!m) return ''
+  return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
+}
+
+function buildRpcPreviewConfig(network: {
+  id: string
+  symbol: string
+  rpcUrl: string
+  rpcWallet?: string
+  rpcUsername?: string
+  rpcPassword?: string
+  bridgeUrl?: string
+  bridgeUsername?: string
+  bridgePassword?: string
+}): UtxoRpcConfig {
+  return {
+    networkId: network.id,
+    coinSymbol: network.symbol,
+    rpcUrl: network.rpcUrl,
+    rpcWallet: network.rpcWallet,
+    rpcUsername: network.rpcUsername,
+    rpcPassword: network.rpcPassword,
+    bridgeUrl: network.bridgeUrl,
+    bridgeUsername: network.bridgeUsername,
+    bridgePassword: network.bridgePassword,
+    useLocalRpc: false
+  }
+}
+
 const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -67,6 +124,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     sendUtxoTransaction,
     sendAssetTransfer,
     refreshActiveBalance,
+    networkAssetLogos,
     isConnected,
     isSyncing,
     syncPercent,
@@ -106,8 +164,111 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const donationRequired = txState.donationRequired === true
   const spendBeforeNetworkFeeRaw = Number(txState.totalBeforeNetworkFee ?? (donationEnabled && donationMode === 'add' ? safeAmount + donationAmount : enteredAmount))
   const spendBeforeNetworkFee = Number.isFinite(spendBeforeNetworkFeeRaw) && spendBeforeNetworkFeeRaw > 0 ? spendBeforeNetworkFeeRaw : safeAmount
-  const estimatedNetworkFee = estimateTransferFee(activeNetwork)
+  const fallbackEstimatedNetworkFee = estimateTransferFee(activeNetwork)
+  const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
+  const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
+  const activeNetworkLogos = networkAssetLogos?.[activeNetworkId] || {}
+  const evmNativeValueWei = useMemo(() => {
+    if (activeNetwork.coinType !== 'EVM' || isAssetTransfer) return 0n
+    try {
+      return ethers.parseEther(String(safeAmount || 0))
+    } catch {
+      return 0n
+    }
+  }, [activeNetwork.coinType, isAssetTransfer, safeAmount])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const fallback = estimateTransferFee(activeNetwork)
+      if (activeNetwork.coinType !== 'EVM' || !toAddress || !fromAddress) {
+        setEstimatedNetworkFee(fallback)
+        setIsEstimatingNetworkFee(false)
+        return
+      }
+      setIsEstimatingNetworkFee(true)
+      try {
+        const rpcConfig = buildRpcPreviewConfig(activeNetwork)
+        if (isAssetTransfer) {
+          const nft = parseEvmNftAssetKey(assetId)
+          if (nft) {
+            const transferData = nft.standard === 'erc721'
+              ? EVM_ERC721_IFACE.encodeFunctionData('safeTransferFrom', [fromAddress, toAddress, BigInt(nft.tokenId)])
+              : EVM_ERC1155_IFACE.encodeFunctionData('safeTransferFrom', [
+                  fromAddress,
+                  toAddress,
+                  BigInt(nft.tokenId),
+                  BigInt(String(Math.max(1, Math.trunc(Number(amount) || 1)))),
+                  '0x'
+                ])
+            const quote = await estimateEvmTxFee({
+              rpcConfig,
+              from: fromAddress,
+              to: nft.address,
+              data: transferData,
+              valueWei: 0n,
+              fallbackGasLimitHex: nft.standard === 'erc721' ? '0x30d40' : '0x30d40'
+            })
+            if (!cancelled) setEstimatedNetworkFee(Number(ethers.formatEther(quote.estimatedFeeWei)))
+          } else {
+            let tokenAddress = ethers.isAddress(assetId) ? ethers.getAddress(assetId) : ''
+            if (!tokenAddress) {
+              tokenAddress = extractEvmTokenAddressFromLogoUri(String(activeNetworkLogos?.[assetId] || ''))
+            }
+            if (!tokenAddress) throw new Error('Unable to resolve token contract address for fee estimation')
+
+            let decimals = 18
+            try {
+              const data = EVM_ERC20_IFACE.encodeFunctionData('decimals', [])
+              const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: tokenAddress, data }, 'latest'])
+              const [value] = EVM_ERC20_IFACE.decodeFunctionResult('decimals', String(raw || '0x'))
+              const n = Number(value)
+              if (Number.isFinite(n) && n >= 0 && n <= 30) decimals = Math.trunc(n)
+            } catch {
+              // Keep fallback decimals.
+            }
+            const amountRaw = ethers.parseUnits(String(amount || '0'), decimals)
+            const transferData = EVM_ERC20_IFACE.encodeFunctionData('transfer', [toAddress, amountRaw])
+            const quote = await estimateEvmTxFee({
+              rpcConfig,
+              from: fromAddress,
+              to: tokenAddress,
+              data: transferData,
+              valueWei: 0n,
+              fallbackGasLimitHex: '0x186a0'
+            })
+            if (!cancelled) setEstimatedNetworkFee(Number(ethers.formatEther(quote.estimatedFeeWei)))
+          }
+        } else {
+          const quote = await estimateEvmTxFee({
+            rpcConfig,
+            from: fromAddress,
+            to: toAddress,
+            valueWei: evmNativeValueWei,
+            fallbackGasLimitHex: '0x5208'
+          })
+          if (!cancelled) setEstimatedNetworkFee(Number(ethers.formatEther(quote.estimatedFeeWei)))
+        }
+      } catch {
+        if (!cancelled) setEstimatedNetworkFee(fallback)
+      } finally {
+        if (!cancelled) setIsEstimatingNetworkFee(false)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [
+    activeNetwork,
+    activeNetworkLogos,
+    activeNetworkId,
+    amount,
+    assetId,
+    evmNativeValueWei,
+    fromAddress,
+    isAssetTransfer,
+    toAddress
+  ])
 
   const TABS = [
     { id: 'details', label: 'DETAILS' },
@@ -337,7 +498,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                  <div className="text-right">
                     <p className="text-xs font-bold">{formatCoinAmount(estimatedNetworkFee)}</p>
                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
-                    <p className="text-[9px] text-gray-500">Est. fee only</p>
+                    <p className="text-[9px] text-gray-500">
+                      {isEstimatingNetworkFee ? 'Updating from network…' : 'Est. fee only'}
+                    </p>
                  </div>
               </div>
 

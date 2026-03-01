@@ -15,7 +15,6 @@ const Register: React.FC = () => {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [ack, setAck] = useState(false)
-  const [betaAck, setBetaAck] = useState(false)
   const [termsAck, setTermsAck] = useState(false)
   const [createStep, setCreateStep] = useState<'form' | 'verify'>('form')
   const [challengeIndex, setChallengeIndex] = useState<number | null>(null)
@@ -92,10 +91,6 @@ const Register: React.FC = () => {
     }
     if (!ack) {
       setError('Please confirm you saved your recovery phrase')
-      return
-    }
-    if (!betaAck) {
-      setError('Please confirm you understand MetaYoshi is still in beta')
       return
     }
     if (!termsAck) {
@@ -264,18 +259,6 @@ const Register: React.FC = () => {
                 />
                 <span className="text-xs font-bold text-gray-300">
                   I saved my recovery phrase securely
-                </span>
-              </label>
-
-              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={betaAck}
-                  onChange={(e) => setBetaAck(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-xs font-bold text-gray-300">
-                  I understand MetaYoshi is still in beta and may contain bugs
                 </span>
               </label>
 

@@ -46,6 +46,7 @@ import { buildSolanaAssetId, extractSolanaMintFromAssetId } from '../lib/assetTy
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
 import { getTokenLogoForAsset } from '../coins/tokenlogos'
 import { createRequestCache } from '../lib/requestCache'
+import { estimateEvmTxFee } from '../lib/evmFee'
 import {
   fetchChainBalanceAndSync,
   type ChainBalanceSyncResult,
@@ -3093,14 +3094,6 @@ export const useWalletStore = create<WalletState>()(
           const nonceHex = externalSigner
             ? '0x0'
             : await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
-          let gasPriceHex = '0x3b9aca00'
-          if (!externalSigner) {
-            try {
-              gasPriceHex = await callBridgeMethod(rpcConfig, 'eth_gasPrice', [])
-            } catch {
-              // Keep fallback gas price.
-            }
-          }
 
           if (nft) {
             const tokenAddress = ethers.getAddress(nft.address)
@@ -3147,17 +3140,14 @@ export const useWalletStore = create<WalletState>()(
               relayAmount = qtyText
             }
 
-            let gasLimitHex = '0x30d40'
-            try {
-              gasLimitHex = await callBridgeMethod(rpcConfig, 'eth_estimateGas', [{
-                from: fromAddress,
-                to: tokenAddress,
-                data: transferData,
-                value: '0x0'
-              }])
-            } catch {
-              // Keep fallback gas limit.
-            }
+            const feeQuote = await estimateEvmTxFee({
+              rpcConfig,
+              from: fromAddress,
+              to: tokenAddress,
+              data: transferData,
+              valueWei: 0n,
+              fallbackGasLimitHex: '0x30d40'
+            })
 
             if (externalSigner) {
               const sent = await externalSigner.sendTransaction({
@@ -3165,21 +3155,28 @@ export const useWalletStore = create<WalletState>()(
                 to: tokenAddress,
                 valueWei: 0n,
                 data: transferData,
-                gasLimit: BigInt(String(gasLimitHex || '0x30d40'))
+                gasLimit: feeQuote.gasLimit
               })
               await get().fetchNetworkAssets()
               return { txid: sent.hash }
             }
 
-            const signedTx = await wallet!.signTransaction({
+            const txToSign: any = {
               to: tokenAddress,
               value: 0n,
               nonce: Number(BigInt(String(nonceHex || '0x0'))),
-              gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
-              gasLimit: BigInt(String(gasLimitHex || '0x30d40')),
+              gasLimit: feeQuote.gasLimit,
               chainId: resolvedChainId,
               data: transferData
-            })
+            }
+            if (feeQuote.type === 2) {
+              txToSign.type = 2
+              txToSign.maxFeePerGas = feeQuote.maxFeePerGas
+              txToSign.maxPriorityFeePerGas = feeQuote.maxPriorityFeePerGas
+            } else {
+              txToSign.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
+            }
+            const signedTx = await wallet!.signTransaction(txToSign)
             const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
             if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
             await get().fetchNetworkAssets()
@@ -3227,38 +3224,42 @@ export const useWalletStore = create<WalletState>()(
           const amountRaw = ethers.parseUnits(String(qty || '').trim(), decimals)
           if (amountRaw <= 0n) throw new Error('Token amount must be greater than 0')
           const transferData = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('transfer', [recipient, amountRaw])
-          let gasLimitHex = '0x186a0'
-          try {
-            gasLimitHex = await callBridgeMethod(rpcConfig, 'eth_estimateGas', [{
-              from: fromAddress,
-              to: tokenAddress,
-              data: transferData,
-              value: '0x0'
-            }])
-          } catch {
-            // Keep fallback gas limit.
-          }
+          const feeQuote = await estimateEvmTxFee({
+            rpcConfig,
+            from: fromAddress,
+            to: tokenAddress,
+            data: transferData,
+            valueWei: 0n,
+            fallbackGasLimitHex: '0x186a0'
+          })
           if (externalSigner) {
             const sent = await externalSigner.sendTransaction({
               chainId: resolvedChainId,
               to: tokenAddress,
               valueWei: 0n,
               data: transferData,
-              gasLimit: BigInt(String(gasLimitHex || '0x186a0'))
+              gasLimit: feeQuote.gasLimit
             })
             await get().fetchNetworkAssets()
             return { txid: sent.hash }
           }
 
-          const signedTx = await wallet!.signTransaction({
+          const txToSign: any = {
             to: tokenAddress,
             value: 0n,
             nonce: Number(BigInt(String(nonceHex || '0x0'))),
-            gasPrice: BigInt(String(gasPriceHex || '0x3b9aca00')),
-            gasLimit: BigInt(String(gasLimitHex || '0x186a0')),
+            gasLimit: feeQuote.gasLimit,
             chainId: resolvedChainId,
             data: transferData
-          })
+          }
+          if (feeQuote.type === 2) {
+            txToSign.type = 2
+            txToSign.maxFeePerGas = feeQuote.maxFeePerGas
+            txToSign.maxPriorityFeePerGas = feeQuote.maxPriorityFeePerGas
+          } else {
+            txToSign.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
+          }
+          const signedTx = await wallet!.signTransaction(txToSign)
           const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
           if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
           await get().fetchNetworkAssets()
@@ -3726,7 +3727,19 @@ export const useWalletStore = create<WalletState>()(
 
         set((state) => {
           const localBaseline = normalizeNetworkListSymbols(INITIAL_NETWORKS)
-          const serverById = new Map(syncedNetworks.map((network) => [network.id, network]))
+          const allowedNetworkIds = new Set(localBaseline.map((n) => String(n.id || '').trim()))
+          const allowedModelIds = new Set(
+            localBaseline
+              .map((n) => String(n.runtimeModelId || n.id || '').trim().toLowerCase())
+              .filter(Boolean)
+          )
+          const filteredServerNetworks = syncedNetworks.filter((network) => {
+            const id = String(network.id || '').trim()
+            if (allowedNetworkIds.has(id)) return true
+            const runtimeModelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
+            return Boolean(runtimeModelId) && allowedModelIds.has(runtimeModelId)
+          })
+          const serverById = new Map(filteredServerNetworks.map((network) => [network.id, network]))
           const mergedLocal = localBaseline.map((localNetwork) => {
             const serverNetwork = serverById.get(localNetwork.id)
             if (!serverNetwork) return localNetwork
@@ -3739,7 +3752,7 @@ export const useWalletStore = create<WalletState>()(
 
             return serverNetwork
           })
-          const serverOnly = syncedNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
+          const serverOnly = filteredServerNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
           const networks = [...mergedLocal, ...serverOnly]
           const activeNetworkId = networks.length > 0 && networks.some((n) => n.id === state.activeNetworkId)
             ? state.activeNetworkId
