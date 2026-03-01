@@ -30,8 +30,6 @@ const AssetSendPage: React.FC = () => {
     isSyncing,
     syncPercent,
     lowSyncStreak,
-    sendAssetTransfer,
-    addActivity,
     fetchNetworkAssets
   } = useWalletStore()
 
@@ -55,8 +53,6 @@ const AssetSendPage: React.FC = () => {
   const [toAddress, setToAddress] = useState('')
   const [qty, setQty] = useState('')
   const [sendError, setSendError] = useState('')
-  const [sending, setSending] = useState(false)
-  const [txid, setTxid] = useState<string | null>(null)
 
   useEffect(() => {
     if (requestedAssetId && availableAssetNames.includes(requestedAssetId)) {
@@ -106,30 +102,19 @@ const AssetSendPage: React.FC = () => {
       return
     }
 
-    setSending(true)
-    try {
-      const result = await sendAssetTransfer({ assetId: selectedAsset, qty, toAddress: toAddress.trim() })
-      const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
-        || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
-        || ''
-      addActivity({
-        id: result.txid,
-        type: 'sent',
-        asset: selectedAsset,
-        amount: qty,
-        from: fromAddress,
+    const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
+      || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
+      || ''
+    navigate('/tx/confirm', {
+      state: {
+        requestType: 'asset',
+        assetId: selectedAsset,
+        assetLabel: selectedLabel || selectedAsset,
         to: toAddress.trim(),
-        status: 'confirmed',
-        timestamp: Date.now(),
-        networkId: activeNetworkId
-      })
-      setTxid(result.txid)
-      void fetchNetworkAssets()
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSending(false)
-    }
+        amount: qty,
+        from: fromAddress
+      }
+    })
   }
 
   if (availableAssetNames.length === 0) {
@@ -214,13 +199,6 @@ const AssetSendPage: React.FC = () => {
           </p>
         </div>
 
-        {txid && (
-          <div className="p-3 bg-green-900/20 border border-green-500/30 rounded-xl">
-            <p className="text-xs font-bold text-green-300 text-center">Asset sent successfully</p>
-            <p className="text-[10px] font-mono text-green-200 text-center break-all mt-1">{txid}</p>
-          </div>
-        )}
-
         {sendError && (
           <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl">
             <p className="text-xs font-bold text-red-300 text-center">{sendError}</p>
@@ -237,9 +215,9 @@ const AssetSendPage: React.FC = () => {
           <Button
             type="submit"
             className="w-full btn-primary"
-            disabled={!canSubmitAssetSend || sendBlockedBySync || sending || !toAddress.trim() || !qty || parseFloat(qty) <= 0}
+            disabled={!canSubmitAssetSend || sendBlockedBySync || !toAddress.trim() || !qty || parseFloat(qty) <= 0}
           >
-            {sending ? 'Sending...' : `Send ${selectedLabel || 'Asset'}`}
+            Continue
           </Button>
         </div>
       </form>

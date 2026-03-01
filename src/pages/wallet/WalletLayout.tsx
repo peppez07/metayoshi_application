@@ -301,8 +301,8 @@ const WalletLayout: React.FC = () => {
           getModelIconFrameClass(activeNetwork.id)
         )}>
           {activeNetwork.logo
-            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-10 h-10 object-contain" />
-            : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-10 h-10 object-contain object-center scale-[1.05] translate-y-[1px]" />
+            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover" />
+            : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.05] translate-y-[1px]" />
           }
         </div>
 

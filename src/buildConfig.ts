@@ -23,6 +23,17 @@ function normalizeId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'dash', 'btcz'])
+
+function normalizeModelStatusId(value: unknown): string {
+  const id = normalizeId(value)
+  if (!id) return ''
+
+  // Server-backed aliases should map to runtime model ids for status display.
+  if (id === 'srv--dash') return 'dash'
+  return id
+}
+
 function normalizeIdList(value: unknown): string[] {
   if (!value) return []
   if (Array.isArray(value)) return value.map(normalizeId).filter(Boolean)
@@ -101,16 +112,15 @@ export function getBuildFeatureFlag(featureKey: string, envKey: string, fallback
 }
 
 export function getModelStatus(modelId: string): BuildModelStatus {
-  const id = normalizeId(modelId)
+  const id = normalizeModelStatusId(modelId)
   if (!id) return 'untested'
 
-  const blocked = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.blocked))
+  const blocked = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.blocked).map(normalizeModelStatusId))
   if (blocked.has(id)) return 'blocked'
 
-  const tested = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.tested))
-  if (tested.has(id)) return 'tested'
+  if (HARD_TESTED_MODEL_IDS.has(id)) return 'tested'
 
-  const explicitUntested = normalizeIdList(BUILD_CONFIG.modelStatus?.untested)
+  const explicitUntested = normalizeIdList(BUILD_CONFIG.modelStatus?.untested).map(normalizeModelStatusId)
   if (explicitUntested.length > 0) {
     const untested = new Set(explicitUntested)
     if (untested.has(id)) return 'untested'

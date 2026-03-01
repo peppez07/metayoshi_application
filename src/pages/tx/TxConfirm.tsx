@@ -15,6 +15,9 @@ interface TxLayoutProps {
 }
 
 interface TxState {
+  requestType?: 'native' | 'asset'
+  assetId?: string
+  assetLabel?: string
   to?: string
   amount?: string
   from?: string
@@ -31,6 +34,18 @@ interface TxState {
 
 function formatCoinAmount(v: number): string {
   return v.toFixed(8).replace(/\.?0+$/, '')
+}
+
+function estimateTransferFee(network: { coinType: string; feePerByte?: number }): number {
+  if (network.coinType === 'UTXO') {
+    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
+    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
+    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
+    return (estimatedBytes * feePerByteSats) / 1e8
+  }
+  if (network.coinType === 'XRP') return 0.000012
+  return 0.002151
 }
 
 const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
@@ -50,6 +65,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     sendStellarTransaction,
     sendTronTransaction,
     sendUtxoTransaction,
+    sendAssetTransfer,
     refreshActiveBalance,
     isConnected,
     isSyncing,
@@ -61,6 +77,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const [submitError, setSubmitError] = useState('')
 
   const txState = (location.state as TxState | null) ?? {}
+  const isAssetTransfer = txState.requestType === 'asset' || Boolean(String(txState.assetId || '').trim())
+  const assetId = String(txState.assetId || '').trim()
+  const assetLabel = String(txState.assetLabel || assetId || '').trim()
   const toAddress = txState.to?.trim() ?? ''
   const amount = txState.amount?.trim() ?? ''
   const fromAddress = txState.from?.trim() ?? ''
@@ -87,7 +106,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const donationRequired = txState.donationRequired === true
   const spendBeforeNetworkFeeRaw = Number(txState.totalBeforeNetworkFee ?? (donationEnabled && donationMode === 'add' ? safeAmount + donationAmount : enteredAmount))
   const spendBeforeNetworkFee = Number.isFinite(spendBeforeNetworkFeeRaw) && spendBeforeNetworkFeeRaw > 0 ? spendBeforeNetworkFeeRaw : safeAmount
-  const estimatedNetworkFee = activeNetwork.coinType === 'UTXO' ? 0.00064 : 0.002151
+  const estimatedNetworkFee = estimateTransferFee(activeNetwork)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
 
   const TABS = [
@@ -119,7 +138,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       setSubmitError('Transaction data is invalid')
       return
     }
-    if (!caps.features.nativeSend) {
+    if (isAssetTransfer && !caps.features.assetSend) {
+      setSubmitError(`${activeNetwork.name} does not support asset transfers in this wallet`)
+      return
+    }
+    if (!isAssetTransfer && !caps.features.nativeSend) {
       setSubmitError(`${activeNetwork.name} does not support native coin transfers in this wallet`)
       return
     }
@@ -134,23 +157,38 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     setIsSubmitting(true)
 
     try {
-      let res: { hash: string }
-      if (activeNetwork.coinType === 'EVM') {
-        res = await sendEvmTransaction({ to: toAddress, amount })
+      let txHash = ''
+      if (isAssetTransfer) {
+        if (!assetId) throw new Error('Asset id missing from transaction request')
+        const sent = await sendAssetTransfer({
+          assetId,
+          qty: amount,
+          toAddress: toAddress
+        })
+        txHash = String(sent.txid || '').trim()
+      } else if (activeNetwork.coinType === 'EVM') {
+        const res = await sendEvmTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'XRP') {
-        res = await sendXrpTransaction({ to: toAddress, amount })
+        const res = await sendXrpTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.id === 'ada') {
-        res = await sendCardanoTransaction({ to: toAddress, amount })
+        const res = await sendCardanoTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.id === 'xmr') {
-        res = await sendMoneroTransaction({ to: toAddress, amount })
+        const res = await sendMoneroTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.id === 'sol') {
-        res = await sendSolanaTransaction({ to: toAddress, amount })
+        const res = await sendSolanaTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.id === 'xlm') {
-        res = await sendStellarTransaction({ to: toAddress, amount })
+        const res = await sendStellarTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.id === 'tron') {
-        res = await sendTronTransaction({ to: toAddress, amount })
+        const res = await sendTronTransaction({ to: toAddress, amount })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'UTXO') {
-        res = await sendUtxoTransaction({
+        const res = await sendUtxoTransaction({
           to: toAddress,
           amount,
           donation: donationEnabled
@@ -161,14 +199,16 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
               }
             : undefined
         })
+        txHash = String(res.hash || '').trim()
       } else {
         throw new Error(`Unsupported coin type: ${activeNetwork.coinType}`)
       }
+      if (!txHash) throw new Error('Transaction sent but hash is missing')
       
       addActivity({
-        id: res.hash,
+        id: txHash,
         type: 'sent',
-        asset: activeNetwork.symbol,
+        asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
         amount: amount,
         from: fromAddress || '',
         to: toAddress,
@@ -195,7 +235,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     addActivity({
       id: Math.random().toString(36).substr(2, 9),
       type: 'sent',
-      asset: activeNetwork.symbol,
+      asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
       amount: amount,
       from: fromAddress || '',
       to: toAddress,
@@ -270,7 +310,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
               {toAddress || 'No recipient provided'}
             </p>
             <p className="text-[11px] font-mono text-gray-300">
-              {safeAmount > 0 ? `${safeAmount} ${activeNetwork.symbol}` : 'No amount provided'}
+              {safeAmount > 0 ? `${safeAmount} ${isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}` : 'No amount provided'}
             </p>
           </div>
           
@@ -301,7 +341,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                  </div>
               </div>
 
-              {donationEnabled && (
+              {donationEnabled && !isAssetTransfer && (
                 <>
                   <div className="divider" />
                   <div className="flex justify-between items-start">
@@ -328,45 +368,49 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
 
               <div className="flex justify-between items-start">
                  <div className="space-y-0.5">
-                    <p className="text-[12px] font-bold">Recipient gets</p>
-                    <p className="text-[10px] text-gray-500">Final transfer amount</p>
+                    <p className="text-[12px] font-bold">{isAssetTransfer ? 'Asset amount' : 'Recipient gets'}</p>
+                    <p className="text-[10px] text-gray-500">{isAssetTransfer ? 'Asset transfer quantity' : 'Final transfer amount'}</p>
                  </div>
                  <div className="text-right">
                     <p className="text-sm font-bold">{formatCoinAmount(safeAmount)}</p>
-                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
-                    {donationEnabled && donationMode === 'deduct' && (
+                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}</p>
+                    {donationEnabled && donationMode === 'deduct' && !isAssetTransfer && (
                       <p className="text-[9px] text-gray-500">Entered: <span className="font-bold">{formatCoinAmount(enteredAmount)} {activeNetwork.symbol}</span></p>
                     )}
                   </div>
               </div>
 
-              <div className="divider" />
+              {!isAssetTransfer && (
+                <>
+                  <div className="divider" />
 
-              <div className="flex justify-between items-start">
-                 <div className="space-y-0.5">
-                    <p className="text-[12px] font-bold">Estimated total cost</p>
-                    <p className="text-[10px] text-gray-500">Spend + network fee</p>
-                 </div>
-                 <div className="text-right">
-                    <p className="text-sm font-bold">{formatCoinAmount(estimatedTotalCost)}</p>
-                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
-                    <p className="text-[9px] text-gray-500">
-                      Network fee: <span className="font-bold">{formatCoinAmount(estimatedNetworkFee)} {activeNetwork.symbol}</span>
-                    </p>
-                    <p className="text-[9px] text-gray-500">
-                      Additional donation: <span className="font-bold">{formatCoinAmount(donationEnabled ? donationAmount : 0)} {activeNetwork.symbol}</span>
-                    </p>
-                 </div>
-              </div>
+                  <div className="flex justify-between items-start">
+                     <div className="space-y-0.5">
+                        <p className="text-[12px] font-bold">Estimated total cost</p>
+                        <p className="text-[10px] text-gray-500">Spend + network fee</p>
+                     </div>
+                     <div className="text-right">
+                        <p className="text-sm font-bold">{formatCoinAmount(estimatedTotalCost)}</p>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
+                        <p className="text-[9px] text-gray-500">
+                          Network fee: <span className="font-bold">{formatCoinAmount(estimatedNetworkFee)} {activeNetwork.symbol}</span>
+                        </p>
+                        <p className="text-[9px] text-gray-500">
+                          Additional donation: <span className="font-bold">{formatCoinAmount(donationEnabled ? donationAmount : 0)} {activeNetwork.symbol}</span>
+                        </p>
+                     </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           {activeTab === 'data' && (
             <div className="bg-dark-900 p-4 rounded-xl border border-dark-600 font-mono text-[10px] text-gray-500">
               <p>{"{"}</p>
-              <p className="ml-4">"method": "send",</p>
-              <p className="ml-4">"params": ["{toAddress || 'N/A'}", "{amount || '0'}"]</p>
-              {donationEnabled && (
+              <p className="ml-4">"method": "{isAssetTransfer ? 'send_asset' : 'send'}",</p>
+              <p className="ml-4">"params": [{isAssetTransfer ? `"${assetId}", ` : ''}"{toAddress || 'N/A'}", "{amount || '0'}"]</p>
+              {donationEnabled && !isAssetTransfer && (
                 <>
                   <p className="ml-4">"donation": {"{"}</p>
                   <p className="ml-8">"enabled": true,</p>
@@ -422,7 +466,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         <Button
           className="flex-1 btn-primary"
           onClick={handleConfirm}
-          disabled={isRejectMode || isSubmitting || !caps.features.nativeSend || !hasTxState || sendBlockedBySync}
+          disabled={isRejectMode || isSubmitting || !(isAssetTransfer ? caps.features.assetSend : caps.features.nativeSend) || !hasTxState || sendBlockedBySync}
           isLoading={isSubmitting}
         >
           Confirm

@@ -230,7 +230,7 @@ const Connecting: React.FC = () => {
           getModelIconFrameClass(activeNetwork?.id || '')
         )}>
           {activeNetwork?.logo
-            ? <img src={activeNetwork.logo} alt={activeNetwork?.name} className="w-11 h-11 object-contain" />
+            ? <img src={activeNetwork.logo} alt={activeNetwork?.name} className="w-full h-full object-cover" />
             : <div className="w-8 h-8 bg-blue-500 rounded-full" />
           }
         </div>

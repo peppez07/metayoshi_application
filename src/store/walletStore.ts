@@ -455,6 +455,13 @@ const DEFAULT_BNB_TRACKED_TOKENS: EvmTrackedToken[] = [
   { address: '0xCE7de646e7208A4Ef112cb6ed5038FA6c0cFfDcF', symbol: 'TRX', decimals: 18 }
 ]
 
+const DEFAULT_BASE_TRACKED_TOKENS: EvmTrackedToken[] = [
+  // Native Base USDC (Circle).
+  { address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', symbol: 'USDC', decimals: 6 },
+  // Wrapped Ether on Base.
+  { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+]
+
 const MIN_TRACKED_EVM_TOKENS_PER_CHAIN = 100
 const MAX_TRACKED_EVM_TOKENS_PER_CHAIN = 220
 const EVM_TRACKED_TOKEN_CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -584,9 +591,11 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   if (byModel.length > 0) return byModel
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'bnb') return DEFAULT_BNB_TRACKED_TOKENS
+  if (modelId.toLowerCase() === 'base') return DEFAULT_BASE_TRACKED_TOKENS
   const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
   if (chainId === 1) return DEFAULT_ETH_TRACKED_TOKENS
   if (chainId === 56) return DEFAULT_BNB_TRACKED_TOKENS
+  if (chainId === 8453) return DEFAULT_BASE_TRACKED_TOKENS
   return []
 }
 
@@ -2062,6 +2071,8 @@ export const useWalletStore = create<WalletState>()(
               ? DEFAULT_ETH_TRACKED_TOKENS
               : chainId === 56
                 ? DEFAULT_BNB_TRACKED_TOKENS
+                : chainId === 8453
+                  ? DEFAULT_BASE_TRACKED_TOKENS
                 : []
             const presentSymbols = new Set(Object.keys(fungibleAssets).map((k) => String(k || '').trim().toUpperCase()))
             for (const token of priorityDefaults) {
