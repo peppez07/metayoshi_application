@@ -88,6 +88,7 @@ const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app']
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
 const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
+const BLOCKED_INTERNAL_ORIGIN_MSG = 'Blocked internal application origin'
 
 let bridgeContextInvalidated = false
 installGlobalErrorMonitor('content-script')
@@ -191,6 +192,64 @@ function markContextInvalidated(message: string): void {
   })
 }
 
+function parseIpv4(hostname: string): number[] | null {
+  const parts = hostname.split('.')
+  if (parts.length !== 4) return null
+  const octets: number[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null
+    const value = Number(part)
+    if (!Number.isInteger(value) || value < 0 || value > 255) return null
+    octets.push(value)
+  }
+  return octets
+}
+
+function isPrivateOrLoopbackIpv4(hostname: string): boolean {
+  const octets = parseIpv4(hostname)
+  if (!octets) return false
+  const [a, b] = octets
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
+function normalizeIpv6(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').toLowerCase()
+}
+
+function isPrivateOrLoopbackIpv6(hostname: string): boolean {
+  const normalized = normalizeIpv6(hostname)
+  if (!normalized.includes(':')) return false
+  if (normalized === '::1') return true
+  if (normalized === '::') return true
+  if (normalized.startsWith('fe80:')) return true
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+  return false
+}
+
+function isBlockedInternalOrigin(rawOrigin: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(String(rawOrigin || ''))
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+
+  const hostname = String(parsed.hostname || '').trim().toLowerCase()
+  if (!hostname) return false
+
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true
+  if (hostname === 'local' || hostname.endsWith('.local')) return true
+  if (isPrivateOrLoopbackIpv4(hostname)) return true
+  if (isPrivateOrLoopbackIpv6(hostname)) return true
+  return false
+}
+
 function forwardRequest(request: any, messageId: number): void {
   if (bridgeContextInvalidated) {
     postToPage({
@@ -206,6 +265,19 @@ function forwardRequest(request: any, messageId: number): void {
   }
 
   const origin = window.location.origin || 'unknown'
+  if (isBlockedInternalOrigin(origin)) {
+    postToPage({
+      type: 'response',
+      id: messageId,
+      response: {
+        jsonrpc: '2.0',
+        id: request?.id ?? null,
+        error: { code: 4001, message: BLOCKED_INTERNAL_ORIGIN_MSG }
+      }
+    })
+    return
+  }
+
   chrome.runtime.sendMessage(
     { 
       type: 'DAPP_INTERNAL_RPC', 

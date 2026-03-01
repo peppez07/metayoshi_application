@@ -8,10 +8,12 @@ import {
   recordRuntimeError
 } from '../lib/runtimeErrorMonitor'
 import {
+  DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE,
   DAPP_APPROVAL_TIMEOUT_MS,
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
   DAPP_PENDING_REQUEST_STORAGE_KEY,
   DAPP_PERMISSIONS_STORAGE_KEY,
+  isBlockedInternalDappOrigin,
   normalizeDappOrigin,
   parseDappPendingApproval,
   parseDappPendingRequest,
@@ -949,6 +951,11 @@ function buildDappRuntimeContext(state: WalletState): DappRuntimeContext {
 
 // Handle RPC methods
 async function handleRpcMethod(method: string, params: any, origin?: string): Promise<any> {
+  const normalizedOrigin = origin ? normalizeDappOrigin(origin) : null
+  if (normalizedOrigin && isBlockedInternalDappOrigin(normalizedOrigin)) {
+    throw { code: 4001, message: DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE }
+  }
+
   const runtime = buildDappRuntimeContext(await getWalletState())
   const {
     state,

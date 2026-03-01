@@ -2,6 +2,7 @@ export const DAPP_PERMISSIONS_STORAGE_KEY = 'metayoshi-dapp-permissions-v1'
 export const DAPP_PENDING_APPROVAL_STORAGE_KEY = 'metayoshi-dapp-pending-approval-v1'
 export const DAPP_PENDING_REQUEST_STORAGE_KEY = 'metayoshi-dapp-pending-request-v1'
 export const DAPP_APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
+export const DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE = 'Blocked internal application origin'
 
 export type DappScope = 'read' | 'sign' | 'send_coin' | 'send_asset'
 export type DappApprovalStatus = 'pending' | 'approved' | 'rejected'
@@ -77,6 +78,67 @@ export function normalizeDappOrigin(input: string): string {
   } catch {
     return value.toLowerCase()
   }
+}
+
+function parseIpv4(hostname: string): number[] | null {
+  const parts = hostname.split('.')
+  if (parts.length !== 4) return null
+  const octets: number[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null
+    const value = Number(part)
+    if (!Number.isInteger(value) || value < 0 || value > 255) return null
+    octets.push(value)
+  }
+  return octets
+}
+
+function isPrivateOrLoopbackIpv4(hostname: string): boolean {
+  const octets = parseIpv4(hostname)
+  if (!octets) return false
+  const [a, b] = octets
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
+function normalizeIpv6(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').toLowerCase()
+}
+
+function isPrivateOrLoopbackIpv6(hostname: string): boolean {
+  const normalized = normalizeIpv6(hostname)
+  if (!normalized.includes(':')) return false
+  if (normalized === '::1') return true
+  if (normalized === '::') return true
+  if (normalized.startsWith('fe80:')) return true
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+  return false
+}
+
+export function isBlockedInternalDappOrigin(input: string): boolean {
+  const origin = normalizeDappOrigin(input)
+  if (!origin || origin === 'unknown') return false
+  if (origin.startsWith('chrome-extension://')) return false
+
+  let parsed: URL
+  try {
+    parsed = new URL(origin)
+  } catch {
+    return false
+  }
+
+  const hostname = String(parsed.hostname || '').trim().toLowerCase()
+  if (!hostname) return false
+
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true
+  if (hostname === 'local' || hostname.endsWith('.local')) return true
+  if (isPrivateOrLoopbackIpv4(hostname)) return true
+  if (isPrivateOrLoopbackIpv6(hostname)) return true
+  return false
 }
 
 export function uniqDappScopes(scopes: readonly DappScope[]): DappScope[] {

@@ -292,6 +292,7 @@ const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
+const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'srv--dash', 'btcz'])
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -3743,6 +3744,7 @@ export const useWalletStore = create<WalletState>()(
           const mergedLocal = localBaseline.map((localNetwork) => {
             const serverNetwork = serverById.get(localNetwork.id)
             if (!serverNetwork) return localNetwork
+            if (FROZEN_STABLE_NETWORK_IDS.has(localNetwork.id)) return localNetwork
 
             // If the app build marks a network as unsupported (no non-custodial signer),
             // do not let the server override it into a "working" network. That would
