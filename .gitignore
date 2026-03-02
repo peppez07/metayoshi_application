@@ -40,3 +40,7 @@ Thumbs.db
 *.bak
 *.tmp
 *.temp
+dist
+dist-firefox
+dist-chromium
+dist
