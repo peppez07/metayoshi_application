@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "MetaYoshi",
-  "version": "0.1.1",
-  "version_name": "0.1.1-beta",
+  "version": "0.1.3",
+  "version_name": "0.1.3-beta",
   "action": {
     "default_icon": {
       "16": "assets/metayoshi-16.png",
       "32": "assets/metayoshi-32.png",
       "48": "assets/metayoshi-48.png",
+      "64": "assets/metayoshi-64.png",
       "128": "assets/metayoshi-128.png"
     }
   },
@@ -15,6 +16,7 @@
     "16": "assets/metayoshi-16.png",
     "32": "assets/metayoshi-32.png",
     "48": "assets/metayoshi-48.png",
+    "64": "assets/metayoshi-64.png",
     "128": "assets/metayoshi-128.png"
   },
   "background": {

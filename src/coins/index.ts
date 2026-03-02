@@ -100,7 +100,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   const token = normalizeCoinSelectionToken(rawToken)
   if (!token) return []
   if (token === 'btc' || token === 'bitcoin') return ['srv--bitcoin']
-  if (token === 'dash') return ['srv--dash']
+  if (token === 'dash' || token === 'sdash') return ['srv--dash']
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))

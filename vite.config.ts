@@ -190,6 +190,7 @@ export default defineConfig({
               'icon-16.png':  'metayoshi-16.png',
               'icon-32.png':  'metayoshi-32.png',
               'icon-48.png':  'metayoshi-48.png',
+              'icon-64.png':  'metayoshi-64.png',
               'icon-128.png': 'metayoshi-128.png',
             }
             for (const [src, dest] of Object.entries(iconMapping)) {

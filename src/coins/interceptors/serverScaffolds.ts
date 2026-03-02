@@ -1,10 +1,24 @@
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 import { dashApiInterceptor, DASH_API_INFO } from './dash'
 
-export const SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = {
-  'srv--dash': DASH_API_INFO
+type ServerScaffoldDefinition = {
+  networkId: string
+  apiInfo: CoinApiInfo
+  interceptor: CoinApiInterceptor
 }
 
-export const SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = {
-  'srv--dash': dashApiInterceptor
-}
+const SERVER_SCAFFOLD_DEFINITIONS: ReadonlyArray<ServerScaffoldDefinition> = [
+  {
+    networkId: 'srv--dash',
+    apiInfo: DASH_API_INFO,
+    interceptor: dashApiInterceptor
+  }
+]
+
+export const SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID: Record<string, CoinApiInfo> = Object.fromEntries(
+  SERVER_SCAFFOLD_DEFINITIONS.map((entry) => [entry.networkId, entry.apiInfo])
+)
+
+export const SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID: Record<string, CoinApiInterceptor> = Object.fromEntries(
+  SERVER_SCAFFOLD_DEFINITIONS.map((entry) => [entry.networkId, entry.interceptor])
+)

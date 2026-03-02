@@ -26,6 +26,7 @@ const dynamicPayloadCatalogCache = new Map<string, CoinPayloadCatalog>()
 function normalizePayloadNetworkId(networkId?: string): string {
   const normalized = String(networkId || '').trim().toLowerCase()
   if (!normalized) return ''
+  if (normalized === 'sdash') return 'srv--dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
   // Preserve scaffold IDs like "srv--bitcoin" and collapse only extra aliases
   // like "srv--bitcoin--alt" to their base scaffold key.
