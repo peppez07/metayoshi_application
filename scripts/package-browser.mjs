@@ -9,8 +9,8 @@ function parseCsvList(value) {
 }
 
 const target = String(process.argv[2] || '').trim().toLowerCase()
-if (!target || !['chromium', 'firefox'].includes(target)) {
-  console.error('Usage: node scripts/package-browser.mjs <chromium|firefox>')
+if (!target || !['chromium', 'chrome', 'brave', 'firefox'].includes(target)) {
+  console.error('Usage: node scripts/package-browser.mjs <chromium|chrome|brave|firefox>')
   process.exit(1)
 }
 
@@ -21,7 +21,13 @@ if (!existsSync(srcDist)) {
   process.exit(1)
 }
 
-const outDir = path.join(root, target === 'firefox' ? 'dist-firefox' : 'dist-chromium')
+const outDirNameMap = {
+  chromium: 'dist-chromium',
+  chrome: 'dist-chrome',
+  brave: 'dist-brave',
+  firefox: 'dist-firefox'
+}
+const outDir = path.join(root, outDirNameMap[target])
 rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 cpSync(srcDist, outDir, { recursive: true })
@@ -29,7 +35,7 @@ cpSync(srcDist, outDir, { recursive: true })
 const baseManifestPath = path.join(root, 'public', 'manifest.json')
 const manifest = JSON.parse(readFileSync(baseManifestPath, 'utf-8'))
 
-if (target === 'chromium') {
+if (target !== 'firefox') {
   // Firefox-only metadata should never appear in Chromium packages.
   delete manifest.browser_specific_settings
 }
