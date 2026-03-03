@@ -7,7 +7,7 @@ const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAUL
 const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/dash/main`
 
 export const DASH_API_INFO: CoinApiInfo = {
-  networkId: 'srv--dash',
+  networkId: 'dash',
   symbol: 'DASH',
   coinId: 'dash',
   chain: 'main',

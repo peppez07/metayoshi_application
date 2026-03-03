@@ -7,14 +7,14 @@ import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
 import type { CoinPayloadCatalog } from './types'
 
-export const PAYLOAD_CATALOG_ORDER = ['rtm', 'srv--dash', 'btcz', 'firo'] as const
+export const PAYLOAD_CATALOG_ORDER = ['rtm', 'dash', 'btcz', 'firo'] as const
 
 const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   networkId: (typeof PAYLOAD_CATALOG_ORDER)[number]
   catalog: CoinPayloadCatalog
 }> = [
   { networkId: 'rtm', catalog: RTM_PAYLOADS },
-  { networkId: 'srv--dash', catalog: DASH_PAYLOADS },
+  { networkId: 'dash', catalog: DASH_PAYLOADS },
   { networkId: 'btcz', catalog: BTCZ_PAYLOADS },
   { networkId: 'firo', catalog: FIRO_PAYLOADS },
 ]
@@ -28,7 +28,7 @@ const dynamicPayloadCatalogCache = new Map<string, CoinPayloadCatalog>()
 function normalizePayloadNetworkId(networkId?: string): string {
   const normalized = String(networkId || '').trim().toLowerCase()
   if (!normalized) return ''
-  if (normalized === 'sdash') return 'srv--dash'
+  if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
   // Preserve scaffold IDs like "srv--bitcoin" and collapse only extra aliases
   // like "srv--bitcoin--alt" to their base scaffold key.

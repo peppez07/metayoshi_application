@@ -292,7 +292,7 @@ const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
-const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'srv--dash', 'btcz', 'firo'])
+const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -1217,8 +1217,23 @@ function normalizeNetworkSymbol(network: Network): Network {
 
 function normalizeNetworkIdAlias(value: string): string {
   const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
   return String(value || '').trim()
+}
+
+function remapNetworkIdKeyedRecord<T>(record: Record<string, T> | undefined): Record<string, T> {
+  const out: Record<string, T> = {}
+  if (!record || typeof record !== 'object') return out
+  for (const [rawKey, value] of Object.entries(record)) {
+    const canonicalKey = normalizeNetworkIdAlias(rawKey) || String(rawKey || '').trim()
+    if (!canonicalKey) continue
+    const isCanonicalInput = canonicalKey === String(rawKey || '').trim()
+    if (!(canonicalKey in out) || isCanonicalInput) {
+      out[canonicalKey] = value
+    }
+  }
+  return out
 }
 
 function normalizeNetworkListSymbols(networks: Network[]): Network[] {
@@ -1439,14 +1454,14 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
   return rawAccounts.map((raw, index) => {
     const candidate = (raw ?? {}) as Partial<Account>
     const addresses = candidate.addresses ?? ({} as Record<CoinType, string>)
-    const networkAddresses = candidate.networkAddresses ?? {}
-    const networkNames = candidate.networkNames ?? {}
-    const networkBalances = candidate.networkBalances ?? {}
+    const networkAddresses = remapNetworkIdKeyedRecord(candidate.networkAddresses ?? {})
+    const networkNames = remapNetworkIdKeyedRecord(candidate.networkNames ?? {})
+    const networkBalances = remapNetworkIdKeyedRecord(candidate.networkBalances ?? {})
 
     return {
       id: typeof candidate.id === 'string' ? candidate.id : `acc-${index + 1}`,
       name: typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`,
-      networkNames: { ...networkNames },
+      networkNames: networkNames,
       derivationIndex: resolveDerivationIndex(candidate, index),
       addresses: {
         EVM: addresses.EVM ?? '',
@@ -1455,8 +1470,8 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
         SOL: addresses.SOL ?? '',
         XRP: addresses.XRP ?? ''
       },
-      networkAddresses: { ...networkAddresses },
-      networkBalances: { ...networkBalances },
+      networkAddresses: networkAddresses,
+      networkBalances: networkBalances,
       balance: typeof candidate.balance === 'string' ? candidate.balance : '0'
     }
   })
@@ -3465,6 +3480,8 @@ export const useWalletStore = create<WalletState>()(
           ? backup.activeAccountId
           : (reHydratedAccounts[0]?.id ?? null)
 
+        const normalizedBackupNetworkId = normalizeNetworkIdAlias(String(backup.activeNetworkId || ''))
+
         // 5. Write everything back into the store.
         set({
           isInitialized:    true,
@@ -3477,12 +3494,12 @@ export const useWalletStore = create<WalletState>()(
           accounts:         reHydratedAccounts,
           nextAccountIndex: backup.nextAccountIndex ?? reHydratedAccounts.length,
           activeAccountId:  safeActiveAccountId,
-          activeNetworkId:  backup.activeNetworkId ?? get().activeNetworkId,
+          activeNetworkId:  normalizedBackupNetworkId || get().activeNetworkId,
           activity:         Array.isArray(backup.activity) ? backup.activity : [],
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
           donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
-          networkAssets:    backup.networkAssets ?? {},
+          networkAssets:    remapNetworkIdKeyedRecord(backup.networkAssets ?? {}),
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
@@ -3740,6 +3757,12 @@ export const useWalletStore = create<WalletState>()(
             const runtimeModelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
             return Boolean(runtimeModelId) && allowedModelIds.has(runtimeModelId)
           })
+          const filteredServerCatalog = serverCatalog.filter((item) => {
+            const appNetworkId = String(item.appNetworkId || '').trim()
+            if (appNetworkId && allowedNetworkIds.has(appNetworkId)) return true
+            const runtimeModelId = String(item.runtimeModelId || '').trim().toLowerCase()
+            return Boolean(runtimeModelId) && allowedModelIds.has(runtimeModelId)
+          })
           const serverById = new Map(filteredServerNetworks.map((network) => [network.id, network]))
           const mergedLocal = localBaseline.map((localNetwork) => {
             const serverNetwork = serverById.get(localNetwork.id)
@@ -3762,7 +3785,7 @@ export const useWalletStore = create<WalletState>()(
           return {
             networks,
             activeNetworkId,
-            serverCoinCatalog: serverCatalog,
+            serverCoinCatalog: filteredServerCatalog,
             lastServerCoinSyncReport: syncReport
           }
         })

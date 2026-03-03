@@ -12,7 +12,7 @@ export const DASH_ADDRESS_SPEC: UtxoAddressSpec = {
 export function createDashNetwork(ctx: CoinRuntimeContext): Network {
   const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
   return {
-    id: 'srv--dash',
+    id: 'dash',
     runtimeModelId: 'dash',
     serverCoinId: 'dash',
     serverChain: 'main',
@@ -34,7 +34,7 @@ export function createDashNetwork(ctx: CoinRuntimeContext): Network {
 }
 
 export const dashCoin: CoinModule = {
-  id: 'srv--dash',
+  id: 'dash',
   symbol: 'DASH',
   coinSymbol: 'DASH',
   capabilities: DASH_CAPABILITIES,

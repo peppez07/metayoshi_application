@@ -9,7 +9,7 @@ type ServerScaffoldDefinition = {
 
 const SERVER_SCAFFOLD_DEFINITIONS: ReadonlyArray<ServerScaffoldDefinition> = [
   {
-    networkId: 'srv--dash',
+    networkId: 'dash',
     apiInfo: DASH_API_INFO,
     interceptor: dashApiInterceptor
   }

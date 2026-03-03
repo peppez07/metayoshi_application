@@ -11,7 +11,7 @@ import {
 } from './serverScaffolds'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
-export const COIN_API_ORDER = ['rtm', 'srv--dash', 'btcz', 'firo'] as const
+export const COIN_API_ORDER = ['rtm', 'dash', 'btcz', 'firo'] as const
 
 const COIN_API_REGISTRY: ReadonlyArray<{
   networkId: (typeof COIN_API_ORDER)[number]
@@ -19,7 +19,7 @@ const COIN_API_REGISTRY: ReadonlyArray<{
   info: CoinApiInfo
 }> = [
   { networkId: 'rtm', interceptor: rtmApiInterceptor, info: RTM_API_INFO },
-  { networkId: 'srv--dash', interceptor: dashApiInterceptor, info: DASH_API_INFO },
+  { networkId: 'dash', interceptor: dashApiInterceptor, info: DASH_API_INFO },
   { networkId: 'btcz', interceptor: btczApiInterceptor, info: BTCZ_API_INFO },
   { networkId: 'firo', interceptor: firoApiInterceptor, info: FIRO_API_INFO },
 ]
@@ -38,7 +38,7 @@ const DYNAMIC_INTERCEPTOR_CACHE = new Map<string, CoinApiInterceptor>()
 function normalizeRegistryNetworkId(networkId?: string): string {
   const normalized = String(networkId || '').trim().toLowerCase()
   if (!normalized) return ''
-  if (normalized === 'sdash') return 'srv--dash'
+  if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
   // Preserve scaffold IDs like "srv--bitcoin" and collapse only extra aliases
   // like "srv--bitcoin--alt" to their base scaffold key.
