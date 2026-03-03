@@ -1,12 +1,13 @@
 import { BTCZ_PAYLOADS } from './btcz'
 import { createUtxoPayloadCatalog } from './common'
 import { DASH_PAYLOADS } from './dash'
+import { FIRO_PAYLOADS } from './firo'
 import { RTM_PAYLOADS } from './rtm'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import { SERVER_SCAFFOLD_PAYLOADS_BY_NETWORK_ID } from './serverScaffolds'
 import type { CoinPayloadCatalog } from './types'
 
-export const PAYLOAD_CATALOG_ORDER = ['rtm', 'srv--dash', 'btcz'] as const
+export const PAYLOAD_CATALOG_ORDER = ['rtm', 'srv--dash', 'btcz', 'firo'] as const
 
 const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   networkId: (typeof PAYLOAD_CATALOG_ORDER)[number]
@@ -15,6 +16,7 @@ const PAYLOAD_CATALOG_REGISTRY: ReadonlyArray<{
   { networkId: 'rtm', catalog: RTM_PAYLOADS },
   { networkId: 'srv--dash', catalog: DASH_PAYLOADS },
   { networkId: 'btcz', catalog: BTCZ_PAYLOADS },
+  { networkId: 'firo', catalog: FIRO_PAYLOADS },
 ]
 
 export const PAYLOADS_BY_NETWORK_ID = Object.fromEntries(
@@ -68,6 +70,7 @@ export {
   RTM_PAYLOADS,
   DASH_PAYLOADS,
   BTCZ_PAYLOADS,
+  FIRO_PAYLOADS,
 }
 
 export type { CoinPayloadCatalog, CoinPayloadBuilders, JsonRpcEnvelope, UtxoTxInputRef } from './types'

@@ -292,7 +292,7 @@ const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
-const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'srv--dash', 'btcz'])
+const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'srv--dash', 'btcz', 'firo'])
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -1157,7 +1157,7 @@ async function readEvmTokenMetadata(
 // support them reliably for unfunded addresses.
 function supportsAddressIndexBalance(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
 }
 
 function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {

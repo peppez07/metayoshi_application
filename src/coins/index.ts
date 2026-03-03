@@ -1,6 +1,7 @@
 import { btczCoin } from './btcz'
 import { dashCoin } from './dash'
 import { ethCoin } from './eth'
+import { firoCoin } from './firo'
 import { rtmCoin } from './rtm'
 import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
@@ -47,6 +48,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
+  firoCoin,
   dashCoin,
   btczCoin,
   ...SERVER_SCAFFOLD_COIN_MODULES
@@ -123,6 +125,18 @@ function normalizeEnabledCoinIdTokens(rawTokens: string[]): string[] {
   return out
 }
 
+function normalizeDisabledCoinIdTokens(rawTokens: string[]): string[] {
+  const out: string[] = []
+  for (const rawToken of rawTokens) {
+    const expanded = expandEnabledCoinSelectionToken(rawToken)
+    for (const id of expanded) {
+      if (!id) continue
+      out.push(id)
+    }
+  }
+  return out
+}
+
 function parseEnabledCoinIdsFromBuildConfig(): Set<string> | null {
   const enabledRaw = BUILD_CONFIG.coins?.enabled
   const disabled = new Set((BUILD_CONFIG.coins?.disabled || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean))
@@ -169,12 +183,13 @@ function parseDisabledCoinIds(raw: string | undefined): Set<string> {
     .split(',')
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean)
-  const resolved = normalizeEnabledCoinIdTokens(selected)
+  const resolved = normalizeDisabledCoinIdTokens(selected)
   return new Set(resolved)
 }
 
-const enabledFromConfigOrEnv = parseEnabledCoinIdsFromBuildConfig() ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined)
-const disabledFromEnv = parseEnabledCoinIdsFromBuildConfig()
+const enabledFromBuildConfig = parseEnabledCoinIdsFromBuildConfig()
+const enabledFromConfigOrEnv = enabledFromBuildConfig ?? parseEnabledCoinIds(import.meta.env.VITE_ENABLED_COINS as string | undefined)
+const disabledFromEnv = enabledFromBuildConfig
   ? new Set<string>() // Build config coins.* takes precedence over legacy VITE_* toggles.
   : parseDisabledCoinIds(import.meta.env.VITE_DISABLED_COINS as string | undefined)
 
@@ -226,7 +241,11 @@ export function getAllUtxoAddressSpecs(): Record<string, UtxoAddressSpec> {
 
 export function estimateNetworkFee(networkId: string, txBytes: number): number | undefined {
   const module = MODULE_BY_NETWORK_ID.get(networkId)
-  return module?.estimateFee ? module.estimateFee(txBytes) : undefined
+  if (module?.estimateFee) return module.estimateFee(txBytes)
+  const network = ALL_NETWORKS.find((n) => n.id === networkId)
+  const feePerByte = Number(network?.feePerByte)
+  if (Number.isFinite(feePerByte) && feePerByte > 0) return txBytes * feePerByte
+  return undefined
 }
 
 type ServerCoinNetworkRow = {
@@ -450,7 +469,6 @@ function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'solana') return 'sol'
   if (normalized === 'tron') return 'tron'
   if (normalized === 'tron-evm') return 'eth'
-  if (normalized === 'optimism') return 'base'
   if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
   if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
@@ -521,8 +539,7 @@ function isLoopbackOrPrivateHost(value: string): boolean {
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
   if (host.startsWith('10.')) return true
   if (host.startsWith('192.168.')) return true
-  if (host.startsWith('172.16.') || host.startsWith('172.17.') || host.startsWith('172.18.') || host.startsWith('172.19.')) return true
-  if (host.startsWith('172.2')) return true
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true
   return false
 }
 

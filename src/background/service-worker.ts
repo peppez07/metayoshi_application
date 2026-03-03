@@ -1343,12 +1343,14 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
   }
 })
 
-chrome.windows.onBoundsChanged.addListener((win) => {
-  if (typeof win.id !== 'number') return
-  if (!managedPopupWindowIds.has(win.id)) return
-  void enforceManagedPopupBounds(win.id)
-  void enforceSingleManagedPopupWindow()
-})
+if (chrome.windows?.onBoundsChanged?.addListener) {
+  chrome.windows.onBoundsChanged.addListener((win) => {
+    if (typeof win.id !== 'number') return
+    if (!managedPopupWindowIds.has(win.id)) return
+    void enforceManagedPopupBounds(win.id)
+    void enforceSingleManagedPopupWindow()
+  })
+}
 
 chrome.windows.onRemoved.addListener((windowId) => {
   if (managedPopupWindowId === windowId) {

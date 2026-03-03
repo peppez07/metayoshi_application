@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "MetaYoshi",
-  "version": "0.1.3",
-  "version_name": "0.1.3-beta",
+  "version": "0.1.5",
+  "version_name": "metayoshi-0.1.5",
   "action": {
     "default_icon": {
       "16": "assets/metayoshi-16.png",
