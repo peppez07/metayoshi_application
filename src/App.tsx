@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect, type ReactElement } from 'react'
 import { useWalletStore } from './store/walletStore'
 import { resolveNetworkCapabilities } from './lib/networkCapabilities'
@@ -12,7 +12,6 @@ import WalletLayout from './pages/wallet/WalletLayout'
 import Assets from './pages/wallet/Assets'
 import AssetsPage from './pages/wallet/AssetsPage'
 import AssetPreviewPage from './pages/wallet/AssetPreviewPage'
-import AssetSendPage from './pages/wallet/AssetSendPage'
 import Activity from './pages/wallet/Activity'
 import Send from './pages/wallet/Send'
 import Swap from './pages/wallet/Swap'
@@ -57,7 +56,7 @@ const SendRouteGate = () => {
   const { networks, activeNetworkId } = useWalletStore()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
-  return caps.ui.showSendAction ? <Send /> : <Navigate to="/wallet/activity" replace />
+  return (caps.ui.showSendAction || caps.features.assetSend) ? <Send /> : <Navigate to="/wallet/activity" replace />
 }
 
 const AssetsRouteGate = () => {
@@ -74,12 +73,19 @@ const WalletModelRedirect = () => {
   return <Navigate to={`/wallet/model/${modelKey}`} replace />
 }
 
+const LegacyAssetSendRedirect = () => {
+  const location = useLocation()
+  const routeState = (location.state as { assetId?: string } | null) || null
+  const assetId = String(routeState?.assetId || '').trim()
+  return <Navigate to="/wallet/send" replace state={assetId ? { assetId } : null} />
+}
+
 const TxRouteGate = ({ element }: { element: ReactElement }) => {
   const { isLocked, networks, activeNetworkId } = useWalletStore()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   if (isLocked) return <Navigate to="/unlock" replace />
-  if (!caps.features.nativeSend) return <Navigate to="/wallet/activity" replace />
+  if (!caps.features.nativeSend && !caps.features.assetSend) return <Navigate to="/wallet/activity" replace />
   return element
 }
 
@@ -145,7 +151,7 @@ function App() {
 
           {/* Full Assets Page */}
           <Route path="/assets" element={isLocked ? <Navigate to="/unlock" /> : <AssetsPage />} />
-          <Route path="/assets/send" element={isLocked ? <Navigate to="/unlock" /> : <AssetSendPage />} />
+          <Route path="/assets/send" element={isLocked ? <Navigate to="/unlock" /> : <LegacyAssetSendRedirect />} />
           <Route path="/assets/preview" element={isLocked ? <Navigate to="/unlock" /> : <AssetPreviewPage />} />
 
           {/* Dapp Flow */}

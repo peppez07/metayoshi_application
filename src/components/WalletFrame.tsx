@@ -4,7 +4,7 @@ import QRCode from 'qrcode'
 import clsx from 'clsx'
 import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
-import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline } from 'react-icons/io5'
+import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline } from 'react-icons/io5'
 import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
@@ -75,6 +75,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       n.name.toLowerCase().includes(query) || n.symbol.toLowerCase().includes(query)
     )
   }, [networkSearch, rankedNetworks])
+  const showGlobalNetworkOption = React.useMemo(() => {
+    const query = networkSearch.trim().toLowerCase()
+    if (!query) return true
+    return 'global network'.includes(query) || 'all chains'.includes(query) || 'send hub'.includes(query)
+  }, [networkSearch])
 
   const rawAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : undefined)
@@ -326,6 +331,36 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
             {/* List */}
             <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
+              {showGlobalNetworkOption && (
+                <div
+                  className="p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20"
+                  onClick={() => {
+                    setShowNetworkMenu(false)
+                    setNetworkSearch('')
+                    navigate('/wallet/send', { state: { hubMode: 'global', autoScan: true } })
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full border border-blue-500/40 bg-blue-500/20 flex items-center justify-center">
+                      <IoGlobeOutline className="w-4 h-4 text-blue-200" />
+                    </div>
+                    <div className="flex flex-col leading-tight">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-blue-100">Global Network</span>
+                        <span
+                          title="Scan all blockchains and addresses"
+                          className="px-1.5 py-0.5 rounded-md border border-blue-400/40 bg-blue-500/20 text-[9px] font-black tracking-widest uppercase text-blue-100"
+                        >
+                          Global
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-blue-200/80 uppercase font-mono">All chains / send hub</span>
+                    </div>
+                  </div>
+                  <div className="w-2 h-2 rounded-full bg-blue-300" />
+                </div>
+              )}
+
               {visibleNetworks
                 .map(n => (
                   <div
@@ -363,7 +398,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   </div>
                 ))
               }
-              {visibleNetworks.length === 0 && (
+              {visibleNetworks.length === 0 && !showGlobalNetworkOption && (
                 <p className="text-xs text-gray-600 text-center py-4">No networks match "{networkSearch}"</p>
               )}
             </div>

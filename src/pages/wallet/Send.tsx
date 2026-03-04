@@ -1,191 +1,596 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button } from '../../components/Button'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useWalletStore, type SendableItem } from '../../store/walletStore'
 import { Input } from '../../components/Input'
-import { useWalletStore } from '../../store/walletStore'
-import { IoArrowBack, IoInformationCircleOutline } from 'react-icons/io5'
+import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
-import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
+import {
+  IoArrowBackOutline,
+  IoChevronDownOutline,
+  IoChevronForwardOutline,
+  IoLayersOutline,
+  IoRefreshOutline,
+  IoSearchOutline
+} from 'react-icons/io5'
 
-function formatCoinAmount(v: number): string {
-  return v.toFixed(8).replace(/\.?0+$/, '')
+function formatUnits8(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
 }
 
-function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
-  if (network.coinType === 'UTXO') {
-    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
-    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
-    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
-    return (estimatedBytes * feePerByteSats) / 1e8
+function shortAddress(address: string): string {
+  const raw = String(address || '').trim()
+  if (!raw) return 'Address unavailable'
+  if (raw.length <= 14) return raw
+  return `${raw.slice(0, 8)}...${raw.slice(-6)}`
+}
+
+type SendRouteState = {
+  assetId?: string
+  sendEntryId?: string
+  hubMode?: 'global'
+  autoScan?: boolean
+}
+type GlobalScanMode = 'auto' | 'manual'
+type GlobalScanOptions = {
+  reason?: string
+  mode?: GlobalScanMode
+  refreshBalances?: boolean
+  forceAssetRefresh?: boolean
+}
+
+type ScanHolder = {
+  key: string
+  networkId: string
+  networkSymbol: string
+  accountId: string
+  accountLabel: string
+  address: string
+  itemId: string
+  assetId?: string
+  requestType: 'native' | 'asset'
+  kind: SendableItem['kind']
+  label: string
+  symbol: string
+  logoUrl?: string
+  rawAmount: number
+  amount: string
+}
+
+type AggregatedScanRow = {
+  key: string
+  networkId: string
+  networkSymbol: string
+  networkName: string
+  networkLogo?: string
+  itemId: string
+  assetId?: string
+  requestType: 'native' | 'asset'
+  kind: SendableItem['kind']
+  label: string
+  symbol: string
+  logoUrl?: string
+  rawAmount: number
+  amount: string
+  holders: ScanHolder[]
+}
+
+type CachedScanPayload = {
+  rows: AggregatedScanRow[]
+  updatedAt: number
+}
+
+const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
+const SEND_HUB_SCAN_AUTO_INTERVAL_MS = 90_000
+const SEND_HUB_SCAN_STALE_MS = 30_000
+
+function readCachedScanRows(): CachedScanPayload | null {
+  try {
+    const raw = localStorage.getItem(SEND_HUB_SCAN_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CachedScanPayload
+    if (!Array.isArray(parsed?.rows)) return null
+    const updatedAt = Number(parsed?.updatedAt || 0)
+    return {
+      rows: parsed.rows,
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0
+    }
+  } catch {
+    return null
   }
-  if (network.coinType === 'XRP') return 0.000012
-  return 0.002151
+}
+
+function writeCachedScanRows(rows: AggregatedScanRow[]): void {
+  try {
+    const payload: CachedScanPayload = { rows, updatedAt: Date.now() }
+    localStorage.setItem(SEND_HUB_SCAN_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // ignore storage quota/runtime failures
+  }
 }
 
 const Send: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, networks, activeNetworkId, isSyncing, syncPercent, isConnected, lowSyncStreak } = useWalletStore()
-  const [toAddress, setToAddress] = useState('')
-  const [amount, setAmount] = useState('')
-  const [error, setError] = useState('')
+  const location = useLocation()
+  const {
+    accounts,
+    networks,
+    activeNetworkId,
+    getSendableItems,
+    setActiveAccount,
+    setActiveNetwork,
+    fetchNetworkAssets
+  } = useWalletStore()
 
-  const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
-  const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
-  const caps = resolveNetworkCapabilities(activeNetwork)
-  const estimatedFeeCoin = React.useMemo(() => estimateNativeSendFee(activeNetwork), [activeNetwork])
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const networkById = useMemo(() => new Map(networks.map((network) => [network.id, network])), [networks])
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    if (!caps.features.nativeSend) {
-      setError(`${activeNetwork.name} does not support native coin transfers in this wallet`)
-      return
-    }
-    if (sendBlockedBySync) {
-      setError(syncBlockedReason)
-      return
-    }
+  const [search, setSearch] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [isScanningAll, setIsScanningAll] = useState(false)
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; label: string }>({
+    done: 0,
+    total: 0,
+    label: ''
+  })
+  const [scanError, setScanError] = useState('')
+  const [scanRows, setScanRows] = useState<AggregatedScanRow[]>(() => {
+    const cached = readCachedScanRows()
+    return cached?.rows || []
+  })
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
+  const handledDeepLinkRef = useRef<string>('')
+  const scanRunIdRef = useRef(0)
+  const isScanningRef = useRef(false)
 
-    if (!toAddress.trim()) {
-      setError('Recipient address is required')
-      return
-    }
+  const allItems = getSendableItems({ includeHidden: true })
 
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Amount must be greater than 0')
-      return
-    }
-
-    if (parseFloat(amount) > parseFloat(activeAccount?.balance || '0')) {
-      setError('Insufficient balance')
-      return
-    }
-
-    // Resolve the correct per-network address (never use the generic UTXO slot
-    // which holds the first-derived coin address, not necessarily this network's)
-    const fromAddress = activeNetwork.coinType === 'EVM'
-      ? (activeAccount?.addresses.EVM || '')
-      : (activeAccount?.networkAddresses?.[activeNetwork.id] || '')
-    
-    navigate('/tx/confirm', { 
-      state: { 
-        to: toAddress,
-        amount: amount,
-        from: fromAddress
-      } 
+  const filteredScanRows = useMemo(() => {
+    const query = String(search || '').trim().toLowerCase()
+    if (!query) return scanRows
+    return scanRows.filter((row) => {
+      const holderHaystack = row.holders
+        .map((holder) => `${holder.accountLabel} ${holder.address}`.toLowerCase())
+        .join(' ')
+      const haystack = `${row.label} ${row.symbol} ${row.networkSymbol} ${row.networkName} ${row.assetId || ''} ${holderHaystack}`.toLowerCase()
+      return haystack.includes(query)
     })
+  }, [scanRows, search])
+
+  const selectedItem = useMemo(
+    () => allItems.find((row) => row.id === selectedId) || null,
+    [allItems, selectedId]
+  )
+
+  useEffect(() => {
+    const routeState = (location.state as SendRouteState | null) || null
+    const requestedAssetId = String(routeState?.assetId || '').trim()
+    const requestedEntryId = String(routeState?.sendEntryId || '').trim()
+    if (!requestedAssetId && !requestedEntryId) return
+    if (allItems.length === 0) return
+
+    const dedupeKey = `${requestedEntryId}|${requestedAssetId}`
+    if (handledDeepLinkRef.current === dedupeKey) return
+    handledDeepLinkRef.current = dedupeKey
+
+    const match = allItems.find((item) => (
+      (requestedEntryId && item.id === requestedEntryId)
+      || (requestedAssetId && item.assetId === requestedAssetId)
+    ))
+    if (match) {
+      setSelectedId(match.id)
+    }
+
+    navigate('/wallet/send', { replace: true, state: null })
+  }, [location.state, allItems, navigate])
+
+  const runGlobalScan = useCallback(async (options?: GlobalScanOptions) => {
+    if (isScanningRef.current) return
+    setScanError('')
+    setIsScanningAll(true)
+    isScanningRef.current = true
+    const runId = scanRunIdRef.current + 1
+    scanRunIdRef.current = runId
+    const mode: GlobalScanMode = options?.mode === 'manual' ? 'manual' : 'auto'
+    const includeBalanceRefresh = options?.refreshBalances ?? (mode === 'manual')
+    const forceAssetRefresh = options?.forceAssetRefresh ?? (mode === 'manual')
+    const reason = String(options?.reason || '').trim()
+    setScanProgress({
+      done: 0,
+      total: 0,
+      label: reason
+        ? `Preparing ${mode === 'manual' ? 'full' : 'background'} scan (${reason})...`
+        : `Preparing ${mode === 'manual' ? 'full' : 'background'} scan...`
+    })
+
+    const stateBefore = useWalletStore.getState()
+    const originalActiveAccountId = stateBefore.activeAccountId
+    const originalActiveNetworkId = stateBefore.activeNetworkId
+    const originalAssetsSnapshot = {
+      networkAssets: stateBefore.networkAssets,
+      networkAssetLogos: stateBefore.networkAssetLogos,
+      networkAssetLabels: stateBefore.networkAssetLabels,
+      evmNftAssets: stateBefore.evmNftAssets
+    }
+
+    const shouldCancel = () => scanRunIdRef.current !== runId
+    const scanAccounts = [...stateBefore.accounts]
+    const scanNetworks = stateBefore.networks.filter((network) => {
+      const networkCaps = resolveNetworkCapabilities(network)
+      return networkCaps.features.nativeSend || networkCaps.features.assetLayer || networkCaps.features.assetSend
+    })
+
+    const total = Math.max(1, scanAccounts.length * scanNetworks.length)
+    const aggregate = new Map<string, AggregatedScanRow>()
+    let done = 0
+
+    try {
+      for (const account of scanAccounts) {
+        if (shouldCancel()) throw new Error('[cancelled]')
+        useWalletStore.setState((state) => ({
+          activeAccountId: account.id
+        }))
+
+        for (const network of scanNetworks) {
+          if (shouldCancel()) throw new Error('[cancelled]')
+          done += 1
+          setScanProgress({
+            done,
+            total,
+            label: `Refreshing global balances (${done}/${total})...`
+          })
+
+          await setActiveNetwork(
+            network.id,
+            includeBalanceRefresh ? undefined : { skipRefresh: true }
+          )
+
+          useWalletStore.setState((state) => ({
+            networkAssets: { ...state.networkAssets, [network.id]: {} },
+            networkAssetLogos: { ...state.networkAssetLogos, [network.id]: {} },
+            networkAssetLabels: { ...state.networkAssetLabels, [network.id]: {} },
+            evmNftAssets: { ...state.evmNftAssets, [network.id]: {} }
+          }))
+
+          if (resolveNetworkCapabilities(network).features.assetLayer) {
+            await fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+          }
+
+          const scanState = useWalletStore.getState()
+          const refreshedAccount = scanState.accounts.find((row) => row.id === account.id) || account
+          const address = String(
+            refreshedAccount.networkAddresses?.[network.id]
+            || (network.coinType === 'EVM' ? refreshedAccount.addresses?.EVM : '')
+            || ''
+          ).trim()
+          const itemRows = scanState.getSendableItems({
+            accountId: account.id,
+            networkId: network.id,
+            includeHidden: true,
+            includeZeroBalance: false
+          })
+
+          for (const item of itemRows) {
+            const rawAmount = Math.max(0, Math.round(Number(item.rawAmount || 0)))
+            if (rawAmount <= 0) continue
+            const key = `${network.id}::${item.id}`
+            const holderKey = `${account.id}::${network.id}::${item.id}`
+            const holder: ScanHolder = {
+              key: holderKey,
+              networkId: network.id,
+              networkSymbol: network.symbol,
+              accountId: account.id,
+              accountLabel: getAccountDisplayName(refreshedAccount, network.id, refreshedAccount.name),
+              address,
+              itemId: item.id,
+              assetId: item.assetId,
+              requestType: item.requestType,
+              kind: item.kind,
+              label: item.label,
+              symbol: item.symbol,
+              logoUrl: item.logoUrl,
+              rawAmount,
+              amount: formatUnits8(rawAmount / 1e8)
+            }
+            const existing = aggregate.get(key)
+            if (!existing) {
+              aggregate.set(key, {
+                key,
+                networkId: network.id,
+                networkSymbol: network.symbol,
+                networkName: network.name,
+                networkLogo: network.logo,
+                itemId: item.id,
+                assetId: item.assetId,
+                requestType: item.requestType,
+                kind: item.kind,
+                label: item.label,
+                symbol: item.symbol,
+                logoUrl: item.logoUrl,
+                rawAmount,
+                amount: formatUnits8(rawAmount / 1e8),
+                holders: [holder]
+              })
+              continue
+            }
+            existing.rawAmount += rawAmount
+            existing.amount = formatUnits8(existing.rawAmount / 1e8)
+            const holderExists = existing.holders.some((row) => row.key === holder.key)
+            if (!holderExists) existing.holders.push(holder)
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+      }
+
+      if (shouldCancel()) throw new Error('[cancelled]')
+
+      const rows = [...aggregate.values()]
+        .map((row) => ({
+          ...row,
+          holders: [...row.holders].sort((a, b) => b.rawAmount - a.rawAmount)
+        }))
+        .sort((a, b) => {
+          if (b.rawAmount !== a.rawAmount) return b.rawAmount - a.rawAmount
+          if (a.networkName !== b.networkName) return a.networkName.localeCompare(b.networkName)
+          return a.label.localeCompare(b.label)
+        })
+
+      setScanRows(rows)
+      setExpandedRows({})
+      writeCachedScanRows(rows)
+      if (rows.length === 0) {
+        setScanProgress({
+          done: total,
+          total,
+          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete. No balances found on scanned accounts.`
+        })
+      } else {
+        setScanProgress({
+          done: total,
+          total,
+          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete. ${rows.length} aggregated holdings.`
+        })
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message !== '[cancelled]') {
+        setScanError(`Global scan failed: ${message}`)
+      }
+    } finally {
+      useWalletStore.setState({
+        networkAssets: originalAssetsSnapshot.networkAssets,
+        networkAssetLogos: originalAssetsSnapshot.networkAssetLogos,
+        networkAssetLabels: originalAssetsSnapshot.networkAssetLabels,
+        evmNftAssets: originalAssetsSnapshot.evmNftAssets
+      })
+
+      if (originalActiveAccountId) {
+        useWalletStore.setState({ activeAccountId: originalActiveAccountId })
+      }
+      if (originalActiveNetworkId) {
+        await useWalletStore.getState().setActiveNetwork(
+          originalActiveNetworkId,
+          includeBalanceRefresh ? undefined : { skipRefresh: true }
+        ).catch(() => {})
+        await useWalletStore.getState().fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+      }
+      if (scanRunIdRef.current === runId) {
+        isScanningRef.current = false
+        setIsScanningAll(false)
+      }
+    }
+  }, [fetchNetworkAssets, setActiveNetwork])
+
+  useEffect(() => {
+    const cached = readCachedScanRows()
+    const cacheAgeMs = cached ? Math.max(0, Date.now() - cached.updatedAt) : Number.POSITIVE_INFINITY
+    if (scanRows.length === 0 && cached?.rows?.length) {
+      setScanRows(cached.rows)
+    }
+    if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || scanRows.length === 0) && !isScanningRef.current) {
+      void runGlobalScan({ mode: 'auto', reason: 'initial load', refreshBalances: true })
+    }
+
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+      void runGlobalScan({ mode: 'auto', reason: 'scheduled refresh', refreshBalances: false })
+    }
+
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+      const latest = readCachedScanRows()
+      const ageMs = latest ? Math.max(0, Date.now() - latest.updatedAt) : Number.POSITIVE_INFINITY
+      if (!latest || ageMs > SEND_HUB_SCAN_STALE_MS) {
+        void runGlobalScan({ mode: 'auto', reason: 'tab visible', refreshBalances: true })
+      }
+    }
+
+    const intervalId = window.setInterval(tick, SEND_HUB_SCAN_AUTO_INTERVAL_MS)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
+    return () => {
+      window.clearInterval(intervalId)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
+    }
+  }, [runGlobalScan, scanRows.length])
+
+  useEffect(() => {
+    const routeState = (location.state as SendRouteState | null) || null
+    const requestedModeRaw = String(routeState?.hubMode || '').trim().toLowerCase()
+    if (requestedModeRaw !== 'global') return
+
+    if (routeState?.autoScan === true && scanRows.length === 0 && !isScanningAll) {
+      void runGlobalScan({ mode: 'auto', reason: 'global network entry' })
+    }
+
+    navigate('/wallet/send', { replace: true, state: null })
+  }, [location.state, navigate, scanRows.length, isScanningAll, runGlobalScan])
+
+  const openSendFromScanHolder = async (holder: ScanHolder) => {
+    setScanError('')
+
+    try {
+      setActiveAccount(holder.accountId)
+      await setActiveNetwork(holder.networkId)
+      const latestState = useWalletStore.getState()
+      const candidates = latestState.getSendableItems({
+        accountId: holder.accountId,
+        networkId: holder.networkId,
+        includeHidden: true,
+        includeZeroBalance: false
+      })
+      const target = candidates.find((item) => (
+        item.id === holder.itemId
+        || (holder.assetId && item.assetId === holder.assetId)
+      ))
+      if (!target) {
+        setScanError(`Cannot open send form for ${holder.label} on ${holder.networkSymbol}. Run scan again.`)
+        return
+      }
+      setSelectedId(target.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setScanError(`Cannot prepare send form: ${message}`)
+    }
+  }
+
+  if (selectedItem) {
+    return (
+      <SendTransferForm
+        item={selectedItem}
+        onBack={() => {
+          setSelectedId(null)
+        }}
+      />
+    )
   }
 
   return (
     <div className="flex flex-col h-full bg-dark-800">
       <header className="p-4 border-b border-dark-600 flex items-center gap-3">
-        <button 
-          onClick={() => navigate('/wallet/assets')}
-          className="text-gray-400 hover:text-white transition-colors"
-        >
-          <IoArrowBack className="w-5 h-5" />
+        <button onClick={() => navigate('/wallet/assets')} className="text-gray-400 hover:text-white transition-colors">
+          <IoArrowBackOutline className="w-5 h-5" />
         </button>
-        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200">Send {activeNetwork.symbol}</h1>
+        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200">Send Hub</h1>
       </header>
 
-      <form onSubmit={handleSend} className="flex-1 flex flex-col p-6 space-y-6 overflow-y-auto custom-scrollbar">
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/30">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full bg-yellow-500" />
-                <span className="text-xs font-bold">{getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')}</span>
-              </div>
-              <div className="px-2 py-0.5 rounded-full bg-dark-600 border border-dark-600 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                <span className="text-[9px] font-bold text-gray-300 uppercase">{activeNetwork.name}</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[10px] text-gray-500 font-bold uppercase">Available Balance</p>
-              <p className="text-lg font-bold">{activeAccount?.balance || 0} {activeNetwork.symbol}</p>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-              Recipient Address
-            </label>
-            <Input
-              placeholder={`Enter ${activeNetwork.name} address`}
-              value={toAddress}
-              onChange={(e) => setToAddress(e.target.value)}
-              className="bg-dark-700/50 border-dark-600 font-mono text-xs"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-              Amount
-            </label>
-            <div className="relative">
-              <Input
-                type="number"
-                step="0.00000001"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="bg-dark-700/50 border-dark-600 pr-16"
-              />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                <span className="text-xs font-bold text-gray-400 uppercase">{activeNetwork.symbol}</span>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-2">
-              {[0.25, 0.5, 0.75, 1].map((percent) => (
-                <button
-                  key={percent}
-                  type="button"
-                  onClick={() => {
-                    const balance = parseFloat(activeAccount?.balance || '0')
-                    setAmount((balance * percent).toFixed(8))
-                  }}
-                  className="flex-1 px-3 py-1.5 bg-dark-700 rounded-lg text-xs font-bold text-gray-300 hover:bg-dark-600 transition-colors"
-                >
-                  {percent * 100}%
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="p-4 border-b border-dark-600/60 space-y-3">
+        <div className="relative">
+          <IoSearchOutline className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+          <Input
+            placeholder="Search token, account, address, blockchain..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="pl-9 bg-dark-700/50 border-dark-600 text-sm"
+          />
         </div>
 
-        <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
-          <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
-          <p className="text-[10px] text-gray-600 leading-relaxed">
-            Estimated required fee: ~{formatCoinAmount(estimatedFeeCoin)} {activeNetwork.symbol}. Change is returned automatically.
-          </p>
-        </div>
-
-        {error && (
-          <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl">
-            <p className="text-xs font-bold text-red-300 text-center">{error}</p>
+        {scanError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+            <p className="text-[11px] font-bold text-red-300">{scanError}</p>
           </div>
         )}
-        {!error && sendBlockedBySync && (
-          <div className="p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl">
-            <p className="text-xs font-bold text-yellow-200 text-center">{syncBlockedReason}</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {filteredScanRows.length === 0 && (
+          <div className="h-full flex flex-col items-center justify-center px-6 text-center text-sm text-gray-400 gap-3">
+            <p>
+              {isScanningAll
+                ? 'Loading global holdings...'
+                : (search.trim()
+                  ? `No scan rows for "${search}".`
+                  : 'Global list auto-updates in background across all addresses and blockchains.')}
+            </p>
           </div>
         )}
 
-        <div className="mt-auto pt-4">
-          <Button 
-            type="submit"
-            className="w-full btn-primary"
-            disabled={!caps.features.nativeSend || sendBlockedBySync || !toAddress.trim() || !amount || parseFloat(amount) <= 0}
-          >
-            Continue
-          </Button>
-        </div>
-      </form>
+        {filteredScanRows.map((row) => {
+          const expanded = expandedRows[row.key] === true
+          return (
+            <div key={row.key} className="px-3 py-2 border-b border-dark-600/40">
+              <button
+                type="button"
+                onClick={() => setExpandedRows((prev) => ({ ...prev, [row.key]: !expanded }))}
+                className="w-full text-left flex items-center gap-3"
+              >
+                <div className="w-9 h-9 rounded-full border border-dark-600 bg-dark-700/60 overflow-hidden flex items-center justify-center shrink-0">
+                  {row.logoUrl
+                    ? <img src={row.logoUrl} alt={row.label} className="w-full h-full object-cover" />
+                    : <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-bold truncate">{row.label}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full border border-dark-500 text-gray-300 font-bold uppercase">
+                      {row.holders.length} {row.holders.length === 1 ? 'holder' : 'holders'}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">
+                      {row.kind === 'native' ? row.networkSymbol : row.symbol}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-blue-500/30 bg-blue-500/10 text-[9px] font-bold uppercase text-blue-200">
+                      {row.networkLogo
+                        ? <img src={row.networkLogo} alt={row.networkSymbol} className="w-3 h-3 rounded-full object-cover" />
+                        : <span className="w-2 h-2 rounded-full bg-blue-300" />}
+                      {row.networkSymbol}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-bold font-mono">{formatUnits8(row.rawAmount / 1e8)}</p>
+                  <div className="flex justify-end">
+                    {expanded ? (
+                      <IoChevronDownOutline className="w-4 h-4 text-gray-500" />
+                    ) : (
+                      <IoChevronForwardOutline className="w-4 h-4 text-gray-500" />
+                    )}
+                  </div>
+                </div>
+              </button>
+
+              {expanded && (
+                <div className="mt-2 space-y-2 pl-12">
+                  {row.holders.map((holder) => {
+                    const holderNetwork = networkById.get(holder.networkId)
+                    const holderCaps = resolveNetworkCapabilities(holderNetwork || activeNetwork)
+                    const holderCanSend = holder.requestType === 'native'
+                      ? holderCaps.features.nativeSend
+                      : holderCaps.features.assetSend
+                    return (
+                      <div key={holder.key} className="p-2 rounded-xl border border-dark-600 bg-dark-700/40 flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold truncate">{holder.accountLabel}</p>
+                          <p className="text-[10px] text-gray-500 font-mono truncate">{shortAddress(holder.address)}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-bold font-mono">{holder.amount}</p>
+                          <button
+                            type="button"
+                            onClick={() => void openSendFromScanHolder(holder)}
+                            disabled={!holderCanSend || isScanningAll}
+                            className="mt-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border border-primary/40 bg-primary/20 text-primary hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -242,8 +242,8 @@ const Assets: React.FC = () => {
             logoUrl={assetLogos[name]}
             rawAmount={raw}
             onClick={() => {
-              if (canOpenAssetSend && !isEvmNftAssetKey(name)) {
-                navigate('/assets/send', { state: { assetId: name } })
+              if (canOpenAssetSend) {
+                navigate('/wallet/send', { state: { assetId: name } })
                 return
               }
               navigate('/assets')

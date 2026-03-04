@@ -88,6 +88,37 @@ export interface FullBackupV1 {
   donationPercent: number
   backupConfirmed: boolean
   networkAssets: Record<string, Record<string, number>>
+  sendListPreferences?: Record<string, SendListPreferenceBucket>
+}
+
+export type SendableItemKind = 'native' | 'fungible' | 'nft'
+
+export interface SendListPreferenceBucket {
+  /** Explicit ordering for send entries in one account+network scope. */
+  order: string[]
+  /** Pinned entries displayed above non-pinned rows. */
+  pinned: string[]
+  /** Hidden entries excluded from the default send list. */
+  hidden: string[]
+}
+
+export interface SendableItem {
+  /** Stable preference id. For EVM tokens we normalize to contract-based ids. */
+  id: string
+  /** Raw wallet asset id used by sendAssetTransfer. */
+  assetId?: string
+  requestType: 'native' | 'asset'
+  kind: SendableItemKind
+  networkId: string
+  accountId: string
+  symbol: string
+  label: string
+  logoUrl?: string
+  amount: string
+  /** Satoshi-like integer (1e8 scale) for sorting/comparisons. */
+  rawAmount: number
+  pinned: boolean
+  hidden: boolean
 }
 
 export interface Account {
@@ -172,6 +203,8 @@ interface WalletState {
   evmNftAssets: Record<string, Record<string, EvmNftHolding>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
   serverCoinCatalog: ServerCoinCatalogItem[]
+  /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
+  sendListPreferences: Record<string, SendListPreferenceBucket>
   authorizedSites: string[]
   autolockMinutes: number
   donationPercent: number
@@ -202,7 +235,7 @@ interface WalletState {
   wipeVault: () => void
   
   setActiveAccount: (id: string) => void
-  setActiveNetwork: (id: string) => Promise<void>
+  setActiveNetwork: (id: string, options?: { skipRefresh?: boolean }) => Promise<void>
   ensureNetworkAddress: (networkId: string) => Promise<string | null>
   
   setConnected: (connected: boolean) => void
@@ -271,6 +304,23 @@ interface WalletState {
   // Asset layer (cross-chain)
   fetchNetworkAssets: (options?: { force?: boolean }) => Promise<void>
   fetchAssetDetails: (assetId: string) => Promise<RtmAssetDetails>
+  getSendableItems: (options?: {
+    accountId?: string
+    networkId?: string
+    includeHidden?: boolean
+    includeZeroBalance?: boolean
+  }) => SendableItem[]
+  setSendListPreferences: (params: {
+    accountId?: string
+    networkId?: string
+    order?: string[]
+    pinned?: string[]
+    hidden?: string[]
+  }) => void
+  resetSendListPreferences: (params?: {
+    accountId?: string
+    networkId?: string
+  }) => void
   sendAssetTransfer: (params: {
     assetId: string
     qty: string
@@ -875,6 +925,118 @@ function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
   const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
   if (!m) return ''
   return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
+}
+
+function formatUnits8(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  return value.toFixed(8).replace(/\.?0+$/, '')
+}
+
+function toRawSatsLike(balanceText: string): number {
+  const num = Number(String(balanceText || '').trim())
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.max(0, Math.round(num * 1e8))
+}
+
+const SEND_LIST_NATIVE_PREFIX = 'NATIVE:'
+const SEND_LIST_EVM_TOKEN_PREFIX = 'EVMTOKEN:'
+const SEND_LIST_ASSET_PREFIX = 'ASSET:'
+
+function buildSendListPreferenceScopeKey(accountId: string, networkId: string): string {
+  const account = String(accountId || '').trim().toLowerCase()
+  const network = normalizeNetworkIdAlias(String(networkId || '').trim()).toLowerCase()
+  return `${account}::${network}`
+}
+
+function normalizeIdList(values: string[] | undefined): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const row of values || []) {
+    const normalized = normalizeSendListEntryId(row)
+    if (!normalized) continue
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    out.push(normalized)
+  }
+  return out
+}
+
+function normalizeSendListPreferenceBucket(raw: Partial<SendListPreferenceBucket> | undefined | null): SendListPreferenceBucket {
+  return {
+    order: normalizeIdList(Array.isArray(raw?.order) ? raw?.order : []),
+    pinned: normalizeIdList(Array.isArray(raw?.pinned) ? raw?.pinned : []),
+    hidden: normalizeIdList(Array.isArray(raw?.hidden) ? raw?.hidden : [])
+  }
+}
+
+function normalizeSendListPreferencesRecord(
+  raw: Record<string, Partial<SendListPreferenceBucket>> | undefined | null
+): Record<string, SendListPreferenceBucket> {
+  const out: Record<string, SendListPreferenceBucket> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [scopeKeyRaw, value] of Object.entries(raw)) {
+    const scopeKey = String(scopeKeyRaw || '').trim().toLowerCase()
+    if (!scopeKey || !scopeKey.includes('::')) continue
+    out[scopeKey] = normalizeSendListPreferenceBucket(value)
+  }
+  return out
+}
+
+function buildNativeSendEntryId(networkId: string): string {
+  const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim()).toLowerCase()
+  return `${SEND_LIST_NATIVE_PREFIX}${normalizedNetworkId}`
+}
+
+function buildAssetSendEntryId(assetId: string): string {
+  return `${SEND_LIST_ASSET_PREFIX}${String(assetId || '').trim()}`
+}
+
+function buildEvmTokenSendEntryId(contractAddress: string): string {
+  return `${SEND_LIST_EVM_TOKEN_PREFIX}${ethers.getAddress(contractAddress)}`
+}
+
+function normalizeSendListEntryId(value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^native:/i.test(raw)) {
+    const networkId = normalizeNetworkIdAlias(raw.slice('native:'.length).trim()).toLowerCase()
+    return networkId ? `${SEND_LIST_NATIVE_PREFIX}${networkId}` : ''
+  }
+  if (/^evmtoken:/i.test(raw)) {
+    const token = raw.slice('evmtoken:'.length).trim()
+    if (!ethers.isAddress(token)) return ''
+    return buildEvmTokenSendEntryId(token)
+  }
+  if (/^asset:/i.test(raw)) {
+    const asset = raw.slice('asset:'.length).trim()
+    return asset ? `${SEND_LIST_ASSET_PREFIX}${asset}` : ''
+  }
+  if (ethers.isAddress(raw)) return buildEvmTokenSendEntryId(raw)
+  const nft = parseEvmNftAssetKey(raw)
+  if (nft) {
+    const canonical = buildEvmNftAssetKey(nft.address, nft.tokenId, nft.standard)
+    return buildAssetSendEntryId(canonical)
+  }
+  return buildAssetSendEntryId(raw)
+}
+
+function resolveSendListAssetEntryId(input: {
+  network: Network
+  assetId: string
+  logoUri?: string
+}): string {
+  const assetId = String(input.assetId || '').trim()
+  if (!assetId) return ''
+  const nft = parseEvmNftAssetKey(assetId)
+  if (nft) return buildAssetSendEntryId(buildEvmNftAssetKey(nft.address, nft.tokenId, nft.standard))
+
+  if (input.network.coinType === 'EVM') {
+    if (ethers.isAddress(assetId)) return buildEvmTokenSendEntryId(assetId)
+    const hinted = extractEvmTokenAddressFromLogoUri(String(input.logoUri || '').trim())
+    if (hinted) return buildEvmTokenSendEntryId(hinted)
+  }
+
+  return buildAssetSendEntryId(assetId)
 }
 
 function parseCosmosContractAssetId(assetId: string): {
@@ -1590,6 +1752,7 @@ export const useWalletStore = create<WalletState>()(
       networkAssetLabels: {},
       evmNftAssets: {},
       serverCoinCatalog: [],
+      sendListPreferences: {},
       authorizedSites: [],
       autolockMinutes: 5,
       donationPercent: MIN_DONATION_PERCENT,
@@ -1786,6 +1949,7 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
+          sendListPreferences: {},
           activity: []
         }),
 
@@ -1914,7 +2078,7 @@ export const useWalletStore = create<WalletState>()(
         return null
       },
 
-      setActiveNetwork: async (id) => {
+      setActiveNetwork: async (id, options) => {
         const normalizedId = normalizeNetworkIdAlias(id)
         set((state) => {
           const activeAccount = state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0]
@@ -1933,7 +2097,9 @@ export const useWalletStore = create<WalletState>()(
           }
         })
         await get().ensureNetworkAddress(normalizedId)
-        await get().refreshActiveBalance()
+        if (options?.skipRefresh !== true) {
+          await get().refreshActiveBalance()
+        }
       },
 
       setConnected: (connected) => set({ isConnected: connected }),
@@ -3025,6 +3191,231 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
+      getSendableItems: (options) => {
+        const {
+          networks,
+          activeNetworkId,
+          accounts,
+          activeAccountId,
+          networkAssets,
+          networkAssetLogos,
+          networkAssetLabels,
+          evmNftAssets,
+          sendListPreferences
+        } = get()
+
+        const requestedNetworkId = normalizeNetworkIdAlias(String(options?.networkId || activeNetworkId || '').trim())
+        const requestedAccountId = String(options?.accountId || activeAccountId || '').trim()
+        const network = networks.find((n) => n.id === requestedNetworkId)
+        const account = accounts.find((a) => a.id === requestedAccountId) || accounts[0]
+        if (!network || !account) return []
+
+        const includeHidden = options?.includeHidden === true
+        const includeZeroBalance = options?.includeZeroBalance === true
+        const scopeKey = buildSendListPreferenceScopeKey(account.id, requestedNetworkId)
+        const preferenceBucket = normalizeSendListPreferenceBucket(sendListPreferences?.[scopeKey])
+
+        const byId = new Map<string, SendableItem>()
+        const aliases = new Map<string, string>()
+
+        const linkAlias = (alias: string, id: string) => {
+          const raw = String(alias || '').trim()
+          if (!raw) return
+          aliases.set(raw, id)
+          const normalized = normalizeSendListEntryId(raw)
+          if (normalized) aliases.set(normalized, id)
+        }
+
+        const addOrMergeItem = (row: SendableItem, entryAliases: string[] = []) => {
+          const existing = byId.get(row.id)
+          if (!existing) {
+            byId.set(row.id, row)
+          } else {
+            const mergedRaw = Math.max(0, Math.round(Number(existing.rawAmount || 0) + Number(row.rawAmount || 0)))
+            byId.set(row.id, {
+              ...existing,
+              assetId: existing.assetId || row.assetId,
+              symbol: existing.symbol || row.symbol,
+              label: (existing.label && existing.label !== existing.assetId) ? existing.label : row.label,
+              logoUrl: existing.logoUrl || row.logoUrl,
+              rawAmount: mergedRaw,
+              amount: formatUnits8(mergedRaw / 1e8)
+            })
+          }
+
+          linkAlias(row.id, row.id)
+          if (row.assetId) {
+            linkAlias(row.assetId, row.id)
+            linkAlias(buildAssetSendEntryId(row.assetId), row.id)
+          }
+          for (const alias of entryAliases) linkAlias(alias, row.id)
+        }
+
+        const nativeEntryId = buildNativeSendEntryId(requestedNetworkId)
+        const nativeBalanceText = String(
+          account.networkBalances?.[requestedNetworkId]
+          || account.balance
+          || '0'
+        )
+        const nativeRaw = toRawSatsLike(nativeBalanceText)
+        const nativeRow: SendableItem = {
+          id: nativeEntryId,
+          requestType: 'native',
+          kind: 'native',
+          networkId: requestedNetworkId,
+          accountId: account.id,
+          symbol: String(network.symbol || '').trim().toUpperCase() || String(network.name || '').trim() || 'NATIVE',
+          label: String(network.symbol || '').trim().toUpperCase() || String(network.name || '').trim() || 'Native',
+          logoUrl: String(network.logo || '').trim() || undefined,
+          amount: formatUnits8(nativeRaw / 1e8),
+          rawAmount: nativeRaw,
+          pinned: false,
+          hidden: false
+        }
+        addOrMergeItem(nativeRow, [requestedNetworkId])
+
+        const rawAssets = networkAssets?.[requestedNetworkId] || {}
+        const rawLogos = networkAssetLogos?.[requestedNetworkId] || {}
+        const rawLabels = networkAssetLabels?.[requestedNetworkId] || {}
+        const nftLookup = evmNftAssets?.[requestedNetworkId] || {}
+
+        for (const [assetIdRaw, rawAmountValue] of Object.entries(rawAssets)) {
+          const assetId = String(assetIdRaw || '').trim()
+          if (!assetId) continue
+          const rawAmount = Math.max(0, Math.round(Number(rawAmountValue || 0)))
+          if (!includeZeroBalance && rawAmount <= 0) continue
+
+          const logoUri = String(rawLogos?.[assetId] || '').trim()
+          const normalizedId = resolveSendListAssetEntryId({
+            network,
+            assetId,
+            logoUri
+          })
+          if (!normalizedId) continue
+
+          const evmNft = parseEvmNftAssetKey(assetId)
+          const solNftLike = /^SOLNFT:/i.test(assetId)
+          const kind: SendableItemKind = (evmNft || solNftLike) ? 'nft' : 'fungible'
+          const label = String(nftLookup?.[assetId]?.label || rawLabels?.[assetId] || assetId).trim() || assetId
+          const symbol = kind === 'nft'
+            ? 'NFT'
+            : (String(rawLabels?.[assetId] || '').trim() || assetId)
+
+          addOrMergeItem({
+            id: normalizedId,
+            assetId,
+            requestType: 'asset',
+            kind,
+            networkId: requestedNetworkId,
+            accountId: account.id,
+            symbol,
+            label,
+            logoUrl: logoUri || getTokenLogoForAsset(label) || undefined,
+            amount: formatUnits8(rawAmount / 1e8),
+            rawAmount,
+            pinned: false,
+            hidden: false
+          })
+        }
+
+        const resolvePreferredId = (value: string): string => {
+          const raw = String(value || '').trim()
+          if (!raw) return ''
+          const normalized = normalizeSendListEntryId(raw)
+          return aliases.get(raw) || aliases.get(normalized) || normalized
+        }
+
+        const orderedIds = normalizeIdList(preferenceBucket.order).map(resolvePreferredId).filter(Boolean)
+        const pinnedIds = normalizeIdList(preferenceBucket.pinned).map(resolvePreferredId).filter(Boolean)
+        const hiddenIds = normalizeIdList(preferenceBucket.hidden).map(resolvePreferredId).filter(Boolean)
+        const rankById = new Map<string, number>()
+        for (const id of orderedIds) {
+          if (rankById.has(id)) continue
+          rankById.set(id, rankById.size)
+        }
+        const pinnedSet = new Set<string>(pinnedIds)
+        const hiddenSet = new Set<string>(hiddenIds)
+
+        const rows = [...byId.values()].map((row) => ({
+          ...row,
+          pinned: pinnedSet.has(row.id),
+          hidden: hiddenSet.has(row.id)
+        }))
+
+        const visibleRows = includeHidden
+          ? rows
+          : rows.filter((row) => !row.hidden || row.kind === 'native')
+
+        visibleRows.sort((a, b) => {
+          const rankA = rankById.has(a.id) ? (rankById.get(a.id) as number) : Number.MAX_SAFE_INTEGER
+          const rankB = rankById.has(b.id) ? (rankById.get(b.id) as number) : Number.MAX_SAFE_INTEGER
+          if (rankA !== rankB) return rankA - rankB
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+          if (a.kind === 'native' && b.kind !== 'native') return -1
+          if (b.kind === 'native' && a.kind !== 'native') return 1
+          if (b.rawAmount !== a.rawAmount) return b.rawAmount - a.rawAmount
+          return a.label.localeCompare(b.label)
+        })
+
+        return visibleRows
+      },
+
+      setSendListPreferences: (params) => {
+        const {
+          accounts,
+          activeAccountId,
+          networks,
+          activeNetworkId,
+          sendListPreferences
+        } = get()
+
+        const accountId = String(params?.accountId || activeAccountId || accounts[0]?.id || '').trim()
+        const networkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!accountId || !networkId) return
+        if (!accounts.some((a) => a.id === accountId)) return
+        if (!networks.some((n) => n.id === networkId)) return
+
+        const scopeKey = buildSendListPreferenceScopeKey(accountId, networkId)
+        const current = normalizeSendListPreferenceBucket(sendListPreferences?.[scopeKey])
+        const next: SendListPreferenceBucket = {
+          order: params?.order ? normalizeIdList(params.order) : current.order,
+          pinned: params?.pinned ? normalizeIdList(params.pinned) : current.pinned,
+          hidden: params?.hidden ? normalizeIdList(params.hidden) : current.hidden
+        }
+
+        set((state) => {
+          const updated = { ...state.sendListPreferences }
+          if (next.order.length === 0 && next.pinned.length === 0 && next.hidden.length === 0) {
+            delete updated[scopeKey]
+          } else {
+            updated[scopeKey] = next
+          }
+          return { sendListPreferences: updated }
+        })
+      },
+
+      resetSendListPreferences: (params) => {
+        const {
+          accounts,
+          activeAccountId,
+          networks,
+          activeNetworkId
+        } = get()
+        const accountId = String(params?.accountId || activeAccountId || accounts[0]?.id || '').trim()
+        const networkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!accountId || !networkId) return
+        if (!accounts.some((a) => a.id === accountId)) return
+        if (!networks.some((n) => n.id === networkId)) return
+
+        const scopeKey = buildSendListPreferenceScopeKey(accountId, networkId)
+        set((state) => {
+          if (!(scopeKey in state.sendListPreferences)) return state
+          const updated = { ...state.sendListPreferences }
+          delete updated[scopeKey]
+          return { sendListPreferences: updated }
+        })
+      },
+
       sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
@@ -3500,6 +3891,7 @@ export const useWalletStore = create<WalletState>()(
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
           donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
           networkAssets:    remapNetworkIdKeyedRecord(backup.networkAssets ?? {}),
+          sendListPreferences: normalizeSendListPreferencesRecord(backup.sendListPreferences ?? {}),
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
@@ -3720,9 +4112,22 @@ export const useWalletStore = create<WalletState>()(
       setUseLocalRpc: (enabled) => set({ useLocalRpc: enabled }),
 
       setLocalRpcOverride: (networkId, override) =>
-        set((state) => ({
-          localRpcOverrides: { ...state.localRpcOverrides, [networkId]: override }
-        })),
+        set((state) => {
+          const canonicalNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim())
+          if (!canonicalNetworkId) return state
+          const nextOverrides = { ...(state.localRpcOverrides || {}) }
+          // Keep a single canonical override key per network id alias family.
+          for (const key of Object.keys(nextOverrides)) {
+            if (key === canonicalNetworkId) continue
+            if (normalizeNetworkIdAlias(String(key || '').trim()) === canonicalNetworkId) {
+              delete nextOverrides[key]
+            }
+          }
+          nextOverrides[canonicalNetworkId] = override
+          return {
+            localRpcOverrides: nextOverrides
+          }
+        }),
 
       syncNetworksFromServer: async () => {
         let serverNetworks: Network[] | null = null
@@ -4573,6 +4978,7 @@ export const useWalletStore = create<WalletState>()(
         isSyncing: state.isSyncing,
         syncPercent: state.syncPercent,
         serverCoinCatalog: state.serverCoinCatalog,
+        sendListPreferences: state.sendListPreferences,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
@@ -4616,6 +5022,15 @@ export const useWalletStore = create<WalletState>()(
               ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
               : []
           ),
+          localRpcOverrides: remapNetworkIdKeyedRecord(
+            ((persisted as any).localRpcOverrides ?? merged.localRpcOverrides ?? {}) as Record<string, {
+              rpcUrl: string
+              rpcUsername: string
+              rpcPassword: string
+              rpcWallet: string
+            }>
+          ),
+          sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT)),
           lastServerCoinSyncReport: String(
             merged.lastServerCoinSyncReport

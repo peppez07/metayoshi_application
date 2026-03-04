@@ -44,6 +44,7 @@ const BackupSettings: React.FC = () => {
     donationPercent,
     backupConfirmed,
     networkAssets,
+    sendListPreferences,
     nextAccountIndex,
     createdAt
   } = useWalletStore()
@@ -104,7 +105,8 @@ const BackupSettings: React.FC = () => {
       autolockMinutes,
       donationPercent,
       backupConfirmed,
-      networkAssets
+      networkAssets,
+      sendListPreferences
     }
 
     downloadJSON(backup, `metayoshi-fullbackup-${Date.now()}.json`)

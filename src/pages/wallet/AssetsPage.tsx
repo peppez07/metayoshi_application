@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useWalletStore } from '../../store/walletStore'
 import {
@@ -8,15 +7,11 @@ import {
   IoLayersOutline,
   IoSearchOutline,
   IoClose,
-  IoInformationCircleOutline,
-  IoCheckmarkCircle,
   IoRefreshOutline,
   IoEyeOutline
 } from 'react-icons/io5'
 import { Input } from '../../components/Input'
-import { Button } from '../../components/Button'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
-import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 
@@ -24,15 +19,6 @@ import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTy
 
 function formatAmount(raw: number): string {
   return (raw / 1e8).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
-}
-
-function formatAmountInput(raw: number): string {
-  const v = raw / 1e8
-  return v.toFixed(8).replace(/\.?0+$/, '')
-}
-
-function formatCoinAmount(v: number): string {
-  return v.toFixed(8).replace(/\.?0+$/, '')
 }
 
 function parseAssetName(name: string): { root: string; sub: string | null } {
@@ -132,16 +118,12 @@ const AssetsPage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const {
-    accounts, activeAccountId,
     networks, activeNetworkId,
     serverCoinCatalog,
-    networkAssets, networkAssetLogos, networkAssetLabels, evmNftAssets, fetchNetworkAssets, fetchAssetDetails, sendAssetTransfer, addActivity,
-    activity,
-    isConnected,
-    isSyncing, syncPercent, lowSyncStreak
+    networkAssets, networkAssetLogos, networkAssetLabels, evmNftAssets, fetchNetworkAssets, fetchAssetDetails,
+    activity
   } = useWalletStore()
 
-  const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
@@ -155,19 +137,10 @@ const AssetsPage: React.FC = () => {
     || activeModelId === 'tron'
     || activeNetwork.coinType === 'XRP'
   const canOpenAssetSend = caps.features.assetSend
-  const canSubmitAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
-  const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
-  const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
   const [search,       setSearch]       = useState('')
   const [refreshing,   setRefreshing]   = useState(false)
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
-  const [toAddress,    setToAddress]    = useState('')
-  const [qty,          setQty]          = useState('')
-  const [sendError,    setSendError]    = useState('')
-  const [sending,      setSending]      = useState(false)
-  const [txid,         setTxid]         = useState<string | null>(null)
   const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
   const checkingRef = useRef<Set<string>>(new Set())
   const deepLinkHandledRef = useRef<string | null>(null)
@@ -223,8 +196,8 @@ const AssetsPage: React.FC = () => {
   const resolveAssetDisplayName = (name: string): string => nftLookup[name]?.label || assetLabels[name] || name
   const isPreviewableAssetName = (name: string): boolean => supportsPreview
   const handleAssetRowClick = (name: string): void => {
-    if (canOpenAssetSend && !isEvmNftAssetKey(name)) {
-      navigate('/assets/send', { state: { assetId: name } })
+    if (canOpenAssetSend) {
+      navigate('/wallet/send', { state: { assetId: name } })
     }
   }
 
@@ -232,10 +205,9 @@ const AssetsPage: React.FC = () => {
 
   useEffect(() => {
     if (!canOpenAssetSend || !deepLinkedSendAsset) return
-    if (isEvmNftAssetKey(deepLinkedSendAsset)) return
     if (deepLinkHandledRef.current === deepLinkedSendAsset) return
     if (!sorted.some(([name]) => name === deepLinkedSendAsset)) return
-    navigate('/assets/send', { state: { assetId: deepLinkedSendAsset } })
+    navigate('/wallet/send', { state: { assetId: deepLinkedSendAsset } })
     deepLinkHandledRef.current = deepLinkedSendAsset
   }, [canOpenAssetSend, deepLinkedSendAsset, sorted, navigate])
 
@@ -266,69 +238,10 @@ const AssetsPage: React.FC = () => {
     return () => { cancelled = true }
   }, [visibleAssetNames, fetchAssetDetails, previewByAsset, supportsPreview])
 
-  const estimatedFeeCoin = useMemo(() => {
-    if (activeNetwork.coinType === 'EVM') return 0
-    const rawFeePerByteCoins = Number(activeNetwork?.feePerByte ?? 0.0000002)
-    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
-    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-
-    // Mirrors non-custodial asset-send sizing: 2 inputs (asset + fee) and 3 outputs with change.
-    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
-    const estimatedFeeSats = estimatedBytes * feePerByteSats
-    return estimatedFeeSats / 1e8
-  }, [activeNetwork?.feePerByte])
-
   const handleRefresh = async () => {
     if (refreshing) return
     setRefreshing(true)
     try { await fetchNetworkAssets({ force: true }) } finally { setRefreshing(false) }
-  }
-
-  const openSend = (name: string) => {
-    setSelectedAsset(name); setToAddress(''); setQty('')
-    setSendError(''); setTxid(null)
-  }
-  const closeSheet = () => {
-    setSelectedAsset(null); setToAddress(''); setQty('')
-    setSendError(''); setTxid(null)
-  }
-  const handleMax = () => {
-    if (!selectedAsset) return
-    const r = rawAssets[selectedAsset]
-    if (r != null) setQty(formatAmountInput(r))
-  }
-
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSendError('')
-    if (!selectedAsset) return
-    if (!canSubmitAssetSend) {
-      setSendError(`${activeNetwork.name} does not support token asset sends yet.`)
-      return
-    }
-    if (sendBlockedBySync) { setSendError(syncBlockedReason); return }
-    if (!toAddress.trim()) { setSendError('Recipient address is required'); return }
-    if (!qty || parseFloat(qty) <= 0) { setSendError('Quantity must be greater than 0'); return }
-    const avail = (rawAssets[selectedAsset] ?? 0) / 1e8
-    if (parseFloat(qty) > avail) { setSendError('Insufficient asset balance'); return }
-
-    setSending(true)
-    try {
-      const result = await sendAssetTransfer({ assetId: selectedAsset, qty, toAddress: toAddress.trim() })
-      const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
-        || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '') || ''
-      addActivity({
-        id: result.txid, type: 'sent', asset: selectedAsset, amount: qty,
-        from: fromAddress, to: toAddress.trim(),
-        status: 'confirmed', timestamp: Date.now(), networkId: activeNetworkId
-      })
-      setTxid(result.txid)
-      void fetchNetworkAssets()
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSending(false)
-    }
   }
 
   return (
@@ -564,160 +477,6 @@ const AssetsPage: React.FC = () => {
         <div className="h-4" />
       </div>
 
-      {/* ── Send Asset bottom sheet (portal) ──────────────────────────────── */}
-      {selectedAsset !== null && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end"
-          onClick={closeSheet}
-        >
-          <div
-            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* drag handle */}
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-dark-600" />
-            </div>
-
-            {/* header */}
-            <div className="flex items-start justify-between px-6 pt-3 pb-4 border-b border-dark-600">
-              <div className="flex flex-col gap-1.5">
-                <h2 className="text-sm font-black uppercase tracking-widest">Send Asset</h2>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {!isEvmEcosystem && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
-                      (isSolanaEcosystem || isRoot(selectedAsset))
-                        ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                        : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-                    }`}>
-                      {isSolanaEcosystem ? resolveSolanaAssetTypeLabel(selectedAsset) : (isRoot(selectedAsset) ? 'Root' : 'Sub')}
-                    </span>
-                  )}
-                  <span className="text-sm font-mono font-bold text-white">{selectedAsset}</span>
-                </div>
-              </div>
-              <button onClick={closeSheet} className="p-1.5 rounded-lg hover:bg-dark-700 transition-colors mt-0.5">
-                <IoClose className="w-5 h-5 text-gray-400 hover:text-white" />
-              </button>
-            </div>
-
-            {txid ? (
-              /* success */
-              <div className="p-6 flex flex-col items-center gap-5 text-center">
-                <div className="w-16 h-16 rounded-full bg-green-500/10 border-2 border-green-500 flex items-center justify-center">
-                  <IoCheckmarkCircle className="w-9 h-9 text-green-400" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-base font-bold text-green-400">Asset Sent!</p>
-                  <p className="text-xs text-gray-500">Transaction submitted to the network</p>
-                  <p className="text-[10px] text-gray-600 font-mono mt-2 break-all leading-relaxed px-2">{txid}</p>
-                </div>
-                <Button className="w-full" onClick={closeSheet}>Done</Button>
-              </div>
-            ) : (
-              /* form */
-              <form onSubmit={handleSend} className="p-5 space-y-4">
-
-                {/* available */}
-                <div className="flex items-center justify-between p-3.5 rounded-xl border border-dark-600 bg-dark-700/30">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
-                      isRoot(selectedAsset) ? 'bg-yellow-500/10' : 'bg-blue-500/10'
-                    }`}>
-                      <IoLayersOutline className={`w-4 h-4 ${isRoot(selectedAsset) ? 'text-yellow-400' : 'text-blue-400'}`} />
-                    </div>
-                    <span className="text-xs text-gray-400">Available</span>
-                  </div>
-                  <span className="text-sm font-bold font-mono">
-                    {rawAssets[selectedAsset] != null ? formatAmount(rawAssets[selectedAsset]) : '—'}
-                  </span>
-                </div>
-
-                {/* recipient */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Recipient Address</label>
-                  <Input
-                    placeholder={`Enter ${activeNetwork.name} address`}
-                    value={toAddress}
-                    onChange={e => setToAddress(e.target.value)}
-                    className="bg-dark-700/50 border-dark-600 font-mono text-xs"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-
-                {/* quantity */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between ml-1">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Quantity</label>
-                    <button
-                      type="button"
-                      onClick={handleMax}
-                      className="text-[10px] font-bold text-primary hover:opacity-80 uppercase px-2 py-0.5 rounded bg-primary/10 transition-opacity"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      step="0.00000001"
-                      min="0"
-                      placeholder="0.00"
-                      value={qty}
-                      onChange={e => setQty(e.target.value)}
-                      className="bg-dark-700/50 border-dark-600 pr-20"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 uppercase truncate max-w-[72px]">
-                      {parseAssetName(selectedAsset).sub || parseAssetName(selectedAsset).root}
-                    </span>
-                  </div>
-                </div>
-
-                {/* fee note */}
-                <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
-                  <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-gray-600 leading-relaxed">
-                    {activeNetwork.coinType === 'EVM'
-                      ? 'Network gas is estimated automatically at signing.'
-                      : `Estimated required fee: ~${formatCoinAmount(estimatedFeeCoin)} ${activeNetwork.symbol}. Change is returned automatically.`}
-                  </p>
-                </div>
-
-                {/* error */}
-                {sendError && (
-                  <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl">
-                    <p className="text-xs font-bold text-red-300 text-center">{sendError}</p>
-                  </div>
-                )}
-                {!sendError && sendBlockedBySync && (
-                  <div className="p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl">
-                    <p className="text-xs font-bold text-yellow-200 text-center">{syncBlockedReason}</p>
-                  </div>
-                )}
-                {!sendError && !canSubmitAssetSend && (
-                  <div className="p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl">
-                    <p className="text-xs font-bold text-yellow-200 text-center">
-                      {activeNetwork.name} supports viewing token assets, but sending them is not enabled yet.
-                    </p>
-                  </div>
-                )}
-
-                <Button
-                  type="submit"
-                  className="w-full btn-primary flex items-center justify-center gap-2"
-                  isLoading={sending}
-                  disabled={!canSubmitAssetSend || sendBlockedBySync || !toAddress.trim() || !qty || parseFloat(qty) <= 0 || sending}
-                >
-                  <IoArrowUpOutline className="w-4 h-4" />
-                  Send {parseAssetName(selectedAsset).sub || parseAssetName(selectedAsset).root}
-                </Button>
-              </form>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   )
 }

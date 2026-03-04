@@ -1,16 +1,34 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
-import { useWalletStore } from '../store/walletStore'
+import { useWalletStore, type FullBackupV1 } from '../store/walletStore'
 import { PageTransition } from '../components/PageTransition'
 import * as bip39 from 'bip39'
 
+type ImportMethod = 'phrase' | 'backup'
+
+function isFullBackup(value: unknown): value is FullBackupV1 {
+  if (!value || typeof value !== 'object') return false
+  const obj = value as Record<string, unknown>
+  return obj.type === 'metayoshi-full-backup' && Number(obj.version) === 1 && Boolean(obj.vault)
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsText(file)
+  })
+}
+
 const Register: React.FC = () => {
   const navigate = useNavigate()
-  const { initialize, hasVault, isInitialized } = useWalletStore()
+  const { initialize, fullRestore, hasVault, isInitialized } = useWalletStore()
 
   const [mode, setMode] = useState<'create' | 'import'>('create')
+  const [importMethod, setImportMethod] = useState<ImportMethod>('phrase')
   const [mnemonic, setMnemonic] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -19,13 +37,23 @@ const Register: React.FC = () => {
   const [createStep, setCreateStep] = useState<'form' | 'verify'>('form')
   const [challengeIndex, setChallengeIndex] = useState<number | null>(null)
   const [challengeInput, setChallengeInput] = useState('')
+  const [backupPassword, setBackupPassword] = useState('')
+  const [fullBackupJson, setFullBackupJson] = useState('')
+  const [parsedBackup, setParsedBackup] = useState<FullBackupV1 | null>(null)
+  const [backupParseError, setBackupParseError] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const backupFileRef = useRef<HTMLInputElement>(null)
 
   const normalizedMnemonic = useMemo(
     () => mnemonic.trim().toLowerCase().replace(/\s+/g, ' '),
     [mnemonic]
   )
+
+  const showPhrasePanel = mode === 'create' || (mode === 'import' && importMethod === 'phrase')
+  const needsPhraseAck = mode === 'create' || (mode === 'import' && importMethod === 'phrase')
+  const backupAccountCount = parsedBackup ? (Array.isArray(parsedBackup.accounts) ? parsedBackup.accounts.length : 0) : 0
+  const backupActivityCount = parsedBackup ? (Array.isArray(parsedBackup.activity) ? parsedBackup.activity.length : 0) : 0
 
   const openTermsInInternalTab = () => {
     navigate('/terms')
@@ -57,19 +85,69 @@ const Register: React.FC = () => {
     setCreateStep('form')
     setChallengeIndex(null)
     setChallengeInput('')
-    // Generate a new mnemonic once on first open in create mode.
     if (!mnemonic.trim()) {
       setMnemonic(bip39.generateMnemonic())
     }
   }, [mode])
 
-  const createVault = async () => {
+  const parseFullBackupText = (text: string) => {
+    setFullBackupJson(text)
+    setParsedBackup(null)
+    setBackupParseError('')
+    if (!text.trim()) return
+    try {
+      const parsed = JSON.parse(text)
+      if (!isFullBackup(parsed)) {
+        setBackupParseError('File is not a valid MetaYoshi full backup')
+        return
+      }
+      setParsedBackup(parsed)
+    } catch {
+      setBackupParseError('Invalid backup JSON')
+    }
+  }
+
+  const handleBackupFile = async (file: File) => {
+    try {
+      const text = await readFileAsText(file)
+      parseFullBackupText(text)
+    } catch {
+      setParsedBackup(null)
+      setBackupParseError('Could not read backup file')
+    }
+  }
+
+  const createVaultFromMnemonic = async () => {
     setBusy(true)
     try {
       await initialize(password, normalizedMnemonic)
       navigate('/connecting')
     } catch (e: any) {
       setError(String(e?.message ?? 'Failed to create vault'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createVaultFromBackup = async () => {
+    if (!parsedBackup) {
+      setError('Please load a valid backup file')
+      return
+    }
+    if (!backupPassword.trim()) {
+      setError('Backup file password is required')
+      return
+    }
+    setBusy(true)
+    try {
+      await fullRestore({
+        backup: parsedBackup,
+        backupPassword: backupPassword.trim(),
+        newPassword: password
+      })
+      navigate('/connecting')
+    } catch (e: any) {
+      setError(String(e?.message ?? 'Failed to import backup file'))
     } finally {
       setBusy(false)
     }
@@ -85,16 +163,22 @@ const Register: React.FC = () => {
       setError('Passwords do not match')
       return
     }
+    if (!termsAck) {
+      setError('Please accept MetaYoshi Terms of Service')
+      return
+    }
+
+    if (mode === 'import' && importMethod === 'backup') {
+      await createVaultFromBackup()
+      return
+    }
+
     if (!bip39.validateMnemonic(normalizedMnemonic)) {
       setError('Invalid mnemonic phrase')
       return
     }
-    if (!ack) {
+    if (needsPhraseAck && !ack) {
       setError('Please confirm you saved your recovery phrase')
-      return
-    }
-    if (!termsAck) {
-      setError('Please accept MetaYoshi Terms of Service')
       return
     }
 
@@ -110,7 +194,7 @@ const Register: React.FC = () => {
       return
     }
 
-    await createVault()
+    await createVaultFromMnemonic()
   }
 
   const handleVerifyAndCreate = async () => {
@@ -126,7 +210,7 @@ const Register: React.FC = () => {
       return
     }
     setError('')
-    await createVault()
+    await createVaultFromMnemonic()
   }
 
   return (
@@ -146,14 +230,21 @@ const Register: React.FC = () => {
           <div className="grid grid-cols-2 gap-2 bg-dark-700/40 p-1 rounded-xl border border-dark-600">
             <button
               className={mode === 'create' ? 'py-2 rounded-lg bg-primary text-white font-bold text-xs' : 'py-2 rounded-lg text-gray-300 font-bold text-xs'}
-              onClick={() => setMode('create')}
+              onClick={() => {
+                setMode('create')
+                setImportMethod('phrase')
+                setError('')
+              }}
               type="button"
             >
               Create
             </button>
             <button
               className={mode === 'import' ? 'py-2 rounded-lg bg-primary text-white font-bold text-xs' : 'py-2 rounded-lg text-gray-300 font-bold text-xs'}
-              onClick={() => setMode('import')}
+              onClick={() => {
+                setMode('import')
+                setError('')
+              }}
               type="button"
             >
               Import
@@ -202,65 +293,171 @@ const Register: React.FC = () => {
             </>
           ) : (
             <>
-              <div className="space-y-2 text-left">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-                  Secret Recovery Phrase
-                </label>
-                <textarea
-                  className="input-field min-h-[110px] resize-none text-xs leading-relaxed py-3 font-mono"
-                  value={mnemonic}
-                  onChange={(e) => setMnemonic(e.target.value)}
-                  placeholder={mode === 'create' ? 'Generated recovery phrase' : 'Enter 12/24 words separated by spaces'}
-                  readOnly={mode === 'create'}
-                />
-                {mode === 'create' && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setMnemonic(bip39.generateMnemonic())}
-                    >
-                      Regenerate
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => navigator.clipboard.writeText(normalizedMnemonic)}
-                    >
-                      Copy
-                    </Button>
+              {mode === 'import' && (
+                <div className="grid grid-cols-2 gap-1 bg-dark-700/30 p-1 rounded-xl border border-dark-600">
+                  <button
+                    className={importMethod === 'phrase' ? 'py-2 rounded-lg bg-primary text-white font-bold text-[11px]' : 'py-2 rounded-lg text-gray-300 font-bold text-[11px]'}
+                    onClick={() => {
+                      setImportMethod('phrase')
+                      setError('')
+                    }}
+                    type="button"
+                  >
+                    Phrase
+                  </button>
+                  <button
+                    className={importMethod === 'backup' ? 'py-2 rounded-lg bg-primary text-white font-bold text-[11px]' : 'py-2 rounded-lg text-gray-300 font-bold text-[11px]'}
+                    onClick={() => {
+                      setImportMethod('backup')
+                      setError('')
+                    }}
+                    type="button"
+                  >
+                    Backup File
+                  </button>
+                </div>
+              )}
+
+              {showPhrasePanel && (
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
+                    Secret Recovery Phrase
+                  </label>
+                  <textarea
+                    className="input-field min-h-[110px] resize-none text-xs leading-relaxed py-3 font-mono"
+                    value={mnemonic}
+                    onChange={(e) => setMnemonic(e.target.value)}
+                    placeholder={mode === 'create' ? 'Generated recovery phrase' : 'Enter 12/24 words separated by spaces'}
+                    readOnly={mode === 'create'}
+                  />
+                  {mode === 'create' && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setMnemonic(bip39.generateMnemonic())}
+                      >
+                        Regenerate
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => navigator.clipboard.writeText(normalizedMnemonic)}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mode === 'import' && importMethod === 'backup' && (
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
+                    Full Backup JSON
+                  </label>
+                  <div
+                    className={`rounded-xl border-2 border-dashed p-4 text-center cursor-pointer transition-colors ${
+                      parsedBackup
+                        ? 'border-green-500/40 bg-green-900/10'
+                        : backupParseError
+                          ? 'border-red-500/40 bg-red-900/10'
+                          : 'border-dark-600 bg-dark-700/30 hover:border-primary/40'
+                    }`}
+                    onClick={() => backupFileRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      const file = e.dataTransfer.files?.[0]
+                      if (file) void handleBackupFile(file)
+                    }}
+                  >
+                    <input
+                      ref={backupFileRef}
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) void handleBackupFile(file)
+                        e.target.value = ''
+                      }}
+                    />
+                    {parsedBackup ? (
+                      <p className="text-xs font-bold text-green-300">
+                        Backup loaded: {backupAccountCount} account{backupAccountCount === 1 ? '' : 's'}, {backupActivityCount} tx record{backupActivityCount === 1 ? '' : 's'}
+                      </p>
+                    ) : backupParseError ? (
+                      <p className="text-xs font-bold text-red-300">{backupParseError}</p>
+                    ) : (
+                      <p className="text-xs font-bold text-gray-300">Drop backup file here or click to browse</p>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  {!parsedBackup && (
+                    <textarea
+                      className="input-field min-h-[80px] resize-none text-[10px] font-mono leading-relaxed py-2.5"
+                      placeholder='{"type":"metayoshi-full-backup","version":1,...}'
+                      value={fullBackupJson}
+                      onChange={(e) => parseFullBackupText(e.target.value)}
+                    />
+                  )}
+
+                  {parsedBackup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setParsedBackup(null)
+                        setFullBackupJson('')
+                        setBackupParseError('')
+                        setBackupPassword('')
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase border border-dark-600 bg-dark-700/40 text-gray-400 hover:text-white"
+                    >
+                      Remove Backup
+                    </button>
+                  )}
+
+                  <Input
+                    type="password"
+                    placeholder="Backup file password"
+                    value={backupPassword}
+                    onChange={(e) => setBackupPassword(e.target.value)}
+                    className="bg-dark-700/50 border-dark-600 text-center h-12"
+                  />
+                </div>
+              )}
 
               <div className="space-y-3">
                 <Input
                   type="password"
-                  placeholder="Password"
+                  placeholder={mode === 'import' && importMethod === 'backup' ? 'New Wallet Password' : 'Password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="bg-dark-700/50 border-dark-600 text-center h-12"
                 />
                 <Input
                   type="password"
-                  placeholder="Confirm Password"
+                  placeholder={mode === 'import' && importMethod === 'backup' ? 'Confirm New Wallet Password' : 'Confirm Password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="bg-dark-700/50 border-dark-600 text-center h-12"
                 />
               </div>
 
-              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={ack}
-                  onChange={(e) => setAck(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-xs font-bold text-gray-300">
-                  I saved my recovery phrase securely
-                </span>
-              </label>
+              {needsPhraseAck && (
+                <label className="flex items-center gap-3 text-left cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={ack}
+                    onChange={(e) => setAck(e.target.checked)}
+                    className="w-4 h-4 accent-primary"
+                  />
+                  <span className="text-xs font-bold text-gray-300">
+                    I saved my recovery phrase securely
+                  </span>
+                </label>
+              )}
 
               <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-3 space-y-2">
                 <div className="flex items-center justify-between gap-3">
@@ -296,8 +493,17 @@ const Register: React.FC = () => {
 
               {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
 
-              <Button className="w-full btn-primary" onClick={handleSubmit} isLoading={busy}>
-                {mode === 'create' ? 'Create Vault' : 'Import Vault'}
+              <Button
+                className="w-full btn-primary"
+                onClick={handleSubmit}
+                isLoading={busy}
+                disabled={busy || (mode === 'import' && importMethod === 'backup' && !parsedBackup)}
+              >
+                {mode === 'create'
+                  ? 'Create Vault'
+                  : importMethod === 'backup'
+                    ? 'Import from Backup File'
+                    : 'Import from Phrase'}
               </Button>
             </>
           )}
