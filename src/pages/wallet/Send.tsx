@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useWalletStore, type SendableItem } from '../../store/walletStore'
+import { useWalletStore, type Network, type SendableItem } from '../../store/walletStore'
 import { Input } from '../../components/Input'
 import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
@@ -9,14 +9,35 @@ import {
   IoArrowBackOutline,
   IoChevronDownOutline,
   IoChevronForwardOutline,
+  IoInformationCircleOutline,
   IoLayersOutline,
-  IoRefreshOutline,
   IoSearchOutline
 } from 'react-icons/io5'
 
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
+}
+
+function formatUnits8Plain(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  return value.toFixed(8).replace(/\.?0+$/, '')
+}
+
+function formatRawAmountPlain(rawAmount: number): string {
+  return formatUnits8Plain(Math.max(0, Number(rawAmount || 0)) / 1e8)
+}
+
+function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
+  if (network.coinType === 'UTXO') {
+    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
+    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
+    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
+    return (estimatedBytes * feePerByteSats) / 1e8
+  }
+  if (network.coinType === 'XRP') return 0.000012
+  return 0.002151
 }
 
 function shortAddress(address: string): string {
@@ -29,6 +50,7 @@ function shortAddress(address: string): string {
 type SendRouteState = {
   assetId?: string
   sendEntryId?: string
+  quickSendNative?: boolean
   hubMode?: 'global'
   autoScan?: boolean
 }
@@ -81,9 +103,121 @@ type CachedScanPayload = {
   updatedAt: number
 }
 
+type BatchPlanRow = {
+  holder: ScanHolder
+  amountRaw: number
+  amount: string
+  skippedReason?: string
+}
+
+type BatchSendResult = {
+  holder: ScanHolder
+  amount: string
+  ok: boolean
+  txid?: string
+  error?: string
+}
+
+type SendHubPreferences = {
+  order: string[]
+  pinned: string[]
+}
+
 const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
+const SEND_HUB_PREFERENCES_KEY = 'metayoshi:send-hub:prefs:v1'
 const SEND_HUB_SCAN_AUTO_INTERVAL_MS = 90_000
 const SEND_HUB_SCAN_STALE_MS = 30_000
+
+function normalizeKeyList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw) {
+    const key = String(value || '').trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out
+}
+
+function readSendHubPreferences(): SendHubPreferences {
+  try {
+    const raw = localStorage.getItem(SEND_HUB_PREFERENCES_KEY)
+    if (!raw) return { order: [], pinned: [] }
+    const parsed = JSON.parse(raw) as Partial<SendHubPreferences>
+    return {
+      order: normalizeKeyList(parsed?.order),
+      pinned: normalizeKeyList(parsed?.pinned)
+    }
+  } catch {
+    return { order: [], pinned: [] }
+  }
+}
+
+function writeSendHubPreferences(value: SendHubPreferences): void {
+  try {
+    localStorage.setItem(SEND_HUB_PREFERENCES_KEY, JSON.stringify({
+      order: normalizeKeyList(value.order),
+      pinned: normalizeKeyList(value.pinned)
+    }))
+  } catch {
+    // ignore local storage failures
+  }
+}
+
+function normalizeSendHubPreferencesForRows(
+  value: SendHubPreferences,
+  rows: AggregatedScanRow[]
+): SendHubPreferences {
+  const known = new Set(rows.map((row) => row.key))
+  return {
+    order: normalizeKeyList(value.order).filter((key) => known.has(key)),
+    pinned: normalizeKeyList(value.pinned).filter((key) => known.has(key))
+  }
+}
+
+function moveRowKeyBefore(keys: string[], draggedKey: string, targetKey: string): string[] {
+  const dragged = String(draggedKey || '').trim()
+  const target = String(targetKey || '').trim()
+  if (!dragged || !target || dragged === target) return [...keys]
+  const withoutDragged = keys.filter((key) => key !== dragged)
+  const targetIndex = withoutDragged.indexOf(target)
+  if (targetIndex < 0) return [...keys]
+  withoutDragged.splice(targetIndex, 0, dragged)
+  return withoutDragged
+}
+
+function applySendHubPreferences(
+  rows: AggregatedScanRow[],
+  preferences: SendHubPreferences
+): AggregatedScanRow[] {
+  const rankByKey = new Map<string, number>()
+  normalizeKeyList(preferences.order).forEach((key) => {
+    if (rankByKey.has(key)) return
+    rankByKey.set(key, rankByKey.size)
+  })
+  const pinnedSet = new Set(normalizeKeyList(preferences.pinned))
+  const baseIndexByKey = new Map<string, number>()
+  rows.forEach((row, index) => {
+    baseIndexByKey.set(row.key, index)
+  })
+
+  return [...rows].sort((a, b) => {
+    const aPinned = pinnedSet.has(a.key)
+    const bPinned = pinnedSet.has(b.key)
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
+
+    const rankA = rankByKey.get(a.key)
+    const rankB = rankByKey.get(b.key)
+    const hasA = typeof rankA === 'number'
+    const hasB = typeof rankB === 'number'
+    if (hasA && hasB && rankA !== rankB) return rankA - rankB
+    if (hasA !== hasB) return hasA ? -1 : 1
+
+    return (baseIndexByKey.get(a.key) || 0) - (baseIndexByKey.get(b.key) || 0)
+  })
+}
 
 function readCachedScanRows(): CachedScanPayload | null {
   try {
@@ -110,9 +244,363 @@ function writeCachedScanRows(rows: AggregatedScanRow[]): void {
   }
 }
 
+function buildNativeSweepAmountRaw(holderRawAmount: number, network?: Pick<Network, 'coinType' | 'feePerByte'>): number {
+  const raw = Math.max(0, Math.round(Number(holderRawAmount || 0)))
+  if (!network) return raw
+  const estimatedFeeRaw = Math.max(0, Math.round(estimateNativeSendFee(network) * 1e8))
+  return Math.max(0, raw - estimatedFeeRaw)
+}
+
+type SendBatchSweepFormProps = {
+  row: AggregatedScanRow
+  networkById: Map<string, Network>
+  onBack: () => void
+  onComplete?: () => void
+}
+
+const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkById, onBack, onComplete }) => {
+  const {
+    networks,
+    activeAccountId,
+    activeNetworkId,
+    setActiveAccount,
+    setActiveNetwork,
+    sendEvmTransaction,
+    sendXrpTransaction,
+    sendCardanoTransaction,
+    sendMoneroTransaction,
+    sendSolanaTransaction,
+    sendStellarTransaction,
+    sendTronTransaction,
+    sendUtxoTransaction,
+    sendAssetTransfer,
+    addActivity,
+    refreshActiveBalance
+  } = useWalletStore()
+
+  const [recipient, setRecipient] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [results, setResults] = useState<BatchSendResult[] | null>(null)
+
+  const rowNetwork = networkById.get(row.networkId) || networks.find((network) => network.id === row.networkId) || networks[0]
+  const rowCaps = resolveNetworkCapabilities(rowNetwork)
+  const rowCanSend = row.requestType === 'native'
+    ? rowCaps.features.nativeSend
+    : rowCaps.features.assetSend
+
+  const planRows = useMemo<BatchPlanRow[]>(() => (
+    row.holders.map((holder) => {
+      if (holder.requestType !== row.requestType) {
+        return {
+          holder,
+          amountRaw: 0,
+          amount: '0',
+          skippedReason: 'Holder request type does not match the aggregated row.'
+        }
+      }
+
+      if (row.requestType === 'asset') {
+        const amountRaw = Math.max(0, Math.round(Number(holder.rawAmount || 0)))
+        return {
+          holder,
+          amountRaw,
+          amount: formatRawAmountPlain(amountRaw),
+          skippedReason: amountRaw <= 0 ? 'No spendable asset balance for this holder.' : undefined
+        }
+      }
+
+      const holderNetwork = networkById.get(holder.networkId) || networks.find((network) => network.id === holder.networkId)
+      const amountRaw = buildNativeSweepAmountRaw(holder.rawAmount, holderNetwork)
+      return {
+        holder,
+        amountRaw,
+        amount: formatRawAmountPlain(amountRaw),
+        skippedReason: amountRaw <= 0
+          ? 'Balance too low after reserving estimated network fee.'
+          : undefined
+      }
+    })
+  ), [networkById, networks, row])
+
+  const executablePlanRows = useMemo(
+    () => planRows.filter((entry) => !entry.skippedReason && entry.amountRaw > 0),
+    [planRows]
+  )
+
+  const totalPlannedRaw = useMemo(
+    () => planRows.reduce((sum, entry) => sum + Math.max(0, entry.amountRaw), 0),
+    [planRows]
+  )
+
+  const runBatchSend = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setResults(null)
+
+    const toAddress = String(recipient || '').trim()
+    if (!toAddress) {
+      setError('Recipient address is required.')
+      return
+    }
+    if (!rowCanSend) {
+      setError(
+        row.requestType === 'native'
+          ? `${rowNetwork?.name || row.networkSymbol} does not support native coin sends.`
+          : `${rowNetwork?.name || row.networkSymbol} does not support asset sends.`
+      )
+      return
+    }
+    if (executablePlanRows.length === 0) {
+      setError('No spendable holder balances found for this merged send.')
+      return
+    }
+
+    setIsSubmitting(true)
+
+    const restoreAccountId = activeAccountId
+    const restoreNetworkId = activeNetworkId
+    const nextResults: BatchSendResult[] = []
+
+    try {
+      for (const plan of planRows) {
+        if (plan.skippedReason || plan.amountRaw <= 0) {
+          nextResults.push({
+            holder: plan.holder,
+            amount: plan.amount,
+            ok: false,
+            error: plan.skippedReason || 'No spendable balance.'
+          })
+          continue
+        }
+
+        try {
+          const latest = useWalletStore.getState()
+          if (!latest.accounts.some((account) => account.id === plan.holder.accountId)) {
+            throw new Error('Account is no longer available in wallet state.')
+          }
+          if (!latest.networks.some((network) => network.id === plan.holder.networkId)) {
+            throw new Error('Network is no longer available in wallet state.')
+          }
+
+          setActiveAccount(plan.holder.accountId)
+          await setActiveNetwork(plan.holder.networkId)
+
+          const scopedState = useWalletStore.getState()
+          const scopedNetwork = scopedState.networks.find((network) => network.id === plan.holder.networkId) || rowNetwork
+          const amountText = plan.amount
+          let txHash = ''
+
+          if (plan.holder.requestType === 'asset') {
+            const assetId = String(plan.holder.assetId || row.assetId || '').trim()
+            if (!assetId) throw new Error('Missing asset id for merged asset send.')
+            const tx = await sendAssetTransfer({
+              assetId,
+              qty: amountText,
+              toAddress
+            })
+            txHash = String(tx.txid || '').trim()
+          } else if (scopedNetwork.coinType === 'EVM') {
+            const tx = await sendEvmTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.coinType === 'XRP') {
+            const tx = await sendXrpTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.id === 'ada') {
+            const tx = await sendCardanoTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.id === 'xmr') {
+            const tx = await sendMoneroTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.id === 'sol') {
+            const tx = await sendSolanaTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.id === 'xlm') {
+            const tx = await sendStellarTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.id === 'tron') {
+            const tx = await sendTronTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedNetwork.coinType === 'UTXO') {
+            const tx = await sendUtxoTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else {
+            throw new Error(`Unsupported network for merged send: ${scopedNetwork.name}`)
+          }
+
+          if (!txHash) throw new Error('Transaction hash missing from wallet response.')
+
+          addActivity({
+            id: txHash,
+            type: 'sent',
+            asset: plan.holder.requestType === 'asset'
+              ? (row.label || row.symbol || row.assetId || 'ASSET')
+              : String(scopedNetwork.symbol || row.networkSymbol || '').trim() || 'COIN',
+            amount: amountText,
+            from: plan.holder.address,
+            to: toAddress,
+            accountId: plan.holder.accountId,
+            status: 'confirmed',
+            timestamp: Date.now(),
+            networkId: plan.holder.networkId
+          })
+
+          nextResults.push({
+            holder: plan.holder,
+            amount: amountText,
+            ok: true,
+            txid: txHash
+          })
+        } catch (err) {
+          nextResults.push({
+            holder: plan.holder,
+            amount: plan.amount,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err)
+          })
+        }
+      }
+    } finally {
+      try {
+        if (restoreAccountId) setActiveAccount(restoreAccountId)
+        if (restoreNetworkId) {
+          await setActiveNetwork(restoreNetworkId, { skipRefresh: true }).catch(() => {})
+        }
+        await refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch(() => {})
+      } finally {
+        setIsSubmitting(false)
+      }
+    }
+
+    setResults(nextResults)
+    if (nextResults.some((entry) => entry.ok)) {
+      onComplete?.()
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-dark-800">
+      <header className="p-4 border-b border-dark-600 flex items-center gap-3">
+        <button onClick={onBack} className="text-gray-400 hover:text-white transition-colors" disabled={isSubmitting}>
+          <IoArrowBackOutline className="w-5 h-5" />
+        </button>
+        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200 truncate">Merged Send</h1>
+      </header>
+
+      <form onSubmit={runBatchSend} className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+        <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-bold truncate">{row.label}</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                {row.holders.length} holder{row.holders.length === 1 ? '' : 's'} on {row.networkName}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-bold font-mono">{formatUnits8(totalPlannedRaw / 1e8)}</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                {row.kind === 'native' ? row.networkSymbol : row.symbol}
+              </p>
+            </div>
+          </div>
+          {row.requestType === 'native' && totalPlannedRaw < row.rawAmount && (
+            <p className="text-[10px] text-gray-500">
+              Per-holder amount reserves estimated network fee to keep the batch send non-custodial and spendable.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Recipient Address</label>
+          <Input
+            placeholder={`Enter ${row.networkName} recipient`}
+            value={recipient}
+            onChange={(event) => setRecipient(event.target.value)}
+            className="bg-dark-700/50 border-dark-600 font-mono text-xs"
+            disabled={isSubmitting}
+          />
+        </div>
+
+        <div className="rounded-xl border border-dark-600/70 bg-dark-700/20 p-3 flex gap-2.5">
+          <IoInformationCircleOutline className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+          <p className="text-[10px] text-gray-500 leading-relaxed">
+            This is a non-custodial batch sweep. The wallet signs one transaction per holder locally and never hands
+            private keys to server infrastructure.
+          </p>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+            <p className="text-[11px] font-bold text-red-300">{error}</p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {planRows.map((plan) => (
+            <div
+              key={plan.holder.key}
+              className={`p-2 rounded-xl border flex items-center justify-between gap-3 ${
+                plan.skippedReason
+                  ? 'border-yellow-500/30 bg-yellow-500/10'
+                  : 'border-dark-600 bg-dark-700/40'
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">{plan.holder.accountLabel}</p>
+                <p className="text-[10px] text-gray-500 font-mono truncate">{shortAddress(plan.holder.address)}</p>
+                {plan.skippedReason && (
+                  <p className="text-[10px] text-yellow-200 mt-0.5">{plan.skippedReason}</p>
+                )}
+              </div>
+              <p className="text-xs font-bold font-mono shrink-0">{plan.amount}</p>
+            </div>
+          ))}
+        </div>
+
+        {results && (
+          <div className="space-y-2 rounded-xl border border-dark-600 bg-dark-700/30 p-3">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Batch Result</p>
+            {results.map((result) => (
+              <div key={`result-${result.holder.key}`} className="flex items-start justify-between gap-3 text-[11px]">
+                <div className="min-w-0">
+                  <p className="font-bold truncate">{result.holder.accountLabel}</p>
+                  <p className={`truncate ${result.ok ? 'text-green-300' : 'text-red-300'}`}>
+                    {result.ok ? `Sent (${result.txid})` : `Failed: ${result.error || 'Unknown error'}`}
+                  </p>
+                </div>
+                <p className="font-mono shrink-0">{result.amount}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="pt-2">
+          <button
+            type="submit"
+            disabled={isSubmitting || executablePlanRows.length === 0 || !rowCanSend}
+            className="w-full px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest border border-primary/40 bg-primary/20 text-primary hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isSubmitting
+              ? 'Sending...'
+              : `Send all holders (${executablePlanRows.length} tx${executablePlanRows.length === 1 ? '' : 's'})`}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 const Send: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
+  const hasDirectRouteRequest = useMemo(() => {
+    const route = (location.state as SendRouteState | null) || null
+    return (
+      route?.quickSendNative === true
+      || Boolean(String(route?.assetId || '').trim())
+      || Boolean(String(route?.sendEntryId || '').trim())
+    )
+  }, [location.state])
   const {
     accounts,
     networks,
@@ -128,6 +616,10 @@ const Send: React.FC = () => {
 
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedBatchKey, setSelectedBatchKey] = useState<string | null>(null)
+  const [hubPreferences, setHubPreferences] = useState<SendHubPreferences>(() => readSendHubPreferences())
+  const [draggingRowKey, setDraggingRowKey] = useState<string | null>(null)
+  const [dragOverRowKey, setDragOverRowKey] = useState<string | null>(null)
   const [isScanningAll, setIsScanningAll] = useState(false)
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number; label: string }>({
     done: 0,
@@ -143,43 +635,71 @@ const Send: React.FC = () => {
   const handledDeepLinkRef = useRef<string>('')
   const scanRunIdRef = useRef(0)
   const isScanningRef = useRef(false)
+  const scanRestoreSelectionRef = useRef<{ accountId: string | null; networkId: string | null } | null>(null)
 
   const allItems = getSendableItems({ includeHidden: true })
+  const orderedScanRows = useMemo(
+    () => applySendHubPreferences(scanRows, hubPreferences),
+    [scanRows, hubPreferences]
+  )
+  const pinnedRowKeys = useMemo(() => new Set(hubPreferences.pinned), [hubPreferences.pinned])
 
   const filteredScanRows = useMemo(() => {
     const query = String(search || '').trim().toLowerCase()
-    if (!query) return scanRows
-    return scanRows.filter((row) => {
+    if (!query) return orderedScanRows
+    return orderedScanRows.filter((row) => {
       const holderHaystack = row.holders
         .map((holder) => `${holder.accountLabel} ${holder.address}`.toLowerCase())
         .join(' ')
       const haystack = `${row.label} ${row.symbol} ${row.networkSymbol} ${row.networkName} ${row.assetId || ''} ${holderHaystack}`.toLowerCase()
       return haystack.includes(query)
     })
-  }, [scanRows, search])
+  }, [orderedScanRows, search])
 
   const selectedItem = useMemo(
     () => allItems.find((row) => row.id === selectedId) || null,
     [allItems, selectedId]
   )
+  const selectedBatchRow = useMemo(
+    () => scanRows.find((row) => row.key === selectedBatchKey) || null,
+    [scanRows, selectedBatchKey]
+  )
+
+  useEffect(() => {
+    setHubPreferences((current) => {
+      const normalized = normalizeSendHubPreferencesForRows(current, scanRows)
+      const sameOrder = normalized.order.length === current.order.length
+        && normalized.order.every((key, index) => key === current.order[index])
+      const samePinned = normalized.pinned.length === current.pinned.length
+        && normalized.pinned.every((key, index) => key === current.pinned[index])
+      return (sameOrder && samePinned) ? current : normalized
+    })
+  }, [scanRows])
+
+  useEffect(() => {
+    writeSendHubPreferences(hubPreferences)
+  }, [hubPreferences])
 
   useEffect(() => {
     const routeState = (location.state as SendRouteState | null) || null
     const requestedAssetId = String(routeState?.assetId || '').trim()
     const requestedEntryId = String(routeState?.sendEntryId || '').trim()
-    if (!requestedAssetId && !requestedEntryId) return
+    const requestedQuickNative = routeState?.quickSendNative === true
+    if (!requestedAssetId && !requestedEntryId && !requestedQuickNative) return
     if (allItems.length === 0) return
 
-    const dedupeKey = `${requestedEntryId}|${requestedAssetId}`
+    const dedupeKey = `${requestedEntryId}|${requestedAssetId}|${requestedQuickNative ? 'native' : ''}`
     if (handledDeepLinkRef.current === dedupeKey) return
     handledDeepLinkRef.current = dedupeKey
 
     const match = allItems.find((item) => (
       (requestedEntryId && item.id === requestedEntryId)
       || (requestedAssetId && item.assetId === requestedAssetId)
+      || (requestedQuickNative && item.requestType === 'native')
     ))
     if (match) {
       setSelectedId(match.id)
+      setSelectedBatchKey(null)
     }
 
     navigate('/wallet/send', { replace: true, state: null })
@@ -207,6 +727,10 @@ const Send: React.FC = () => {
     const stateBefore = useWalletStore.getState()
     const originalActiveAccountId = stateBefore.activeAccountId
     const originalActiveNetworkId = stateBefore.activeNetworkId
+    scanRestoreSelectionRef.current = {
+      accountId: originalActiveAccountId,
+      networkId: originalActiveNetworkId
+    }
     const originalAssetsSnapshot = {
       networkAssets: stateBefore.networkAssets,
       networkAssetLogos: stateBefore.networkAssetLogos,
@@ -231,6 +755,7 @@ const Send: React.FC = () => {
         useWalletStore.setState((state) => ({
           activeAccountId: account.id
         }))
+        if (shouldCancel()) throw new Error('[cancelled]')
 
         for (const network of scanNetworks) {
           if (shouldCancel()) throw new Error('[cancelled]')
@@ -245,6 +770,7 @@ const Send: React.FC = () => {
             network.id,
             includeBalanceRefresh ? undefined : { skipRefresh: true }
           )
+          if (shouldCancel()) throw new Error('[cancelled]')
 
           useWalletStore.setState((state) => ({
             networkAssets: { ...state.networkAssets, [network.id]: {} },
@@ -252,9 +778,11 @@ const Send: React.FC = () => {
             networkAssetLabels: { ...state.networkAssetLabels, [network.id]: {} },
             evmNftAssets: { ...state.evmNftAssets, [network.id]: {} }
           }))
+          if (shouldCancel()) throw new Error('[cancelled]')
 
           if (resolveNetworkCapabilities(network).features.assetLayer) {
             await fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+            if (shouldCancel()) throw new Error('[cancelled]')
           }
 
           const scanState = useWalletStore.getState()
@@ -359,31 +887,56 @@ const Send: React.FC = () => {
         setScanError(`Global scan failed: ${message}`)
       }
     } finally {
-      useWalletStore.setState({
-        networkAssets: originalAssetsSnapshot.networkAssets,
-        networkAssetLogos: originalAssetsSnapshot.networkAssetLogos,
-        networkAssetLabels: originalAssetsSnapshot.networkAssetLabels,
-        evmNftAssets: originalAssetsSnapshot.evmNftAssets
-      })
+      const cancelled = shouldCancel()
+      if (!cancelled) {
+        useWalletStore.setState({
+          networkAssets: originalAssetsSnapshot.networkAssets,
+          networkAssetLogos: originalAssetsSnapshot.networkAssetLogos,
+          networkAssetLabels: originalAssetsSnapshot.networkAssetLabels,
+          evmNftAssets: originalAssetsSnapshot.evmNftAssets
+        })
 
-      if (originalActiveAccountId) {
-        useWalletStore.setState({ activeAccountId: originalActiveAccountId })
-      }
-      if (originalActiveNetworkId) {
-        await useWalletStore.getState().setActiveNetwork(
-          originalActiveNetworkId,
-          includeBalanceRefresh ? undefined : { skipRefresh: true }
-        ).catch(() => {})
-        await useWalletStore.getState().fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+        if (originalActiveAccountId) {
+          useWalletStore.setState({ activeAccountId: originalActiveAccountId })
+        }
+        if (originalActiveNetworkId) {
+          await useWalletStore.getState().setActiveNetwork(
+            originalActiveNetworkId,
+            includeBalanceRefresh ? undefined : { skipRefresh: true }
+          ).catch(() => {})
+          await useWalletStore.getState().fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+        }
       }
       if (scanRunIdRef.current === runId) {
         isScanningRef.current = false
         setIsScanningAll(false)
       }
+      if (!cancelled) {
+        scanRestoreSelectionRef.current = null
+      }
     }
   }, [fetchNetworkAssets, setActiveNetwork])
 
   useEffect(() => {
+    return () => {
+      const wasScanning = isScanningRef.current
+      scanRunIdRef.current += 1
+      isScanningRef.current = false
+      if (!wasScanning) return
+
+      const restore = scanRestoreSelectionRef.current
+      if (restore?.accountId) {
+        useWalletStore.setState({ activeAccountId: restore.accountId })
+      }
+      if (restore?.networkId) {
+        void useWalletStore.getState().setActiveNetwork(restore.networkId, { skipRefresh: true }).catch(() => {})
+      }
+      scanRestoreSelectionRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (hasDirectRouteRequest || selectedId || selectedBatchKey) return
     const cached = readCachedScanRows()
     const cacheAgeMs = cached ? Math.max(0, Date.now() - cached.updatedAt) : Number.POSITIVE_INFINITY
     if (scanRows.length === 0 && cached?.rows?.length) {
@@ -419,7 +972,7 @@ const Send: React.FC = () => {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [runGlobalScan, scanRows.length])
+  }, [hasDirectRouteRequest, runGlobalScan, scanRows.length, selectedBatchKey, selectedId])
 
   useEffect(() => {
     const routeState = (location.state as SendRouteState | null) || null
@@ -435,8 +988,14 @@ const Send: React.FC = () => {
 
   const openSendFromScanHolder = async (holder: ScanHolder) => {
     setScanError('')
+    // Stop any in-flight background scan before switching account/network for send.
+    scanRunIdRef.current += 1
+    isScanningRef.current = false
+    setIsScanningAll(false)
+    scanRestoreSelectionRef.current = null
 
     try {
+      setSelectedBatchKey(null)
       setActiveAccount(holder.accountId)
       await setActiveNetwork(holder.networkId)
       const latestState = useWalletStore.getState()
@@ -459,6 +1018,91 @@ const Send: React.FC = () => {
       const message = error instanceof Error ? error.message : String(error)
       setScanError(`Cannot prepare send form: ${message}`)
     }
+  }
+
+  const togglePinRow = (rowKey: string) => {
+    const key = String(rowKey || '').trim()
+    if (!key) return
+    setHubPreferences((current) => {
+      const pinned = new Set(normalizeKeyList(current.pinned))
+      if (pinned.has(key)) pinned.delete(key)
+      else pinned.add(key)
+      return {
+        order: normalizeKeyList(current.order),
+        pinned: [...pinned]
+      }
+    })
+  }
+
+  const resetHubPreferences = () => {
+    setHubPreferences({ order: [], pinned: [] })
+  }
+
+  const applyDragReorder = (draggedKey: string, targetKey: string) => {
+    const dragged = String(draggedKey || '').trim()
+    const target = String(targetKey || '').trim()
+    if (!dragged || !target || dragged === target) return
+
+    setHubPreferences((current) => {
+      const currentOrderedKeys = applySendHubPreferences(scanRows, current).map((row) => row.key)
+      const nextOrder = moveRowKeyBefore(currentOrderedKeys, dragged, target)
+      return {
+        order: normalizeKeyList(nextOrder),
+        pinned: normalizeKeyList(current.pinned)
+      }
+    })
+  }
+
+  const handleRowDragStart = (rowKey: string, event: React.DragEvent<HTMLDivElement>) => {
+    if (search.trim()) return
+    const key = String(rowKey || '').trim()
+    if (!key) return
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', key)
+    setDraggingRowKey(key)
+    setDragOverRowKey(null)
+  }
+
+  const handleRowDragOver = (rowKey: string, event: React.DragEvent<HTMLDivElement>) => {
+    if (search.trim()) return
+    if (!draggingRowKey || draggingRowKey === rowKey) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDragOverRowKey(rowKey)
+  }
+
+  const handleRowDrop = (targetRowKey: string, event: React.DragEvent<HTMLDivElement>) => {
+    if (search.trim()) return
+    event.preventDefault()
+    const dragged = String(draggingRowKey || event.dataTransfer.getData('text/plain') || '').trim()
+    if (!dragged || dragged === targetRowKey) {
+      setDragOverRowKey(null)
+      setDraggingRowKey(null)
+      return
+    }
+    applyDragReorder(dragged, targetRowKey)
+    setDragOverRowKey(null)
+    setDraggingRowKey(null)
+  }
+
+  const clearDragState = () => {
+    setDragOverRowKey(null)
+    setDraggingRowKey(null)
+  }
+
+  if (selectedBatchRow) {
+    return (
+      <SendBatchSweepForm
+        row={selectedBatchRow}
+        networkById={networkById}
+        onBack={() => {
+          setSelectedBatchKey(null)
+        }}
+        onComplete={() => {
+          void runGlobalScan({ mode: 'manual', reason: 'post merged send', refreshBalances: true, forceAssetRefresh: true })
+        }}
+      />
+    )
   }
 
   if (selectedItem) {
@@ -492,6 +1136,22 @@ const Send: React.FC = () => {
           />
         </div>
 
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[10px] text-gray-500">
+            {search.trim()
+              ? 'Clear search to drag and reorder rows.'
+              : 'Drag rows to reorder. Pin rows to keep them on top.'}
+          </p>
+          <button
+            type="button"
+            onClick={resetHubPreferences}
+            disabled={hubPreferences.order.length === 0 && hubPreferences.pinned.length === 0}
+            className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase border border-dark-500 text-gray-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Reset order
+          </button>
+        </div>
+
         {scanError && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
             <p className="text-[11px] font-bold text-red-300">{scanError}</p>
@@ -514,8 +1174,26 @@ const Send: React.FC = () => {
 
         {filteredScanRows.map((row) => {
           const expanded = expandedRows[row.key] === true
+          const rowNetwork = networkById.get(row.networkId) || activeNetwork
+          const rowCaps = resolveNetworkCapabilities(rowNetwork)
+          const rowCanBatchSend = row.requestType === 'native'
+            ? rowCaps.features.nativeSend
+            : rowCaps.features.assetSend
+          const rowPinned = pinnedRowKeys.has(row.key)
           return (
-            <div key={row.key} className="px-3 py-2 border-b border-dark-600/40">
+            <div
+              key={row.key}
+              draggable={!search.trim()}
+              onDragStart={(event) => handleRowDragStart(row.key, event)}
+              onDragOver={(event) => handleRowDragOver(row.key, event)}
+              onDrop={(event) => handleRowDrop(row.key, event)}
+              onDragEnd={clearDragState}
+              className={`px-3 py-2 border-b ${
+                dragOverRowKey === row.key
+                  ? 'border-primary/60 bg-primary/5'
+                  : 'border-dark-600/40'
+              } ${draggingRowKey === row.key ? 'opacity-60' : ''}`}
+            >
               <button
                 type="button"
                 onClick={() => setExpandedRows((prev) => ({ ...prev, [row.key]: !expanded }))}
@@ -532,6 +1210,11 @@ const Send: React.FC = () => {
                     <span className="text-[9px] px-1.5 py-0.5 rounded-full border border-dark-500 text-gray-300 font-bold uppercase">
                       {row.holders.length} {row.holders.length === 1 ? 'holder' : 'holders'}
                     </span>
+                    {rowPinned && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full border border-yellow-500/40 text-yellow-200 font-bold uppercase">
+                        Pinned
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 min-w-0">
                     <span className="text-[10px] text-gray-500 uppercase tracking-wide">
@@ -543,6 +1226,11 @@ const Send: React.FC = () => {
                         : <span className="w-2 h-2 rounded-full bg-blue-300" />}
                       {row.networkSymbol}
                     </span>
+                    {!search.trim() && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md border border-dark-500 text-gray-400 uppercase font-bold">
+                        Drag
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -559,6 +1247,32 @@ const Send: React.FC = () => {
 
               {expanded && (
                 <div className="mt-2 space-y-2 pl-12">
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => togglePinRow(row.key)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                        rowPinned
+                          ? 'border-yellow-500/40 bg-yellow-500/20 text-yellow-200 hover:text-white'
+                          : 'border-dark-500 bg-dark-700/40 text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      {rowPinned ? 'Unpin' : 'Pin to Top'}
+                    </button>
+                    {row.holders.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedId(null)
+                          setSelectedBatchKey(row.key)
+                        }}
+                        disabled={!rowCanBatchSend}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border border-blue-400/40 bg-blue-500/20 text-blue-200 hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        Send All Holders
+                      </button>
+                    )}
+                  </div>
                   {row.holders.map((holder) => {
                     const holderNetwork = networkById.get(holder.networkId)
                     const holderCaps = resolveNetworkCapabilities(holderNetwork || activeNetwork)
@@ -576,7 +1290,7 @@ const Send: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void openSendFromScanHolder(holder)}
-                            disabled={!holderCanSend || isScanningAll}
+                            disabled={!holderCanSend}
                             className="mt-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border border-primary/40 bg-primary/20 text-primary hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             Send

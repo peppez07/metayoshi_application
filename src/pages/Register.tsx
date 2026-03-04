@@ -217,7 +217,7 @@ const Register: React.FC = () => {
     <PageTransition>
       <div className="flex flex-col items-center justify-between h-full p-8 text-center bg-dark-800 overflow-y-auto hide-scrollbar">
         <div className="flex flex-col items-center mt-12 gap-6">
-          <div className="w-32 h-32 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_28px_rgba(245,132,31,0.28)]">
+          <div className="w-32 h-32 flex items-center justify-center border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_28px_rgba(245,132,31,0.28)]">
             <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.15] translate-y-[2px]" />
           </div>
           <div className="space-y-2">

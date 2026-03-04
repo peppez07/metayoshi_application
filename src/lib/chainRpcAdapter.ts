@@ -160,6 +160,18 @@ function asDecimalString(value: unknown): string {
   return /^\d+(\.\d+)?$/.test(raw) ? raw : ''
 }
 
+function parseRpcQuantityToBigInt(value: unknown, label: string): bigint {
+  const raw = String(value ?? '').trim()
+  if (!raw) return 0n
+  if (/^0x[0-9a-fA-F]+$/.test(raw)) return BigInt(raw)
+  if (/^\d+$/.test(raw)) return BigInt(raw)
+  const preview = raw.length > 120 ? `${raw.slice(0, 117)}...` : raw
+  throw new Error(
+    `${label} returned a non-quantity value (${preview}). ` +
+    'RPC endpoint appears incompatible (must be JSON-RPC, not explorer API).'
+  )
+}
+
 const BRIDGE_METHOD_VARIANT_CACHE_TTL_MS = 10 * 60 * 1000
 const CHAIN_INFO_CACHE_TTL_MS = 12 * 1000
 const ADDRESS_VALIDATION_CACHE_TTL_MS = 30 * 1000
@@ -435,7 +447,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
       throw new Error('Bridge RPC config is required for EVM networks')
     }
     const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
-    const balanceWei = BigInt(String(balHex || '0x0'))
+    const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')
     return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
   }
 
@@ -553,9 +565,9 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
     const tx: any = {
       to,
       value: valueWei,
-      nonce: Number(BigInt(String(nonceHex || '0x0'))),
+      nonce: Number(parseRpcQuantityToBigInt(nonceHex, 'eth_getTransactionCount')),
       gasLimit: feeQuote.gasLimit,
-      chainId: Number(BigInt(String(chainIdHex || input.network.chainId || 1)))
+      chainId: Number(parseRpcQuantityToBigInt(chainIdHex || input.network.chainId || 1, 'eth_chainId'))
     }
     if (feeQuote.type === 2) {
       tx.type = 2

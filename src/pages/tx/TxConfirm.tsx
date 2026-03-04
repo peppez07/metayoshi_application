@@ -373,6 +373,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         amount: amount,
         from: fromAddress || '',
         to: toAddress,
+        accountId: activeAccount?.id,
         status: 'confirmed',
         timestamp: Date.now(),
         networkId: activeNetwork.id
@@ -400,6 +401,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       amount: amount,
       from: fromAddress || '',
       to: toAddress,
+      accountId: activeAccount?.id,
       status: 'rejected',
       timestamp: Date.now(),
       networkId: activeNetwork.id

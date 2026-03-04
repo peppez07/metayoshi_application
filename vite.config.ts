@@ -186,6 +186,10 @@ export default defineConfig({
         try {
           const publicIconsDir = path.resolve(__dirname, 'public/icons')
           if (existsSync(publicIconsDir)) {
+            const distIconsDir = path.resolve(__dirname, 'dist/icons')
+            if (!existsSync(distIconsDir)) {
+              mkdirSync(distIconsDir, { recursive: true })
+            }
             const iconMapping: Record<string, string> = {
               'icon-16.png':  'metayoshi-16.png',
               'icon-32.png':  'metayoshi-32.png',
@@ -196,9 +200,12 @@ export default defineConfig({
             for (const [src, dest] of Object.entries(iconMapping)) {
               const srcPath  = path.join(publicIconsDir, src)
               const destPath = path.join(assetsDir, dest)
+              const legacyDestPath = path.join(distIconsDir, src)
               if (existsSync(srcPath)) {
                 copyFileSync(srcPath, destPath)
                 console.log(`[OK] Copied ${src} -> dist/assets/${dest}`)
+                copyFileSync(srcPath, legacyDestPath)
+                console.log(`[OK] Copied ${src} -> dist/icons/${src}`)
               }
             }
           }

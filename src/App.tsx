@@ -99,6 +99,26 @@ function App() {
     lock,
     syncNetworksFromServer
   } = useWalletStore()
+  const location = useLocation()
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const iconHref = '/icons/icon-32.png?v=20260304'
+    const iconRels = ['icon', 'shortcut icon', 'apple-touch-icon']
+
+    iconRels.forEach((rel) => {
+      let link = document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"][data-metayoshi-brand="1"]`)
+        || document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`)
+      if (!link) {
+        link = document.createElement('link')
+        link.setAttribute('rel', rel)
+        link.setAttribute('type', 'image/png')
+        document.head.appendChild(link)
+      }
+      link.setAttribute('data-metayoshi-brand', '1')
+      link.setAttribute('href', iconHref)
+    })
+  }, [location.pathname])
 
   useEffect(() => {
     void syncNetworksFromServer()

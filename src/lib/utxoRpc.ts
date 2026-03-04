@@ -224,6 +224,8 @@ const BRIDGE_WRITE_METHODS = new Set([
 ])
 
 const secureBridgeSessionCache = new Map<string, SecureBridgeSession>()
+const EVM_BRIDGE_READ_BYPASS_TTL_MS = 2 * 60 * 1000
+const evmBridgeReadBypassUntil = new Map<string, number>()
 
 function parseBoolWithDefault(value: unknown, fallback: boolean): boolean {
   const normalized = String(value ?? '').trim().toLowerCase()
@@ -738,7 +740,119 @@ export async function callBridgeMethod(
   method: string,
   params: any[] = []
 ): Promise<any> {
-  return await jsonRpcCall(config, method, params)
+  const normalizedMethod = String(method || '').trim().toLowerCase()
+  if (!isEvmBridgeReadMethod(normalizedMethod) || !String(config.bridgeUrl || '').trim()) {
+    return await jsonRpcCall(config, method, params)
+  }
+
+  const bypassKey = resolveEvmBridgeBypassKey(config)
+  if (isEvmBridgeBypassActive(bypassKey)) {
+    const directConfig = createEvmDirectRpcConfig(config)
+    return await jsonRpcCall(directConfig, method, params)
+  }
+
+  try {
+    const result = await jsonRpcCall(config, method, params)
+    clearEvmBridgeBypass(bypassKey)
+    return result
+  } catch (bridgeError) {
+    if (!isBridgeFallbackEligibleError(bridgeError)) throw bridgeError
+    const directConfig = createEvmDirectRpcConfig(config)
+    try {
+      const result = await jsonRpcCall(directConfig, method, params)
+      setEvmBridgeBypass(bypassKey)
+      return result
+    } catch (directError) {
+      const bridgeMessage = asError(bridgeError).message
+      const directMessage = asError(directError).message
+      throw new Error(`${bridgeMessage} | Direct EVM RPC fallback failed: ${directMessage}`)
+    }
+  }
+}
+
+function isEvmBridgeReadMethod(method: string): boolean {
+  if (!method.startsWith('eth_')) return false
+  const writeOrSensitiveMethods = new Set([
+    'eth_sendrawtransaction',
+    'eth_sendtransaction',
+    'eth_sign',
+    'eth_signtypeddata',
+    'eth_signtypeddata_v3',
+    'eth_signtypeddata_v4',
+    'eth_signtransaction'
+  ])
+  return !writeOrSensitiveMethods.has(method)
+}
+
+function resolveEvmBridgeBypassKey(config: UtxoRpcConfig): string {
+  return String(config.bridgeUrl || '').trim().toLowerCase()
+}
+
+function isEvmBridgeBypassActive(key: string): boolean {
+  if (!key) return false
+  const until = Number(evmBridgeReadBypassUntil.get(key) || 0)
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    evmBridgeReadBypassUntil.delete(key)
+    return false
+  }
+  return true
+}
+
+function setEvmBridgeBypass(key: string): void {
+  if (!key) return
+  evmBridgeReadBypassUntil.set(key, Date.now() + EVM_BRIDGE_READ_BYPASS_TTL_MS)
+}
+
+function clearEvmBridgeBypass(key: string): void {
+  if (!key) return
+  evmBridgeReadBypassUntil.delete(key)
+}
+
+function isBridgeFallbackEligibleError(error: unknown): boolean {
+  const message = asError(error).message
+  return (
+    /rpc call failed \[bridge\]: http 5\d\d/i.test(message)
+    || /secure bridge .*http 5\d\d/i.test(message)
+    || /bad gateway/i.test(message)
+    || /rpc error \[[^\]]+\]: fetch failed/i.test(message)
+    || /rpc call failed \[bridge\]:.*\bfetch failed\b/i.test(message)
+    || /returned a non-quantity value/i.test(message)
+    || /rpc endpoint appears incompatible/i.test(message)
+    || /deprecated v1 endpoint/i.test(message)
+  )
+}
+
+function isLikelyExplorerApiUrl(url: string): boolean {
+  const lower = String(url || '').trim().toLowerCase()
+  if (!lower) return false
+  if (
+    /etherscan\.io|bscscan\.com|polygonscan\.com|snowtrace\.io|arbiscan\.io|basescan\.org|ftmscan\.com/.test(lower)
+  ) {
+    return true
+  }
+  const hasApiPath = /\/api(?:[/?#]|$)/.test(lower)
+  const hasExplorerQuery = /(?:\?|&)(module|action|apikey)=/i.test(lower)
+  return hasApiPath && hasExplorerQuery
+}
+
+function createEvmDirectRpcConfig(config: UtxoRpcConfig): UtxoRpcConfig {
+  const rpcUrl = String(config.rpcUrl || '').trim()
+  if (!rpcUrl) {
+    throw new Error('Direct EVM RPC fallback is unavailable: rpcUrl is not configured.')
+  }
+  if (isLikelyExplorerApiUrl(rpcUrl)) {
+    throw new Error(
+      `Direct EVM RPC fallback is misconfigured: rpcUrl points to an explorer API (${rpcUrl}). `
+      + 'Configure a JSON-RPC endpoint (for example https://ethereum-rpc.publicnode.com).'
+    )
+  }
+  return {
+    ...config,
+    bridgeUrl: undefined,
+    bridgeUsername: undefined,
+    bridgePassword: undefined,
+    useLocalRpc: true
+  }
 }
 
 export interface UtxoUnspent {

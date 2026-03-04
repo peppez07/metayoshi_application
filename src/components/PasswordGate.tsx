@@ -40,7 +40,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-dark-800">
       <div className="flex flex-col items-center gap-6 mb-8">
-        <div className="w-20 h-20 rounded-full flex items-center justify-center border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_22px_rgba(245,132,31,0.22)]">
+        <div className="w-20 h-20 flex items-center justify-center border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_22px_rgba(245,132,31,0.22)]">
            <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.12] translate-y-[2px]" />
         </div>
         <div className="space-y-1">

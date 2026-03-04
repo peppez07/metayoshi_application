@@ -191,7 +191,7 @@ const WalletLayout: React.FC = () => {
             <QuickAction
               icon={<IoArrowUpOutline className="w-5 h-5" />}
               label="Send"
-              onClick={() => navigate('/wallet/send')}
+              onClick={() => navigate('/wallet/send', { state: { quickSendNative: true } })}
             />
           )}
           <QuickAction

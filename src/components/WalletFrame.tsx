@@ -121,12 +121,38 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       const logo = new Image()
       logo.onload = () => {
         if (!mounted) return
-        const logoR = Math.round(SIZE * 0.14)   // logo radius
-        const cx    = SIZE / 2
-        const cy    = SIZE / 2
+        const logoR = Math.round(SIZE * 0.14) // logo radius
+        const cx = SIZE / 2
+        const cy = SIZE / 2
+        const logoSize = logoR * 2
 
-        // Draw the MetaYoshi logo directly over the QR dots (no background)
-        ctx.drawImage(logo, cx - logoR, cy - logoR, logoR * 2, logoR * 2)
+        // Add a rounded square badge so the center logo stays readable.
+        const badgePadding = Math.max(6, Math.round(SIZE * 0.02))
+        const badgeSize = logoSize + badgePadding * 2
+        const badgeX = cx - (badgeSize / 2)
+        const badgeY = cy - (badgeSize / 2)
+        const badgeRadius = Math.round(badgeSize * 0.22)
+
+        ctx.save()
+        ctx.beginPath()
+        ctx.moveTo(badgeX + badgeRadius, badgeY)
+        ctx.lineTo(badgeX + badgeSize - badgeRadius, badgeY)
+        ctx.arcTo(badgeX + badgeSize, badgeY, badgeX + badgeSize, badgeY + badgeRadius, badgeRadius)
+        ctx.lineTo(badgeX + badgeSize, badgeY + badgeSize - badgeRadius)
+        ctx.arcTo(badgeX + badgeSize, badgeY + badgeSize, badgeX + badgeSize - badgeRadius, badgeY + badgeSize, badgeRadius)
+        ctx.lineTo(badgeX + badgeRadius, badgeY + badgeSize)
+        ctx.arcTo(badgeX, badgeY + badgeSize, badgeX, badgeY + badgeSize - badgeRadius, badgeRadius)
+        ctx.lineTo(badgeX, badgeY + badgeRadius)
+        ctx.arcTo(badgeX, badgeY, badgeX + badgeRadius, badgeY, badgeRadius)
+        ctx.closePath()
+        ctx.fillStyle = '#ffffff'
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = '#111316'
+        ctx.stroke()
+        ctx.restore()
+
+        ctx.drawImage(logo, cx - logoR, cy - logoR, logoSize, logoSize)
 
         if (mounted) setQrDataUrl(canvas.toDataURL())
       }

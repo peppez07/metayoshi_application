@@ -5,6 +5,23 @@ import { useWalletStore, type Activity as WalletActivity } from '../../store/wal
 import { IoClose, IoCopyOutline, IoOpenOutline, IoCheckmark, IoSearchOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 
+const STABLE_NETWORK_IDS = new Set(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+
+function normalizeActivityNetworkId(value: string): string {
+  const raw = String(value || '').trim()
+  const lower = raw.toLowerCase()
+  if (!lower) return ''
+  if (lower === 'sdash' || lower === 'srv--dash') return 'dash'
+  if (lower === 'btc' || lower === 'bitcoin' || lower === 'srv--btc') return 'srv--bitcoin'
+  if (lower.endsWith('-mainnet')) {
+    const base = lower.slice(0, -'-mainnet'.length)
+    if (STABLE_NETWORK_IDS.has(base)) return base
+  }
+  if (STABLE_NETWORK_IDS.has(lower)) return lower
+  if (lower.startsWith('srv--')) return lower
+  return raw
+}
+
 const Activity: React.FC = () => {
   const { activity, activeNetworkId, networks, accounts, activeAccountId } = useWalletStore()
   const [selectedTx, setSelectedTx] = useState<WalletActivity | null>(null)
@@ -39,7 +56,7 @@ const Activity: React.FC = () => {
 
   const baseActivity = activity
     .filter((a) => {
-      if (a.networkId !== activeNetworkId) return false
+      if (normalizeActivityNetworkId(a.networkId) !== normalizeActivityNetworkId(activeNetworkId)) return false
       if (a.accountId) return a.accountId === activeAccount?.id
 
       // Legacy fallback for entries saved before accountId tagging.
@@ -103,7 +120,11 @@ const Activity: React.FC = () => {
   }
 
   const selectedNetwork = selectedTx
-    ? (networks.find((n) => n.id === selectedTx.networkId) || activeNetwork)
+    ? (
+      networks.find((n) => (
+        normalizeActivityNetworkId(n.id) === normalizeActivityNetworkId(selectedTx.networkId)
+      )) || activeNetwork
+    )
     : activeNetwork
 
   const txExplorerUrl = (() => {

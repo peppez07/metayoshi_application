@@ -217,11 +217,12 @@ const DappRequestConfirm: React.FC = () => {
       const latestState = useWalletStore.getState()
       const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]
       const accountForActivity = latestState.accounts.find((a) => a.id === pendingRequest.accountId) || latestState.accounts[0]
-      const senderAddress = requestNetwork.coinType === 'EVM'
-        ? (accountForActivity?.addresses?.EVM || '')
-        : accountForActivity?.networkAddresses?.[pendingRequest.networkId]
-        || (requestNetwork.coinType === 'XRP' ? accountForActivity?.addresses?.XRP : accountForActivity?.addresses?.UTXO)
+      const senderAddress = String(
+        accountForActivity?.networkAddresses?.[pendingRequest.networkId]
+        || (networkForActivity?.coinType === 'EVM' ? accountForActivity?.addresses?.EVM : '')
+        || (networkForActivity?.coinType === 'XRP' ? accountForActivity?.addresses?.XRP : '')
         || ''
+      ).trim()
 
       if (networkForActivity) {
         addActivity({
@@ -231,6 +232,7 @@ const DappRequestConfirm: React.FC = () => {
           amount: requestAmount,
           from: senderAddress,
           to: requestTo,
+          accountId: pendingRequest.accountId,
           status: 'confirmed',
           timestamp: Date.now(),
           networkId: networkForActivity.id

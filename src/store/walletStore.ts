@@ -362,6 +362,9 @@ function isTransientBridgeFailure(error: unknown): boolean {
     || /bad gateway/i.test(message)
     || /rpc error \[[^\]]+\]: fetch failed/i.test(message)
     || /rpc call failed \[bridge\]:.*\bfetch failed\b/i.test(message)
+    || /returned a non-quantity value/i.test(message)
+    || /rpc endpoint appears incompatible/i.test(message)
+    || /deprecated v1 endpoint/i.test(message)
   )
 }
 
@@ -1378,10 +1381,18 @@ function normalizeNetworkSymbol(network: Network): Network {
 }
 
 function normalizeNetworkIdAlias(value: string): string {
-  const normalized = String(value || '').trim().toLowerCase()
+  const raw = String(value || '').trim()
+  const normalized = raw.toLowerCase()
+  if (!normalized) return ''
   if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
-  return String(value || '').trim()
+  if (normalized.endsWith('-mainnet')) {
+    const base = normalized.slice(0, -'-mainnet'.length)
+    if (FROZEN_STABLE_NETWORK_IDS.has(base)) return base
+  }
+  if (FROZEN_STABLE_NETWORK_IDS.has(normalized)) return normalized
+  if (normalized.startsWith('srv--')) return normalized
+  return raw
 }
 
 function remapNetworkIdKeyedRecord<T>(record: Record<string, T> | undefined): Record<string, T> {
@@ -1395,6 +1406,157 @@ function remapNetworkIdKeyedRecord<T>(record: Record<string, T> | undefined): Re
       out[canonicalKey] = value
     }
   }
+  return out
+}
+
+interface ActivityNormalizationContext {
+  networks: Network[]
+  accounts: Account[]
+  activeNetworkId: string
+  activeAccountId: string | null
+}
+
+function resolveCanonicalActivityNetworkId(
+  rawNetworkId: unknown,
+  context: ActivityNormalizationContext
+): string {
+  const requested = normalizeNetworkIdAlias(String(rawNetworkId || '').trim())
+  if (requested) {
+    const exact = context.networks.find((network) => network.id === requested)
+    if (exact) return exact.id
+    const fold = context.networks.find((network) => network.id.toLowerCase() === requested.toLowerCase())
+    if (fold) return fold.id
+  }
+
+  const activeRequested = normalizeNetworkIdAlias(String(context.activeNetworkId || '').trim())
+  if (activeRequested) {
+    const exact = context.networks.find((network) => network.id === activeRequested)
+    if (exact) return exact.id
+    const fold = context.networks.find((network) => network.id.toLowerCase() === activeRequested.toLowerCase())
+    if (fold) return fold.id
+  }
+
+  return context.networks[0]?.id || activeRequested || requested
+}
+
+function resolveActivityAccountId(
+  rawAccountId: unknown,
+  rawFrom: unknown,
+  rawTo: unknown,
+  networkId: string,
+  context: ActivityNormalizationContext
+): string | undefined {
+  const isKnownAccountId = (candidate: string): boolean => (
+    Boolean(candidate) && context.accounts.some((account) => account.id === candidate)
+  )
+
+  const explicitId = String(rawAccountId || '').trim()
+  if (isKnownAccountId(explicitId)) return explicitId
+
+  const normalizedFrom = String(rawFrom || '').trim().toLowerCase()
+  const normalizedTo = String(rawTo || '').trim().toLowerCase()
+  const hasAddressHint = Boolean(normalizedFrom || normalizedTo)
+
+  const network = context.networks.find((entry) => entry.id === networkId)
+  if (hasAddressHint) {
+    const inferred = context.accounts.find((account) => {
+      const candidates = new Set<string>()
+      const push = (value: unknown) => {
+        const normalized = String(value || '').trim().toLowerCase()
+        if (normalized) candidates.add(normalized)
+      }
+
+      push(account.networkAddresses?.[networkId])
+      if (network?.coinType === 'EVM') push(account.addresses?.EVM)
+      else if (network?.coinType === 'XRP') push(account.addresses?.XRP)
+      else if (network?.coinType === 'UTXO') {
+        push(account.addresses?.UTXO)
+        push(account.addresses?.BTC)
+      } else if (!network) {
+        Object.values(account.networkAddresses || {}).forEach(push)
+        push(account.addresses?.EVM)
+        push(account.addresses?.UTXO)
+        push(account.addresses?.BTC)
+        push(account.addresses?.SOL)
+        push(account.addresses?.XRP)
+      }
+
+      return (
+        (normalizedFrom && candidates.has(normalizedFrom))
+        || (normalizedTo && candidates.has(normalizedTo))
+      )
+    })
+    if (inferred?.id) return inferred.id
+  }
+
+  const activeId = String(context.activeAccountId || '').trim()
+  if (isKnownAccountId(activeId)) return activeId
+
+  const firstId = String(context.accounts[0]?.id || '').trim()
+  if (isKnownAccountId(firstId)) return firstId
+
+  return undefined
+}
+
+function normalizeActivityRecord(
+  rawActivity: unknown,
+  context: ActivityNormalizationContext,
+  indexHint: number
+): Activity | null {
+  if (!rawActivity || typeof rawActivity !== 'object') return null
+  const candidate = rawActivity as Partial<Activity>
+  const networkId = resolveCanonicalActivityNetworkId(candidate.networkId, context)
+  if (!networkId) return null
+
+  const timestampRaw = Number(candidate.timestamp)
+  const timestamp = Number.isFinite(timestampRaw) && timestampRaw > 0
+    ? Math.trunc(timestampRaw)
+    : Date.now()
+
+  const typeRaw = String(candidate.type || '').trim().toLowerCase()
+  const type: Activity['type'] =
+    typeRaw === 'received' ? 'received'
+      : typeRaw === 'swap' ? 'swap'
+        : 'sent'
+
+  const statusRaw = String(candidate.status || '').trim().toLowerCase()
+  const status: Activity['status'] =
+    statusRaw === 'pending' ? 'pending'
+      : statusRaw === 'rejected' ? 'rejected'
+        : 'confirmed'
+
+  const id = String(candidate.id || '').trim() || `activity-${timestamp}-${indexHint}`
+  const network = context.networks.find((entry) => entry.id === networkId)
+  const asset = String(candidate.asset || '').trim() || String(network?.symbol || '').trim() || 'UNKNOWN'
+  const amount = String(candidate.amount || '').trim() || '0'
+  const from = String(candidate.from || '').trim()
+  const to = String(candidate.to || '').trim()
+  const accountId = resolveActivityAccountId(candidate.accountId, from, to, networkId, context)
+
+  return {
+    id,
+    type,
+    asset,
+    amount,
+    to: to || undefined,
+    from: from || undefined,
+    accountId,
+    status,
+    timestamp,
+    networkId
+  }
+}
+
+function normalizeActivityList(
+  rawActivity: unknown,
+  context: ActivityNormalizationContext
+): Activity[] {
+  if (!Array.isArray(rawActivity)) return []
+  const out: Activity[] = []
+  rawActivity.forEach((entry, index) => {
+    const normalized = normalizeActivityRecord(entry, context, index)
+    if (normalized) out.push(normalized)
+  })
   return out
 }
 
@@ -1769,7 +1931,7 @@ export const useWalletStore = create<WalletState>()(
           to: 'RGG...vcFFDFdffd',
           status: 'confirmed',
           timestamp: Date.now() - 3600000,
-          networkId: 'rtm-mainnet'
+          networkId: DEFAULT_ACTIVE_NETWORK_ID
         },
         {
           id: '2',
@@ -1779,7 +1941,7 @@ export const useWalletStore = create<WalletState>()(
           to: 'RGG...vcFFDFdffd',
           status: 'confirmed',
           timestamp: Date.now() - 7200000,
-          networkId: 'rtm-mainnet'
+          networkId: DEFAULT_ACTIVE_NETWORK_ID
         }
       ],
 
@@ -3872,6 +4034,15 @@ export const useWalletStore = create<WalletState>()(
           : (reHydratedAccounts[0]?.id ?? null)
 
         const normalizedBackupNetworkId = normalizeNetworkIdAlias(String(backup.activeNetworkId || ''))
+        const restoredActiveNetworkId = networks.some((network) => network.id === normalizedBackupNetworkId)
+          ? normalizedBackupNetworkId
+          : get().activeNetworkId
+        const normalizedActivity = normalizeActivityList(backup.activity, {
+          networks,
+          accounts: reHydratedAccounts,
+          activeNetworkId: restoredActiveNetworkId,
+          activeAccountId: safeActiveAccountId
+        })
 
         // 5. Write everything back into the store.
         set({
@@ -3885,8 +4056,8 @@ export const useWalletStore = create<WalletState>()(
           accounts:         reHydratedAccounts,
           nextAccountIndex: backup.nextAccountIndex ?? reHydratedAccounts.length,
           activeAccountId:  safeActiveAccountId,
-          activeNetworkId:  normalizedBackupNetworkId || get().activeNetworkId,
-          activity:         Array.isArray(backup.activity) ? backup.activity : [],
+          activeNetworkId:  restoredActiveNetworkId,
+          activity:         normalizedActivity,
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
           donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
@@ -3929,19 +4100,18 @@ export const useWalletStore = create<WalletState>()(
       },
 
       addActivity: (item) => set((state) => {
-        const resolvedAccountId = String(
-          item.accountId
-          || state.activeAccountId
-          || state.accounts[0]?.id
-          || ''
-        ).trim()
-
-        return {
-          activity: [
-            { ...item, accountId: resolvedAccountId || undefined },
-            ...state.activity
-          ]
-        }
+        const normalized = normalizeActivityRecord(
+          item,
+          {
+            networks: state.networks,
+            accounts: state.accounts,
+            activeNetworkId: state.activeNetworkId,
+            activeAccountId: state.activeAccountId
+          },
+          state.activity.length
+        )
+        if (!normalized) return state
+        return { activity: [normalized, ...state.activity] }
       }),
 
       changePassword: (oldPass, newPass) => {
@@ -5004,19 +5174,27 @@ export const useWalletStore = create<WalletState>()(
         const activeNetworkId = INITIAL_NETWORKS.some((n) => n.id === normalizedPersistedNetworkId)
           ? normalizedPersistedNetworkId
           : DEFAULT_ACTIVE_NETWORK_ID
+        const normalizedNetworks = normalizeNetworkListSymbols(INITIAL_NETWORKS)
         const accountsWithActiveNetworkBalance = accounts.map((account) => (
           account.id === activeAccountId
             ? { ...account, balance: getCachedBalanceForNetwork(account, activeNetworkId, true) }
             : account
         ))
+        const normalizedActivity = normalizeActivityList(persisted.activity ?? merged.activity, {
+          networks: normalizedNetworks,
+          accounts: accountsWithActiveNetworkBalance,
+          activeNetworkId,
+          activeAccountId
+        })
 
         return {
           ...merged,
           accounts: accountsWithActiveNetworkBalance,
           nextAccountIndex,
           activeAccountId,
-          networks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
+          networks: normalizedNetworks,
           activeNetworkId,
+          activity: normalizedActivity,
           serverCoinCatalog: normalizeServerCatalogSymbols(
             Array.isArray((persisted as any).serverCoinCatalog)
               ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
