@@ -7,6 +7,40 @@ import { installGlobalErrorMonitor, recordRuntimeError } from './lib/runtimeErro
 
 import { ToastProvider } from './components/Toast'
 
+function installZoomShortcutBlockers(): void {
+  const blockZoomKeyCombo = (event: KeyboardEvent): boolean => {
+    if (!event.ctrlKey && !event.metaKey) return false
+    const key = String(event.key || '').toLowerCase()
+    return key === '+' || key === '=' || key === '-' || key === '_' || key === '0'
+  }
+
+  // Prevent trackpad pinch and Ctrl/Meta + wheel zoom.
+  window.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+    },
+    { passive: false, capture: true }
+  )
+
+  // Prevent keyboard zoom shortcuts (Ctrl/Meta + +, -, 0).
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!blockZoomKeyCombo(event)) return
+      event.preventDefault()
+    },
+    { capture: true }
+  )
+
+  // Safari/WebKit gesture pinch events.
+  const preventGestureZoom = (event: Event) => event.preventDefault()
+  document.addEventListener('gesturestart', preventGestureZoom as EventListener, { passive: false })
+  document.addEventListener('gesturechange', preventGestureZoom as EventListener, { passive: false })
+  document.addEventListener('gestureend', preventGestureZoom as EventListener, { passive: false })
+}
+
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error?: Error }
@@ -55,6 +89,7 @@ class ErrorBoundary extends React.Component<
 }
 
 installGlobalErrorMonitor('popup-ui')
+installZoomShortcutBlockers()
 
 const rootElement = document.getElementById('app')
 if (!rootElement) {

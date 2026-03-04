@@ -11,6 +11,7 @@ import {
   IoChevronForwardOutline,
   IoInformationCircleOutline,
   IoLayersOutline,
+  IoPin,
   IoSearchOutline
 } from 'react-icons/io5'
 
@@ -1188,11 +1189,7 @@ const Send: React.FC = () => {
               onDragOver={(event) => handleRowDragOver(row.key, event)}
               onDrop={(event) => handleRowDrop(row.key, event)}
               onDragEnd={clearDragState}
-              className={`px-3 py-2 border-b ${
-                dragOverRowKey === row.key
-                  ? 'border-primary/60 bg-primary/5'
-                  : 'border-dark-600/40'
-              } ${draggingRowKey === row.key ? 'opacity-60' : ''}`}
+              className={`px-3 py-2 border-b border-dark-600/40 ${draggingRowKey === row.key ? 'opacity-60' : ''}`}
             >
               <button
                 type="button"
@@ -1211,8 +1208,12 @@ const Send: React.FC = () => {
                       {row.holders.length} {row.holders.length === 1 ? 'holder' : 'holders'}
                     </span>
                     {rowPinned && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full border border-yellow-500/40 text-yellow-200 font-bold uppercase">
-                        Pinned
+                      <span
+                        className="inline-flex items-center justify-center p-1 rounded-full border border-yellow-500/40 text-yellow-200"
+                        aria-label="Pinned"
+                        title="Pinned"
+                      >
+                        <IoPin className="w-2.5 h-2.5" />
                       </span>
                     )}
                   </div>
@@ -1226,11 +1227,6 @@ const Send: React.FC = () => {
                         : <span className="w-2 h-2 rounded-full bg-blue-300" />}
                       {row.networkSymbol}
                     </span>
-                    {!search.trim() && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-md border border-dark-500 text-gray-400 uppercase font-bold">
-                        Drag
-                      </span>
-                    )}
                   </div>
                 </div>
                 <div className="text-right shrink-0">

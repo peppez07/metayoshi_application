@@ -35,9 +35,9 @@ const Activity: React.FC = () => {
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const activeCaps = resolveNetworkCapabilities(activeNetwork)
 
-  const activeAccountAddressSet = useMemo(() => {
+  const activeNetworkAccountAddressSet = useMemo(() => {
     const set = new Set<string>()
-    if (!activeAccount) return set
+    if (!activeAccount || !activeNetwork) return set
 
     const push = (value: unknown) => {
       const raw = String(value || '').trim()
@@ -46,13 +46,22 @@ const Activity: React.FC = () => {
       set.add(raw.toLowerCase())
     }
 
-    Object.values(activeAccount.networkAddresses || {}).forEach(push)
-    push(activeAccount.addresses?.EVM)
-    push(activeAccount.addresses?.UTXO)
-    push(activeAccount.addresses?.BTC)
-    push(activeAccount.addresses?.SOL)
+    const activeNetworkCanonicalId = normalizeActivityNetworkId(activeNetworkId)
+    const networkAddresses = activeAccount.networkAddresses || {}
+    for (const [networkId, address] of Object.entries(networkAddresses)) {
+      if (normalizeActivityNetworkId(networkId) !== activeNetworkCanonicalId) continue
+      push(address)
+    }
+
+    // Keep a narrow fallback for legacy records that may not have networkAddresses mapped yet.
+    if (activeNetwork.coinType === 'EVM') push(activeAccount.addresses?.EVM)
+    if (activeNetwork.coinType === 'UTXO') {
+      push(activeAccount.addresses?.UTXO)
+      push(activeAccount.addresses?.BTC)
+    }
+    if (activeNetwork.coinType === 'SOL') push(activeAccount.addresses?.SOL)
     return set
-  }, [activeAccount])
+  }, [activeAccount, activeNetwork, activeNetworkId])
 
   const baseActivity = activity
     .filter((a) => {
@@ -64,10 +73,10 @@ const Activity: React.FC = () => {
       const to = String(a.to || '').trim()
       if (!from && !to) return false
       return (
-        activeAccountAddressSet.has(from)
-        || activeAccountAddressSet.has(from.toLowerCase())
-        || activeAccountAddressSet.has(to)
-        || activeAccountAddressSet.has(to.toLowerCase())
+        activeNetworkAccountAddressSet.has(from)
+        || activeNetworkAccountAddressSet.has(from.toLowerCase())
+        || activeNetworkAccountAddressSet.has(to)
+        || activeNetworkAccountAddressSet.has(to.toLowerCase())
       )
     })
     .sort((a, b) => b.timestamp - a.timestamp)

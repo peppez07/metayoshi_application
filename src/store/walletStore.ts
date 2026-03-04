@@ -213,8 +213,6 @@ interface WalletState {
 
   // Local RPC mode Ã¢â‚¬â€ bypasses the MetaYoshi bridge when enabled
   useLocalRpc: boolean
-  /** Last generated /v1/coins mapping report (server coin -> app network id). */
-  lastServerCoinSyncReport: string
   /** Per-network local node settings, keyed by network id. */
   localRpcOverrides: Record<string, {
     rpcUrl: string
@@ -343,6 +341,12 @@ const UTXO_ZERO_BALANCE_RECHECK_MS = 900
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const DEFAULT_TRANSIENT_BRIDGE_COOLDOWN_MS = 20_000
+const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
+  eth: 60_000,
+  firo: 45_000
+}
+const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -366,6 +370,28 @@ function isTransientBridgeFailure(error: unknown): boolean {
     || /rpc endpoint appears incompatible/i.test(message)
     || /deprecated v1 endpoint/i.test(message)
   )
+}
+
+function resolveTransientBridgeCooldownMs(networkId?: string): number {
+  const key = String(networkId || '').trim().toLowerCase()
+  return TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK[key] ?? DEFAULT_TRANSIENT_BRIDGE_COOLDOWN_MS
+}
+
+function getTransientBridgeCooldownRemainingMs(networkId?: string): number {
+  const key = String(networkId || '').trim().toLowerCase()
+  if (!key) return 0
+  const until = Number(transientBridgeCooldownUntilByNetwork.get(key) || 0)
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    transientBridgeCooldownUntilByNetwork.delete(key)
+    return 0
+  }
+  return Math.max(0, until - Date.now())
+}
+
+function setTransientBridgeCooldown(networkId?: string): void {
+  const key = String(networkId || '').trim().toLowerCase()
+  if (!key) return
+  transientBridgeCooldownUntilByNetwork.set(key, Date.now() + resolveTransientBridgeCooldownMs(key))
 }
 
 async function createUtxoRpcConfig(
@@ -1574,38 +1600,6 @@ function normalizeServerCatalogSymbols(catalog: ServerCoinCatalogItem[]): Server
   })
 }
 
-const SERVER_COIN_SYNC_REPORT_STORAGE_KEY = 'metayoshi:last-server-coin-sync-report'
-
-function buildServerCoinSyncReport(networks: Network[]): string {
-  const nowIso = new Date().toISOString()
-  const rows = [...networks]
-    .filter((n) => String(n.serverCoinId || '').trim())
-    .map((n) => ({
-      serverCoinId: String(n.serverCoinId || '').trim().toLowerCase(),
-      appNetworkId: String(n.id || '').trim(),
-      runtimeModelId: String(n.runtimeModelId || n.id || '').trim(),
-      chain: String(n.serverChain || 'main').trim().toLowerCase(),
-      symbol: String(n.symbol || '').trim().toUpperCase()
-    }))
-    .sort((a, b) => a.serverCoinId.localeCompare(b.serverCoinId))
-
-  const lines: string[] = [
-    '# Server Coin Sync Report',
-    '',
-    `Generated: ${nowIso}`,
-    `Total mapped networks: ${rows.length}`,
-    '',
-    '| serverCoinId | appNetworkId | runtimeModelId | chain | symbol |',
-    '| --- | --- | --- | --- | --- |'
-  ]
-
-  for (const row of rows) {
-    lines.push(`| ${row.serverCoinId} | ${row.appNetworkId} | ${row.runtimeModelId} | ${row.chain} | ${row.symbol} |`)
-  }
-
-  return lines.join('\n')
-}
-
 const TIDE_LEGACY_ADDRESS_SPEC = {
   bip44CoinType: 200,
   p2pkhVersion: 0x21
@@ -1920,7 +1914,6 @@ export const useWalletStore = create<WalletState>()(
       donationPercent: MIN_DONATION_PERCENT,
       lastActiveTimestamp: Date.now(),
       useLocalRpc: false,
-      lastServerCoinSyncReport: '',
       localRpcOverrides: {},
       activity: [
         {
@@ -2280,6 +2273,7 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
+        if (getTransientBridgeCooldownRemainingMs(activeNetworkId) > 0) return
         const activeModelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
         if (!resolveNetworkCapabilities(net).features.assetLayer) return
 
@@ -2579,6 +2573,7 @@ export const useWalletStore = create<WalletState>()(
               { force: true }
             ).catch(() => {})
           } catch (err) {
+            if (isTransientBridgeFailure(err)) setTransientBridgeCooldown(activeNetworkId)
             console.warn(
               `[${net.symbol}] fetchNetworkAssets failed for ${activeNetworkId} (${address}). `
               + 'Bridge token reads require eth_call to be allowed for this chain.',
@@ -4314,9 +4309,6 @@ export const useWalletStore = create<WalletState>()(
         }
         if ((!serverNetworks || serverNetworks.length === 0) && serverCatalog.length === 0) return
         const syncedNetworks = serverNetworks || []
-        const syncReport = buildServerCoinSyncReport(syncedNetworks)
-        writeLocalStorageSafe(SERVER_COIN_SYNC_REPORT_STORAGE_KEY, syncReport)
-        console.info('[coins-sync] generated report:\n' + syncReport)
 
         set((state) => {
           const localBaseline = normalizeNetworkListSymbols(INITIAL_NETWORKS)
@@ -4360,8 +4352,7 @@ export const useWalletStore = create<WalletState>()(
           return {
             networks,
             activeNetworkId,
-            serverCoinCatalog: filteredServerCatalog,
-            lastServerCoinSyncReport: syncReport
+            serverCoinCatalog: filteredServerCatalog
           }
         })
       },
@@ -4373,6 +4364,17 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
+        const bridgeCooldownRemainingMs = getTransientBridgeCooldownRemainingMs(activeNetworkId)
+        if (bridgeCooldownRemainingMs > 0 && !fastMode) {
+          set((state) => ({
+            isSyncing: false,
+            isConnected: state.isConnected,
+            syncPercent: state.syncPercent,
+            lowSyncStreak: state.lowSyncStreak,
+            accounts: state.accounts
+          }))
+          return
+        }
         const modelId = resolveNetworkModelId(net)
         const requestStartedAt = Date.now()
         const requestNonce = get().balanceRefreshNonce + 1
@@ -4728,6 +4730,7 @@ export const useWalletStore = create<WalletState>()(
         } catch (err) {
           const transientBridgeFailure = isTransientBridgeFailure(err)
           if (transientBridgeFailure) {
+            setTransientBridgeCooldown(activeNetworkId)
             console.warn(`[${net?.symbol}] transient bridge failure; preserving previous connection state`, err)
             useApiMonitorStore.getState().clearLastError()
             await waitForUiStabilize()
@@ -5153,8 +5156,7 @@ export const useWalletStore = create<WalletState>()(
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
         lastActiveTimestamp: state.lastActiveTimestamp,
-        activity: state.activity,
-        lastServerCoinSyncReport: state.lastServerCoinSyncReport
+        activity: state.activity
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
@@ -5209,12 +5211,7 @@ export const useWalletStore = create<WalletState>()(
             }>
           ),
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
-          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT)),
-          lastServerCoinSyncReport: String(
-            merged.lastServerCoinSyncReport
-            || readLocalStorageSafe(SERVER_COIN_SYNC_REPORT_STORAGE_KEY)
-            || ''
-          )
+          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }
       }
     }
