@@ -172,6 +172,28 @@ function parseRpcQuantityToBigInt(value: unknown, label: string): bigint {
   )
 }
 
+function isLikelyExplorerApiUrl(url: string): boolean {
+  const lower = String(url || '').trim().toLowerCase()
+  if (!lower) return false
+  if (
+    /etherscan\.io|bscscan\.com|polygonscan\.com|snowtrace\.io|arbiscan\.io|basescan\.org|ftmscan\.com/.test(lower)
+  ) {
+    return true
+  }
+  const hasApiPath = /\/api(?:[/?#]|$)/.test(lower)
+  const hasExplorerQuery = /(?:\?|&)(module|action|apikey)=/i.test(lower)
+  return hasApiPath && hasExplorerQuery
+}
+
+function isEvmBridgePayloadIncompatibleError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    /returned a non-quantity value/i.test(message)
+    || /rpc endpoint appears incompatible/i.test(message)
+    || /deprecated v1 endpoint/i.test(message)
+  )
+}
+
 const BRIDGE_METHOD_VARIANT_CACHE_TTL_MS = 10 * 60 * 1000
 const CHAIN_INFO_CACHE_TTL_MS = 12 * 1000
 const ADDRESS_VALIDATION_CACHE_TTL_MS = 30 * 1000
@@ -446,9 +468,18 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
       throw new Error('Bridge RPC config is required for EVM networks')
     }
-    const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
-    const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')
-    return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
+    try {
+      const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
+      const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')
+      return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
+    } catch (error) {
+      if (!isEvmBridgePayloadIncompatibleError(error)) throw error
+      const rpcUrl = String(input.network.rpcUrl || '').trim()
+      if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl)) throw error
+      const provider = new ethers.JsonRpcProvider(rpcUrl)
+      const wei = await provider.getBalance(address)
+      return { balance: ethers.formatEther(wei), syncPercent: 100, isSyncing: false }
+    }
   }
 
   if (!input.rpcConfig) {
