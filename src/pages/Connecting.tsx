@@ -256,9 +256,11 @@ const Connecting: React.FC = () => {
         />
 
         {/* MetaYoshi Icon */}
-        <div className="z-10 w-20 h-20 rounded-full bg-gradient-to-b from-primary/35 to-primary/10 border-2 border-primary flex items-center justify-center overflow-hidden shadow-lg shadow-primary/25 ml-auto">
-          <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.12] translate-y-[2px]" />
-        </div>
+        <img
+          src="/MetayoshiLogo.png"
+          alt="MetaYoshi"
+          className="z-10 w-20 h-20 object-contain object-center ml-auto drop-shadow-[0_0_12px_rgba(245,132,31,0.25)]"
+        />
       </div>
 
       <motion.p

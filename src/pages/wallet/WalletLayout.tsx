@@ -590,7 +590,7 @@ const WalletLayout: React.FC = () => {
                 <div className="space-y-1.5 p-2 rounded-lg border border-dark-600 bg-dark-700/30">
                   <label className="flex items-center justify-between cursor-pointer select-none">
                     <span className="text-[9px] font-bold uppercase tracking-widest text-gray-300">
-                      Donation ({donationPercent}%)
+                      Support the project with {donationPercent}%
                     </span>
                     <input
                       type="checkbox"
@@ -640,7 +640,7 @@ const WalletLayout: React.FC = () => {
                       </div>}
 
                       {donationAddress && <div className="text-[9px] leading-relaxed text-gray-500">
-                        Donation: <span className="font-bold text-gray-300">{formatCoinAmount(donationAmount)} {activeNetwork.symbol}</span>
+                        Support the project with: <span className="font-bold text-gray-300">{formatCoinAmount(donationAmount)} {activeNetwork.symbol}</span>
                         {' · '}
                         Recipient gets: <span className="font-bold text-gray-300">{formatCoinAmount(recipientAmount)} {activeNetwork.symbol}</span>
                       </div>}
