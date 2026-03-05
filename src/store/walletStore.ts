@@ -255,6 +255,7 @@ interface WalletState {
   checkAutolock: () => void
   
   addActivity: (item: Activity) => void
+  trackActivityTransactionStatus: (params: { txid: string; networkId?: string }) => void
   changePassword: (oldPass: string, newPass: string) => boolean
   
   // Account management
@@ -359,6 +360,97 @@ const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
 const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
 let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
 let sendOperationNextAllowedAtMs = 0
+const trackedActivityStatusPollers = new Set<string>()
+
+function buildTrackedActivityStatusKey(networkId: string, txid: string): string {
+  return `${String(networkId || '').trim().toLowerCase()}::${String(txid || '').trim().toLowerCase()}`
+}
+
+async function checkOnChainTransactionStatus(
+  net: Network,
+  rpcConfig: UtxoRpcConfig,
+  txid: string
+): Promise<Activity['status']> {
+  const normalizedTxid = String(txid || '').trim()
+  if (!normalizedTxid) return 'pending'
+
+  if (net.coinType === 'EVM') {
+    try {
+      const receipt = await callBridgeMethod(rpcConfig, 'eth_getTransactionReceipt', [normalizedTxid]) as any
+      if (!receipt || typeof receipt !== 'object') return 'pending'
+      const status = String(receipt?.status ?? '').trim().toLowerCase()
+      if (status === '0x1' || status === '1' || status === '0x01') return 'confirmed'
+      if (status === '0x0' || status === '0' || status === '0x00') return 'rejected'
+      if (String(receipt?.blockHash || '').trim()) return 'confirmed'
+      return 'pending'
+    } catch {
+      return 'pending'
+    }
+  }
+
+  const modelId = resolveNetworkModelId(net)
+
+  if (modelId === 'sol') {
+    try {
+      const statusRes = await callBridgeMethod(
+        rpcConfig,
+        'getSignatureStatuses',
+        [[normalizedTxid], { searchTransactionHistory: true }]
+      ) as any
+      const row = statusRes?.value?.[0] ?? statusRes?.result?.value?.[0]
+      if (!row) return 'pending'
+      if (row?.err) return 'rejected'
+      const confirmationStatus = String(row?.confirmationStatus || '').trim().toLowerCase()
+      if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') return 'confirmed'
+      const confirmations = Number(row?.confirmations)
+      if (Number.isFinite(confirmations) && confirmations >= 1) return 'confirmed'
+      return 'pending'
+    } catch {
+      return 'pending'
+    }
+  }
+
+  if (net.coinType === 'UTXO') {
+    try {
+      const txInfo = await callBridgeMethod(rpcConfig, 'gettransaction', [normalizedTxid]) as any
+      const confirmations = Number(txInfo?.confirmations)
+      if (Number.isFinite(confirmations) && confirmations >= 1) return 'confirmed'
+      if (String(txInfo?.blockhash || '').trim()) return 'confirmed'
+    } catch {
+      // Continue with getrawtransaction fallback.
+    }
+    try {
+      const rawInfo = await callBridgeMethod(rpcConfig, 'getrawtransaction', [normalizedTxid, true]) as any
+      const confirmations = Number(rawInfo?.confirmations)
+      if (Number.isFinite(confirmations) && confirmations >= 1) return 'confirmed'
+      if (String(rawInfo?.blockhash || '').trim()) return 'confirmed'
+      return 'pending'
+    } catch {
+      return 'pending'
+    }
+  }
+
+  if (net.coinType === 'XRP') {
+    try {
+      const txInfo = await callBridgeMethod(rpcConfig, 'tx', [{ transaction: normalizedTxid, binary: false }]) as any
+      const payload = txInfo?.result ?? txInfo
+      const validated = Boolean(payload?.validated)
+      const txResult = String(
+        payload?.meta?.TransactionResult
+        || payload?.meta?.transaction_result
+        || payload?.engine_result
+        || ''
+      ).trim().toUpperCase()
+      if (txResult && txResult !== 'TESSUCCESS') return 'rejected'
+      if (validated || Number.isFinite(Number(payload?.ledger_index))) return 'confirmed'
+      return 'pending'
+    } catch {
+      return 'pending'
+    }
+  }
+
+  return 'pending'
+}
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -4481,6 +4573,61 @@ export const useWalletStore = create<WalletState>()(
         if (!normalized) return state
         return { activity: [normalized, ...state.activity] }
       }),
+
+      trackActivityTransactionStatus: ({ txid, networkId }) => {
+        const normalizedTxid = String(txid || '').trim()
+        const requestedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim())
+        if (!normalizedTxid || !requestedNetworkId) return
+
+        const pollerKey = buildTrackedActivityStatusKey(requestedNetworkId, normalizedTxid)
+        if (trackedActivityStatusPollers.has(pollerKey)) return
+        trackedActivityStatusPollers.add(pollerKey)
+
+        void (async () => {
+          try {
+            for (let attempt = 0; attempt < 45; attempt += 1) {
+              const state = get()
+              const current = state.activity.find((entry) =>
+                String(entry.id || '').trim().toLowerCase() === normalizedTxid.toLowerCase()
+                && normalizeNetworkIdAlias(String(entry.networkId || '').trim()) === requestedNetworkId
+              )
+              if (!current || current.status !== 'pending') return
+
+              const net = state.networks.find((entry) => entry.id === requestedNetworkId)
+              if (!net) return
+
+              let rpcConfig: UtxoRpcConfig | null = null
+              try {
+                rpcConfig = await createUtxoRpcConfig(net, {
+                  useLocalRpc: state.useLocalRpc,
+                  localRpcOverride: state.localRpcOverrides?.[net.id],
+                  secureBridgeSigner: get().signBackendAuthMessage
+                })
+              } catch {
+                rpcConfig = null
+              }
+
+              if (rpcConfig) {
+                const status = await checkOnChainTransactionStatus(net, rpcConfig, normalizedTxid)
+                if (status === 'confirmed' || status === 'rejected') {
+                  set((prev) => ({
+                    activity: prev.activity.map((entry) => {
+                      const sameTx = String(entry.id || '').trim().toLowerCase() === normalizedTxid.toLowerCase()
+                      const sameNetwork = normalizeNetworkIdAlias(String(entry.networkId || '').trim()) === requestedNetworkId
+                      return sameTx && sameNetwork ? { ...entry, status } : entry
+                    })
+                  }))
+                  return
+                }
+              }
+
+              await waitMs(8000)
+            }
+          } finally {
+            trackedActivityStatusPollers.delete(pollerKey)
+          }
+        })()
+      },
 
       changePassword: (oldPass, newPass) => {
         // Legacy stub: now we store an encrypted vault, so password change requires re-encrypt.

@@ -94,9 +94,7 @@ class ErrorBoundary extends React.Component<
 }
 
 installGlobalErrorMonitor('popup-ui')
-if (shouldBlockZoomShortcuts()) {
-  installZoomShortcutBlockers()
-}
+installZoomShortcutBlockers()
 
 const rootElement = document.getElementById('app')
 if (!rootElement) {

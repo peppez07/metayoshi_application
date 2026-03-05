@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { IoArrowUpOutline, IoChevronForward, IoEyeOutline, IoLayersOutline } from 'react-icons/io5'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { formatAssetAmount, parseAssetName } from './useAssetListModel'
@@ -33,8 +33,14 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
-  const logoSrc = String(logoUrl || '').trim() || getTokenLogoForAsset(effectiveName)
+  const fallbackLogo = useMemo(() => getTokenLogoForAsset(effectiveName), [effectiveName])
+  const primaryLogo = String(logoUrl || '').trim() || fallbackLogo
+  const [logoSrc, setLogoSrc] = useState(primaryLogo)
   const compact = variant === 'compact'
+
+  useEffect(() => {
+    setLogoSrc(primaryLogo)
+  }, [primaryLogo])
 
   return (
     <div className={`w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 transition-colors ${
@@ -51,7 +57,18 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
             isRootAsset ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-blue-500/10 border border-blue-500/30'
           }`}>
             {logoSrc ? (
-              <img src={logoSrc} alt={`${name} logo`} className="w-full h-full rounded-full object-cover" />
+              <img
+                src={logoSrc}
+                alt={`${name} logo`}
+                className="w-full h-full rounded-full object-cover"
+                onError={() => {
+                  if (logoSrc !== fallbackLogo) {
+                    setLogoSrc(fallbackLogo)
+                    return
+                  }
+                  setLogoSrc('')
+                }}
+              />
             ) : (
               <IoLayersOutline className={`${compact ? 'w-4.5 h-4.5' : 'w-5 h-5'} ${isRootAsset ? 'text-yellow-400' : 'text-blue-400'}`} />
             )}
@@ -114,4 +131,3 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
 }
 
 export default AssetListRow
-

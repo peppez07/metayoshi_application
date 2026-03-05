@@ -32,8 +32,8 @@ import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
 const APP_POPUP_WIDTH = 380
-const APP_POPUP_HEIGHT = 640
-const APP_POPUP_MAX_HEIGHT = 700
+// Chrome window bounds use integer pixels; 663.2px requested by product is rounded to 663px.
+const APP_POPUP_HEIGHT = 663
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const managedPopupWindowIds = new Set<number>()
 let managedPopupWindowId: number | null = null
@@ -458,6 +458,7 @@ async function openManagedPopupInternal(url: string): Promise<void> {
     await chrome.windows.update(windowId, {
       width: APP_POPUP_WIDTH,
       height: APP_POPUP_HEIGHT,
+      state: 'normal',
       left,
       top,
       focused: true
@@ -471,6 +472,7 @@ async function openManagedPopupInternal(url: string): Promise<void> {
     type: 'popup',
     width: APP_POPUP_WIDTH,
     height: APP_POPUP_HEIGHT,
+    state: 'normal',
     left,
     top,
     focused: true
@@ -616,8 +618,11 @@ async function enforceManagedPopupBounds(windowId: number): Promise<void> {
     if (typeof win.width === 'number' && win.width !== APP_POPUP_WIDTH) {
       nextBounds.width = APP_POPUP_WIDTH
     }
-    if (typeof win.height === 'number' && win.height > APP_POPUP_MAX_HEIGHT) {
-      nextBounds.height = APP_POPUP_MAX_HEIGHT
+    if (typeof win.height === 'number' && win.height !== APP_POPUP_HEIGHT) {
+      nextBounds.height = APP_POPUP_HEIGHT
+    }
+    if (win.state && win.state !== 'normal') {
+      nextBounds.state = 'normal'
     }
     if (Object.keys(nextBounds).length > 0) {
       await chrome.windows.update(windowId, nextBounds)

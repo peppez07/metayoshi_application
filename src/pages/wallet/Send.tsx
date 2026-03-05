@@ -50,6 +50,42 @@ function shortAddress(address: string): string {
   return `${raw.slice(0, 8)}...${raw.slice(-6)}`
 }
 
+type TokenCircleLogoProps = {
+  logoUrl?: string
+  assetName: string
+  alt: string
+  className: string
+}
+
+const TokenCircleLogo: React.FC<TokenCircleLogoProps> = ({ logoUrl, assetName, alt, className }) => {
+  const fallbackLogo = useMemo(() => getTokenLogoForAsset(assetName), [assetName])
+  const primaryLogo = String(logoUrl || '').trim() || fallbackLogo
+  const [resolvedSrc, setResolvedSrc] = useState(primaryLogo)
+
+  useEffect(() => {
+    setResolvedSrc(primaryLogo)
+  }, [primaryLogo])
+
+  if (!resolvedSrc) {
+    return <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />
+  }
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (resolvedSrc !== fallbackLogo) {
+          setResolvedSrc(fallbackLogo)
+          return
+        }
+        setResolvedSrc('')
+      }}
+    />
+  )
+}
+
 type SendRouteState = {
   assetId?: string
   sendEntryId?: string
@@ -1453,12 +1489,12 @@ const Send: React.FC = () => {
                 className="w-full text-left flex items-center gap-3"
               >
                 <div className="w-9 h-9 rounded-full border border-dark-600 bg-dark-700/60 overflow-hidden flex items-center justify-center shrink-0">
-                  {(() => {
-                    const resolvedLogo = String(row.logoUrl || '').trim() || getTokenLogoForAsset(row.label || row.symbol)
-                    return resolvedLogo
-                      ? <img src={resolvedLogo} alt={row.label} className="w-full h-full object-cover" />
-                      : <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />
-                  })()}
+                  <TokenCircleLogo
+                    logoUrl={row.logoUrl}
+                    assetName={row.label || row.symbol}
+                    alt={row.label}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">
