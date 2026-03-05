@@ -39,6 +39,11 @@ function formatCoinAmount(v: number): string {
   return v.toFixed(8).replace(/\.?0+$/, '')
 }
 
+function parseCoinAmount(value: unknown): number {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function estimateTransferFee(network: { coinType: string; feePerByte?: number }): number {
   if (network.coinType === 'UTXO') {
     const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
@@ -114,6 +119,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     networks,
     activeNetworkId,
     addActivity,
+    trackActivityTransactionStatus,
     sendEvmTransaction,
     sendXrpTransaction,
     sendCardanoTransaction,
@@ -177,6 +183,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       return 0n
     }
   }, [activeNetwork.coinType, isAssetTransfer, safeAmount])
+  const availableNativeBalance = useMemo(() => {
+    const scoped = parseCoinAmount(activeAccount?.networkBalances?.[activeNetworkId])
+    if (scoped > 0) return scoped
+    return parseCoinAmount(activeAccount?.balance)
+  }, [activeAccount?.balance, activeAccount?.networkBalances, activeNetworkId])
 
   useEffect(() => {
     let cancelled = false
@@ -311,6 +322,14 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       setSubmitError(syncBlockedReason)
       return
     }
+    if (isAssetTransfer && availableNativeBalance + 1e-12 < estimatedNetworkFee) {
+      setSubmitError(`Insufficient ${activeNetwork.symbol} for network fee. Required ~${formatCoinAmount(estimatedNetworkFee)} ${activeNetwork.symbol}, available ${formatCoinAmount(availableNativeBalance)} ${activeNetwork.symbol}.`)
+      return
+    }
+    if (!isAssetTransfer && availableNativeBalance + 1e-12 < estimatedTotalCost) {
+      setSubmitError(`Insufficient balance for amount + fee. Required ~${formatCoinAmount(estimatedTotalCost)} ${activeNetwork.symbol}, available ${formatCoinAmount(availableNativeBalance)} ${activeNetwork.symbol}.`)
+      return
+    }
     if (activeNetwork.coinType === 'UTXO' && donationEnabled && donationRequired && donationAmount > 0 && !donationAddress) {
       setSubmitError('Donation address missing from server policy/config')
       return
@@ -374,10 +393,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         from: fromAddress || '',
         to: toAddress,
         accountId: activeAccount?.id,
-        status: 'confirmed',
+        status: 'pending',
         timestamp: Date.now(),
         networkId: activeNetwork.id
       })
+      trackActivityTransactionStatus({ txid: txHash, networkId: activeNetwork.id })
       void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((err) => {
         console.warn('Post-send fast balance refresh failed:', err)
       })

@@ -31,6 +31,11 @@ function formatRawAmountPlain(rawAmount: number): string {
   return formatUnits8Plain(Math.max(0, Number(rawAmount || 0)) / 1e8)
 }
 
+function parseCoinAmount(value: unknown): number {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
   if (network.coinType === 'UTXO') {
     const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
@@ -365,6 +370,7 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
     sendUtxoTransaction,
     sendAssetTransfer,
     addActivity,
+    trackActivityTransactionStatus,
     refreshActiveBalance
   } = useWalletStore()
 
@@ -482,6 +488,16 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
           let txHash = ''
 
           if (plan.holder.requestType === 'asset') {
+            const senderAccount = scopedState.accounts.find((account) => account.id === plan.holder.accountId)
+            const senderNativeBalance = parseCoinAmount(
+              senderAccount?.networkBalances?.[plan.holder.networkId] ?? senderAccount?.balance
+            )
+            const requiredFee = estimateNativeSendFee(scopedNetwork)
+            if (senderNativeBalance + 1e-12 < requiredFee) {
+              throw new Error(
+                `Insufficient ${scopedNetwork.symbol} for network fee on ${plan.holder.accountLabel}. Required ~${formatUnits8Plain(requiredFee)} ${scopedNetwork.symbol}, available ${formatUnits8Plain(senderNativeBalance)} ${scopedNetwork.symbol}.`
+              )
+            }
             const assetId = String(plan.holder.assetId || row.assetId || '').trim()
             if (!assetId) throw new Error('Missing asset id for merged asset send.')
             const tx = await sendAssetTransfer({
@@ -530,10 +546,11 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
             from: plan.holder.address,
             to: toAddress,
             accountId: plan.holder.accountId,
-            status: 'confirmed',
+            status: 'pending',
             timestamp: Date.now(),
             networkId: plan.holder.networkId
           })
+          trackActivityTransactionStatus({ txid: txHash, networkId: plan.holder.networkId })
 
           nextResults.push({
             holder: plan.holder,
@@ -1468,6 +1485,7 @@ const Send: React.FC = () => {
         {filteredScanRows.map((row) => {
           const expanded = expandedRows[row.key] === true
           const rowNetwork = networkById.get(row.networkId) || activeNetwork
+          const mergedRawAmount = row.holders.reduce((sum, holder) => sum + Math.max(0, Number(holder.rawAmount || 0)), 0)
           const rowCaps = resolveNetworkCapabilities(rowNetwork)
           const rowCanBatchSend = row.requestType === 'native'
             ? rowCaps.features.nativeSend
@@ -1525,7 +1543,7 @@ const Send: React.FC = () => {
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-bold font-mono">{formatUnits8(row.rawAmount / 1e8)}</p>
+                  <p className="text-sm font-bold font-mono">{formatUnits8(mergedRawAmount / 1e8)}</p>
                   <div className="flex justify-end">
                     {expanded ? (
                       <IoChevronDownOutline className="w-4 h-4 text-gray-500" />

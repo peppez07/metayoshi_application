@@ -35,6 +35,7 @@ const DappRequestConfirm: React.FC = () => {
     sendAssetTransfer,
     refreshActiveBalance,
     addActivity,
+    trackActivityTransactionStatus,
     isConnected,
     isSyncing,
     syncPercent,
@@ -233,10 +234,11 @@ const DappRequestConfirm: React.FC = () => {
           from: senderAddress,
           to: requestTo,
           accountId: pendingRequest.accountId,
-          status: 'confirmed',
+          status: 'pending',
           timestamp: Date.now(),
           networkId: networkForActivity.id
         })
+        trackActivityTransactionStatus({ txid: txHash, networkId: networkForActivity.id })
       }
       await refreshActiveBalance()
 
