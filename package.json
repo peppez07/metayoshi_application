@@ -21,6 +21,7 @@
     "release:all": "npm run build:browsers && node scripts/zip-browser.mjs chrome Metayoshi-chrome-store.zip && node scripts/zip-browser.mjs brave Metayoshi-brave-store.zip && node scripts/zip-browser.mjs firefox Metayoshi-firefox-amo.zip",
     "release:browsers": "npm run build:browsers && node scripts/zip-browser.mjs chrome && node scripts/zip-browser.mjs brave && node scripts/zip-browser.mjs firefox",
     "test:api:firo-eth": "node scripts/smoke-api-firo-eth.mjs",
+    "search:sol-logos": "node scripts/search-solana-token-logos.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

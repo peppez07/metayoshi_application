@@ -1,3 +1,4 @@
+import { baseCoin } from './base'
 import { btczCoin } from './btcz'
 import { dashCoin } from './dash'
 import { ethCoin } from './eth'
@@ -49,6 +50,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
+  baseCoin,
   solCoin,
   firoCoin,
   dashCoin,
@@ -64,16 +66,20 @@ const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 const ALLOWED_COIN_IDS = new Set([...ALL_COIN_IDS].filter((id) => !DISABLED_NETWORK_IDS.has(id)))
 const DEFAULT_ENABLED_COIN_IDS = [...ALLOWED_COIN_IDS]
-const EVM_COIN_IDS = new Set<string>(['eth'])
-const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>()
+const EVM_COIN_IDS = new Set<string>(['eth', 'base'])
+const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['base'])
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
-  1: 'eth'
+  1: 'eth',
+  8453: 'base'
 }
 const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   eth: 'eth',
   ethereum: 'eth',
   'ethereum-mainnet': 'eth',
-  'mainnet-ethereum': 'eth'
+  'mainnet-ethereum': 'eth',
+  base: 'base',
+  'base-mainnet': 'base',
+  'mainnet-base': 'base'
 }
 
 function normalizeCoinSelectionToken(rawToken: string): string {

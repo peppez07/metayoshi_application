@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useWalletStore, type Network, type SendableItem } from '../../store/walletStore'
 import { Input } from '../../components/Input'
 import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { getEnabledNetworks } from '../../lib/networkVisibility'
 import {
   IoArrowBackOutline,
   IoChevronDownOutline,
@@ -61,6 +62,17 @@ type GlobalScanOptions = {
   mode?: GlobalScanMode
   refreshBalances?: boolean
   forceAssetRefresh?: boolean
+}
+type SendHubScanDiagnostics = {
+  mode: GlobalScanMode
+  reason: string
+  startedAt: number
+  finishedAt: number
+  durationMs: number
+  totalSteps: number
+  succeededSteps: number
+  failedSteps: number
+  lastFailure?: string
 }
 
 type ScanHolder = {
@@ -128,6 +140,9 @@ const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
 const SEND_HUB_PREFERENCES_KEY = 'metayoshi:send-hub:prefs:v1'
 const SEND_HUB_SCAN_AUTO_INTERVAL_MS = 90_000
 const SEND_HUB_SCAN_STALE_MS = 30_000
+const SEND_HUB_SCAN_MAX_TPS = 5
+const SEND_HUB_SCAN_STEP_DELAY_MS = Math.max(1, Math.trunc(1000 / SEND_HUB_SCAN_MAX_TPS))
+const SEND_HUB_SCAN_STEP_TIMEOUT_MS = 20_000
 
 function normalizeKeyList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -243,6 +258,43 @@ function writeCachedScanRows(rows: AggregatedScanRow[]): void {
   } catch {
     // ignore storage quota/runtime failures
   }
+}
+
+function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+
+    task
+      .then((result) => {
+        clearTimeout(timer)
+        resolve(result)
+      })
+      .catch((error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
+}
+
+function sortAggregatedScanRows(rows: AggregatedScanRow[]): AggregatedScanRow[] {
+  return [...rows]
+    .map((row) => ({
+      ...row,
+      holders: [...row.holders].sort((a, b) => b.rawAmount - a.rawAmount)
+    }))
+    .sort((a, b) => {
+      if (b.rawAmount !== a.rawAmount) return b.rawAmount - a.rawAmount
+      if (a.networkName !== b.networkName) return a.networkName.localeCompare(b.networkName)
+      return a.label.localeCompare(b.label)
+    })
+}
+
+function formatDurationMs(value: number): string {
+  const ms = Math.max(0, Math.round(Number(value || 0)))
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s`
 }
 
 function buildNativeSweepAmountRaw(holderRawAmount: number, network?: Pick<Network, 'coinType' | 'feePerByte'>): number {
@@ -605,14 +657,25 @@ const Send: React.FC = () => {
   const {
     accounts,
     networks,
+    disabledNetworkIds,
+    activeAccountId,
     activeNetworkId,
+    networkAssets,
     getSendableItems,
     setActiveAccount,
     setActiveNetwork,
     fetchNetworkAssets
   } = useWalletStore()
 
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const enabledNetworks = useMemo(
+    () => getEnabledNetworks(networks, disabledNetworkIds),
+    [networks, disabledNetworkIds]
+  )
+  const enabledNetworkIds = useMemo(
+    () => new Set(enabledNetworks.map((network) => network.id)),
+    [enabledNetworks]
+  )
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const networkById = useMemo(() => new Map(networks.map((network) => [network.id, network])), [networks])
 
   const [search, setSearch] = useState('')
@@ -622,11 +685,12 @@ const Send: React.FC = () => {
   const [draggingRowKey, setDraggingRowKey] = useState<string | null>(null)
   const [dragOverRowKey, setDragOverRowKey] = useState<string | null>(null)
   const [isScanningAll, setIsScanningAll] = useState(false)
-  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; label: string }>({
+  const [, setScanProgress] = useState<{ done: number; total: number; label: string }>({
     done: 0,
     total: 0,
     label: ''
   })
+  const [, setScanDiagnostics] = useState<SendHubScanDiagnostics | null>(null)
   const [scanError, setScanError] = useState('')
   const [scanRows, setScanRows] = useState<AggregatedScanRow[]>(() => {
     const cached = readCachedScanRows()
@@ -637,11 +701,33 @@ const Send: React.FC = () => {
   const scanRunIdRef = useRef(0)
   const isScanningRef = useRef(false)
   const scanRestoreSelectionRef = useRef<{ accountId: string | null; networkId: string | null } | null>(null)
+  const enabledNetworksSignatureRef = useRef<string>('')
 
   const allItems = getSendableItems({ includeHidden: true })
+  const activePairItems = useMemo(() => {
+    if (!activeAccountId || !activeNetworkId) return [] as SendableItem[]
+    return getSendableItems({
+      accountId: activeAccountId,
+      networkId: activeNetworkId,
+      includeHidden: true,
+      includeZeroBalance: true
+    })
+  }, [activeAccountId, activeNetworkId, accounts, networkAssets, getSendableItems])
+  const activePairItemByKey = useMemo(() => {
+    const out = new Map<string, SendableItem>()
+    for (const item of activePairItems) {
+      out.set(item.id, item)
+      if (item.assetId) out.set(`asset:${item.assetId}`, item)
+    }
+    return out
+  }, [activePairItems])
+  const visibleScanRows = useMemo(
+    () => scanRows.filter((row) => enabledNetworkIds.has(row.networkId)),
+    [scanRows, enabledNetworkIds]
+  )
   const orderedScanRows = useMemo(
-    () => applySendHubPreferences(scanRows, hubPreferences),
-    [scanRows, hubPreferences]
+    () => applySendHubPreferences(visibleScanRows, hubPreferences),
+    [visibleScanRows, hubPreferences]
   )
   const pinnedRowKeys = useMemo(() => new Set(hubPreferences.pinned), [hubPreferences.pinned])
 
@@ -662,24 +748,99 @@ const Send: React.FC = () => {
     [allItems, selectedId]
   )
   const selectedBatchRow = useMemo(
-    () => scanRows.find((row) => row.key === selectedBatchKey) || null,
-    [scanRows, selectedBatchKey]
+    () => visibleScanRows.find((row) => row.key === selectedBatchKey) || null,
+    [visibleScanRows, selectedBatchKey]
   )
 
   useEffect(() => {
     setHubPreferences((current) => {
-      const normalized = normalizeSendHubPreferencesForRows(current, scanRows)
+      const normalized = normalizeSendHubPreferencesForRows(current, visibleScanRows)
       const sameOrder = normalized.order.length === current.order.length
         && normalized.order.every((key, index) => key === current.order[index])
       const samePinned = normalized.pinned.length === current.pinned.length
         && normalized.pinned.every((key, index) => key === current.pinned[index])
       return (sameOrder && samePinned) ? current : normalized
     })
-  }, [scanRows])
+  }, [visibleScanRows])
 
   useEffect(() => {
     writeSendHubPreferences(hubPreferences)
   }, [hubPreferences])
+
+  useEffect(() => {
+    if (!activeAccountId || !activeNetworkId) return
+    if (isScanningRef.current) return
+    if (scanRows.length === 0) return
+
+    setScanRows((current) => {
+      let changed = false
+      const nextRows: AggregatedScanRow[] = []
+
+      for (const row of current) {
+        if (row.networkId !== activeNetworkId) {
+          nextRows.push(row)
+          continue
+        }
+
+        let rowChanged = false
+        const nextHolders: ScanHolder[] = []
+
+        for (const holder of row.holders) {
+          if (holder.accountId !== activeAccountId) {
+            nextHolders.push(holder)
+            continue
+          }
+
+          const latest = activePairItemByKey.get(holder.itemId)
+            || (holder.assetId ? activePairItemByKey.get(`asset:${holder.assetId}`) : undefined)
+          const latestRawAmount = Math.max(0, Math.round(Number(latest?.rawAmount || 0)))
+
+          if (latestRawAmount <= 0) {
+            changed = true
+            rowChanged = true
+            continue
+          }
+
+          const latestAmount = formatUnits8(latestRawAmount / 1e8)
+          if (latestRawAmount !== holder.rawAmount || latestAmount !== holder.amount) {
+            changed = true
+            rowChanged = true
+            nextHolders.push({
+              ...holder,
+              rawAmount: latestRawAmount,
+              amount: latestAmount
+            })
+            continue
+          }
+
+          nextHolders.push(holder)
+        }
+
+        if (!rowChanged) {
+          nextRows.push(row)
+          continue
+        }
+
+        const nextRowRaw = nextHolders.reduce((sum, holder) => sum + Math.max(0, holder.rawAmount), 0)
+        if (nextRowRaw <= 0) {
+          changed = true
+          continue
+        }
+
+        nextRows.push({
+          ...row,
+          rawAmount: nextRowRaw,
+          amount: formatUnits8(nextRowRaw / 1e8),
+          holders: [...nextHolders].sort((a, b) => b.rawAmount - a.rawAmount)
+        })
+      }
+
+      if (!changed) return current
+      const sorted = sortAggregatedScanRows(nextRows)
+      writeCachedScanRows(sorted)
+      return sorted
+    })
+  }, [activeAccountId, activeNetworkId, activePairItemByKey, scanRows.length])
 
   useEffect(() => {
     const routeState = (location.state as SendRouteState | null) || null
@@ -717,6 +878,7 @@ const Send: React.FC = () => {
     const includeBalanceRefresh = options?.refreshBalances ?? (mode === 'manual')
     const forceAssetRefresh = options?.forceAssetRefresh ?? (mode === 'manual')
     const reason = String(options?.reason || '').trim()
+    const startedAt = Date.now()
     setScanProgress({
       done: 0,
       total: 0,
@@ -742,6 +904,7 @@ const Send: React.FC = () => {
     const shouldCancel = () => scanRunIdRef.current !== runId
     const scanAccounts = [...stateBefore.accounts]
     const scanNetworks = stateBefore.networks.filter((network) => {
+      if (!enabledNetworkIds.has(network.id)) return false
       const networkCaps = resolveNetworkCapabilities(network)
       return networkCaps.features.nativeSend || networkCaps.features.assetLayer || networkCaps.features.assetSend
     })
@@ -749,6 +912,9 @@ const Send: React.FC = () => {
     const total = Math.max(1, scanAccounts.length * scanNetworks.length)
     const aggregate = new Map<string, AggregatedScanRow>()
     let done = 0
+    let succeededSteps = 0
+    let failedSteps = 0
+    let lastFailure = ''
 
     try {
       for (const account of scanAccounts) {
@@ -764,72 +930,65 @@ const Send: React.FC = () => {
           setScanProgress({
             done,
             total,
-            label: `Refreshing global balances (${done}/${total})...`
+            label: failedSteps > 0
+              ? `Refreshing global balances (${done}/${total})... ${failedSteps} issue${failedSteps === 1 ? '' : 's'}`
+              : `Refreshing global balances (${done}/${total})...`
           })
 
-          await setActiveNetwork(
-            network.id,
-            includeBalanceRefresh ? undefined : { skipRefresh: true }
-          )
-          if (shouldCancel()) throw new Error('[cancelled]')
-
-          useWalletStore.setState((state) => ({
-            networkAssets: { ...state.networkAssets, [network.id]: {} },
-            networkAssetLogos: { ...state.networkAssetLogos, [network.id]: {} },
-            networkAssetLabels: { ...state.networkAssetLabels, [network.id]: {} },
-            evmNftAssets: { ...state.evmNftAssets, [network.id]: {} }
-          }))
-          if (shouldCancel()) throw new Error('[cancelled]')
-
-          if (resolveNetworkCapabilities(network).features.assetLayer) {
-            await fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
+          try {
+            await withTimeout(
+              setActiveNetwork(
+                network.id,
+                includeBalanceRefresh ? undefined : { skipRefresh: true }
+              ),
+              SEND_HUB_SCAN_STEP_TIMEOUT_MS,
+              `[${network.symbol}] network switch`
+            )
             if (shouldCancel()) throw new Error('[cancelled]')
-          }
 
-          const scanState = useWalletStore.getState()
-          const refreshedAccount = scanState.accounts.find((row) => row.id === account.id) || account
-          const address = String(
-            refreshedAccount.networkAddresses?.[network.id]
-            || (network.coinType === 'EVM' ? refreshedAccount.addresses?.EVM : '')
-            || ''
-          ).trim()
-          const itemRows = scanState.getSendableItems({
-            accountId: account.id,
-            networkId: network.id,
-            includeHidden: true,
-            includeZeroBalance: false
-          })
+            useWalletStore.setState((state) => ({
+              networkAssets: { ...state.networkAssets, [network.id]: {} },
+              networkAssetLogos: { ...state.networkAssetLogos, [network.id]: {} },
+              networkAssetLabels: { ...state.networkAssetLabels, [network.id]: {} },
+              evmNftAssets: { ...state.evmNftAssets, [network.id]: {} }
+            }))
+            if (shouldCancel()) throw new Error('[cancelled]')
 
-          for (const item of itemRows) {
-            const rawAmount = Math.max(0, Math.round(Number(item.rawAmount || 0)))
-            if (rawAmount <= 0) continue
-            const key = `${network.id}::${item.id}`
-            const holderKey = `${account.id}::${network.id}::${item.id}`
-            const holder: ScanHolder = {
-              key: holderKey,
-              networkId: network.id,
-              networkSymbol: network.symbol,
-              accountId: account.id,
-              accountLabel: getAccountDisplayName(refreshedAccount, network.id, refreshedAccount.name),
-              address,
-              itemId: item.id,
-              assetId: item.assetId,
-              requestType: item.requestType,
-              kind: item.kind,
-              label: item.label,
-              symbol: item.symbol,
-              logoUrl: item.logoUrl,
-              rawAmount,
-              amount: formatUnits8(rawAmount / 1e8)
+            if (resolveNetworkCapabilities(network).features.assetLayer) {
+              await withTimeout(
+                fetchNetworkAssets({ force: forceAssetRefresh }),
+                SEND_HUB_SCAN_STEP_TIMEOUT_MS,
+                `[${network.symbol}] asset refresh`
+              )
+              if (shouldCancel()) throw new Error('[cancelled]')
             }
-            const existing = aggregate.get(key)
-            if (!existing) {
-              aggregate.set(key, {
-                key,
+
+            const scanState = useWalletStore.getState()
+            const refreshedAccount = scanState.accounts.find((row) => row.id === account.id) || account
+            const address = String(
+              refreshedAccount.networkAddresses?.[network.id]
+              || (network.coinType === 'EVM' ? refreshedAccount.addresses?.EVM : '')
+              || ''
+            ).trim()
+            const itemRows = scanState.getSendableItems({
+              accountId: account.id,
+              networkId: network.id,
+              includeHidden: true,
+              includeZeroBalance: false
+            })
+
+            for (const item of itemRows) {
+              const rawAmount = Math.max(0, Math.round(Number(item.rawAmount || 0)))
+              if (rawAmount <= 0) continue
+              const key = `${network.id}::${item.id}`
+              const holderKey = `${account.id}::${network.id}::${item.id}`
+              const holder: ScanHolder = {
+                key: holderKey,
                 networkId: network.id,
                 networkSymbol: network.symbol,
-                networkName: network.name,
-                networkLogo: network.logo,
+                accountId: account.id,
+                accountLabel: getAccountDisplayName(refreshedAccount, network.id, refreshedAccount.name),
+                address,
                 itemId: item.id,
                 assetId: item.assetId,
                 requestType: item.requestType,
@@ -838,54 +997,98 @@ const Send: React.FC = () => {
                 symbol: item.symbol,
                 logoUrl: item.logoUrl,
                 rawAmount,
-                amount: formatUnits8(rawAmount / 1e8),
-                holders: [holder]
-              })
-              continue
+                amount: formatUnits8(rawAmount / 1e8)
+              }
+              const existing = aggregate.get(key)
+              if (!existing) {
+                aggregate.set(key, {
+                  key,
+                  networkId: network.id,
+                  networkSymbol: network.symbol,
+                  networkName: network.name,
+                  networkLogo: network.logo,
+                  itemId: item.id,
+                  assetId: item.assetId,
+                  requestType: item.requestType,
+                  kind: item.kind,
+                  label: item.label,
+                  symbol: item.symbol,
+                  logoUrl: item.logoUrl,
+                  rawAmount,
+                  amount: formatUnits8(rawAmount / 1e8),
+                  holders: [holder]
+                })
+                continue
+              }
+              existing.rawAmount += rawAmount
+              existing.amount = formatUnits8(existing.rawAmount / 1e8)
+              const holderExists = existing.holders.some((row) => row.key === holder.key)
+              if (!holderExists) existing.holders.push(holder)
             }
-            existing.rawAmount += rawAmount
-            existing.amount = formatUnits8(existing.rawAmount / 1e8)
-            const holderExists = existing.holders.some((row) => row.key === holder.key)
-            if (!holderExists) existing.holders.push(holder)
+            succeededSteps += 1
+          } catch (stepError) {
+            const message = stepError instanceof Error ? stepError.message : String(stepError)
+            if (message === '[cancelled]') throw stepError
+            failedSteps += 1
+            lastFailure = `[${network.symbol}] ${message}`
           }
 
-          await new Promise((resolve) => setTimeout(resolve, 0))
+          if (shouldCancel()) throw new Error('[cancelled]')
+          await new Promise((resolve) => setTimeout(resolve, SEND_HUB_SCAN_STEP_DELAY_MS))
         }
       }
 
       if (shouldCancel()) throw new Error('[cancelled]')
 
-      const rows = [...aggregate.values()]
-        .map((row) => ({
-          ...row,
-          holders: [...row.holders].sort((a, b) => b.rawAmount - a.rawAmount)
-        }))
-        .sort((a, b) => {
-          if (b.rawAmount !== a.rawAmount) return b.rawAmount - a.rawAmount
-          if (a.networkName !== b.networkName) return a.networkName.localeCompare(b.networkName)
-          return a.label.localeCompare(b.label)
-        })
+      const rows = sortAggregatedScanRows([...aggregate.values()])
 
       setScanRows(rows)
       setExpandedRows({})
       writeCachedScanRows(rows)
+      const finishedAt = Date.now()
+      setScanDiagnostics({
+        mode,
+        reason,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        totalSteps: total,
+        succeededSteps,
+        failedSteps,
+        lastFailure: lastFailure || undefined
+      })
+      if (failedSteps > 0) {
+        setScanError(`Partial scan: ${failedSteps}/${total} checks failed. Last: ${lastFailure}`)
+      }
       if (rows.length === 0) {
         setScanProgress({
           done: total,
           total,
-          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete. No balances found on scanned accounts.`
+          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete in ${formatDurationMs(finishedAt - startedAt)}. No balances found.`
         })
       } else {
         setScanProgress({
           done: total,
           total,
-          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete. ${rows.length} aggregated holdings.`
+          label: `${mode === 'manual' ? 'Full scan' : 'Auto-update'} complete in ${formatDurationMs(finishedAt - startedAt)}. ${rows.length} holdings${failedSteps > 0 ? `, ${failedSteps} issue${failedSteps === 1 ? '' : 's'}` : ''}.`
         })
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message !== '[cancelled]') {
         setScanError(`Global scan failed: ${message}`)
+        const finishedAt = Date.now()
+        setScanDiagnostics({
+          mode,
+          reason,
+          startedAt,
+          finishedAt,
+          durationMs: Math.max(0, finishedAt - startedAt),
+          totalSteps: total,
+          succeededSteps,
+          failedSteps: Math.max(failedSteps, 1),
+          lastFailure: message
+        })
       }
     } finally {
       const cancelled = shouldCancel()
@@ -901,9 +1104,13 @@ const Send: React.FC = () => {
           useWalletStore.setState({ activeAccountId: originalActiveAccountId })
         }
         if (originalActiveNetworkId) {
-          await useWalletStore.getState().setActiveNetwork(
-            originalActiveNetworkId,
-            includeBalanceRefresh ? undefined : { skipRefresh: true }
+          await withTimeout(
+            useWalletStore.getState().setActiveNetwork(
+              originalActiveNetworkId,
+              includeBalanceRefresh ? undefined : { skipRefresh: true }
+            ),
+            SEND_HUB_SCAN_STEP_TIMEOUT_MS,
+            '[restore] network switch'
           ).catch(() => {})
           await useWalletStore.getState().fetchNetworkAssets({ force: forceAssetRefresh }).catch(() => {})
         }
@@ -916,7 +1123,7 @@ const Send: React.FC = () => {
         scanRestoreSelectionRef.current = null
       }
     }
-  }, [fetchNetworkAssets, setActiveNetwork])
+  }, [enabledNetworkIds, fetchNetworkAssets, setActiveNetwork])
 
   useEffect(() => {
     return () => {
@@ -940,10 +1147,10 @@ const Send: React.FC = () => {
     if (hasDirectRouteRequest || selectedId || selectedBatchKey) return
     const cached = readCachedScanRows()
     const cacheAgeMs = cached ? Math.max(0, Date.now() - cached.updatedAt) : Number.POSITIVE_INFINITY
-    if (scanRows.length === 0 && cached?.rows?.length) {
+    if (visibleScanRows.length === 0 && cached?.rows?.length) {
       setScanRows(cached.rows)
     }
-    if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || scanRows.length === 0) && !isScanningRef.current) {
+    if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || visibleScanRows.length === 0) && !isScanningRef.current) {
       void runGlobalScan({ mode: 'auto', reason: 'initial load', refreshBalances: true })
     }
 
@@ -973,19 +1180,36 @@ const Send: React.FC = () => {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [hasDirectRouteRequest, runGlobalScan, scanRows.length, selectedBatchKey, selectedId])
+  }, [hasDirectRouteRequest, runGlobalScan, selectedBatchKey, selectedId, visibleScanRows.length])
 
   useEffect(() => {
     const routeState = (location.state as SendRouteState | null) || null
     const requestedModeRaw = String(routeState?.hubMode || '').trim().toLowerCase()
     if (requestedModeRaw !== 'global') return
 
-    if (routeState?.autoScan === true && scanRows.length === 0 && !isScanningAll) {
+    if (routeState?.autoScan === true && visibleScanRows.length === 0 && !isScanningAll) {
       void runGlobalScan({ mode: 'auto', reason: 'global network entry' })
     }
 
     navigate('/wallet/send', { replace: true, state: null })
-  }, [location.state, navigate, scanRows.length, isScanningAll, runGlobalScan])
+  }, [location.state, navigate, visibleScanRows.length, isScanningAll, runGlobalScan])
+
+  useEffect(() => {
+    const signature = enabledNetworks
+      .map((network) => network.id)
+      .sort((a, b) => a.localeCompare(b))
+      .join('|')
+    const previous = enabledNetworksSignatureRef.current
+    enabledNetworksSignatureRef.current = signature
+    if (!previous || previous === signature) return
+    if (hasDirectRouteRequest || selectedId || selectedBatchKey) return
+    void runGlobalScan({
+      mode: 'auto',
+      reason: 'enabled network list updated',
+      refreshBalances: true,
+      forceAssetRefresh: true
+    })
+  }, [enabledNetworks, hasDirectRouteRequest, runGlobalScan, selectedBatchKey, selectedId])
 
   const openSendFromScanHolder = async (holder: ScanHolder) => {
     setScanError('')
@@ -1033,10 +1257,6 @@ const Send: React.FC = () => {
         pinned: [...pinned]
       }
     })
-  }
-
-  const resetHubPreferences = () => {
-    setHubPreferences({ order: [], pinned: [] })
   }
 
   const applyDragReorder = (draggedKey: string, targetKey: string) => {
@@ -1135,22 +1355,6 @@ const Send: React.FC = () => {
             onChange={(event) => setSearch(event.target.value)}
             className="pl-9 bg-dark-700/50 border-dark-600 text-sm"
           />
-        </div>
-
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[10px] text-gray-500">
-            {search.trim()
-              ? 'Clear search to drag and reorder rows.'
-              : 'Drag rows to reorder. Pin rows to keep them on top.'}
-          </p>
-          <button
-            type="button"
-            onClick={resetHubPreferences}
-            disabled={hubPreferences.order.length === 0 && hubPreferences.pinned.length === 0}
-            className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase border border-dark-500 text-gray-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Reset order
-          </button>
         </div>
 
         {scanError && (

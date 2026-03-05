@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { IoArrowBackOutline, IoDocumentOutline, IoOpenOutline, IoRefreshOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../store/walletStore'
+import { parseSolanaAssetType } from '../../lib/assetTypes'
 
 type PreviewKind = 'image' | 'pdf' | 'json' | 'text' | 'binary' | 'none'
 
@@ -41,7 +42,7 @@ function inferKind(contentType: string): PreviewKind {
 const AssetPreviewPage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { fetchAssetDetails } = useWalletStore()
+  const { fetchAssetDetails, networks, activeNetworkId } = useWalletStore()
 
   const assetId = String((location.state as { assetId?: string } | null)?.assetId || '').trim()
   const [loading, setLoading] = useState(true)
@@ -55,6 +56,14 @@ const AssetPreviewPage: React.FC = () => {
   const [activeSourceUrl, setActiveSourceUrl] = useState('')
 
   const gatewayUrls = useMemo(() => buildSourceUrls(sourceRef), [sourceRef])
+  const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0]
+  const activeModelId = String(activeNetwork?.runtimeModelId || activeNetwork?.id || '').trim().toLowerCase()
+  const isSolanaEcosystem = activeNetwork?.coinType === 'SOL' || activeModelId === 'sol'
+  const isSolanaNftAsset = useMemo(() => {
+    if (!isSolanaEcosystem) return true
+    const type = parseSolanaAssetType(assetId)
+    return type === 'spl-nft' || type === 'compressed-nft'
+  }, [assetId, isSolanaEcosystem])
 
   const loadPreview = async () => {
     setLoading(true)
@@ -206,10 +215,17 @@ const AssetPreviewPage: React.FC = () => {
           </div>
         )}
 
-        {!loading && (kind === 'json' || kind === 'text') && (
+        {!loading && (kind === 'json' || kind === 'text') && isSolanaNftAsset && (
           <pre className="rounded-xl border border-dark-600 bg-dark-900 p-3 text-[11px] text-gray-300 font-mono whitespace-pre-wrap break-words">
             {textContent || 'No text content to preview.'}
           </pre>
+        )}
+
+        {!loading && (kind === 'json' || kind === 'text') && !isSolanaNftAsset && (
+          <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-4 flex items-center gap-3">
+            <IoDocumentOutline className="w-5 h-5 text-gray-400 shrink-0" />
+            <div className="text-xs text-gray-300">Code preview is hidden for non-NFT Solana tokens.</div>
+          </div>
         )}
 
         {!loading && (kind === 'binary' || kind === 'none') && (

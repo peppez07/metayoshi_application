@@ -11,6 +11,7 @@ import { getAccountDisplayName } from '../lib/accountName'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { compareNetworksByModelFamily } from '../lib/coinModel'
 import { getModelIconRingClass } from '../buildConfig'
+import { getEnabledNetworks } from '../lib/networkVisibility'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -24,6 +25,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     syncPercent,
     activeNetworkId,
     networks,
+    disabledNetworkIds,
     activity,
     accounts,
     activeAccountId,
@@ -51,7 +53,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const [qrDataUrl, setQrDataUrl] = React.useState('')
   const [statusNow, setStatusNow] = React.useState(() => Date.now())
 
-  const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const enabledNetworks = React.useMemo(
+    () => getEnabledNetworks(networks, disabledNetworkIds),
+    [networks, disabledNetworkIds]
+  )
+  const activeNetwork = enabledNetworks.find(n => n.id === activeNetworkId) || enabledNetworks[0]
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const rankedNetworks = React.useMemo(() => {
     const usageByNetwork = new Map<string, number>()
@@ -60,14 +66,14 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       if (!networkId) continue
       usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
     }
-    return [...networks].sort((a, b) => {
+    return [...enabledNetworks].sort((a, b) => {
       const familyDelta = compareNetworksByModelFamily(a, b)
       if (familyDelta !== 0) return familyDelta
       const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
       if (usageDelta !== 0) return usageDelta
       return a.name.localeCompare(b.name)
     })
-  }, [activity, networks])
+  }, [activity, enabledNetworks])
   const visibleNetworks = React.useMemo(() => {
     const query = networkSearch.trim().toLowerCase()
     if (!query) return rankedNetworks

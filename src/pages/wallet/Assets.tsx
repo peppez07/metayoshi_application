@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore } from '../../store/walletStore'
 import { IoLayersOutline, IoChevronForward, IoEyeOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
-import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { isEvmNftAssetKey, parseSolanaAssetType, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -144,7 +144,11 @@ const Assets: React.FC = () => {
     || activeNetwork.coinType === 'XRP'
   const canOpenAssetSend = caps.features.assetSend
   const nftLookup = evmNftAssets[activeNetworkId] ?? {}
-  const isPreviewableAssetName = (name: string): boolean => supportsPreview
+  const isPreviewableAssetName = useCallback((name: string): boolean => {
+    if (!supportsPreview) return false
+    if (isSolanaEcosystem) return parseSolanaAssetType(name) !== 'spl-token'
+    return true
+  }, [isSolanaEcosystem, supportsPreview])
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
@@ -195,6 +199,12 @@ const Assets: React.FC = () => {
     let cancelled = false
     const checkPreviewability = async () => {
       for (const assetName of previewNames) {
+        if (!isPreviewableAssetName(assetName)) {
+          if (!cancelled) {
+            setPreviewByAsset((prev) => (prev[assetName] === false ? prev : { ...prev, [assetName]: false }))
+          }
+          continue
+        }
         if (previewByAsset[assetName] !== undefined) continue
         if (checkingRef.current.has(assetName)) continue
         checkingRef.current.add(assetName)
@@ -215,7 +225,7 @@ const Assets: React.FC = () => {
     }
     if (previewNames.length > 0) void checkPreviewability()
     return () => { cancelled = true }
-  }, [previewNames, fetchAssetDetails, previewByAsset, supportsPreview])
+  }, [previewNames, fetchAssetDetails, isPreviewableAssetName, previewByAsset, supportsPreview])
 
   if (total === 0) {
     return (

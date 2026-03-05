@@ -13,6 +13,14 @@ const tokenListCache = createRequestCache<Record<string, SolanaTokenRegistryEntr
   maxEntries: 2
 })
 
+const SOLANA_TOKEN_REGISTRY_FALLBACK_URLS = [
+  // Jupiter legacy endpoint (kept for compatibility with existing setups).
+  'https://token.jup.ag/all',
+  // Public static token list mirrors.
+  'https://raw.githubusercontent.com/solana-labs/token-list/main/src/tokens/solana.tokenlist.json',
+  'https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/src/tokens/solana.tokenlist.json'
+]
+
 function normalizeMint(mint: string): string {
   return String(mint || '').trim()
 }
@@ -26,37 +34,65 @@ function readEnvFlag(name: string, fallback = false): boolean {
   return fallback
 }
 
+function extractTokenRows(json: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(json)) return json as Array<Record<string, unknown>>
+  if (json && typeof json === 'object') {
+    const rows = (json as any)?.tokens
+    if (Array.isArray(rows)) return rows as Array<Record<string, unknown>>
+  }
+  return []
+}
+
+function parseTokenRows(rows: Array<Record<string, unknown>>): Record<string, SolanaTokenRegistryEntry> {
+  const out: Record<string, SolanaTokenRegistryEntry> = {}
+  for (const row of rows) {
+    const address = normalizeMint(String(row?.address || row?.mint || ''))
+    const symbol = String(row?.symbol || '').trim()
+    const name = String(row?.name || '').trim()
+    const decimals = Number(row?.decimals ?? 0)
+    if (!address) continue
+    if (!symbol && !name) continue
+    out[address] = {
+      address,
+      symbol: symbol || name || address.slice(0, 6),
+      name: name || symbol || address.slice(0, 6),
+      decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+      logoURI: String((row as any)?.logoURI || (row as any)?.logoUri || '').trim() || undefined
+    }
+  }
+  return out
+}
+
+async function fetchRegistryFromUrl(url: string): Promise<Record<string, SolanaTokenRegistryEntry>> {
+  const res = await fetch(url, { method: 'GET' })
+  if (!res.ok) throw new Error(`Failed to fetch Solana token registry (${res.status}) from ${url}`)
+  const json = await res.json()
+  return parseTokenRows(extractTokenRows(json))
+}
+
 export async function getSolanaTokenRegistry(): Promise<Record<string, SolanaTokenRegistryEntry>> {
   return await tokenListCache.get('solana-token-registry:jupiter', async () => {
     const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
     const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
     const allowPublicRegistry = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_TOKEN_REGISTRY', false)
     // Default behavior: no external token-registry call unless explicitly allowed/configured.
-    const url = configuredUrl || (allowPublicRegistry ? 'https://token.jup.ag/all' : '')
-    if (!url) return {}
+    if (!configuredUrl && !allowPublicRegistry) return {}
 
-    const res = await fetch(url, { method: 'GET' })
-    if (!res.ok) throw new Error(`Failed to fetch Solana token registry (${res.status})`)
-    const json = await res.json()
-    if (!Array.isArray(json)) return {}
+    const urls = configuredUrl
+      ? [configuredUrl, ...SOLANA_TOKEN_REGISTRY_FALLBACK_URLS.filter((u) => u !== configuredUrl)]
+      : [...SOLANA_TOKEN_REGISTRY_FALLBACK_URLS]
 
-    const out: Record<string, SolanaTokenRegistryEntry> = {}
-    for (const row of json) {
-      const address = normalizeMint(row?.address)
-      const symbol = String(row?.symbol || '').trim()
-      const name = String(row?.name || '').trim()
-      const decimals = Number(row?.decimals ?? 0)
-      if (!address) continue
-      if (!symbol && !name) continue
-      out[address] = {
-        address,
-        symbol: symbol || name || address.slice(0, 6),
-        name: name || symbol || address.slice(0, 6),
-        decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
-        logoURI: String(row?.logoURI || '').trim() || undefined
+    let lastError: unknown = null
+    for (const url of urls) {
+      try {
+        const out = await fetchRegistryFromUrl(url)
+        if (Object.keys(out).length > 0) return out
+      } catch (error) {
+        lastError = error
       }
     }
-    return out
+    if (lastError) throw lastError
+    return {}
   }).catch(() => ({}))
 }
 

@@ -4,17 +4,19 @@ import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
 import { useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoSwapHorizontal } from 'react-icons/io5'
+import { getEnabledNetworks } from '../../lib/networkVisibility'
 
 const Swap: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, networks, activeNetworkId } = useWalletStore()
+  const { accounts, activeAccountId, networks, disabledNetworkIds, activeNetworkId } = useWalletStore()
   const [fromAmount, setFromAmount] = useState('')
   const [toAmount, setToAmount] = useState('')
   const [fromToken, setFromToken] = useState(activeNetworkId)
   const [toToken, setToToken] = useState('')
 
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
-  const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const activeNetwork = enabledNetworks.find(n => n.id === activeNetworkId) || enabledNetworks[0]
 
   const handleSwap = () => {
     // Mock swap functionality
@@ -63,7 +65,7 @@ const Swap: React.FC = () => {
                 onChange={(e) => setFromToken(e.target.value)}
                 className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
               >
-                {networks.map((net) => (
+                {enabledNetworks.map((net) => (
                   <option key={net.id} value={net.id}>{net.symbol}</option>
                 ))}
               </select>
@@ -98,7 +100,7 @@ const Swap: React.FC = () => {
                 className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
               >
                 <option value="">Select token</option>
-                {networks.filter(n => n.id !== fromToken).map((net) => (
+                {enabledNetworks.filter(n => n.id !== fromToken).map((net) => (
                   <option key={net.id} value={net.id}>{net.symbol}</option>
                 ))}
               </select>
@@ -109,7 +111,7 @@ const Swap: React.FC = () => {
         <div className="p-4 bg-dark-900/50 rounded-xl border border-dark-600 space-y-2">
           <div className="flex justify-between text-xs">
             <span className="text-gray-500">Exchange Rate</span>
-            <span className="text-gray-300 font-bold">1 {networks.find(n => n.id === fromToken)?.symbol} = 1.0 {networks.find(n => n.id === toToken)?.symbol}</span>
+            <span className="text-gray-300 font-bold">1 {enabledNetworks.find(n => n.id === fromToken)?.symbol} = 1.0 {enabledNetworks.find(n => n.id === toToken)?.symbol}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-gray-500">Estimated Gas</span>

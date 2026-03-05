@@ -11,6 +11,7 @@ import {
   sendBridgeTokenTransfer,
   sendRtmAssetNonCustodial,
   getAssetDetailsByName,
+  type BridgeTokenBalanceRow,
   type RtmAssetDetails,
   type UtxoRpcConfig
 } from '../lib/utxoRpc'
@@ -183,6 +184,8 @@ interface WalletState {
   activeAccountId: string | null
   activeNetworkId: string
   networks: Network[]
+  /** Hidden main blockchains excluded from wallet UI/runtime scans. */
+  disabledNetworkIds: string[]
 
   // App state
   isConnected: boolean
@@ -222,7 +225,11 @@ interface WalletState {
   }>
 
   // Actions
-  initialize: (password: string, mnemonic: string) => Promise<void>
+  initialize: (
+    password: string,
+    mnemonic: string,
+    options?: { startWithEthereumOnly?: boolean }
+  ) => Promise<void>
   unlock: (password: string) => Promise<boolean>
   verifyPassword: (password: string) => Promise<boolean>
   signBackendAuthMessage: (message: string) => Promise<{ address: string; signature: string }>
@@ -261,6 +268,7 @@ interface WalletState {
   addNetwork: (network: Network) => void
   removeNetwork: (id: string) => void
   updateNetwork: (id: string, updates: Partial<Network>) => void
+  setNetworkEnabled: (networkId: string, enabled: boolean) => void
 
   // Local RPC settings
   setUseLocalRpc: (enabled: boolean) => void
@@ -338,6 +346,8 @@ interface WalletState {
 
 const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
+const SEND_OPERATION_MAX_TPS = 5
+const SEND_OPERATION_MIN_INTERVAL_MS = Math.max(1, Math.trunc(1000 / SEND_OPERATION_MAX_TPS))
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
@@ -347,6 +357,8 @@ const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
   firo: 45_000
 }
 const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
+let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
+let sendOperationNextAllowedAtMs = 0
 
 function clampDonationPercent(value: number): number {
   if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
@@ -356,6 +368,18 @@ function clampDonationPercent(value: number): number {
 function delay(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve()
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForSendOperationSlot(): Promise<void> {
+  const runner = async () => {
+    const now = Date.now()
+    const waitMs = Math.max(0, sendOperationNextAllowedAtMs - now)
+    if (waitMs > 0) await delay(waitMs)
+    sendOperationNextAllowedAtMs = Date.now() + SEND_OPERATION_MIN_INTERVAL_MS
+  }
+  const pending = sendOperationRateLimiterQueue.then(runner, runner)
+  sendOperationRateLimiterQueue = pending.catch(() => {})
+  await pending
 }
 
 function isTransientBridgeFailure(error: unknown): boolean {
@@ -956,6 +980,46 @@ function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
   return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
 }
 
+function isBridgeEvmNftTokenType(tokenType: string): boolean {
+  const normalized = String(tokenType || '').trim().toLowerCase()
+  if (!normalized) return false
+  return (
+    normalized.includes('erc721')
+    || normalized.includes('erc-721')
+    || normalized.includes('erc1155')
+    || normalized.includes('erc-1155')
+    || normalized.includes('nft')
+  )
+}
+
+function parseBridgeEvmNftReference(row: BridgeTokenBalanceRow): { address: string; tokenId: string } | null {
+  const tokenIdRaw = String(row.tokenId || '').trim()
+  const tokenAddressRaw = String(row.tokenAddress || '').trim()
+  let address = normalizeEvmAddressLoose(tokenAddressRaw)
+  if (!address) {
+    const tokenAddressMatch = tokenIdRaw.match(/0x[0-9a-fA-F]{40}/)
+    if (tokenAddressMatch) address = normalizeEvmAddressLoose(tokenAddressMatch[0])
+  }
+  if (!address) return null
+
+  let tokenId = tokenIdRaw
+  if (!tokenId || normalizeEvmAddressLoose(tokenId)) {
+    const fromComposite = tokenIdRaw.match(/^0x[0-9a-fA-F]{40}[:/#-](.+)$/)
+    if (fromComposite && String(fromComposite[1] || '').trim()) {
+      tokenId = String(fromComposite[1] || '').trim()
+    } else {
+      const source = `${String(row.name || '').trim()} ${String(row.symbol || '').trim()}`
+      const tokenIdMatch =
+        source.match(/(?:tokenid|token|id)\D*(0x[0-9a-f]+|\d+)/i)
+        || source.match(/[#:/-](0x[0-9a-f]+|\d+)/i)
+      tokenId = String(tokenIdMatch?.[1] || '').trim()
+    }
+  }
+
+  if (!tokenId || normalizeEvmAddressLoose(tokenId)) return null
+  return { address, tokenId }
+}
+
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return value.toFixed(8).replace(/\.?0+$/, '')
@@ -1419,6 +1483,98 @@ function normalizeNetworkIdAlias(value: string): string {
   if (FROZEN_STABLE_NETWORK_IDS.has(normalized)) return normalized
   if (normalized.startsWith('srv--')) return normalized
   return raw
+}
+
+function resolveKnownNetworkId(networks: Network[], rawNetworkId: string): string | null {
+  const raw = String(rawNetworkId || '').trim()
+  const requested = normalizeNetworkIdAlias(raw)
+  if (!requested && !raw) return null
+
+  const exact = networks.find((network) => (
+    network.id === requested
+    || network.id === raw
+  ))
+  if (exact) return exact.id
+
+  const requestedLower = requested.toLowerCase()
+  const rawLower = raw.toLowerCase()
+  const folded = networks.find((network) => (
+    network.id.toLowerCase() === requestedLower
+    || network.id.toLowerCase() === rawLower
+  ))
+  return folded?.id || null
+}
+
+function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown, networks: Network[]): string[] {
+  if (!Array.isArray(disabledNetworkIds) || networks.length === 0) return []
+  const canonicalByLower = new Map<string, string>()
+  for (const network of networks) {
+    const id = String(network.id || '').trim()
+    if (!id) continue
+    canonicalByLower.set(id.toLowerCase(), id)
+    const alias = normalizeNetworkIdAlias(id)
+    if (alias) canonicalByLower.set(alias.toLowerCase(), id)
+  }
+
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of disabledNetworkIds) {
+    const raw = String(value || '').trim()
+    if (!raw) continue
+    const candidates = [raw, normalizeNetworkIdAlias(raw)]
+    let resolved = ''
+    for (const candidate of candidates) {
+      const key = String(candidate || '').trim().toLowerCase()
+      if (!key) continue
+      const mapped = canonicalByLower.get(key)
+      if (mapped) {
+        resolved = mapped
+        break
+      }
+    }
+    if (!resolved || seen.has(resolved)) continue
+    seen.add(resolved)
+    out.push(resolved)
+  }
+  if (networks.length > 0 && out.length >= networks.length) {
+    const firstNetworkId = String(networks[0]?.id || '').trim()
+    return out.filter((networkId) => networkId !== firstNetworkId)
+  }
+  return out
+}
+
+function resolveEnabledNetworkId(
+  networks: Network[],
+  disabledNetworkIds: string[],
+  preferredNetworkId?: string | null
+): string {
+  const normalizedDisabled = new Set(normalizeDisabledNetworkIdsForState(disabledNetworkIds, networks))
+  const preferred = resolveKnownNetworkId(networks, String(preferredNetworkId || '').trim())
+  if (preferred && !normalizedDisabled.has(preferred)) return preferred
+  const firstEnabled = networks.find((network) => !normalizedDisabled.has(network.id))
+  return firstEnabled?.id || networks[0]?.id || DEFAULT_ACTIVE_NETWORK_ID
+}
+
+function resolveEthereumOnlyNetworkDefaults(networks: Network[]): { activeNetworkId: string; disabledNetworkIds: string[] } {
+  const ethereumNetworkId = resolveKnownNetworkId(networks, 'eth')
+  if (!ethereumNetworkId) {
+    return {
+      activeNetworkId: resolveEnabledNetworkId(networks, [], DEFAULT_ACTIVE_NETWORK_ID),
+      disabledNetworkIds: []
+    }
+  }
+
+  const disabledNetworkIds = normalizeDisabledNetworkIdsForState(
+    networks
+      .map((network) => String(network.id || '').trim())
+      .filter((id) => id && id !== ethereumNetworkId),
+    networks
+  )
+
+  return {
+    activeNetworkId: resolveEnabledNetworkId(networks, disabledNetworkIds, ethereumNetworkId),
+    disabledNetworkIds
+  }
 }
 
 function remapNetworkIdKeyedRecord<T>(record: Record<string, T> | undefined): Record<string, T> {
@@ -1897,6 +2053,7 @@ export const useWalletStore = create<WalletState>()(
       activeAccountId: null,
       activeNetworkId: DEFAULT_ACTIVE_NETWORK_ID,
       networks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
+      disabledNetworkIds: [],
       
       isConnected: false,
       isSyncing: false,
@@ -1938,11 +2095,14 @@ export const useWalletStore = create<WalletState>()(
         }
       ],
 
-      initialize: async (password, mnemonic) => {
+      initialize: async (password, mnemonic, options) => {
         const vault = await encryptVaultV1({ password, mnemonic })
         const normalizedMnemonic = mnemonic.trim()
 
         const networks = get().networks
+        const visibilityPatch = options?.startWithEthereumOnly
+          ? resolveEthereumOnlyNetworkDefaults(networks)
+          : {}
         const derived = await deriveAccountAddresses(normalizedMnemonic, networks, 0)
         const utxoNetworks = networks.filter((n) => n.coinType === 'UTXO')
         const derivedUtxoCount = utxoNetworks.filter((n) => Boolean(derived.networkAddresses[n.id])).length
@@ -1972,7 +2132,8 @@ export const useWalletStore = create<WalletState>()(
           accounts: [initialAccount],
           nextAccountIndex: 1,
           activeAccountId: 'acc-1',
-          lastActiveTimestamp: Date.now()
+          lastActiveTimestamp: Date.now(),
+          ...visibilityPatch
         })
 
         void get().refreshActiveBalance().catch((err) => {
@@ -2097,6 +2258,7 @@ export const useWalletStore = create<WalletState>()(
           accounts: [],
           nextAccountIndex: 1,
           activeAccountId: null,
+          disabledNetworkIds: [],
           syncPercent: null,
           lowSyncStreak: 0,
           donationPercent: MIN_DONATION_PERCENT,
@@ -2234,7 +2396,13 @@ export const useWalletStore = create<WalletState>()(
       },
 
       setActiveNetwork: async (id, options) => {
-        const normalizedId = normalizeNetworkIdAlias(id)
+        const stateBefore = get()
+        const requestedId = resolveKnownNetworkId(stateBefore.networks, id) || normalizeNetworkIdAlias(id)
+        const normalizedId = resolveEnabledNetworkId(
+          stateBefore.networks,
+          stateBefore.disabledNetworkIds,
+          requestedId || stateBefore.activeNetworkId
+        )
         set((state) => {
           const activeAccount = state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0]
           const nextAccounts = activeAccount
@@ -2339,7 +2507,9 @@ export const useWalletStore = create<WalletState>()(
             // Bridge-first: keep app->server transport consistent with wallet policy.
             const fungibleAssets: Record<string, number> = {}
             const fungibleAssetLogos: Record<string, string> = {}
+            const fungibleAssetLabels: Record<string, string> = {}
             const usedAssetKeys = new Set<string>()
+            const assetKeyByContract = new Map<string, string>()
             let tokenReadSuccesses = 0
             let tokenReadErrors = 0
             const tokenRows = await mapWithConcurrency(mergedTokens, 8, async (token) => {
@@ -2401,7 +2571,9 @@ export const useWalletStore = create<WalletState>()(
               }
               usedAssetKeys.add(assetKey)
               fungibleAssets[assetKey] = row.displaySats
+              fungibleAssetLabels[assetKey] = row.symbol
               if (row.logoUri) fungibleAssetLogos[assetKey] = row.logoUri
+              assetKeyByContract.set(row.token.address, assetKey)
             }
 
             // Priority fallback: ensure core chain defaults are checked with a low-volume pass,
@@ -2445,8 +2617,10 @@ export const useWalletStore = create<WalletState>()(
                 usedAssetKeys.add(assetKey)
                 presentSymbols.add(symbol)
                 fungibleAssets[assetKey] = displaySats
+                fungibleAssetLabels[assetKey] = symbol
                 const logoUri = String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim()
                 if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+                assetKeyByContract.set(ethers.getAddress(token.address), assetKey)
               } catch {
                 // Keep scanning remaining priority defaults.
               }
@@ -2536,10 +2710,89 @@ export const useWalletStore = create<WalletState>()(
               }
             }
 
+            const shouldUseBridgeFallback =
+              Object.keys(fungibleAssets).length === 0
+              || (tokenReadSuccesses === 0 && tokenReadErrors > 0)
+            let bridgeFallbackRowsApplied = 0
+            if (shouldUseBridgeFallback) {
+              try {
+                const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+                  owner: address,
+                  wallet: String(net.rpcWallet || '').trim() || undefined
+                })
+                for (const row of bridgeRows) {
+                  const rawBalanceText = String(row.balanceRaw || '').trim()
+                  if (!/^\d+$/.test(rawBalanceText)) continue
+                  const rawBalance = BigInt(rawBalanceText)
+                  if (rawBalance <= 0n) continue
+
+                  const tokenType = String(row.tokenType || '').trim()
+                  if (isBridgeEvmNftTokenType(tokenType)) {
+                    const parsedNft = parseBridgeEvmNftReference(row)
+                    if (!parsedNft) continue
+                    const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
+                    const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
+                    const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
+                    if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
+                    const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
+                    const displayLabel = `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`
+                    nftAssets[assetKey] = quantitySats
+                    nftLookup[assetKey] = {
+                      address: parsedNft.address,
+                      tokenId: parsedNft.tokenId,
+                      standard,
+                      label: displayLabel,
+                      quantityRaw: rawBalance.toString()
+                    }
+                    bridgeFallbackRowsApplied += 1
+                    continue
+                  }
+
+                  const decimalsRaw = Number(row.decimals)
+                  const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
+                  const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                  if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+                  const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || '').trim())
+                  const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
+                  const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
+
+                  let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
+                  if (!assetKey) {
+                    const baseKey = tokenAddress
+                      ? `${displaySymbol}@${shortAddress(tokenAddress)}`
+                      : displaySymbol
+                    assetKey = baseKey
+                    let suffix = 2
+                    while (usedAssetKeys.has(assetKey)) {
+                      assetKey = `${baseKey}-${suffix}`
+                      suffix += 1
+                    }
+                    usedAssetKeys.add(assetKey)
+                    if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
+                  }
+
+                  const prev = Number(fungibleAssets[assetKey] || 0)
+                  fungibleAssets[assetKey] = Math.max(prev, displaySats)
+                  fungibleAssetLabels[assetKey] = displaySymbol
+                  if (tokenAddress) {
+                    const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+                    if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+                  }
+                  bridgeFallbackRowsApplied += 1
+                }
+              } catch (bridgeFallbackError) {
+                console.warn(
+                  `[${net.symbol}] fetchNetworkAssets bridge fallback failed for ${activeNetworkId} (${address}).`,
+                  bridgeFallbackError
+                )
+              }
+            }
+
             const assets = { ...fungibleAssets, ...nftAssets }
 
             // Do not wipe visible assets on transient provider failures.
-            if (tokenReadSuccesses === 0 && tokenReadErrors > 0) {
+            if (tokenReadSuccesses === 0 && tokenReadErrors > 0 && bridgeFallbackRowsApplied === 0 && Object.keys(assets).length === 0) {
               console.warn(
                 `[${net.symbol}] fetchNetworkAssets skipped state update for ${activeNetworkId} (${address}) `
                 + `because all ERC20 reads failed (errors=${tokenReadErrors}).`
@@ -2558,7 +2811,7 @@ export const useWalletStore = create<WalletState>()(
               },
               networkAssetLabels: {
                 ...state.networkAssetLabels,
-                [activeNetworkId]: {}
+                [activeNetworkId]: fungibleAssetLabels
               },
               evmNftAssets: {
                 ...state.evmNftAssets,
@@ -2568,7 +2821,7 @@ export const useWalletStore = create<WalletState>()(
 
             networkAssetsCache.get(
               cacheKey,
-              async () => ({ assets, logos: fungibleAssetLogos, labels: {}, evmNfts: nftLookup }),
+              async () => ({ assets, logos: fungibleAssetLogos, labels: fungibleAssetLabels, evmNfts: nftLookup }),
               undefined,
               { force: true }
             ).catch(() => {})
@@ -3583,6 +3836,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
+        await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
           accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, useLocalRpc: ulr2, localRpcOverrides: lro2
@@ -4263,15 +4517,18 @@ export const useWalletStore = create<WalletState>()(
       },
 
       removeNetwork: (id) => {
-        const { networks, activeNetworkId } = get()
+        const { networks, activeNetworkId, disabledNetworkIds } = get()
         if (networks.length <= 1) return // Don't allow removing the last network
         const filtered = networks.filter(n => n.id !== id)
-        const newActiveId = activeNetworkId === id 
+        const nextDisabled = normalizeDisabledNetworkIdsForState(disabledNetworkIds, filtered)
+        const preferredNetworkId = activeNetworkId === id
           ? (filtered[0]?.id || DEFAULT_NETWORK_ID)
           : activeNetworkId
+        const newActiveId = resolveEnabledNetworkId(filtered, nextDisabled, preferredNetworkId)
         set({
           networks: filtered,
-          activeNetworkId: newActiveId
+          activeNetworkId: newActiveId,
+          disabledNetworkIds: nextDisabled
         })
       },
 
@@ -4281,6 +4538,59 @@ export const useWalletStore = create<WalletState>()(
             net.id === id ? normalizeNetworkSymbol({ ...net, ...updates }) : net
           )
         }))
+      },
+
+      setNetworkEnabled: (networkId, enabled) => {
+        let shouldRefreshActive = false
+        let nextActiveNetworkId: string | null = null
+
+        set((state) => {
+          const targetId = resolveKnownNetworkId(state.networks, networkId)
+          if (!targetId) return state
+
+          const normalizedDisabled = normalizeDisabledNetworkIdsForState(state.disabledNetworkIds, state.networks)
+          const disabledSet = new Set(normalizedDisabled)
+          const currentlyDisabled = disabledSet.has(targetId)
+          if (enabled && !currentlyDisabled) return state
+          if (!enabled && currentlyDisabled) return state
+
+          const enabledCount = state.networks.reduce(
+            (count, network) => count + (disabledSet.has(network.id) ? 0 : 1),
+            0
+          )
+          if (!enabled && enabledCount <= 1) return state
+
+          const nextDisabled = enabled
+            ? normalizedDisabled.filter((id) => id !== targetId)
+            : [...normalizedDisabled, targetId]
+          const nextActiveId = resolveEnabledNetworkId(state.networks, nextDisabled, state.activeNetworkId)
+          nextActiveNetworkId = nextActiveId
+          shouldRefreshActive = nextActiveId !== state.activeNetworkId
+
+          const activeAccount = state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0]
+          const nextAccounts = (activeAccount && shouldRefreshActive)
+            ? state.accounts.map((account) => (
+              account.id === activeAccount.id
+                ? { ...account, balance: getCachedBalanceForNetwork(account, nextActiveId, false) }
+                : account
+            ))
+            : state.accounts
+
+          return {
+            disabledNetworkIds: nextDisabled,
+            activeNetworkId: nextActiveId,
+            accounts: nextAccounts,
+            lastActiveTimestamp: Date.now()
+          }
+        })
+
+        if (shouldRefreshActive && nextActiveNetworkId) {
+          void (async () => {
+            await get().ensureNetworkAddress(nextActiveNetworkId)
+            await get().refreshActiveBalance()
+            await get().fetchNetworkAssets().catch(() => {})
+          })()
+        }
       },
 
       setUseLocalRpc: (enabled) => set({ useLocalRpc: enabled }),
@@ -4355,12 +4665,18 @@ export const useWalletStore = create<WalletState>()(
           })
           const serverOnly = filteredServerNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
           const networks = [...mergedLocal, ...serverOnly]
-          const activeNetworkId = networks.length > 0 && networks.some((n) => n.id === state.activeNetworkId)
-            ? state.activeNetworkId
-            : (networks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
+          const normalizedDisabled = normalizeDisabledNetworkIdsForState(state.disabledNetworkIds, networks)
+          const activeNetworkId = resolveEnabledNetworkId(
+            networks,
+            normalizedDisabled,
+            networks.some((n) => n.id === state.activeNetworkId)
+              ? state.activeNetworkId
+              : (networks[0]?.id || state.activeNetworkId || DEFAULT_ACTIVE_NETWORK_ID)
+          )
           return {
             networks,
             activeNetworkId,
+            disabledNetworkIds: normalizedDisabled,
             serverCoinCatalog: filteredServerCatalog
           }
         })
@@ -4537,7 +4853,22 @@ export const useWalletStore = create<WalletState>()(
           zeroBalanceRecheckMs: !skipZeroBalanceRecheck && !fastMode ? UTXO_ZERO_BALANCE_RECHECK_MS : 0,
           force: fastMode
         })
-        console.info(`[${net.symbol}] connected via bridge`)
+        const connectionMode = useLocalRpc ? 'local-rpc' : 'bridge'
+        const endpoint = useLocalRpc
+          ? String(localRpcOverrides?.[net.id]?.rpcUrl || net.rpcUrl || '').trim() || 'n/a'
+          : String(net.rpcUrl || '').trim() || 'bridge'
+        console.info(`[${net.symbol}] connected via ${connectionMode}`, {
+          networkId: activeNetworkId,
+          runtimeModelId: String(net.runtimeModelId || net.id || '').trim(),
+          accountId: acc.id,
+          address,
+          balance: snapshot.balance,
+          syncPercent: snapshot.syncPercent,
+          isSyncing: snapshot.isSyncing,
+          endpoint,
+          fastMode,
+          skipZeroBalanceRecheck
+        })
 
             await waitForUiStabilize()
             if (isStaleRequest()) return
@@ -4887,6 +5218,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendEvmTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
 
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -4922,6 +5254,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendXrpTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked, useLocalRpc, localRpcOverrides } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -4959,6 +5292,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendCardanoTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -4980,6 +5314,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendMoneroTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -5000,6 +5335,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendSolanaTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -5022,6 +5358,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendStellarTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -5044,6 +5381,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendTronTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -5066,6 +5404,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       sendUtxoTransaction: async ({ to, amount, donation }) => {
+        await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked, useLocalRpc: ulr3, localRpcOverrides: lro3 } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
 
@@ -5156,6 +5495,7 @@ export const useWalletStore = create<WalletState>()(
         activeAccountId: state.activeAccountId,
         activeNetworkId: state.activeNetworkId,
         networks: state.networks,
+        disabledNetworkIds: state.disabledNetworkIds,
         isConnected: state.isConnected,
         isSyncing: state.isSyncing,
         syncPercent: state.syncPercent,
@@ -5181,11 +5521,19 @@ export const useWalletStore = create<WalletState>()(
         const activeAccountId = accounts.some((a) => a.id === merged.activeAccountId)
           ? merged.activeAccountId
           : (accounts[0]?.id ?? null)
-        const normalizedPersistedNetworkId = normalizeNetworkIdAlias(String(merged.activeNetworkId || ''))
-        const activeNetworkId = INITIAL_NETWORKS.some((n) => n.id === normalizedPersistedNetworkId)
-          ? normalizedPersistedNetworkId
-          : DEFAULT_ACTIVE_NETWORK_ID
         const normalizedNetworks = normalizeNetworkListSymbols(INITIAL_NETWORKS)
+        const normalizedDisabledNetworkIds = normalizeDisabledNetworkIdsForState(
+          (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
+          normalizedNetworks
+        )
+        const normalizedPersistedNetworkId = normalizeNetworkIdAlias(String(merged.activeNetworkId || ''))
+        const activeNetworkId = resolveEnabledNetworkId(
+          normalizedNetworks,
+          normalizedDisabledNetworkIds,
+          INITIAL_NETWORKS.some((n) => n.id === normalizedPersistedNetworkId)
+            ? normalizedPersistedNetworkId
+            : DEFAULT_ACTIVE_NETWORK_ID
+        )
         const accountsWithActiveNetworkBalance = accounts.map((account) => (
           account.id === activeAccountId
             ? { ...account, balance: getCachedBalanceForNetwork(account, activeNetworkId, true) }
@@ -5204,6 +5552,7 @@ export const useWalletStore = create<WalletState>()(
           nextAccountIndex,
           activeAccountId,
           networks: normalizedNetworks,
+          disabledNetworkIds: normalizedDisabledNetworkIds,
           activeNetworkId,
           activity: normalizedActivity,
           serverCoinCatalog: normalizeServerCatalogSymbols(

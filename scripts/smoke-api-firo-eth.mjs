@@ -85,7 +85,10 @@ async function runRpcTest(coin, method, params, validateResult) {
     headers: commonHeaders,
     body: JSON.stringify(body)
   }, (data, res) => {
-    if (!res.ok) return `HTTP ${res.status}`
+    if (!res.ok) {
+      const rpcMessage = String(data?.error?.message || data?.error || '').trim()
+      return rpcMessage ? `HTTP ${res.status} (${rpcMessage})` : `HTTP ${res.status}`
+    }
     if (!data || typeof data !== 'object') return 'response is not an object'
     if (data.error) return `rpc error: ${JSON.stringify(data.error)}`
     if (!Object.prototype.hasOwnProperty.call(data, 'result')) return 'missing result field'
@@ -95,6 +98,15 @@ async function runRpcTest(coin, method, params, validateResult) {
 
 function isHexQuantity(value) {
   return /^0x[0-9a-f]+$/i.test(String(value || ''))
+}
+
+function parseHexQuantity(value) {
+  if (!isHexQuantity(value)) return null
+  try {
+    return Number.parseInt(String(value), 16)
+  } catch {
+    return null
+  }
 }
 
 async function main() {
@@ -117,6 +129,15 @@ async function main() {
   })
 
   await runHttpTest('methods:ethereum', `${apiBase}/v1/bridge/methods/ethereum`, {
+    method: 'GET',
+    headers: commonHeaders
+  }, (data, res) => {
+    if (!res.ok) return `HTTP ${res.status}`
+    const methods = Array.isArray(data?.result?.methods) ? data.result.methods : []
+    return methods.length > 0 ? true : 'missing result.methods'
+  })
+
+  await runHttpTest('methods:base', `${apiBase}/v1/bridge/methods/base`, {
     method: 'GET',
     headers: commonHeaders
   }, (data, res) => {
@@ -154,6 +175,25 @@ async function main() {
   ))
   await runRpcTest('ethereum', 'eth_getTransactionCount', [zeroAddress, 'latest'], (result) => (
     isHexQuantity(result) ? true : 'invalid eth_getTransactionCount'
+  ))
+
+  // Base core read methods used by app runtime.
+  await runRpcTest('base', 'eth_chainId', [], (result) => {
+    if (!isHexQuantity(result)) return 'invalid base eth_chainId'
+    const chainId = parseHexQuantity(result)
+    return chainId === 8453 ? true : `unexpected chainId ${String(result)}`
+  })
+  await runRpcTest('base', 'eth_blockNumber', [], (result) => (
+    isHexQuantity(result) ? true : 'invalid base eth_blockNumber'
+  ))
+  await runRpcTest('base', 'eth_gasPrice', [], (result) => (
+    isHexQuantity(result) ? true : 'invalid base eth_gasPrice'
+  ))
+  await runRpcTest('base', 'eth_getBalance', [zeroAddress, 'latest'], (result) => (
+    isHexQuantity(result) ? true : 'invalid base eth_getBalance'
+  ))
+  await runRpcTest('base', 'eth_getTransactionCount', [zeroAddress, 'latest'], (result) => (
+    isHexQuantity(result) ? true : 'invalid base eth_getTransactionCount'
   ))
 
   const total = results.length

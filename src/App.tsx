@@ -3,6 +3,7 @@ import { useEffect, type ReactElement } from 'react'
 import { useWalletStore } from './store/walletStore'
 import { resolveNetworkCapabilities } from './lib/networkCapabilities'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from './lib/coinModel'
+import { getEnabledNetworks } from './lib/networkVisibility'
 
 // Pages (to be created)
 import Register from './pages/Register'
@@ -43,32 +44,37 @@ import AccountManager from './pages/settings/AccountManager'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
 import LocalRpcSettings from './pages/settings/LocalRpcSettings'
 import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
+import BlockchainVisibilitySettings from './pages/settings/BlockchainVisibilitySettings'
 import TermsAndRules from './pages/TermsAndRules'
 
 const WalletIndexRedirect = () => {
-  const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   return <Navigate to={caps.ui.showAssetsTab ? '/wallet/assets' : '/wallet/activity'} replace />
 }
 
 const SendRouteGate = () => {
-  const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   return (caps.ui.showSendAction || caps.features.assetSend) ? <Send /> : <Navigate to="/wallet/activity" replace />
 }
 
 const AssetsRouteGate = () => {
-  const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   return caps.ui.showAssetsTab ? <Assets /> : <Navigate to="/wallet/activity" replace />
 }
 
 const WalletModelRedirect = () => {
-  const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const modelKey = coinModelFamilyToRouteKey(resolveCoinModelFamily(activeNetwork))
   return <Navigate to={`/wallet/model/${modelKey}`} replace />
 }
@@ -81,8 +87,9 @@ const LegacyAssetSendRedirect = () => {
 }
 
 const TxRouteGate = ({ element }: { element: ReactElement }) => {
-  const { isLocked, networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const { isLocked, networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   if (isLocked) return <Navigate to="/unlock" replace />
   if (!caps.features.nativeSend && !caps.features.assetSend) return <Navigate to="/wallet/activity" replace />
@@ -196,6 +203,7 @@ function App() {
             <Route path="autolock" element={<AutolockSettings />} />
             <Route path="donation" element={<DonationSettings />} />
             <Route path="authorized-sites" element={<AuthorizedSites />} />
+            <Route path="blockchains" element={<BlockchainVisibilitySettings />} />
             <Route path="local-rpc" element={<LocalRpcSettings />} />
             <Route path="bridge-auth" element={<BridgeTxAuthSettings />} />
             <Route path="rpc" element={<Navigate to="/settings" replace />} />

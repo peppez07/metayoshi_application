@@ -12,6 +12,7 @@ import {
 import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { compareNetworksByModelFamily } from '../../lib/coinModel'
+import { getEnabledNetworks } from '../../lib/networkVisibility'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -26,7 +27,11 @@ function scopeLabel(scope: DappScope): string {
 
 const DappConnectStep1: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, activeNetworkId, isLocked, networks } = useWalletStore()
+  const { accounts, activeAccountId, activeNetworkId, isLocked, networks, disabledNetworkIds } = useWalletStore()
+  const enabledNetworks = useMemo(
+    () => getEnabledNetworks(networks, disabledNetworkIds),
+    [networks, disabledNetworkIds]
+  )
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [coinFilter, setCoinFilter] = useState('all')
@@ -90,7 +95,7 @@ const DappConnectStep1: React.FC = () => {
   }
 
   const coinOptions = useMemo(
-    () => [...networks]
+    () => [...enabledNetworks]
       .sort((a, b) => {
         const familyDelta = compareNetworksByModelFamily(a, b)
         if (familyDelta !== 0) return familyDelta
@@ -100,7 +105,7 @@ const DappConnectStep1: React.FC = () => {
         id: network.id,
         label: `${network.symbol} (${network.name})`
       })),
-    [networks]
+    [enabledNetworks]
   )
 
   const filteredAccounts = useMemo(() => {

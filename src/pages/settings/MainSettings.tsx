@@ -34,6 +34,12 @@ const MainSettings: React.FC = () => {
       items: [
         { label: 'Show authorized websites', path: '/settings/authorized-sites' },
       ]
+    },
+    {
+      title: 'PERFORMANCE / CLEAN MENU',
+      items: [
+        { label: 'Manage blockchain visibility', path: '/settings/blockchains' },
+      ]
     }
   ]
 

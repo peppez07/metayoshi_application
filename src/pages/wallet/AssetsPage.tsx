@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useWalletStore } from '../../store/walletStore'
 import {
@@ -13,7 +13,7 @@ import {
 import { Input } from '../../components/Input'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
-import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { isEvmNftAssetKey, parseSolanaAssetType, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -194,7 +194,11 @@ const AssetsPage: React.FC = () => {
     return rows.map(([name]) => name)
   }, [filtered, isSearching, sorted])
   const resolveAssetDisplayName = (name: string): string => nftLookup[name]?.label || assetLabels[name] || name
-  const isPreviewableAssetName = (name: string): boolean => supportsPreview
+  const isPreviewableAssetName = useCallback((name: string): boolean => {
+    if (!supportsPreview) return false
+    if (isSolanaEcosystem) return parseSolanaAssetType(name) !== 'spl-token'
+    return true
+  }, [isSolanaEcosystem, supportsPreview])
   const handleAssetRowClick = (name: string): void => {
     if (canOpenAssetSend) {
       navigate('/wallet/send', { state: { assetId: name } })
@@ -216,6 +220,12 @@ const AssetsPage: React.FC = () => {
     let cancelled = false
     const checkPreviewability = async () => {
       for (const assetName of visibleAssetNames) {
+        if (!isPreviewableAssetName(assetName)) {
+          if (!cancelled) {
+            setPreviewByAsset((prev) => (prev[assetName] === false ? prev : { ...prev, [assetName]: false }))
+          }
+          continue
+        }
         if (previewByAsset[assetName] !== undefined) continue
         if (checkingRef.current.has(assetName)) continue
         checkingRef.current.add(assetName)
@@ -236,7 +246,7 @@ const AssetsPage: React.FC = () => {
     }
     if (visibleAssetNames.length > 0) void checkPreviewability()
     return () => { cancelled = true }
-  }, [visibleAssetNames, fetchAssetDetails, previewByAsset, supportsPreview])
+  }, [visibleAssetNames, fetchAssetDetails, isPreviewableAssetName, previewByAsset, supportsPreview])
 
   const handleRefresh = async () => {
     if (refreshing) return

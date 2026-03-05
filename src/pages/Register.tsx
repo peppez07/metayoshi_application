@@ -120,7 +120,7 @@ const Register: React.FC = () => {
   const createVaultFromMnemonic = async () => {
     setBusy(true)
     try {
-      await initialize(password, normalizedMnemonic)
+      await initialize(password, normalizedMnemonic, { startWithEthereumOnly: true })
       navigate('/connecting')
     } catch (e: any) {
       setError(String(e?.message ?? 'Failed to create vault'))
