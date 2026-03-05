@@ -1,20 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { IoArrowBack, IoCheckmarkCircle } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import { PasswordGate } from '../../components/PasswordGate'
 import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
-  parseDappPendingApproval,
-  type DappPendingApproval,
   type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
-
-function canUseChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
-}
+import DappApprovalStatus from './DappApprovalStatus'
+import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
 function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'View your wallet address and balances'
@@ -26,8 +22,7 @@ function scopeLabel(scope: DappScope): string {
 const DappConnectStep2: React.FC = () => {
   const navigate = useNavigate()
   const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, isLocked } = useWalletStore()
-  const [pendingApproval, setPendingApproval] = useState<DappPendingApproval | null>(null)
-  const [loadingApproval, setLoadingApproval] = useState(true)
+  const { pendingApproval, loadingApproval } = usePendingDappApproval()
 
   const activeAccount = useMemo(
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
@@ -37,47 +32,6 @@ const DappConnectStep2: React.FC = () => {
     () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
     [activeAccount, activeNetworkId]
   )
-
-  useEffect(() => {
-    if (!canUseChromeStorage()) {
-      setLoadingApproval(false)
-      return
-    }
-
-    let mounted = true
-
-    const applyPendingValue = (rawValue: unknown): void => {
-      const parsed = parseDappPendingApproval(rawValue)
-      if (!mounted) return
-      setPendingApproval(parsed && parsed.status === 'pending' ? parsed : null)
-      setLoadingApproval(false)
-    }
-
-    void chrome.storage.local
-      .get(DAPP_PENDING_APPROVAL_STORAGE_KEY)
-      .then((result) => {
-        applyPendingValue(result[DAPP_PENDING_APPROVAL_STORAGE_KEY])
-      })
-      .catch(() => {
-        if (!mounted) return
-        setPendingApproval(null)
-        setLoadingApproval(false)
-      })
-
-    const onStorageChanged = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      areaName: string
-    ): void => {
-      if (areaName !== 'local' || !changes[DAPP_PENDING_APPROVAL_STORAGE_KEY]) return
-      applyPendingValue(changes[DAPP_PENDING_APPROVAL_STORAGE_KEY].newValue)
-    }
-
-    chrome.storage.onChanged.addListener(onStorageChanged)
-    return () => {
-      mounted = false
-      chrome.storage.onChanged.removeListener(onStorageChanged)
-    }
-  }, [])
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
     if (!pendingApproval || !canUseChromeStorage()) {
@@ -101,27 +55,8 @@ const DappConnectStep2: React.FC = () => {
     window.close()
   }
 
-  if (loadingApproval) {
-    return (
-      <div className="flex flex-col h-full bg-dark-800 items-center justify-center text-xs text-gray-400">
-        Loading approval request...
-      </div>
-    )
-  }
-
-  if (!pendingApproval) {
-    return (
-      <div className="flex flex-col h-full bg-dark-800">
-        <div className="flex-1 flex items-center justify-center p-8 text-center text-sm text-gray-400">
-          No pending dapp approval request.
-        </div>
-        <footer className="p-4 border-t border-dark-600">
-          <Button className="w-full btn-primary" onClick={() => navigate('/wallet/assets')}>
-            Back to wallet
-          </Button>
-        </footer>
-      </div>
-    )
+  if (loadingApproval || !pendingApproval) {
+    return <DappApprovalStatus loading={loadingApproval} onBack={() => navigate('/wallet/assets')} />
   }
 
   const content = (

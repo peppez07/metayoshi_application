@@ -25,8 +25,7 @@ const MainSettings: React.FC = () => {
     {
       title: 'SHOW / DOWNLOAD KEYS',
       items: [
-        { label: 'Download private and public key', path: '/settings/download-keys' },
-        { label: 'Show private key', path: '/settings/show-secrets' },
+        { label: 'Show / download recovery phrase and private key', path: '/settings/show-secrets' },
       ]
     },
     {

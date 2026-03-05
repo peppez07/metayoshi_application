@@ -5,18 +5,14 @@ import { Button } from '../../components/Button'
 import { PasswordGate } from '../../components/PasswordGate'
 import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
-  parseDappPendingApproval,
-  type DappPendingApproval,
   type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { compareNetworksByModelFamily } from '../../lib/coinModel'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-
-function canUseChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
-}
+import DappApprovalStatus from './DappApprovalStatus'
+import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
 function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'Read wallet addresses and balances'
@@ -35,8 +31,7 @@ const DappConnectStep1: React.FC = () => {
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [coinFilter, setCoinFilter] = useState('all')
-  const [pendingApproval, setPendingApproval] = useState<DappPendingApproval | null>(null)
-  const [loadingApproval, setLoadingApproval] = useState(true)
+  const { pendingApproval, loadingApproval } = usePendingDappApproval()
 
   useEffect(() => {
     const defaultAccountId = activeAccountId || accounts[0]?.id
@@ -46,47 +41,6 @@ const DappConnectStep1: React.FC = () => {
       return [defaultAccountId]
     })
   }, [accounts, activeAccountId])
-
-  useEffect(() => {
-    if (!canUseChromeStorage()) {
-      setLoadingApproval(false)
-      return
-    }
-
-    let mounted = true
-
-    const applyPendingValue = (rawValue: unknown): void => {
-      const parsed = parseDappPendingApproval(rawValue)
-      if (!mounted) return
-      setPendingApproval(parsed && parsed.status === 'pending' ? parsed : null)
-      setLoadingApproval(false)
-    }
-
-    void chrome.storage.local
-      .get(DAPP_PENDING_APPROVAL_STORAGE_KEY)
-      .then((result) => {
-        applyPendingValue(result[DAPP_PENDING_APPROVAL_STORAGE_KEY])
-      })
-      .catch(() => {
-        if (!mounted) return
-        setPendingApproval(null)
-        setLoadingApproval(false)
-      })
-
-    const onStorageChanged = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      areaName: string
-    ): void => {
-      if (areaName !== 'local' || !changes[DAPP_PENDING_APPROVAL_STORAGE_KEY]) return
-      applyPendingValue(changes[DAPP_PENDING_APPROVAL_STORAGE_KEY].newValue)
-    }
-
-    chrome.storage.onChanged.addListener(onStorageChanged)
-    return () => {
-      mounted = false
-      chrome.storage.onChanged.removeListener(onStorageChanged)
-    }
-  }, [])
 
   const toggleAccount = (id: string): void => {
     setSelectedAccounts((prev) => (
@@ -164,27 +118,8 @@ const DappConnectStep1: React.FC = () => {
     window.close()
   }
 
-  if (loadingApproval) {
-    return (
-      <div className="flex flex-col h-full bg-dark-800 items-center justify-center text-xs text-gray-400">
-        Loading approval request...
-      </div>
-    )
-  }
-
-  if (!pendingApproval) {
-    return (
-      <div className="flex flex-col h-full bg-dark-800">
-        <div className="flex-1 flex items-center justify-center p-8 text-center text-sm text-gray-400">
-          No pending dapp approval request.
-        </div>
-        <footer className="p-4 border-t border-dark-600">
-          <Button className="w-full btn-primary" onClick={() => navigate('/wallet/assets')}>
-            Back to wallet
-          </Button>
-        </footer>
-      </div>
-    )
+  if (loadingApproval || !pendingApproval) {
+    return <DappApprovalStatus loading={loadingApproval} onBack={() => navigate('/wallet/assets')} />
   }
 
   const content = (

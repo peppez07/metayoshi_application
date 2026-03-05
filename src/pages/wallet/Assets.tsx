@@ -1,158 +1,31 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore } from '../../store/walletStore'
-import { IoLayersOutline, IoChevronForward, IoEyeOutline } from 'react-icons/io5'
-import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
-import { getTokenLogoForAsset } from '../../coins/tokenlogos'
-import { isEvmNftAssetKey, parseSolanaAssetType, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
-
-// Ã¢â€â‚¬Ã¢â€â‚¬ helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-function formatAmount(raw: number): string {
-  return (raw / 1e8).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
-}
-
-function parseAssetName(name: string): { root: string; sub: string | null } {
-  const pipeIdx = name.indexOf('|')
-  if (pipeIdx >= 0) return { root: name.slice(0, pipeIdx).trim(), sub: name.slice(pipeIdx + 1).trim() || null }
-  const slashIdx = name.indexOf('/')
-  if (slashIdx >= 0) return { root: name.slice(0, slashIdx).trim(), sub: name.slice(slashIdx + 1).trim() || null }
-  return { root: name.trim(), sub: null }
-}
-
-function isRoot(name: string) { return !parseAssetName(name).sub }
-
-
-// Ã¢â€â‚¬Ã¢â€â‚¬ compact asset row (mirrors ActivityRow look) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-interface AssetPreviewRowProps {
-  name: string
-  displayName?: string
-  nft?: boolean
-  metaLabel?: string
-  logoUrl?: string
-  rawAmount: number
-  onClick: () => void
-  onPreview: () => void
-  previewAvailable?: boolean
-  hideMetaLabels?: boolean
-}
-
-const AssetPreviewRow: React.FC<AssetPreviewRowProps> = ({ name, displayName, nft = false, metaLabel, logoUrl, rawAmount, onClick, onPreview, previewAvailable = false, hideMetaLabels = false }) => {
-  const effectiveName = displayName || name
-  const { root, sub } = parseAssetName(effectiveName)
-  const isRootAsset = !sub
-  const logoSrc = String(logoUrl || '').trim() || getTokenLogoForAsset(effectiveName)
-
-  return (
-    <div className="w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 hover:bg-dark-700 transition-colors">
-      <button
-        onClick={onClick}
-        className="flex-1 min-w-0 flex items-center justify-between p-2 text-left"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          {/* icon */}
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-            isRootAsset ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-blue-500/10 border border-blue-500/30'
-          }`}>
-            {logoSrc ? (
-              <img src={logoSrc} alt={`${name} logo`} className="w-full h-full rounded-full object-cover" />
-            ) : (
-              <IoLayersOutline className={`w-4.5 h-4.5 ${isRootAsset ? 'text-yellow-400' : 'text-blue-400'}`} />
-            )}
-          </div>
-
-          {/* name + badge */}
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {sub ? (
-                <span className="text-sm font-bold text-blue-300 leading-none truncate">{sub}</span>
-              ) : (
-                <span className="text-sm font-bold leading-none truncate">{root}</span>
-              )}
-            </div>
-            {(nft || !hideMetaLabels) && (
-              <span className={`text-[9px] font-bold uppercase ${isRootAsset ? 'text-yellow-600' : 'text-blue-500'}`}>
-                {metaLabel || (nft ? 'EVM NFT' : (isRootAsset ? 'Root Asset' : `Sub of ${root}`))}
-              </span>
-            )}
-            {!hideMetaLabels && previewAvailable && (
-              <span className="text-[9px] font-bold uppercase text-primary">Preview</span>
-            )}
-          </div>
-        </div>
-
-        {/* amount + arrow */}
-        <div className="flex items-center gap-2 shrink-0 pl-2">
-          <span className="text-sm font-bold font-mono">{formatAmount(rawAmount)}</span>
-          <IoChevronForward className="text-gray-500 w-4 h-4" />
-        </div>
-      </button>
-
-      <button
-        onClick={onPreview}
-        disabled={!previewAvailable}
-        className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${
-          previewAvailable
-            ? 'border-primary/40 bg-primary/10 hover:bg-primary/20'
-            : 'border-dark-600 bg-dark-700/40 opacity-40 cursor-not-allowed'
-        }`}
-        title={
-          previewAvailable
-            ? (hideMetaLabels ? 'View asset file' : 'Preview asset file')
-            : (hideMetaLabels ? 'No file available' : 'No preview available')
-        }
-      >
-        <IoEyeOutline className={`w-4.5 h-4.5 ${previewAvailable ? 'text-primary' : 'text-gray-300'}`} />
-      </button>
-    </div>
-  )
-}
-
-// Ã¢â€â‚¬Ã¢â€â‚¬ main Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+import { IoChevronForward, IoLayersOutline } from 'react-icons/io5'
+import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import AssetListRow from './AssetListRow'
+import { useAssetListModel } from './useAssetListModel'
 
 const Assets: React.FC = () => {
-  const {
-    networks,
-    activeNetworkId,
-    accounts,
-    activeAccountId,
-    networkAssets,
-    networkAssetLogos,
-    networkAssetLabels,
-    evmNftAssets,
-    fetchNetworkAssets,
-    fetchAssetDetails,
-    activity
-  } = useWalletStore()
   const navigate = useNavigate()
-  const [previewByAsset, setPreviewByAsset] = useState<Record<string, boolean>>({})
-  const checkingRef = useRef<Set<string>>(new Set())
+  const {
+    activeNetwork,
+    caps,
+    sorted,
+    isEvmEcosystem,
+    isSolanaEcosystem,
+    canOpenAssetSend,
+    assetLogos,
+    previewByAsset,
+    resolveAssetDisplayName,
+    isPreviewableAssetName,
+    ensurePreviewAvailability
+  } = useAssetListModel()
 
-  const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
-  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-  const caps = resolveNetworkCapabilities(activeNetwork)
-  const activeModelId = String(activeNetwork.runtimeModelId || activeNetwork.id || '').trim().toLowerCase()
-  const isEvmEcosystem = activeNetwork.coinType === 'EVM'
-  const isSolanaEcosystem = activeNetwork.coinType === 'SOL' || activeModelId === 'sol'
-  const supportsPreview =
-    activeNetwork.coinType === 'UTXO'
-    || activeNetwork.coinType === 'EVM'
-    || activeModelId === 'sol'
-    || activeModelId === 'ada'
-    || activeModelId === 'tron'
-    || activeNetwork.coinType === 'XRP'
-  const canOpenAssetSend = caps.features.assetSend
-  const nftLookup = evmNftAssets[activeNetworkId] ?? {}
-  const isPreviewableAssetName = useCallback((name: string): boolean => {
-    if (!supportsPreview) return false
-    if (isSolanaEcosystem) return parseSolanaAssetType(name) !== 'spl-token'
-    return true
-  }, [isSolanaEcosystem, supportsPreview])
+  const previewRows = useMemo(() => sorted.slice(0, 3), [sorted])
+  const previewAssetNames = useMemo(() => previewRows.map(([name]) => name), [previewRows])
+  const total = sorted.length
 
-  useEffect(() => {
-    if (caps.features.assetLayer) void fetchNetworkAssets()
-  }, [activeNetworkId, fetchNetworkAssets, caps.features.assetLayer])
+  useEffect(() => ensurePreviewAvailability(previewAssetNames), [ensurePreviewAvailability, previewAssetNames])
 
   if (!caps.features.assetLayer) {
     return (
@@ -164,68 +37,6 @@ const Assets: React.FC = () => {
       </div>
     )
   }
-
-  const baseRawAssets = networkAssets[activeNetworkId] ?? {}
-  const rawAssets = baseRawAssets
-  const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
-  const assetLabels = networkAssetLabels[activeNetworkId] ?? {}
-  const allEntries = Object.entries(rawAssets)
-  const assetUsage = useMemo(() => {
-    const out = new Map<string, number>()
-    for (const row of activity) {
-      if (String(row?.networkId || '').trim() !== activeNetworkId) continue
-      const name = String(row?.asset || '').trim().toLowerCase()
-      if (!name) continue
-      out.set(name, (out.get(name) || 0) + 1)
-    }
-    return out
-  }, [activity, activeNetworkId])
-  const byUsageThenName = (a: string, b: string): number => {
-    const delta = (assetUsage.get(b.toLowerCase()) || 0) - (assetUsage.get(a.toLowerCase()) || 0)
-    if (delta !== 0) return delta
-    return a.localeCompare(b)
-  }
-
-  // roots first, then subs, each group sorted alphabetically Ã¢â€ â€™ take top 3
-  const roots = allEntries.filter(([n]) => isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
-  const subs  = allEntries.filter(([n]) => !isRoot(n)).sort(([a], [b]) => byUsageThenName(a, b))
-  const sorted = [...roots, ...subs]
-  const preview = sorted.slice(0, 3)
-  const total   = sorted.length
-  const previewNames = useMemo(() => preview.map(([name]) => name), [preview])
-
-  useEffect(() => {
-    if (!supportsPreview) return
-    let cancelled = false
-    const checkPreviewability = async () => {
-      for (const assetName of previewNames) {
-        if (!isPreviewableAssetName(assetName)) {
-          if (!cancelled) {
-            setPreviewByAsset((prev) => (prev[assetName] === false ? prev : { ...prev, [assetName]: false }))
-          }
-          continue
-        }
-        if (previewByAsset[assetName] !== undefined) continue
-        if (checkingRef.current.has(assetName)) continue
-        checkingRef.current.add(assetName)
-        try {
-          const details = await fetchAssetDetails(assetName)
-          const hasPreview = Boolean(String(details?.preview_url || details?.ipfs_hash || details?.metadata_url || '').trim())
-          if (!cancelled) {
-            setPreviewByAsset((prev) => ({ ...prev, [assetName]: hasPreview }))
-          }
-        } catch {
-          if (!cancelled) {
-            setPreviewByAsset((prev) => ({ ...prev, [assetName]: false }))
-          }
-        } finally {
-          checkingRef.current.delete(assetName)
-        }
-      }
-    }
-    if (previewNames.length > 0) void checkPreviewability()
-    return () => { cancelled = true }
-  }, [previewNames, fetchAssetDetails, isPreviewableAssetName, previewByAsset, supportsPreview])
 
   if (total === 0) {
     return (
@@ -244,13 +55,16 @@ const Assets: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1">
-        {preview.map(([name, raw]) => (
-          <AssetPreviewRow
+        {previewRows.map(([name, rawAmount]) => (
+          <AssetListRow
             key={name}
+            variant="compact"
             name={name}
+            displayName={resolveAssetDisplayName(name)}
             nft={isEvmNftAssetKey(name)}
+            metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
             logoUrl={assetLogos[name]}
-            rawAmount={raw}
+            rawAmount={rawAmount}
             onClick={() => {
               if (canOpenAssetSend) {
                 navigate('/wallet/send', { state: { assetId: name } })
@@ -264,8 +78,6 @@ const Assets: React.FC = () => {
             }}
             previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
             hideMetaLabels={isEvmEcosystem}
-            displayName={nftLookup[name]?.label || assetLabels[name]}
-            metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
           />
         ))}
 

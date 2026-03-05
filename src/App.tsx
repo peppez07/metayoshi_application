@@ -39,7 +39,6 @@ import SecuritySettings from './pages/settings/SecuritySettings'
 import BackupSettings from './pages/settings/BackupSettings'
 import RestoreSettings from './pages/settings/RestoreSettings'
 import ShowSecrets from './pages/settings/ShowSecrets'
-import DownloadKeys from './pages/settings/DownloadKeys'
 import AccountManager from './pages/settings/AccountManager'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
 import LocalRpcSettings from './pages/settings/LocalRpcSettings'
@@ -197,7 +196,7 @@ function App() {
             <Route path="backup" element={<BackupSettings />} />
             <Route path="restore" element={<RestoreSettings />} />
             <Route path="show-secrets" element={<ShowSecrets />} />
-            <Route path="download-keys" element={<DownloadKeys />} />
+            <Route path="download-keys" element={<Navigate to="/settings/show-secrets" replace />} />
             <Route path="accounts" element={<AccountManager />} />
             <Route path="password" element={<PasswordSettings />} />
             <Route path="autolock" element={<AutolockSettings />} />
