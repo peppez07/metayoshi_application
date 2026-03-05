@@ -210,6 +210,26 @@ function resolveBridgeWalletHint(config: UtxoRpcConfig): string {
   return ''
 }
 
+function deriveBridgeChainEndpointUrl(config: UtxoRpcConfig): string | null {
+  const baseUrl = String(config.bridgeUrl || '').trim().replace(/\/+$/, '')
+  if (!baseUrl) return null
+
+  const bridgeWithWallet = baseUrl.match(/^(.*)\/v1\/bridge\/([^/]+)\/([^/]+)\/wallet\/([^/]+)$/i)
+  if (bridgeWithWallet) {
+    const [, host, coin, chain] = bridgeWithWallet
+    return `${host}/v1/bridge/${coin}/${chain}`
+  }
+
+  const bridgeWalletOnly = baseUrl.match(/^(.*)\/v1\/bridge\/wallet\/([^/]+)$/i)
+  if (bridgeWalletOnly) {
+    const [, host] = bridgeWalletOnly
+    const hint = resolveBridgeCoinChainHint(config)
+    if (hint.coin && hint.chain) return `${host}/v1/bridge/${hint.coin}/${hint.chain}`
+  }
+
+  return null
+}
+
 const BRIDGE_WRITE_METHODS = new Set([
   'sendtoaddress',
   'sendmany',
@@ -2078,7 +2098,63 @@ export async function sendRtmAssetNonCustodial(
     ...selectedFeeInputs.map((u) => ({ txid: u.txid, vout: u.vout }))
   ]
 
-  const rawHex = await jsonRpcCall(config, 'createrawtransaction', [inputs, outputs])
+  const createRawTxViaBestBridgeRoute = async (): Promise<string> => {
+    const rpcConfigs: UtxoRpcConfig[] = [config]
+    const chainBridgeUrl = deriveBridgeChainEndpointUrl(config)
+    if (
+      chainBridgeUrl
+      && String(chainBridgeUrl).trim().toLowerCase() !== String(config.bridgeUrl || '').trim().toLowerCase()
+    ) {
+      rpcConfigs.push({ ...config, bridgeUrl: chainBridgeUrl })
+    }
+
+    const maxAttempts = 4
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      for (let cfgIndex = 0; cfgIndex < rpcConfigs.length; cfgIndex += 1) {
+        const rpcConfig = rpcConfigs[cfgIndex]
+        try {
+          const created = await jsonRpcCall(rpcConfig, 'createrawtransaction', [inputs, outputs])
+          return String(created)
+        } catch (error) {
+          const wrapped = asError(error)
+          lastError = wrapped
+          const msg = wrapped.message
+
+          const hasMoreEndpointCandidates = cfgIndex < rpcConfigs.length - 1
+          const hasMoreAttempts = attempt < maxAttempts - 1
+          if (!hasMoreEndpointCandidates && !hasMoreAttempts) break
+
+          const cooldownMs = parseBridgeCooldownMs(msg)
+          if (cooldownMs !== null) {
+            await sleep(cooldownMs + 250)
+            continue
+          }
+
+          const transientBridgeFailure =
+            isBridgeFallbackEligibleError(wrapped)
+            || /upstream rpc fetch failed/i.test(msg)
+            || /rpc call failed \[bridge\].*\bhttp\s*5\d\d\b/i.test(msg)
+          if (transientBridgeFailure) continue
+
+          throw wrapped
+        }
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await sleep(400 * (attempt + 1))
+      }
+    }
+
+    const detail = lastError?.message || 'unknown error'
+    throw new Error(
+      `Failed to build RTM asset transaction on bridge after ${maxAttempts} attempts: ${detail}. ` +
+      'Server bridge upstream is unstable; verify RTM daemon/RPC health on server.'
+    )
+  }
+
+  const rawHex = await createRawTxViaBestBridgeRoute()
 
   const signingInputs: UnsignedTxInput[] = [
     ...selectedAssetInputs.map((u) => ({

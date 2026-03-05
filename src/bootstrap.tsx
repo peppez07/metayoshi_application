@@ -41,6 +41,11 @@ function installZoomShortcutBlockers(): void {
   document.addEventListener('gestureend', preventGestureZoom as EventListener, { passive: false })
 }
 
+function shouldBlockZoomShortcuts(): boolean {
+  const raw = String((import.meta as any)?.env?.VITE_BLOCK_ZOOM_SHORTCUTS || '').trim().toLowerCase()
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on'
+}
+
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error?: Error }
@@ -89,7 +94,9 @@ class ErrorBoundary extends React.Component<
 }
 
 installGlobalErrorMonitor('popup-ui')
-installZoomShortcutBlockers()
+if (shouldBlockZoomShortcuts()) {
+  installZoomShortcutBlockers()
+}
 
 const rootElement = document.getElementById('app')
 if (!rootElement) {
