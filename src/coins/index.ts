@@ -3,6 +3,7 @@ import { dashCoin } from './dash'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
 import { rtmCoin } from './rtm'
+import { solCoin } from './sol'
 import { SERVER_SCAFFOLD_COIN_MODULES, SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from './serverScaffoldCoins'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 import { BUILD_CONFIG } from '../buildConfig'
@@ -48,6 +49,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
+  solCoin,
   firoCoin,
   dashCoin,
   btczCoin,

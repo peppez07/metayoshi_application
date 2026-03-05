@@ -8,5 +8,6 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   dash: { symbol: 'DASH', coinId: 'dash' },
   btcz: { symbol: 'BTCZ', coinId: 'bitcoinz' },
   firo: { symbol: 'FIRO', coinId: 'firo' },
-  eth: { symbol: 'ETH', coinId: 'ethereum' }
+  eth: { symbol: 'ETH', coinId: 'ethereum' },
+  sol: { symbol: 'SOL', coinId: 'solana' }
 }
