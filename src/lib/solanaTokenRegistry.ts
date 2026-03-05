@@ -17,11 +17,24 @@ function normalizeMint(mint: string): string {
   return String(mint || '').trim()
 }
 
+function readEnvFlag(name: string, fallback = false): boolean {
+  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+  const raw = String(env?.[name] ?? '').trim().toLowerCase()
+  if (!raw) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false
+  return fallback
+}
+
 export async function getSolanaTokenRegistry(): Promise<Record<string, SolanaTokenRegistryEntry>> {
   return await tokenListCache.get('solana-token-registry:jupiter', async () => {
-    // Jupiter token list is a pragmatic, widely-used registry for SPL tokens (mint -> symbol/name/logo).
-    // If it fails, we return an empty registry and still show tokens by mint address.
-    const url = 'https://token.jup.ag/all'
+    const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+    const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
+    const allowPublicRegistry = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_TOKEN_REGISTRY', false)
+    // Default behavior: no external token-registry call unless explicitly allowed/configured.
+    const url = configuredUrl || (allowPublicRegistry ? 'https://token.jup.ag/all' : '')
+    if (!url) return {}
+
     const res = await fetch(url, { method: 'GET' })
     if (!res.ok) throw new Error(`Failed to fetch Solana token registry (${res.status})`)
     const json = await res.json()

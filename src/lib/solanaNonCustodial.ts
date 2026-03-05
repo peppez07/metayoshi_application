@@ -15,9 +15,22 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqC
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1Q2hvZbsiqW5xWH25efTNsLJA8knL')
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 
+function readEnvFlag(name: string, fallback = false): boolean {
+  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+  const raw = String(env?.[name] ?? '').trim().toLowerCase()
+  if (!raw) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false
+  return fallback
+}
+
+const SOL_ALLOW_PUBLIC_RPC_FALLBACK = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_RPC_FALLBACK', false)
+
 function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
   const primary = String(rpcUrl || '').trim()
-  const defaults = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+  const defaults = SOL_ALLOW_PUBLIC_RPC_FALLBACK
+    ? ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+    : []
   return Array.from(new Set([primary, ...defaults].filter(Boolean)))
 }
 
@@ -309,18 +322,20 @@ export async function listSolanaTokenBalances(rpcUrl: string, ownerAddress: stri
       lastError = error
     }
   }
-  // Final fallback: direct JSON-RPC calls to public mainnet endpoints.
-  try {
-    const fallbackEndpoints = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
-    for (const endpoint of fallbackEndpoints) {
-      const tokenkegRows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_PROGRAM_ID.toBase58())
-      const token2022Rows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_2022_PROGRAM_ID.toBase58())
-      const merged = [...tokenkegRows, ...token2022Rows]
-      if (firstSuccessful == null) firstSuccessful = merged
-      if (merged.length > 0) return merged
+  // Optional public fallback for deployments that intentionally allow it.
+  if (SOL_ALLOW_PUBLIC_RPC_FALLBACK) {
+    try {
+      const fallbackEndpoints = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+      for (const endpoint of fallbackEndpoints) {
+        const tokenkegRows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_PROGRAM_ID.toBase58())
+        const token2022Rows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_2022_PROGRAM_ID.toBase58())
+        const merged = [...tokenkegRows, ...token2022Rows]
+        if (firstSuccessful == null) firstSuccessful = merged
+        if (merged.length > 0) return merged
+      }
+    } catch (error) {
+      lastError = error
     }
-  } catch (error) {
-    lastError = error
   }
   if (firstSuccessful != null) return firstSuccessful
   if (lastError) throw lastError instanceof Error ? lastError : new Error('Failed to list Solana token balances')

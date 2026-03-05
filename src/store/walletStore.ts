@@ -2816,50 +2816,59 @@ export const useWalletStore = create<WalletState>()(
               symbol?: string
             }> = []
 
+            const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+            const solDirectFallbackFlag = String(env.VITE_SOL_ALLOW_DIRECT_ASSET_RPC_FALLBACK ?? '').trim().toLowerCase()
+            const allowDirectAssetRpcFallback =
+              solDirectFallbackFlag === '1'
+              || solDirectFallbackFlag === 'true'
+              || solDirectFallbackFlag === 'yes'
+              || solDirectFallbackFlag === 'on'
+
             try {
-              const directRows = await listSolanaTokenBalances(net.rpcUrl, address)
-              rows = directRows.map((row) => ({
-                tokenId: String(row.tokenId || '').trim(),
-                amountRaw: String(row.amountRaw || '').trim(),
-                amountUi: String(row.amountUi || '').trim(),
-                decimals: Number.isFinite(row.decimals) ? Math.max(0, Math.trunc(row.decimals)) : 0,
-                isNft: Boolean(row.isNft),
-                symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined
-              }))
+              const rpcConfig = await createUtxoRpcConfig(net, {
+                useLocalRpc: ulr,
+                localRpcOverride: lro[net.id],
+                secureBridgeSigner: get().signBackendAuthMessage
+              })
+              const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+                coin: String(net.serverCoinId || 'solana').trim() || 'solana',
+                chain: String(net.serverChain || 'main').trim() || 'main',
+                owner: address,
+                wallet: String(net.rpcWallet || '').trim() || undefined
+              })
+              const normalized: typeof rows = []
+              for (const row of bridgeRows) {
+                const tokenId = String(row.tokenId || row.tokenAddress || '').trim()
+                const amountRaw = String(row.balanceRaw || '').trim()
+                if (!tokenId || !/^\d+$/.test(amountRaw)) continue
+                const decimals = Number(row.decimals ?? 0)
+                normalized.push({
+                  tokenId,
+                  amountRaw,
+                  amountUi: String(row.balance || '0').trim() || '0',
+                  decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+                  tokenType: String(row.tokenType || '').trim(),
+                  symbol: String(row.symbol || '').trim().toUpperCase() || undefined
+                })
+              }
+              rows = normalized
             } catch {
               rows = []
             }
 
-            if (rows.length === 0) {
+            if (rows.length === 0 && allowDirectAssetRpcFallback) {
               try {
-                const rpcConfig = await createUtxoRpcConfig(net, {
-                  useLocalRpc: ulr,
-                  localRpcOverride: lro[net.id],
-                  secureBridgeSigner: get().signBackendAuthMessage
-                })
-                const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
-                  coin: String(net.serverCoinId || 'solana').trim() || 'solana',
-                  chain: String(net.serverChain || 'main').trim() || 'main',
-                  owner: address
-                })
-                const normalized: typeof rows = []
-                for (const row of bridgeRows) {
-                  const tokenId = String(row.tokenId || row.tokenAddress || '').trim()
-                  const amountRaw = String(row.balanceRaw || '').trim()
-                  if (!tokenId || !/^\d+$/.test(amountRaw)) continue
-                  const decimals = Number(row.decimals ?? 0)
-                  normalized.push({
-                    tokenId,
-                    amountRaw,
-                    amountUi: String(row.balance || '0').trim() || '0',
-                    decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
-                    tokenType: String(row.tokenType || '').trim(),
-                    symbol: String(row.symbol || '').trim().toUpperCase() || undefined
-                  })
-                }
-                rows = normalized
+                const directRows = await listSolanaTokenBalances(net.rpcUrl, address)
+                rows = directRows.map((row) => ({
+                  tokenId: String(row.tokenId || '').trim(),
+                  amountRaw: String(row.amountRaw || '').trim(),
+                  amountUi: String(row.amountUi || '').trim(),
+                  decimals: Number.isFinite(row.decimals) ? Math.max(0, Math.trunc(row.decimals)) : 0,
+                  isNft: Boolean(row.isNft),
+                  symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined
+                }))
               } catch {
-                // Keep the direct RPC result (possibly empty) when bridge token balance is unavailable.
+                rows = []
               }
             }
 

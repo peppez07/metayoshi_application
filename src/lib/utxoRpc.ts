@@ -2786,9 +2786,13 @@ export async function fetchBridgeTokenBalances(
 
   const body: Record<string, unknown> = { id: `tok-bal-${Date.now()}` }
   const owner = String(input.owner || '').trim()
-  const wallet = String(input.wallet || '').trim()
+  const wallet = String(input.wallet || config.rpcWallet || '').trim()
   const tokenId = String(input.tokenId || '').trim()
-  if (owner) body.owner = owner
+  if (owner) {
+    body.owner = owner
+    // Some bridge deployments expect `address` instead of `owner`.
+    body.address = owner
+  }
   if (wallet) body.wallet = wallet
   if (tokenId) body.tokenId = tokenId
 
