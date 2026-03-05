@@ -564,7 +564,9 @@ const DEFAULT_BASE_TRACKED_TOKENS: EvmTrackedToken[] = [
   // Native Base USDC (Circle).
   { address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', symbol: 'USDC', decimals: 6 },
   // Wrapped Ether on Base.
-  { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+  { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 },
+  // MasterBOT ERC-20 on Base.
+  { address: '0x6E7c5Faaaa2ccA8437C8FA20EA2eE5A5cF5077DC', symbol: 'MASTERBOT', decimals: 18 }
 ]
 
 const MIN_TRACKED_EVM_TOKENS_PER_CHAIN = 100
@@ -1318,9 +1320,67 @@ function toHexBlock(value: bigint): string {
   return `0x${value.toString(16)}`
 }
 
+function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
+  const raw = String(bridgeUrl || '').trim().replace(/\/+$/, '')
+  if (!raw) return ''
+  const lower = raw.toLowerCase()
+  const idxV1Bridge = lower.indexOf('/v1/bridge/')
+  if (idxV1Bridge >= 0) return raw.slice(0, idxV1Bridge)
+  const idxBridge = lower.indexOf('/bridge/')
+  if (idxBridge >= 0) return raw.slice(0, idxBridge)
+  if (/\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '')
+  return raw
+}
+
+async function discoverEvmTokenContractsFromAddressAssets(
+  rpcConfig: UtxoRpcConfig,
+  input: { coin: string; chain: string; ownerAddress: string }
+): Promise<string[]> {
+  const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig.bridgeUrl || ''))
+  if (!apiBase) return []
+
+  const coin = String(input.coin || '').trim().toLowerCase()
+  const chain = String(input.chain || 'main').trim().toLowerCase() || 'main'
+  const ownerAddress = String(input.ownerAddress || '').trim()
+  if (!coin || !ownerAddress || !ethers.isAddress(ownerAddress)) return []
+
+  const url = `${apiBase}/v1/address/${encodeURIComponent(ownerAddress)}`
+    + `/assets?coin=${encodeURIComponent(coin)}&chain=${encodeURIComponent(chain)}&multichain=1`
+  const headers: Record<string, string> = {}
+  const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+  if (apiKey) headers['X-API-Key'] = apiKey
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? 10000))
+  try {
+    const res = await fetch(url, { method: 'GET', headers, signal: controller.signal })
+    if (!res.ok) return []
+    const json = await res.json().catch(() => null) as any
+    const erc20Rows = Array.isArray(json?.assets?.erc20) ? json.assets.erc20 : []
+    const out = new Set<string>()
+    for (const row of erc20Rows) {
+      const candidate = normalizeEvmAddressLoose(String(
+        row?.contractAddress
+        || row?.tokenAddress
+        || row?.TokenAddress
+        || ''
+      ).trim())
+      if (!candidate) continue
+      out.add(candidate)
+      if (out.size >= 220) break
+    }
+    return [...out]
+  } catch {
+    return []
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function discoverEvmTokenContractsFromLogs(
   rpcConfig: UtxoRpcConfig,
-  ownerAddress: string
+  ownerAddress: string,
+  txidsHint?: string[]
 ): Promise<string[]> {
   const checksumOwner = ethers.getAddress(ownerAddress)
   const cacheKey = `${String(rpcConfig.bridgeUrl || '').trim().toLowerCase()}|${checksumOwner.toLowerCase()}`
@@ -1366,9 +1426,43 @@ async function discoverEvmTokenContractsFromLogs(
         if (discovered.size >= 120) break
       }
       if (discovered.size >= 120) break
-      if (incoming || outgoing) break
+      const incomingCount = Array.isArray(incoming) ? incoming.length : 0
+      const outgoingCount = Array.isArray(outgoing) ? outgoing.length : 0
+      if (incomingCount > 0 || outgoingCount > 0) break
     } catch {
       // Provider may reject large ranges; try a narrower window.
+    }
+  }
+
+  // Fallback: discover ERC-20 contracts from recent local activity tx receipts.
+  if (discovered.size < 120) {
+    const hintedTxids = Array.isArray(txidsHint)
+      ? txidsHint
+          .map((value) => String(value || '').trim())
+          .filter((value) => /^0x[0-9a-f]{64}$/i.test(value))
+      : []
+    const uniqueTxids = [...new Set(hintedTxids)].slice(0, 36)
+    if (uniqueTxids.length > 0) {
+      await mapWithConcurrency(uniqueTxids, 6, async (txid) => {
+        try {
+          const receipt = await callBridgeMethod(rpcConfig, 'eth_getTransactionReceipt', [txid]) as {
+            logs?: Array<{ address?: string; topics?: string[] }>
+          } | null
+          const logs = Array.isArray(receipt?.logs) ? receipt!.logs : []
+          for (const log of logs) {
+            const topics = Array.isArray(log?.topics) ? log!.topics : []
+            const topic0 = String(topics[0] || '').toLowerCase()
+            // ERC-20 Transfer(address,address,uint256) has exactly 3 topics.
+            if (topic0 !== EVM_TRANSFER_TOPIC.toLowerCase() || topics.length !== 3) continue
+            const candidate = String(log?.address || '').trim()
+            if (!ethers.isAddress(candidate)) continue
+            discovered.add(ethers.getAddress(candidate))
+            if (discovered.size >= 120) break
+          }
+        } catch {
+          // Keep reading remaining receipts.
+        }
+      })
     }
   }
 
@@ -2435,6 +2529,7 @@ export const useWalletStore = create<WalletState>()(
           accounts,
           activeAccountId,
           serverCoinCatalog,
+          activity,
           useLocalRpc: ulr,
           localRpcOverrides: lro
         } = get()
@@ -2471,11 +2566,10 @@ export const useWalletStore = create<WalletState>()(
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
-          const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
           const chainId = resolveEvmChainId(net)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
-          for (const token of [...trackedDefaults, ...trackedFromCatalog]) {
+          for (const token of trackedFromCatalog) {
             if (!ethers.isAddress(token.address)) continue
             const checksum = ethers.getAddress(token.address)
             if (trackedByAddress.has(checksum)) continue
@@ -2486,8 +2580,42 @@ export const useWalletStore = create<WalletState>()(
               secureBridgeSigner: get().signBackendAuthMessage
             })
 
-            const discoveredAddresses = await discoverEvmTokenContractsFromLogs(rpcConfig, address).catch(() => [])
+            const activityTxids = activity
+              .filter((entry) =>
+                String(entry?.networkId || '').trim() === activeNetworkId
+                && String(entry?.status || '').trim().toLowerCase() !== 'rejected'
+                && (
+                  String(entry?.accountId || '').trim() === String(acc.id || '').trim()
+                  || String(entry?.from || '').trim().toLowerCase() === address.toLowerCase()
+                  || String(entry?.to || '').trim().toLowerCase() === address.toLowerCase()
+                )
+              )
+              .map((entry) => String(entry?.id || '').trim())
+            const discoveredAddresses = await discoverEvmTokenContractsFromLogs(
+              rpcConfig,
+              address,
+              activityTxids
+            ).catch(() => [])
+            const bridgeCoin = String(
+              net.serverCoinId
+              || (activeNetworkId === 'eth' ? 'ethereum' : activeNetworkId)
+            ).trim().toLowerCase()
+            const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
+            const assetsEndpointContracts = await discoverEvmTokenContractsFromAddressAssets(rpcConfig, {
+              coin: bridgeCoin,
+              chain: bridgeChain,
+              ownerAddress: address
+            }).catch(() => [])
             for (const discoveredAddress of discoveredAddresses) {
+              if (trackedByAddress.has(discoveredAddress)) continue
+              trackedByAddress.set(discoveredAddress, {
+                address: discoveredAddress,
+                symbol: shortAddress(discoveredAddress),
+                decimals: 18,
+                discovered: true
+              })
+            }
+            for (const discoveredAddress of assetsEndpointContracts) {
               if (trackedByAddress.has(discoveredAddress)) continue
               trackedByAddress.set(discoveredAddress, {
                 address: discoveredAddress,
@@ -2498,9 +2626,9 @@ export const useWalletStore = create<WalletState>()(
             }
 
             let mergedTokens = [...trackedByAddress.values()]
-            if (discoveredAddresses.length === 0 && mergedTokens.length > 80) {
+            if (discoveredAddresses.length === 0 && assetsEndpointContracts.length === 0 && mergedTokens.length > 80) {
               // Shared/public RPC providers often throttle large token scan bursts.
-              // Keep the highest-priority tracked set first (defaults/env/catalog are inserted first).
+              // Keep scan bounded when no dynamic discovery source produced candidates.
               mergedTokens = mergedTokens.slice(0, 80)
             }
 
@@ -2574,56 +2702,6 @@ export const useWalletStore = create<WalletState>()(
               fungibleAssetLabels[assetKey] = row.symbol
               if (row.logoUri) fungibleAssetLogos[assetKey] = row.logoUri
               assetKeyByContract.set(row.token.address, assetKey)
-            }
-
-            // Priority fallback: ensure core chain defaults are checked with a low-volume pass,
-            // so transient broad-scan failures do not hide common holdings.
-            const priorityDefaults = chainId === 1
-              ? DEFAULT_ETH_TRACKED_TOKENS
-              : chainId === 56
-                ? DEFAULT_BNB_TRACKED_TOKENS
-                : chainId === 8453
-                  ? DEFAULT_BASE_TRACKED_TOKENS
-                : []
-            const presentSymbols = new Set(Object.keys(fungibleAssets).map((k) => String(k || '').trim().toUpperCase()))
-            for (const token of priorityDefaults) {
-              const symbol = String(token.symbol || '').trim().toUpperCase()
-              if (!symbol || presentSymbols.has(symbol)) continue
-              try {
-                const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
-                let rawHex: unknown = null
-                let lastError: unknown = null
-                for (let attempt = 0; attempt < 3; attempt += 1) {
-                  try {
-                    rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
-                    lastError = null
-                    break
-                  } catch (err) {
-                    lastError = err
-                    if (attempt < 2) await waitMs(120 * (attempt + 1))
-                  }
-                }
-                if (lastError) continue
-                const rawBalance = BigInt(String(rawHex || '0x0'))
-                if (rawBalance <= 0n) continue
-                const displaySats = toAssetDisplaySats(rawBalance, token.decimals)
-                if (!Number.isFinite(displaySats) || displaySats <= 0) continue
-                let assetKey = symbol
-                let suffix = 2
-                while (usedAssetKeys.has(assetKey)) {
-                  assetKey = `${symbol}-${suffix}`
-                  suffix += 1
-                }
-                usedAssetKeys.add(assetKey)
-                presentSymbols.add(symbol)
-                fungibleAssets[assetKey] = displaySats
-                fungibleAssetLabels[assetKey] = symbol
-                const logoUri = String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim()
-                if (logoUri) fungibleAssetLogos[assetKey] = logoUri
-                assetKeyByContract.set(ethers.getAddress(token.address), assetKey)
-              } catch {
-                // Keep scanning remaining priority defaults.
-              }
             }
 
             const trackedNfts = [...resolveTrackedEvmNfts(net), ...resolveCatalogEvmTrackedNfts(serverCoinCatalog, modelId)]
@@ -2710,83 +2788,80 @@ export const useWalletStore = create<WalletState>()(
               }
             }
 
-            const shouldUseBridgeFallback =
-              Object.keys(fungibleAssets).length === 0
-              || (tokenReadSuccesses === 0 && tokenReadErrors > 0)
             let bridgeFallbackRowsApplied = 0
-            if (shouldUseBridgeFallback) {
-              try {
-                const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
-                  owner: address,
-                  wallet: String(net.rpcWallet || '').trim() || undefined
-                })
-                for (const row of bridgeRows) {
-                  const rawBalanceText = String(row.balanceRaw || '').trim()
-                  if (!/^\d+$/.test(rawBalanceText)) continue
-                  const rawBalance = BigInt(rawBalanceText)
-                  if (rawBalance <= 0n) continue
+            try {
+              const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+                coin: bridgeCoin,
+                chain: bridgeChain,
+                owner: address,
+                wallet: String(net.rpcWallet || '').trim() || undefined
+              })
+              for (const row of bridgeRows) {
+                const rawBalanceText = String(row.balanceRaw || '').trim()
+                if (!/^\d+$/.test(rawBalanceText)) continue
+                const rawBalance = BigInt(rawBalanceText)
+                if (rawBalance <= 0n) continue
 
-                  const tokenType = String(row.tokenType || '').trim()
-                  if (isBridgeEvmNftTokenType(tokenType)) {
-                    const parsedNft = parseBridgeEvmNftReference(row)
-                    if (!parsedNft) continue
-                    const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
-                    const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
-                    const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
-                    if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
-                    const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
-                    const displayLabel = `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`
-                    nftAssets[assetKey] = quantitySats
-                    nftLookup[assetKey] = {
-                      address: parsedNft.address,
-                      tokenId: parsedNft.tokenId,
-                      standard,
-                      label: displayLabel,
-                      quantityRaw: rawBalance.toString()
-                    }
-                    bridgeFallbackRowsApplied += 1
-                    continue
-                  }
-
-                  const decimalsRaw = Number(row.decimals)
-                  const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
-                  const displaySats = toAssetDisplaySats(rawBalance, decimals)
-                  if (!Number.isFinite(displaySats) || displaySats <= 0) continue
-
-                  const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || '').trim())
-                  const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
-                  const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
-
-                  let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
-                  if (!assetKey) {
-                    const baseKey = tokenAddress
-                      ? `${displaySymbol}@${shortAddress(tokenAddress)}`
-                      : displaySymbol
-                    assetKey = baseKey
-                    let suffix = 2
-                    while (usedAssetKeys.has(assetKey)) {
-                      assetKey = `${baseKey}-${suffix}`
-                      suffix += 1
-                    }
-                    usedAssetKeys.add(assetKey)
-                    if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
-                  }
-
-                  const prev = Number(fungibleAssets[assetKey] || 0)
-                  fungibleAssets[assetKey] = Math.max(prev, displaySats)
-                  fungibleAssetLabels[assetKey] = displaySymbol
-                  if (tokenAddress) {
-                    const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
-                    if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+                const tokenType = String(row.tokenType || '').trim()
+                if (isBridgeEvmNftTokenType(tokenType)) {
+                  const parsedNft = parseBridgeEvmNftReference(row)
+                  if (!parsedNft) continue
+                  const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
+                  const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
+                  const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
+                  if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
+                  const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
+                  const displayLabel = `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`
+                  nftAssets[assetKey] = quantitySats
+                  nftLookup[assetKey] = {
+                    address: parsedNft.address,
+                    tokenId: parsedNft.tokenId,
+                    standard,
+                    label: displayLabel,
+                    quantityRaw: rawBalance.toString()
                   }
                   bridgeFallbackRowsApplied += 1
+                  continue
                 }
-              } catch (bridgeFallbackError) {
-                console.warn(
-                  `[${net.symbol}] fetchNetworkAssets bridge fallback failed for ${activeNetworkId} (${address}).`,
-                  bridgeFallbackError
-                )
+
+                const decimalsRaw = Number(row.decimals)
+                const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
+                const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+                const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || '').trim())
+                const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
+                const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
+
+                let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
+                if (!assetKey) {
+                  const baseKey = tokenAddress
+                    ? `${displaySymbol}@${shortAddress(tokenAddress)}`
+                    : displaySymbol
+                  assetKey = baseKey
+                  let suffix = 2
+                  while (usedAssetKeys.has(assetKey)) {
+                    assetKey = `${baseKey}-${suffix}`
+                    suffix += 1
+                  }
+                  usedAssetKeys.add(assetKey)
+                  if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
+                }
+
+                const prev = Number(fungibleAssets[assetKey] || 0)
+                fungibleAssets[assetKey] = Math.max(prev, displaySats)
+                fungibleAssetLabels[assetKey] = displaySymbol
+                if (tokenAddress) {
+                  const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+                  if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+                }
+                bridgeFallbackRowsApplied += 1
               }
+            } catch (bridgeFallbackError) {
+              console.warn(
+                `[${net.symbol}] fetchNetworkAssets bridge token.balance read failed for ${activeNetworkId} (${address}).`,
+                bridgeFallbackError
+              )
             }
 
             const assets = { ...fungibleAssets, ...nftAssets }
@@ -3918,12 +3993,30 @@ export const useWalletStore = create<WalletState>()(
             : String(wallet!.address || '').trim()
           const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
           const resolvedChainId = Number(BigInt(String(chainIdHex || net.chainId || 1)))
+          const expectedChainId = Number(net.chainId || 0)
+          if (Number.isFinite(expectedChainId) && expectedChainId > 0 && resolvedChainId !== expectedChainId) {
+            throw new Error(
+              `Bridge/RPC chain mismatch: selected ${net.name} expects chainId ${expectedChainId}, got ${resolvedChainId}. ` +
+              'Stop and verify bridge coin/chain routing before sending.'
+            )
+          }
           const nonceHex = externalSigner
             ? '0x0'
             : await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
+          const assertContractDeployedOnActiveChain = async (contractAddress: string, label: string) => {
+            const codeRaw = await callBridgeMethod(rpcConfig, 'eth_getCode', [contractAddress, 'latest'])
+            const code = String(codeRaw || '').trim().toLowerCase()
+            if (!code || code === '0x' || /^0x0+$/i.test(code)) {
+              throw new Error(
+                `${label} contract is not deployed on ${net.name} (chainId ${resolvedChainId}). ` +
+                'Use the correct contract address for this network.'
+              )
+            }
+          }
 
           if (nft) {
             const tokenAddress = ethers.getAddress(nft.address)
+            await assertContractDeployedOnActiveChain(tokenAddress, 'NFT')
             let transferData = ''
             let relayAmount = '1'
 
@@ -4004,7 +4097,15 @@ export const useWalletStore = create<WalletState>()(
               txToSign.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
             }
             const signedTx = await wallet!.signTransaction(txToSign)
-            const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
+            const sent = await sendBridgeTokenTransfer(rpcConfig, {
+              tokenId: nft ? `${tokenAddress}:${nft.tokenId}` : tokenAddress,
+              toAddress: recipient,
+              amount: relayAmount,
+              fromAddress,
+              signedTxHex: signedTx,
+              signedFormat: 'evm-raw-hex'
+            })
+            const sentHash = String(sent.txid || '').trim()
             if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
             await get().fetchNetworkAssets()
             return { txid: sentHash }
@@ -4036,6 +4137,7 @@ export const useWalletStore = create<WalletState>()(
             }
             tokenAddress = ethers.getAddress(matches[Math.max(0, alias.ordinal - 1)].address)
           }
+          await assertContractDeployedOnActiveChain(tokenAddress, 'Token')
 
           let decimals = 18
           try {
@@ -4087,7 +4189,15 @@ export const useWalletStore = create<WalletState>()(
             txToSign.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
           }
           const signedTx = await wallet!.signTransaction(txToSign)
-          const sentHash = String(await callBridgeMethod(rpcConfig, 'eth_sendRawTransaction', [signedTx]) || '').trim()
+          const sent = await sendBridgeTokenTransfer(rpcConfig, {
+            tokenId: tokenAddress,
+            toAddress: recipient,
+            amount: String(qty || '').trim(),
+            fromAddress,
+            signedTxHex: signedTx,
+            signedFormat: 'evm-raw-hex'
+          })
+          const sentHash = String(sent.txid || '').trim()
           if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
           await get().fetchNetworkAssets()
           return { txid: sentHash }

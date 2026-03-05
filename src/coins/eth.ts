@@ -1,6 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { createEvmCoinModule } from './factories'
-import ethereumLogo from './coinlogos/ethereum.png'
+import { getUnifiedLogoByName } from './logos'
 
 const ethModule = createEvmCoinModule({
   id: 'eth',
@@ -9,7 +9,7 @@ const ethModule = createEvmCoinModule({
   coinSymbol: 'ETH',
   chainId: 1,
   bridgeCoinId: 'ethereum',
-  logo: ethereumLogo,
+  logo: getUnifiedLogoByName('ethereum'),
   rpcEnvKey: 'VITE_ETH_RPC',
   rpcUserEnvKey: 'VITE_ETH_RPC_USER',
   rpcPasswordEnvKey: 'VITE_ETH_RPC_PASSWORD',

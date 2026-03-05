@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { RTM_API_INFO } from './interceptors'
-import rtmLogo from './coinlogos/raptoreum.png'
+import { getUnifiedLogoByName } from './logos'
 
 export const RTM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -41,7 +41,7 @@ export function createRtmNetwork(ctx: CoinRuntimeContext): Network {
     explorerUrl: import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || 'https://explorer.raptoreum.com',
     capabilities: RTM_CAPABILITIES,
     feePerByte: RTM_FEE_PER_BYTE,
-    logo: rtmLogo
+    logo: getUnifiedLogoByName('raptoreum')
   }
 }
 

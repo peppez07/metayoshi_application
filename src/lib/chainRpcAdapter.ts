@@ -11,6 +11,7 @@ import {
   getUtxoBalance,
   listUtxoUnspent,
   scanAddressUnspent,
+  sendBridgeEvmSignedRelay,
   sendRawTransaction,
   sendToAddress,
   validateAddress,
@@ -584,6 +585,13 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
     const valueWei = ethers.parseEther(String(input.amount))
     const valueHex = ethers.toQuantity(valueWei)
     const chainIdHex = await callBridgeMethod(input.rpcConfig, 'eth_chainId', [])
+    const resolvedChainId = Number(parseRpcQuantityToBigInt(chainIdHex || input.network.chainId || 1, 'eth_chainId'))
+    const expectedChainId = Number(input.network.chainId || 0)
+    if (Number.isFinite(expectedChainId) && expectedChainId > 0 && resolvedChainId !== expectedChainId) {
+      throw new Error(
+        `Bridge/RPC chain mismatch: selected ${input.network.name} expects chainId ${expectedChainId}, got ${resolvedChainId}.`
+      )
+    }
     const nonceHex = await callBridgeMethod(input.rpcConfig, 'eth_getTransactionCount', [from, 'pending'])
     const feeQuote = await estimateEvmTxFee({
       rpcConfig: input.rpcConfig,
@@ -598,7 +606,7 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
       value: valueWei,
       nonce: Number(parseRpcQuantityToBigInt(nonceHex, 'eth_getTransactionCount')),
       gasLimit: feeQuote.gasLimit,
-      chainId: Number(parseRpcQuantityToBigInt(chainIdHex || input.network.chainId || 1, 'eth_chainId'))
+      chainId: resolvedChainId
     }
     if (feeQuote.type === 2) {
       tx.type = 2
@@ -608,8 +616,11 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
       tx.gasPrice = feeQuote.gasPrice ?? 1_000_000_000n
     }
     const signed = await wallet.signTransaction(tx)
-    const hash = await callBridgeMethod(input.rpcConfig, 'eth_sendRawTransaction', [signed])
-    return { hash: String(hash) }
+    const relayed = await sendBridgeEvmSignedRelay(input.rpcConfig, {
+      kind: 'coin',
+      signedTxHex: signed
+    })
+    return { hash: String(relayed.txid) }
   }
   if (protocol === 'utxo-jsonrpc') {
     if (!input.utxoSend) throw new Error('UTXO sender is not configured')

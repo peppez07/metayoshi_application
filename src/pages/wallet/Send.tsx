@@ -6,6 +6,7 @@ import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
+import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 import {
   IoArrowBackOutline,
   IoChevronDownOutline,
@@ -696,6 +697,7 @@ const Send: React.FC = () => {
     const cached = readCachedScanRows()
     return cached?.rows || []
   })
+  const scanRowsRef = useRef<AggregatedScanRow[]>(scanRows)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
   const handledDeepLinkRef = useRef<string>('')
   const scanRunIdRef = useRef(0)
@@ -725,6 +727,10 @@ const Send: React.FC = () => {
     () => scanRows.filter((row) => enabledNetworkIds.has(row.networkId)),
     [scanRows, enabledNetworkIds]
   )
+
+  useEffect(() => {
+    scanRowsRef.current = scanRows
+  }, [scanRows])
   const orderedScanRows = useMemo(
     () => applySendHubPreferences(visibleScanRows, hubPreferences),
     [visibleScanRows, hubPreferences]
@@ -911,10 +917,50 @@ const Send: React.FC = () => {
 
     const total = Math.max(1, scanAccounts.length * scanNetworks.length)
     const aggregate = new Map<string, AggregatedScanRow>()
+    for (const row of scanRowsRef.current) {
+      aggregate.set(row.key, {
+        ...row,
+        holders: [...row.holders]
+      })
+    }
     let done = 0
     let succeededSteps = 0
     let failedSteps = 0
     let lastFailure = ''
+    let lastPublishAt = 0
+    const stepDelayMs = mode === 'manual' ? Math.min(SEND_HUB_SCAN_STEP_DELAY_MS, 80) : 0
+
+    const publishProgressRows = (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastPublishAt < 180) return
+      lastPublishAt = now
+      const rows = sortAggregatedScanRows([...aggregate.values()])
+      setScanRows(rows)
+      if (force) writeCachedScanRows(rows)
+    }
+
+    const replaceAccountNetworkSlice = (networkId: string, accountId: string) => {
+      for (const [rowKey, row] of aggregate.entries()) {
+        if (row.networkId !== networkId) continue
+        const kept = row.holders.filter((holder) => !(holder.networkId === networkId && holder.accountId === accountId))
+        if (kept.length === row.holders.length) continue
+        if (kept.length <= 0) {
+          aggregate.delete(rowKey)
+          continue
+        }
+        const nextRaw = kept.reduce((sum, holder) => sum + Math.max(0, holder.rawAmount), 0)
+        if (nextRaw <= 0) {
+          aggregate.delete(rowKey)
+          continue
+        }
+        aggregate.set(rowKey, {
+          ...row,
+          rawAmount: nextRaw,
+          amount: formatUnits8(nextRaw / 1e8),
+          holders: kept.sort((a, b) => b.rawAmount - a.rawAmount)
+        })
+      }
+    }
 
     try {
       for (const account of scanAccounts) {
@@ -931,8 +977,8 @@ const Send: React.FC = () => {
             done,
             total,
             label: failedSteps > 0
-              ? `Refreshing global balances (${done}/${total})... ${failedSteps} issue${failedSteps === 1 ? '' : 's'}`
-              : `Refreshing global balances (${done}/${total})...`
+              ? `Scanning ${account.name} on ${network.symbol} (${done}/${total})... ${failedSteps} issue${failedSteps === 1 ? '' : 's'}`
+              : `Scanning ${account.name} on ${network.symbol} (${done}/${total})...`
           })
 
           try {
@@ -976,6 +1022,10 @@ const Send: React.FC = () => {
               includeHidden: true,
               includeZeroBalance: false
             })
+
+            // Keep existing rows visible until this exact account+network slice is refreshed.
+            // After refresh, replace that slice; if fresh balance is zero it disappears.
+            replaceAccountNetworkSlice(network.id, account.id)
 
             for (const item of itemRows) {
               const rawAmount = Math.max(0, Math.round(Number(item.rawAmount || 0)))
@@ -1026,25 +1076,27 @@ const Send: React.FC = () => {
               if (!holderExists) existing.holders.push(holder)
             }
             succeededSteps += 1
+            publishProgressRows(false)
           } catch (stepError) {
             const message = stepError instanceof Error ? stepError.message : String(stepError)
             if (message === '[cancelled]') throw stepError
             failedSteps += 1
             lastFailure = `[${network.symbol}] ${message}`
+            publishProgressRows(false)
           }
 
           if (shouldCancel()) throw new Error('[cancelled]')
-          await new Promise((resolve) => setTimeout(resolve, SEND_HUB_SCAN_STEP_DELAY_MS))
+          if (stepDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, stepDelayMs))
+          }
         }
       }
 
       if (shouldCancel()) throw new Error('[cancelled]')
 
+      publishProgressRows(true)
       const rows = sortAggregatedScanRows([...aggregate.values()])
-
-      setScanRows(rows)
       setExpandedRows({})
-      writeCachedScanRows(rows)
       const finishedAt = Date.now()
       setScanDiagnostics({
         mode,
@@ -1401,9 +1453,12 @@ const Send: React.FC = () => {
                 className="w-full text-left flex items-center gap-3"
               >
                 <div className="w-9 h-9 rounded-full border border-dark-600 bg-dark-700/60 overflow-hidden flex items-center justify-center shrink-0">
-                  {row.logoUrl
-                    ? <img src={row.logoUrl} alt={row.label} className="w-full h-full object-cover" />
-                    : <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />}
+                  {(() => {
+                    const resolvedLogo = String(row.logoUrl || '').trim() || getTokenLogoForAsset(row.label || row.symbol)
+                    return resolvedLogo
+                      ? <img src={resolvedLogo} alt={row.label} className="w-full h-full object-cover" />
+                      : <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />
+                  })()}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">

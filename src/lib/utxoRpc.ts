@@ -2686,23 +2686,36 @@ export async function sendBridgeTokenTransfer(
     const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
     let res: Response
     try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: `tok-${Date.now()}`,
-          transfer: {
-            fromAddress: String(input.fromAddress || '').trim(),
+      const requestBody = signedFormat === 'evm-raw-hex'
+        ? {
+            id: `tok-${Date.now()}`,
+            fromAddress: String(input.fromAddress || '').trim() || undefined,
             toAddress,
             tokenId,
             amount: amountNum,
             wallet: wallet || undefined,
-            signed: {
-              format: signedFormat,
-              payload: signedTxHex
+            signedTx: signedTxHex,
+            signedTxHex,
+            rawTx: signedTxHex
+          }
+        : {
+            id: `tok-${Date.now()}`,
+            transfer: {
+              fromAddress: String(input.fromAddress || '').trim(),
+              toAddress,
+              tokenId,
+              amount: amountNum,
+              wallet: wallet || undefined,
+              signed: {
+                format: signedFormat,
+                payload: signedTxHex
+              }
             }
           }
-        }),
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       })
     } catch (err) {
@@ -2737,6 +2750,108 @@ export async function sendBridgeTokenTransfer(
       || `HTTP ${res.status}`
     ))
     lastError = `Token transfer failed [HTTP ${res.status}]: ${detail}`
+    const shouldRetryTxKey = txKeyAttempts.length > i + 1
+      && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
+    if (shouldRetryTxKey) continue
+    throw new Error(lastError)
+  }
+
+  throw new Error(lastError)
+}
+
+export async function sendBridgeEvmSignedRelay(
+  config: UtxoRpcConfig,
+  input: {
+    kind: 'coin' | 'asset'
+    signedTxHex: string
+    coin?: string
+    chain?: string
+    wallet?: string
+  }
+): Promise<{ txid: string; relayed?: boolean; nonCustodial?: boolean }> {
+  if (!config.bridgeUrl) throw new Error('Bridge URL is required for EVM relay')
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) throw new Error('Bridge API base URL is not available')
+
+  const hinted = resolveBridgeCoinChainHint(config)
+  const coin = String(input.coin || hinted.coin || '').trim()
+  const chain = String(input.chain || hinted.chain || 'main').trim()
+  const wallet = String(input.wallet || '').trim()
+  const signedTxHex = String(input.signedTxHex || '').trim()
+  if (!coin) throw new Error('Bridge coin is required for EVM relay')
+  if (!chain) throw new Error('Bridge chain is required for EVM relay')
+  if (!signedTxHex) throw new Error('signedTx is required for EVM relay')
+  if (!/^0x[0-9a-f]+$/i.test(signedTxHex)) throw new Error('signedTx must be 0x-prefixed hex')
+
+  const baseUrl = `${apiBase}/v1/bridge/send/${input.kind}/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
+  const url = wallet ? `${baseUrl}/${encodeURIComponent(wallet)}` : baseUrl
+  const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.bridgeUsername && config.bridgePassword) {
+    baseHeaders['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
+  }
+
+  const txKeyCandidates = dedupeStringList([
+    ...(config.bridgeTxKeyCandidates || []),
+    config.bridgeTxKey
+  ])
+  const txKeyAttempts = txKeyCandidates.length > 0 ? txKeyCandidates : ['']
+
+  let lastError = `EVM relay ${input.kind} failed`
+  for (let i = 0; i < txKeyAttempts.length; i += 1) {
+    const txKey = txKeyAttempts[i]
+    const headers: Record<string, string> = { ...baseHeaders }
+    if (txKey) headers['X-Bridge-Tx-Key'] = txKey
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          signedTx: signedTxHex,
+          signedTxHex,
+          rawTx: signedTxHex
+        }),
+        signal: controller.signal
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      lastError = `EVM relay ${input.kind} request failed: ${err instanceof Error ? err.message : String(err)}`
+      continue
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const rawText = await res.text().catch(() => '')
+    const json = (() => {
+      try { return rawText ? JSON.parse(rawText) : null } catch { return null }
+    })()
+
+    if (res.ok) {
+      if (json?.error) {
+        const errText = compactErrorText(String(json?.error?.message || json?.error || `EVM relay ${input.kind} failed`))
+        throw new Error(`EVM relay ${input.kind} failed: ${errText}`)
+      }
+      const txid = String(json?.result?.txid || json?.txid || '').trim()
+      if (!txid) throw new Error(`EVM relay ${input.kind} succeeded but no txid returned`)
+      return {
+        txid,
+        relayed: Boolean(json?.result?.relayed),
+        nonCustodial: Boolean(json?.result?.nonCustodial)
+      }
+    }
+
+    const detail = compactErrorText(String(
+      json?.error?.message
+      || json?.error
+      || json?.message
+      || rawText
+      || res.statusText
+      || `HTTP ${res.status}`
+    ))
+    lastError = `EVM relay ${input.kind} failed [HTTP ${res.status}]: ${detail}`
     const shouldRetryTxKey = txKeyAttempts.length > i + 1
       && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
     if (shouldRetryTxKey) continue

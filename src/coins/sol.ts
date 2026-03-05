@@ -1,6 +1,6 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
-import solanaLogo from './coinlogos/solana.png'
+import { getUnifiedLogoByName } from './logos'
 
 const DEFAULT_SOL_RPC_URL = 'https://solana-rpc.publicnode.com'
 const DEFAULT_SOL_EXPLORER_URL = 'https://solscan.io'
@@ -29,7 +29,7 @@ export function createSolNetwork(ctx: CoinRuntimeContext): Network {
     bridgePassword,
     explorerUrl: String(env.VITE_SOL_EXPLORER || env.VITE_SOLANA_EXPLORER || DEFAULT_SOL_EXPLORER_URL).trim() || DEFAULT_SOL_EXPLORER_URL,
     capabilities: SOL_CAPABILITIES,
-    logo: solanaLogo
+    logo: getUnifiedLogoByName('solana')
   }
 }
 

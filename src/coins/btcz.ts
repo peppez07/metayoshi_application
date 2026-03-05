@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { BTCZ_API_INFO } from './interceptors'
-import btczLogo from './coinlogos/bitcoinz.png'
+import { getUnifiedLogoByName } from './logos'
 
 export const BTCZ_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -38,7 +38,7 @@ export function createBtczNetwork(ctx: CoinRuntimeContext): Network {
     explorerUrl: import.meta.env.VITE_BTCZ_EXPLORER || BTCZ_API_INFO.defaultExplorerUrl || '',
     capabilities: BTCZ_CAPABILITIES,
     feePerByte: BTCZ_FEE_PER_BYTE,
-    logo: btczLogo
+    logo: getUnifiedLogoByName('bitcoinz')
   }
 }
 

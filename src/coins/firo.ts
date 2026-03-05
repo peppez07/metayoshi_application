@@ -6,7 +6,7 @@ import type {
   UtxoAddressSpec
 } from './types'
 import { FIRO_API_INFO } from './interceptors/firo'
-import firoLogo from './coinlogos/firo.png'
+import { getUnifiedLogoByName } from './logos'
 
 export const FIRO_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -39,7 +39,7 @@ export function createFiroNetwork(ctx: CoinRuntimeContext): Network {
     explorerUrl: import.meta.env.VITE_FIRO_EXPLORER || FIRO_API_INFO.defaultExplorerUrl || 'https://explorer.firo.org',
     capabilities: FIRO_CAPABILITIES,
     feePerByte: FIRO_FEE_PER_BYTE,
-    logo: firoLogo
+    logo: getUnifiedLogoByName('firo')
   }
 }
 
