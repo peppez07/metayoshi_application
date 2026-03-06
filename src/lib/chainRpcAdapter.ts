@@ -1,4 +1,3 @@
-import { ethers } from 'ethers'
 import type { Network } from '../coins'
 import { estimateNetworkFee, getCoinRuntimeProfile } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
@@ -19,10 +18,6 @@ import {
 } from './utxoRpc'
 import { getXrpAccountBalance } from './xrpRpc'
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
-import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
-import { StrKey } from '@stellar/stellar-sdk'
-import { TronWeb } from 'tronweb'
-import { getTronBalance } from './tronNonCustodial'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
 import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
 import { getBuildFeatureFlag } from '../buildConfig'
@@ -70,6 +65,37 @@ export interface SendUtxoNonCustodialInput {
   amount: string
   donation?: UtxoDonationInput
   deriveSigningKey: (senderAddress: string) => Promise<{ privHex: string }>
+}
+
+let ethersModulePromise: Promise<typeof import('ethers')> | null = null
+let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
+let stellarSdkModulePromise: Promise<typeof import('@stellar/stellar-sdk')> | null = null
+let tronWebModulePromise: Promise<typeof import('tronweb')> | null = null
+let tronNonCustodialModulePromise: Promise<typeof import('./tronNonCustodial')> | null = null
+
+function loadEthersModule() {
+  if (!ethersModulePromise) ethersModulePromise = import('ethers')
+  return ethersModulePromise
+}
+
+function loadSolanaWeb3Module() {
+  if (!solanaWeb3ModulePromise) solanaWeb3ModulePromise = import('@solana/web3.js')
+  return solanaWeb3ModulePromise
+}
+
+function loadStellarSdkModule() {
+  if (!stellarSdkModulePromise) stellarSdkModulePromise = import('@stellar/stellar-sdk')
+  return stellarSdkModulePromise
+}
+
+function loadTronWebModule() {
+  if (!tronWebModulePromise) tronWebModulePromise = import('tronweb')
+  return tronWebModulePromise
+}
+
+function loadTronNonCustodialModule() {
+  if (!tronNonCustodialModulePromise) tronNonCustodialModulePromise = import('./tronNonCustodial')
+  return tronNonCustodialModulePromise
 }
 
 function resolveProtocol(network: Network): string {
@@ -262,6 +288,7 @@ async function getSolanaBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: stri
 }
 
 async function getSolanaBalanceDirectRpc(rpcUrl: string, address: string): Promise<string> {
+  const { Connection, LAMPORTS_PER_SOL, PublicKey } = await loadSolanaWeb3Module()
   const connection = new Connection(String(rpcUrl || '').trim(), 'confirmed')
   const lamports = await connection.getBalance(new PublicKey(address), 'confirmed')
   if (!Number.isFinite(lamports) || lamports < 0) {
@@ -379,7 +406,8 @@ async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string
   throw lastError instanceof Error ? lastError : new Error('Bridge TRON balance query failed')
 }
 
-function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeWallet {
+async function deriveEvmWallet(mnemonic: string, accountIndex: number) {
+  const { ethers } = await loadEthersModule()
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, `m/44'/60'/${accountIndex}'/0/0`)
 }
 
@@ -461,6 +489,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     }
     const rpcUrl = String(input.network.rpcUrl || '').trim()
     if (!rpcUrl) throw new Error('TRON RPC URL is not configured')
+    const { getTronBalance } = await loadTronNonCustodialModule()
     const balance = await getTronBalance(rpcUrl, address)
     return { balance, syncPercent: 100, isSyncing: false }
   }
@@ -470,6 +499,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
       throw new Error('Bridge RPC config is required for EVM networks')
     }
     try {
+      const { ethers } = await loadEthersModule()
       const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
       const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')
       return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
@@ -477,6 +507,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
       if (!isEvmBridgePayloadIncompatibleError(error)) throw error
       const rpcUrl = String(input.network.rpcUrl || '').trim()
       if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl)) throw error
+      const { ethers } = await loadEthersModule()
       const provider = new ethers.JsonRpcProvider(rpcUrl)
       const wei = await provider.getBalance(address)
       return { balance: ethers.formatEther(wei), syncPercent: 100, isSyncing: false }
@@ -538,19 +569,29 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   if (!value) return false
   if (modelId === 'sol') {
     try {
+      const { PublicKey } = await loadSolanaWeb3Module()
       void new PublicKey(value)
       return true
     } catch {
       return false
     }
   }
-  if (modelId === 'xlm') return StrKey.isValidEd25519PublicKey(value)
-  if (modelId === 'tron') return TronWeb.isAddress(value)
+  if (modelId === 'xlm') {
+    const { StrKey } = await loadStellarSdkModule()
+    return StrKey.isValidEd25519PublicKey(value)
+  }
+  if (modelId === 'tron') {
+    const tronweb = await loadTronWebModule()
+    return tronweb.TronWeb.isAddress(value)
+  }
   if (isCosmosLikeModelId(modelId)) {
     const { hrp } = resolveCosmosNetworkConfig(network)
     return isCosmosAddressForHrp(value, hrp)
   }
-  if (network.coinType === 'EVM') return ethers.isAddress(value)
+  if (network.coinType === 'EVM') {
+    const { ethers } = await loadEthersModule()
+    return ethers.isAddress(value)
+  }
   if (protocol === 'xrp-jsonrpc-compat') {
     return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
   }
@@ -575,12 +616,13 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
     return input.xrpSend()
   }
   if (input.network.coinType === 'EVM') {
+    const { ethers } = await loadEthersModule()
     const ctx = input.evm
     if (!ctx?.mnemonic) throw new Error('Wallet is locked')
     if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
       throw new Error('Bridge RPC config is required for EVM networks')
     }
-    const wallet = deriveEvmWallet(ctx.mnemonic, ctx.accountIndex)
+    const wallet = await deriveEvmWallet(ctx.mnemonic, ctx.accountIndex)
     const from = wallet.address
     const valueWei = ethers.parseEther(String(input.amount))
     const valueHex = ethers.toQuantity(valueWei)

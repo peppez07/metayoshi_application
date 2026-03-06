@@ -17,25 +17,9 @@ import {
 } from '../lib/utxoRpc'
 import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
-import { deriveXrpAddress } from '../lib/xrpAddress'
-import { sendXrpNonCustodial } from '../lib/xrpNonCustodial'
-import { deriveCardanoAddress } from '../lib/cardanoAddress'
-import { sendCardanoAssetNonCustodial, sendCardanoNonCustodial } from '../lib/cardanoNonCustodial'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
-import { deriveSolanaAddress } from '../lib/solanaAddress'
-import { listSolanaTokenBalances, sendSolanaNonCustodial, sendSolanaSplTokenNonCustodial } from '../lib/solanaNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
-import { deriveStellarAddress } from '../lib/stellarAddress'
-import { sendStellarNonCustodial } from '../lib/stellarNonCustodial'
-import { deriveTronAddress } from '../lib/tronAddress'
-import {
-  getTrc20BalanceRaw,
-  parseTrc20UiAmountToRaw,
-  readTrc20TokenMetadata,
-  sendTrc20NonCustodial,
-  sendTronNonCustodial
-} from '../lib/tronNonCustodial'
 import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
@@ -361,6 +345,66 @@ const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
 let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
 let sendOperationNextAllowedAtMs = 0
 const trackedActivityStatusPollers = new Set<string>()
+let xrpAddressModulePromise: Promise<typeof import('../lib/xrpAddress')> | null = null
+let xrpNonCustodialModulePromise: Promise<typeof import('../lib/xrpNonCustodial')> | null = null
+let cardanoAddressModulePromise: Promise<typeof import('../lib/cardanoAddress')> | null = null
+let cardanoNonCustodialModulePromise: Promise<typeof import('../lib/cardanoNonCustodial')> | null = null
+let solanaAddressModulePromise: Promise<typeof import('../lib/solanaAddress')> | null = null
+let solanaNonCustodialModulePromise: Promise<typeof import('../lib/solanaNonCustodial')> | null = null
+let stellarAddressModulePromise: Promise<typeof import('../lib/stellarAddress')> | null = null
+let stellarNonCustodialModulePromise: Promise<typeof import('../lib/stellarNonCustodial')> | null = null
+let tronAddressModulePromise: Promise<typeof import('../lib/tronAddress')> | null = null
+let tronNonCustodialModulePromise: Promise<typeof import('../lib/tronNonCustodial')> | null = null
+
+function loadXrpAddressModule() {
+  if (!xrpAddressModulePromise) xrpAddressModulePromise = import('../lib/xrpAddress')
+  return xrpAddressModulePromise
+}
+
+function loadXrpNonCustodialModule() {
+  if (!xrpNonCustodialModulePromise) xrpNonCustodialModulePromise = import('../lib/xrpNonCustodial')
+  return xrpNonCustodialModulePromise
+}
+
+function loadCardanoAddressModule() {
+  if (!cardanoAddressModulePromise) cardanoAddressModulePromise = import('../lib/cardanoAddress')
+  return cardanoAddressModulePromise
+}
+
+function loadCardanoNonCustodialModule() {
+  if (!cardanoNonCustodialModulePromise) cardanoNonCustodialModulePromise = import('../lib/cardanoNonCustodial')
+  return cardanoNonCustodialModulePromise
+}
+
+function loadSolanaAddressModule() {
+  if (!solanaAddressModulePromise) solanaAddressModulePromise = import('../lib/solanaAddress')
+  return solanaAddressModulePromise
+}
+
+function loadSolanaNonCustodialModule() {
+  if (!solanaNonCustodialModulePromise) solanaNonCustodialModulePromise = import('../lib/solanaNonCustodial')
+  return solanaNonCustodialModulePromise
+}
+
+function loadStellarAddressModule() {
+  if (!stellarAddressModulePromise) stellarAddressModulePromise = import('../lib/stellarAddress')
+  return stellarAddressModulePromise
+}
+
+function loadStellarNonCustodialModule() {
+  if (!stellarNonCustodialModulePromise) stellarNonCustodialModulePromise = import('../lib/stellarNonCustodial')
+  return stellarNonCustodialModulePromise
+}
+
+function loadTronAddressModule() {
+  if (!tronAddressModulePromise) tronAddressModulePromise = import('../lib/tronAddress')
+  return tronAddressModulePromise
+}
+
+function loadTronNonCustodialModule() {
+  if (!tronNonCustodialModulePromise) tronNonCustodialModulePromise = import('../lib/tronNonCustodial')
+  return tronNonCustodialModulePromise
+}
 
 function buildTrackedActivityStatusKey(networkId: string, txid: string): string {
   return `${String(networkId || '').trim().toLowerCase()}::${String(txid || '').trim().toLowerCase()}`
@@ -2037,6 +2081,7 @@ async function deriveAccountAddresses(
       }
     } else if (net.coinType === 'XRP') {
       try {
+        const { deriveXrpAddress } = await loadXrpAddressModule()
         const xrp = await deriveXrpAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = xrp.address
         if (!firstXrpAddress) firstXrpAddress = xrp.address
@@ -2049,6 +2094,7 @@ async function deriveAccountAddresses(
       networkAddresses[net.id] = evmWallet.address
     } else if (modelId === 'sol') {
       try {
+        const { deriveSolanaAddress } = await loadSolanaAddressModule()
         const sol = await deriveSolanaAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = sol.address
       } catch (err) {
@@ -2058,6 +2104,7 @@ async function deriveAccountAddresses(
       }
     } else if (modelId === 'xlm') {
       try {
+        const { deriveStellarAddress } = await loadStellarAddressModule()
         const xlm = await deriveStellarAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = xlm.address
       } catch (err) {
@@ -2067,6 +2114,7 @@ async function deriveAccountAddresses(
       }
     } else if (modelId === 'tron') {
       try {
+        const { deriveTronAddress } = await loadTronAddressModule()
         const tron = await deriveTronAddress(mnemonic, derivationIndex)
         networkAddresses[net.id] = tron.address
       } catch (err) {
@@ -2076,6 +2124,7 @@ async function deriveAccountAddresses(
       }
     } else if (modelId === 'ada') {
       try {
+        const { deriveCardanoAddress } = await loadCardanoAddressModule()
         const ada = await deriveCardanoAddress(mnemonic, derivationIndex, net.rpcUrl)
         networkAddresses[net.id] = ada.address
       } catch (err) {
@@ -2537,6 +2586,7 @@ export const useWalletStore = create<WalletState>()(
           if (net.coinType === 'EVM') {
             address = deriveEvmWallet(sessionMnemonic!, accountIndex).address
           } else if (net.coinType === 'XRP') {
+            const { deriveXrpAddress } = await loadXrpAddressModule()
             const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           } else if (modelId === 'cosmos' || isCroCosmosModel(net)) {
@@ -2552,18 +2602,22 @@ export const useWalletStore = create<WalletState>()(
               console.info(`[${net.symbol}] derived address on demand: ${address}`)
             }
           } else if (modelId === 'ada') {
+            const { deriveCardanoAddress } = await loadCardanoAddressModule()
             const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
             address = derived.address
           } else if (modelId === 'xmr') {
             const derived = await deriveMoneroAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
             address = derived.address
           } else if (modelId === 'sol') {
+            const { deriveSolanaAddress } = await loadSolanaAddressModule()
             const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           } else if (modelId === 'xlm') {
+            const { deriveStellarAddress } = await loadStellarAddressModule()
             const derived = await deriveStellarAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           } else if (modelId === 'tron') {
+            const { deriveTronAddress } = await loadTronAddressModule()
             const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
             address = derived.address
           }
@@ -3012,6 +3066,7 @@ export const useWalletStore = create<WalletState>()(
 
             const rows = await mapWithConcurrency(tracked, 6, async (token) => {
               try {
+                const { readTrc20TokenMetadata, getTrc20BalanceRaw } = await loadTronNonCustodialModule()
                 const meta = await readTrc20TokenMetadata(net.rpcUrl, token.contract)
                 const raw = await getTrc20BalanceRaw(net.rpcUrl, token.contract, address)
                 if (raw <= 0n) return null
@@ -3278,6 +3333,7 @@ export const useWalletStore = create<WalletState>()(
 
             if (rows.length === 0 && allowDirectAssetRpcFallback) {
               try {
+                const { listSolanaTokenBalances } = await loadSolanaNonCustodialModule()
                 const directRows = await listSolanaTokenBalances(net.rpcUrl, address)
                 rows = directRows.map((row) => ({
                   tokenId: String(row.tokenId || '').trim(),
@@ -4043,9 +4099,11 @@ export const useWalletStore = create<WalletState>()(
             throw new Error(`Unknown TRC20 contract for ${normalizedAssetId}. Configure VITE_TRON_TRACKED_TOKENS.`)
           }
 
+          const { readTrc20TokenMetadata, parseTrc20UiAmountToRaw, sendTrc20NonCustodial } = await loadTronNonCustodialModule()
           const meta = await readTrc20TokenMetadata(net.rpcUrl, contract)
           const amountRaw = parseTrc20UiAmountToRaw(String(qty || '').trim(), meta.decimals)
 
+          const { deriveTronAddress } = await loadTronAddressModule()
           const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
           if (String(senderAddress || '').trim() !== derived.address) {
             throw new Error(`Active TRX address does not match derived signer address (${senderAddress} != ${derived.address})`)
@@ -4301,11 +4359,13 @@ export const useWalletStore = create<WalletState>()(
           if (!tokenId) throw new Error('SPL token mint address is required')
           if (!recipient) throw new Error('Solana recipient address is required')
 
+          const { deriveSolanaAddress } = await loadSolanaAddressModule()
           const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
           if (String(senderAddress || '').trim() !== derived.address) {
             throw new Error(`Active SOL address does not match derived signer address (${senderAddress} != ${derived.address})`)
           }
 
+          const { sendSolanaSplTokenNonCustodial } = await loadSolanaNonCustodialModule()
           const tx = await sendSolanaSplTokenNonCustodial({
             rpcUrl: net.rpcUrl,
             fromAddress: derived.address,
@@ -4326,6 +4386,7 @@ export const useWalletStore = create<WalletState>()(
           if (!/^\d+$/.test(tokenAmountRaw) || BigInt(tokenAmountRaw) <= 0n) {
             throw new Error('Cardano token send quantity must be a positive integer')
           }
+          const { sendCardanoAssetNonCustodial } = await loadCardanoNonCustodialModule()
           const tx = await sendCardanoAssetNonCustodial({
             network: net,
             mnemonic: sessionMnemonic!,
@@ -4651,24 +4712,29 @@ export const useWalletStore = create<WalletState>()(
         if (selectedNetwork.coinType === 'EVM') {
           selectedAddress = deriveEvmWallet(sessionMnemonic, derivationIndex).address
         } else if (selectedNetwork.coinType === 'XRP') {
+          const { deriveXrpAddress } = await loadXrpAddressModule()
           const derived = await deriveXrpAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
         } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
           const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
           selectedAddress = derived.address
         } else if (selectedModelId === 'ada') {
+          const { deriveCardanoAddress } = await loadCardanoAddressModule()
           const derived = await deriveCardanoAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
           selectedAddress = derived.address
         } else if (selectedModelId === 'xmr') {
           const derived = await deriveMoneroAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
           selectedAddress = derived.address
         } else if (selectedModelId === 'sol') {
+          const { deriveSolanaAddress } = await loadSolanaAddressModule()
           const derived = await deriveSolanaAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
         } else if (selectedModelId === 'xlm') {
+          const { deriveStellarAddress } = await loadStellarAddressModule()
           const derived = await deriveStellarAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
         } else if (selectedModelId === 'tron') {
+          const { deriveTronAddress } = await loadTronAddressModule()
           const derived = await deriveTronAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
         }
@@ -5519,6 +5585,7 @@ export const useWalletStore = create<WalletState>()(
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!acc) throw new Error('No active account')
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const { deriveXrpAddress } = await loadXrpAddressModule()
         const derived = await deriveXrpAddress(sessionMnemonic, accountIndex)
         const activeAddress = String(
           acc.networkAddresses?.[activeNetworkId]
@@ -5533,6 +5600,7 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverride: localRpcOverrides[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
+        const { sendXrpNonCustodial } = await loadXrpNonCustodialModule()
         return await sendChainTransaction({
           network: net,
           to,
@@ -5559,6 +5627,7 @@ export const useWalletStore = create<WalletState>()(
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
         if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
+        const { sendCardanoNonCustodial } = await loadCardanoNonCustodialModule()
         return await sendCardanoNonCustodial({
           network: net,
           mnemonic: sessionMnemonic,
@@ -5600,11 +5669,13 @@ export const useWalletStore = create<WalletState>()(
         if (!net || modelId !== 'sol') throw new Error('Active network is not Solana')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const { deriveSolanaAddress } = await loadSolanaAddressModule()
         const derived = await deriveSolanaAddress(sessionMnemonic, accountIndex)
         const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
         if (fromAddress !== derived.address) {
           throw new Error(`Active SOL address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const { sendSolanaNonCustodial } = await loadSolanaNonCustodialModule()
         return await sendSolanaNonCustodial({
           rpcUrl: net.rpcUrl,
           fromAddress,
@@ -5623,11 +5694,13 @@ export const useWalletStore = create<WalletState>()(
         if (!net || modelId !== 'xlm') throw new Error('Active network is not Stellar')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const { deriveStellarAddress } = await loadStellarAddressModule()
         const derived = await deriveStellarAddress(sessionMnemonic, accountIndex)
         const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
         if (fromAddress !== derived.address) {
           throw new Error(`Active XLM address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const { sendStellarNonCustodial } = await loadStellarNonCustodialModule()
         return await sendStellarNonCustodial({
           rpcUrl: net.rpcUrl,
           fromAddress,
@@ -5646,11 +5719,13 @@ export const useWalletStore = create<WalletState>()(
         if (!net || modelId !== 'tron') throw new Error('Active network is not TRON')
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const { deriveTronAddress } = await loadTronAddressModule()
         const derived = await deriveTronAddress(sessionMnemonic, accountIndex)
         const fromAddress = String(acc?.networkAddresses?.[activeNetworkId] || derived.address).trim()
         if (fromAddress !== derived.address) {
           throw new Error(`Active TRX address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const { sendTronNonCustodial } = await loadTronNonCustodialModule()
         return await sendTronNonCustodial({
           rpcUrl: net.rpcUrl,
           fromAddress,
