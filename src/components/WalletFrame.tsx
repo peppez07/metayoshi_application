@@ -247,9 +247,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.1] translate-y-px" />
                 </div>
                 <span className="text-[9px] leading-tight text-gray-500 max-w-[90px]">
-                  Your keys, your coins.
-                  <br />
-                  Use at your own risk.
                 </span>
               </Link>
             </div>
