@@ -261,7 +261,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               >
                 {activeNetwork.logo
                   ? (
-                    <div className={clsx('w-4 h-4 rounded-full overflow-hidden', getModelIconRingClass(activeNetwork.id))}>
+                    <div className={clsx('w-4 h-4 rounded-full overflow-hidden', getModelIconRingClass(String(activeNetwork.runtimeModelId || activeNetwork.id || '')))}>
                       <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover rounded-full" />
                     </div>
                   )
@@ -365,7 +365,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             <div className="space-y-1.5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
               {showGlobalNetworkOption && (
                 <div
-                  className="p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20"
+                  className="global-network-option p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all"
                   onClick={() => {
                     setShowNetworkMenu(false)
                     setNetworkSearch('')
@@ -373,23 +373,23 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   }}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full border border-blue-500/40 bg-blue-500/20 flex items-center justify-center">
-                      <IoGlobeOutline className="w-4 h-4 text-blue-200" />
+                    <div className="global-network-icon-wrap w-7 h-7 rounded-full border flex items-center justify-center">
+                      <IoGlobeOutline className="global-network-icon w-4 h-4" />
                     </div>
                     <div className="flex flex-col leading-tight">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-blue-100">Global Network</span>
+                        <span className="global-network-title text-sm font-bold">Global Network</span>
                         <span
                           title="Scan all blockchains and addresses"
-                          className="px-1.5 py-0.5 rounded-md border border-blue-400/40 bg-blue-500/20 text-[9px] font-black tracking-widest uppercase text-blue-100"
+                          className="global-network-chip px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase"
                         >
                           Global
                         </span>
                       </div>
-                      <span className="text-[10px] text-blue-200/80 uppercase font-mono">All chains / send hub</span>
+                      <span className="global-network-subtitle text-[10px] uppercase font-mono">All chains / send hub</span>
                     </div>
                   </div>
-                  <div className="w-2 h-2 rounded-full bg-blue-300" />
+                  <div className="global-network-dot w-2 h-2 rounded-full" />
                 </div>
               )}
 
@@ -405,7 +405,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                     <div className="flex items-center gap-3">
                       {n.logo
                         ? (
-                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(n.id))}>
+                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(String(n.runtimeModelId || n.id || '')))}>
                             <img src={n.logo} alt={n.name} className="w-full h-full object-cover rounded-full" />
                           </div>
                         )

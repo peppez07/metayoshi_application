@@ -2,6 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+:root,
+html.theme-dark {
+  --color-background: 11 12 14;
+  --color-dark-900: 11 12 14;
+  --color-dark-800: 17 19 22;
+  --color-dark-700: 29 33 38;
+  --color-dark-600: 44 50 56;
+  --color-text-primary: 255 255 255;
+  --color-text-muted-200: 229 231 235;
+  --color-text-muted-300: 209 213 219;
+  --color-text-muted-400: 156 163 175;
+  --color-text-muted-500: 107 114 128;
+  --color-text-muted-600: 75 85 99;
+  --scrollbar-thumb: #2c3238;
+  --scrollbar-thumb-hover: #3c4248;
+}
+
+html.theme-light {
+  --color-background: 248 250 252;
+  --color-dark-900: 241 245 249;
+  --color-dark-800: 255 255 255;
+  --color-dark-700: 241 245 249;
+  --color-dark-600: 203 213 225;
+  --color-text-primary: 15 23 42;
+  --color-text-muted-200: 30 41 59;
+  --color-text-muted-300: 51 65 85;
+  --color-text-muted-400: 71 85 105;
+  --color-text-muted-500: 100 116 139;
+  --color-text-muted-600: 148 163 184;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-thumb-hover: #64748b;
+}
+
 @layer base {
   html, body, #app, #root {
     width: 100%;
@@ -10,7 +43,8 @@
   }
 
   body {
-    @apply text-white font-sans bg-dark-900;
+    @apply font-sans bg-dark-900;
+    color: rgb(var(--color-text-primary));
     font-size: 14px;
     text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;
@@ -27,7 +61,7 @@
   }
 
   .btn-secondary {
-    @apply bg-secondary hover:bg-yellow-500 active:bg-yellow-600 text-dark-900 font-bold py-3 px-6 rounded-full transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-secondary hover:bg-yellow-500 active:bg-yellow-600 text-black font-bold py-3 px-6 rounded-full transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-outline {
@@ -127,7 +161,7 @@
     scrollbar-color: transparent transparent;
   }
   .custom-scrollbar:hover {
-    scrollbar-color: #2c3238 transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
@@ -141,10 +175,10 @@
     transition: background-color 0.2s ease;
   }
   .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-    background-color: #2c3238;
+    background-color: var(--scrollbar-thumb);
   }
   .custom-scrollbar:hover::-webkit-scrollbar-thumb:hover {
-    background-color: #3c4248;
+    background-color: var(--scrollbar-thumb-hover);
   }
 
   /* Keep wheel/touch scrolling while hiding scrollbar UI entirely. */
@@ -157,6 +191,65 @@
     height: 0;
     display: none; /* Chromium/Safari */
   }
+
+  /* Global network quick entry in network sheet */
+  .global-network-option {
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.12);
+  }
+  .global-network-option:hover {
+    background: rgba(59, 130, 246, 0.2);
+  }
+  .global-network-icon-wrap {
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.2);
+  }
+  .global-network-icon {
+    color: rgb(191, 219, 254);
+  }
+  .global-network-title {
+    color: rgb(219, 234, 254);
+  }
+  .global-network-chip {
+    border-color: rgba(96, 165, 250, 0.45);
+    background: rgba(59, 130, 246, 0.2);
+    color: rgb(219, 234, 254);
+  }
+  .global-network-subtitle {
+    color: rgba(191, 219, 254, 0.85);
+  }
+  .global-network-dot {
+    background: rgb(147, 197, 253);
+  }
+
+  html.theme-light .global-network-option {
+    border-color: rgba(37, 99, 235, 0.45);
+    background: rgba(219, 234, 254, 0.88);
+  }
+  html.theme-light .global-network-option:hover {
+    background: rgba(191, 219, 254, 0.94);
+  }
+  html.theme-light .global-network-icon-wrap {
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(37, 99, 235, 0.12);
+  }
+  html.theme-light .global-network-icon {
+    color: rgb(29, 78, 216);
+  }
+  html.theme-light .global-network-title {
+    color: rgb(30, 58, 138);
+  }
+  html.theme-light .global-network-chip {
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(219, 234, 254, 0.95);
+    color: rgb(30, 64, 175);
+  }
+  html.theme-light .global-network-subtitle {
+    color: rgb(30, 64, 175);
+  }
+  html.theme-light .global-network-dot {
+    background: rgb(37, 99, 235);
+  }
 }
 
 /* Readability uplift for dense popup layouts on Windows high-DPI displays. */
@@ -168,4 +261,40 @@
 [class*='text-[10px]'] {
   font-size: 11.5px !important;
   line-height: 1.35 !important;
+}
+
+html.theme-light .text-white {
+  color: rgb(var(--color-text-primary)) !important;
+}
+
+html.theme-light .hover\:text-white:hover {
+  color: rgb(var(--color-text-primary)) !important;
+}
+
+html.theme-light .text-gray-200 {
+  color: rgb(var(--color-text-muted-200)) !important;
+}
+
+html.theme-light .text-gray-300 {
+  color: rgb(var(--color-text-muted-300)) !important;
+}
+
+html.theme-light .text-gray-400 {
+  color: rgb(var(--color-text-muted-400)) !important;
+}
+
+html.theme-light .text-gray-500 {
+  color: rgb(var(--color-text-muted-500)) !important;
+}
+
+html.theme-light .text-gray-600 {
+  color: rgb(var(--color-text-muted-600)) !important;
+}
+
+html.theme-light .placeholder-gray-400::placeholder {
+  color: rgb(var(--color-text-muted-500)) !important;
+}
+
+html.theme-light .placeholder-gray-500::placeholder {
+  color: rgb(var(--color-text-muted-500)) !important;
 }

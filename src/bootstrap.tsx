@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import './styles/index.css'
 import { installGlobalErrorMonitor, recordRuntimeError } from './lib/runtimeErrorMonitor'
+import { initThemeMode } from './lib/themeMode'
 
 import { ToastProvider } from './components/Toast'
 
@@ -95,6 +96,7 @@ class ErrorBoundary extends React.Component<
 
 installGlobalErrorMonitor('popup-ui')
 installZoomShortcutBlockers()
+initThemeMode()
 
 const rootElement = document.getElementById('app')
 if (!rootElement) {

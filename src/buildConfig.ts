@@ -23,7 +23,7 @@ function normalizeId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
-const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'dash', 'btcz'])
+const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'dash', 'btcz'])
 
 function normalizeModelStatusId(value: unknown): string {
   const id = normalizeId(value)
@@ -31,6 +31,10 @@ function normalizeModelStatusId(value: unknown): string {
 
   // Server-backed aliases should map to runtime model ids for status display.
   if (id === 'srv--dash') return 'dash'
+  if (id === 'srv--ethereum' || id === 'ethereum') return 'eth'
+  if (id === 'srv--base' || id === 'base-mainnet' || id === 'mainnet-base') return 'base'
+  if (id.startsWith('eth--')) return 'eth'
+  if (id.startsWith('base--')) return 'base'
   return id
 }
 

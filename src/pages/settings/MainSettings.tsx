@@ -1,9 +1,17 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IoChevronForward } from 'react-icons/io5'
+import { IoChevronForward, IoMoonOutline, IoSunnyOutline } from 'react-icons/io5'
+import { getStoredThemeMode, setThemeMode, type ThemeMode } from '../../lib/themeMode'
 
 const MainSettings: React.FC = () => {
   const navigate = useNavigate()
+  const [themeMode, setThemeModeState] = React.useState<ThemeMode>(() => getStoredThemeMode())
+
+  const toggleThemeMode = () => {
+    const next = themeMode === 'dark' ? 'light' : 'dark'
+    setThemeMode(next)
+    setThemeModeState(next)
+  }
 
   const SECTIONS = [
     {
@@ -49,6 +57,42 @@ const MainSettings: React.FC = () => {
       </header>
 
       <div className="flex-1">
+        <div className="mb-4">
+          <div className="px-4 py-2 mt-4">
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none">APPEARANCE</p>
+          </div>
+          <div className="space-y-0.5 border-t border-b border-dark-600/50">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-gray-300">Theme mode</span>
+                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                  {themeMode === 'dark' ? 'Dark' : 'Light'}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={themeMode === 'light'}
+                aria-label="Toggle light and dark mode"
+                onClick={toggleThemeMode}
+                className={`relative inline-flex h-7 w-14 items-center rounded-full border transition-colors ${
+                  themeMode === 'dark'
+                    ? 'bg-dark-700 border-dark-600'
+                    : 'bg-primary/20 border-primary/40'
+                }`}
+              >
+                <span
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-black shadow-sm transition-transform ${
+                    themeMode === 'dark' ? 'translate-x-0.5' : 'translate-x-7'
+                  }`}
+                >
+                  {themeMode === 'dark' ? <IoMoonOutline className="w-3.5 h-3.5" /> : <IoSunnyOutline className="w-3.5 h-3.5" />}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {SECTIONS.map((section, idx) => (
           <div key={idx} className="mb-4">
              <div className="px-4 py-2 mt-4">

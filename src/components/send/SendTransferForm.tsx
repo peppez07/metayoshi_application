@@ -7,6 +7,7 @@ import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { IoArrowBackOutline, IoInformationCircleOutline } from 'react-icons/io5'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -48,6 +49,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     activeAccountId,
     networks,
     activeNetworkId,
+    donationPercent,
     isConnected,
     isSyncing,
     syncPercent,
@@ -143,7 +145,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     setAmount(formatUnits8(available))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
@@ -172,14 +174,45 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
       || ''
 
     if (isNative) {
-      navigate('/tx/confirm', {
-        state: {
-          requestType: 'native',
-          to: toAddress.trim(),
-          amount: normalizedAmount,
-          from: fromAddress
+      const txState: Record<string, unknown> = {
+        requestType: 'native',
+        to: toAddress.trim(),
+        amount: normalizedAmount,
+        from: fromAddress
+      }
+
+      // Keep donation support active for supported UTXO coins (including RTM/BTCZ)
+      // while still honoring user percentage when server policy is optional.
+      if (activeNetwork.coinType === 'UTXO' && supportsCoinDonationPolicy(activeNetwork)) {
+        try {
+          const policy = await fetchCoinDonationPolicy(activeNetwork)
+          if (policy?.enabled && policy.address && policy.percent > 0) {
+            const baseAmount = Number(normalizedAmount)
+            const spend = Number.isFinite(baseAmount) && baseAmount > 0 ? baseAmount : 0
+            if (spend > 0) {
+              const userPct = Number(donationPercent)
+              const effectivePercent = policy.required
+                ? Number(policy.percent)
+                : (Number.isFinite(userPct) && userPct > 0 ? userPct : Number(policy.percent))
+              if (effectivePercent > 0) {
+                const donationAmount = (spend * effectivePercent) / 100
+                txState.donationEnabled = true
+                txState.donationPercent = Number(effectivePercent.toFixed(4))
+                txState.donationMode = 'add'
+                txState.donationAmount = formatUnits8(donationAmount)
+                txState.donationAddress = policy.address
+                txState.donationRequired = policy.required === true
+                txState.enteredAmount = formatUnits8(spend)
+                txState.totalBeforeNetworkFee = formatUnits8(spend + donationAmount)
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[donation] policy fetch failed, continuing without donation payload:', err)
         }
-      })
+      }
+
+      navigate('/tx/confirm', { state: txState })
       return
     }
 

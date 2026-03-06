@@ -334,7 +334,7 @@ const WalletLayout: React.FC = () => {
                     <div className="flex items-center gap-3">
                       {net.logo
                         ? (
-                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(net.id))}>
+                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(String(net.runtimeModelId || net.id || '')))}>
                             <img src={net.logo} alt={net.name} className="w-full h-full object-cover rounded-full" />
                           </div>
                         )

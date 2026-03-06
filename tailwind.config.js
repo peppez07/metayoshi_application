@@ -8,14 +8,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#111316',
+        background: 'rgb(var(--color-background) / <alpha-value>)',
         primary: '#f5841f', // MetaYoshi orange
         secondary: '#f6c343', // Register CTA yellow
         dark: {
-          900: '#0b0c0e',
-          800: '#111316',
-          700: '#1d2126',
-          600: '#2c3238',
+          900: 'rgb(var(--color-dark-900) / <alpha-value>)',
+          800: 'rgb(var(--color-dark-800) / <alpha-value>)',
+          700: 'rgb(var(--color-dark-700) / <alpha-value>)',
+          600: 'rgb(var(--color-dark-600) / <alpha-value>)',
         }
       },
       borderRadius: {
