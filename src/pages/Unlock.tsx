@@ -108,7 +108,6 @@ const Unlock: React.FC = () => {
         />
         <div className="space-y-1">
           <h1 className="text-2xl font-black uppercase tracking-tight">Welcome Back!</h1>
-          <p className="text-gray-400 text-sm font-medium">Please enter your password</p>
         </div>
       </div>
 

@@ -836,6 +836,9 @@ function isBridgeFallbackEligibleError(error: unknown): boolean {
     || /bad gateway/i.test(message)
     || /rpc error \[[^\]]+\]: fetch failed/i.test(message)
     || /rpc call failed \[bridge\]:.*\bfetch failed\b/i.test(message)
+    || /rpc call timed out \[bridge\]/i.test(message)
+    || /\baborterror\b/i.test(message)
+    || /signal is aborted/i.test(message)
     || /returned a non-quantity value/i.test(message)
     || /rpc endpoint appears incompatible/i.test(message)
     || /deprecated v1 endpoint/i.test(message)
@@ -855,10 +858,25 @@ function isLikelyExplorerApiUrl(url: string): boolean {
   return hasApiPath && hasExplorerQuery
 }
 
+function isBlockedDirectEvmRpcUrl(url: string): boolean {
+  const lower = String(url || '').trim().toLowerCase()
+  if (!lower) return false
+  return (
+    lower.includes('ethereum-rpc.publicnode.com')
+    || lower.includes('base-rpc.publicnode.com')
+  )
+}
+
 function createEvmDirectRpcConfig(config: UtxoRpcConfig): UtxoRpcConfig {
   const rpcUrl = String(config.rpcUrl || '').trim()
   if (!rpcUrl) {
     throw new Error('Direct EVM RPC fallback is unavailable: rpcUrl is not configured.')
+  }
+  if (isBlockedDirectEvmRpcUrl(rpcUrl)) {
+    throw new Error(
+      `Direct EVM RPC fallback is disabled by policy for ${rpcUrl}. ` +
+      'Bridge/server transport is required for this network.'
+    )
   }
   if (isLikelyExplorerApiUrl(rpcUrl)) {
     throw new Error(
@@ -2921,6 +2939,11 @@ export async function fetchBridgeTokenBalances(
       body: JSON.stringify(body),
       signal: controller.signal
     })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Token balance failed [timeout]: ${url}`)
+    }
+    throw error
   } finally {
     clearTimeout(timer)
   }

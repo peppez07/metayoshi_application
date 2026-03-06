@@ -2682,7 +2682,8 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
-        if (getTransientBridgeCooldownRemainingMs(activeNetworkId) > 0) return
+        const bridgeCooldownMs = getTransientBridgeCooldownRemainingMs(activeNetworkId)
+        if (bridgeCooldownMs > 0 && options?.force !== true) return
         const activeModelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
         if (!resolveNetworkCapabilities(net).features.assetLayer) return
 
@@ -2712,19 +2713,26 @@ export const useWalletStore = create<WalletState>()(
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
+          const trackedDefaults = await resolveTrackedEvmTokens(net)
           const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
           const chainId = resolveEvmChainId(net)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
-          for (const token of trackedFromCatalog) {
+          for (const token of mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)) {
             if (!ethers.isAddress(token.address)) continue
             const checksum = ethers.getAddress(token.address)
             if (trackedByAddress.has(checksum)) continue
             trackedByAddress.set(checksum, { ...token, address: checksum })
           }
           try {
-            const rpcConfig = await createUtxoRpcConfig(net, {
+            const baseRpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
+            const rpcConfig: UtxoRpcConfig = {
+              ...baseRpcConfig,
+              // EVM asset scans involve many sequential eth_call/getLogs requests.
+              // Use a higher read timeout to reduce false AbortError failures.
+              timeoutMs: Math.max(Number(baseRpcConfig.timeoutMs ?? 10000), 30000)
+            }
 
             const activityTxids = activity
               .filter((entry) =>
@@ -2786,7 +2794,7 @@ export const useWalletStore = create<WalletState>()(
             const assetKeyByContract = new Map<string, string>()
             let tokenReadSuccesses = 0
             let tokenReadErrors = 0
-            const tokenRows = await mapWithConcurrency(mergedTokens, 8, async (token) => {
+            const tokenRows = await mapWithConcurrency(mergedTokens, 6, async (token) => {
               try {
                 const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
                 let rawHex: unknown = null

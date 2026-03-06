@@ -212,6 +212,15 @@ function isLikelyExplorerApiUrl(url: string): boolean {
   return hasApiPath && hasExplorerQuery
 }
 
+function isBlockedDirectEvmRpcUrl(url: string): boolean {
+  const lower = String(url || '').trim().toLowerCase()
+  if (!lower) return false
+  return (
+    lower.includes('ethereum-rpc.publicnode.com')
+    || lower.includes('base-rpc.publicnode.com')
+  )
+}
+
 function isEvmBridgePayloadIncompatibleError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')
   return (
@@ -506,7 +515,7 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
     } catch (error) {
       if (!isEvmBridgePayloadIncompatibleError(error)) throw error
       const rpcUrl = String(input.network.rpcUrl || '').trim()
-      if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl)) throw error
+      if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl) || isBlockedDirectEvmRpcUrl(rpcUrl)) throw error
       const { ethers } = await loadEthersModule()
       const provider = new ethers.JsonRpcProvider(rpcUrl)
       const wei = await provider.getBalance(address)
