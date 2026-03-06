@@ -14,6 +14,7 @@ import {
   IoInformationCircleOutline,
   IoLayersOutline,
   IoPin,
+  IoRefreshOutline,
   IoSearchOutline
 } from 'react-icons/io5'
 
@@ -180,7 +181,6 @@ type SendHubPreferences = {
 
 const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
 const SEND_HUB_PREFERENCES_KEY = 'metayoshi:send-hub:prefs:v1'
-const SEND_HUB_SCAN_AUTO_INTERVAL_MS = 90_000
 const SEND_HUB_SCAN_STALE_MS = 30_000
 const SEND_HUB_SCAN_MAX_TPS = 5
 const SEND_HUB_SCAN_STEP_DELAY_MS = Math.max(1, Math.trunc(1000 / SEND_HUB_SCAN_MAX_TPS))
@@ -304,17 +304,31 @@ function writeCachedScanRows(rows: AggregatedScanRow[]): void {
 
 function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`))
+    let settled = false
+    const timeoutHandle = window.setTimeout(() => {
+      if (settled) return
+      // Do not start the next scan step while this one is still running.
+      // We cannot hard-cancel deep store/rpc work here, so drain it first.
+      void task
+        .catch(() => undefined)
+        .finally(() => {
+          if (settled) return
+          settled = true
+          reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`))
+        })
     }, timeoutMs)
 
     task
       .then((result) => {
-        clearTimeout(timer)
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeoutHandle)
         resolve(result)
       })
       .catch((error) => {
-        clearTimeout(timer)
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeoutHandle)
         reject(error)
       })
   })
@@ -756,7 +770,7 @@ const Send: React.FC = () => {
   const scanRunIdRef = useRef(0)
   const isScanningRef = useRef(false)
   const scanRestoreSelectionRef = useRef<{ accountId: string | null; networkId: string | null } | null>(null)
-  const enabledNetworksSignatureRef = useRef<string>('')
+  const initialAutoScanTriggeredRef = useRef(false)
 
   const allItems = getSendableItems({ includeHidden: true })
   const activePairItems = useMemo(() => {
@@ -1255,35 +1269,10 @@ const Send: React.FC = () => {
     if (visibleScanRows.length === 0 && cached?.rows?.length) {
       setScanRows(cached.rows)
     }
+    if (initialAutoScanTriggeredRef.current) return
     if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || visibleScanRows.length === 0) && !isScanningRef.current) {
+      initialAutoScanTriggeredRef.current = true
       void runGlobalScan({ mode: 'auto', reason: 'initial load', refreshBalances: true })
-    }
-
-    const tick = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-      void runGlobalScan({ mode: 'auto', reason: 'scheduled refresh', refreshBalances: false })
-    }
-
-    const onVisibility = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-      const latest = readCachedScanRows()
-      const ageMs = latest ? Math.max(0, Date.now() - latest.updatedAt) : Number.POSITIVE_INFINITY
-      if (!latest || ageMs > SEND_HUB_SCAN_STALE_MS) {
-        void runGlobalScan({ mode: 'auto', reason: 'tab visible', refreshBalances: true })
-      }
-    }
-
-    const intervalId = window.setInterval(tick, SEND_HUB_SCAN_AUTO_INTERVAL_MS)
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', onVisibility)
-    }
-    return () => {
-      window.clearInterval(intervalId)
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', onVisibility)
-      }
     }
   }, [hasDirectRouteRequest, runGlobalScan, selectedBatchKey, selectedId, visibleScanRows.length])
 
@@ -1299,22 +1288,16 @@ const Send: React.FC = () => {
     navigate('/wallet/send', { replace: true, state: null })
   }, [location.state, navigate, visibleScanRows.length, isScanningAll, runGlobalScan])
 
-  useEffect(() => {
-    const signature = enabledNetworks
-      .map((network) => network.id)
-      .sort((a, b) => a.localeCompare(b))
-      .join('|')
-    const previous = enabledNetworksSignatureRef.current
-    enabledNetworksSignatureRef.current = signature
-    if (!previous || previous === signature) return
-    if (hasDirectRouteRequest || selectedId || selectedBatchKey) return
+  const handleManualRefresh = useCallback(() => {
+    if (isScanningRef.current) return
+    setScanError('')
     void runGlobalScan({
-      mode: 'auto',
-      reason: 'enabled network list updated',
+      mode: 'manual',
+      reason: 'manual refresh',
       refreshBalances: true,
       forceAssetRefresh: true
     })
-  }, [enabledNetworks, hasDirectRouteRequest, runGlobalScan, selectedBatchKey, selectedId])
+  }, [runGlobalScan])
 
   const openSendFromScanHolder = async (holder: ScanHolder) => {
     setScanError('')
@@ -1448,7 +1431,17 @@ const Send: React.FC = () => {
         <button onClick={() => navigate('/wallet/assets')} className="text-gray-400 hover:text-white transition-colors">
           <IoArrowBackOutline className="w-5 h-5" />
         </button>
-        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200">Send Hub</h1>
+        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200 flex-1">Send Hub</h1>
+        <button
+          type="button"
+          onClick={handleManualRefresh}
+          disabled={isScanningAll}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dark-500 bg-dark-700/40 text-[11px] font-bold uppercase tracking-wide text-gray-200 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Refresh Send Hub scan"
+        >
+          <IoRefreshOutline className={`w-3.5 h-3.5 ${isScanningAll ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </header>
 
       <div className="p-4 border-b border-dark-600/60 space-y-3">
@@ -1477,7 +1470,7 @@ const Send: React.FC = () => {
                 ? 'Loading global holdings...'
                 : (search.trim()
                   ? `No scan rows for "${search}".`
-                  : 'Global list auto-updates in background across all addresses and blockchains.')}
+                  : 'No holdings loaded yet. Use Refresh to run a global scan.')}
             </p>
           </div>
         )}

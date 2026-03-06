@@ -22,7 +22,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const {
     isConnected,
     isSyncing,
-    syncPercent,
     activeNetworkId,
     networks,
     disabledNetworkIds,
@@ -38,10 +37,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const navigate = useNavigate()
   const {
     inFlight: apiInFlight,
-    oldestPendingAt,
-    slowThresholdMs,
-    lastDurationMs,
-    lastError
   } = useApiMonitorStore()
 
   const [showNetworkMenu, setShowNetworkMenu] = React.useState(false)
@@ -51,7 +46,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const [copied, setCopied] = React.useState(false)
   const [qrCopied, setQrCopied] = React.useState(false)
   const [qrDataUrl, setQrDataUrl] = React.useState('')
-  const [statusNow, setStatusNow] = React.useState(() => Date.now())
 
   const enabledNetworks = React.useMemo(
     () => getEnabledNetworks(networks, disabledNetworkIds),
@@ -93,14 +87,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const shortenedAddress = rawAddress
     ? `${rawAddress.slice(0, 4)}…${rawAddress.slice(-6)}`
     : ''
-
-  // While there are in-flight RPC calls, keep the status clock ticking so the UI
-  // can show how long the current wait has been.
-  React.useEffect(() => {
-    if (apiInFlight <= 0) return
-    const timer = window.setInterval(() => setStatusNow(Date.now()), 500)
-    return () => window.clearInterval(timer)
-  }, [apiInFlight])
 
   React.useEffect(() => {
     if (!showReceiveQr || !rawAddress) {
@@ -175,25 +161,14 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     return () => { mounted = false }
   }, [showReceiveQr, rawAddress])
 
-  const waitingMs = apiInFlight > 0 && oldestPendingAt ? Math.max(0, statusNow - oldestPendingAt) : 0
-  const waitingSec = Math.floor(waitingMs / 1000)
   const isApiWaiting = apiInFlight > 0
-  const isApiSlow = isApiWaiting && waitingMs >= slowThresholdMs
-  const statusColor = (isSyncing || isApiWaiting) ? 'status-dot-yellow' : isConnected ? 'status-dot-green' : 'status-dot-red'
-  const syncLabel = syncPercent !== null ? `${syncPercent.toFixed(1)}%` : '...'
-  const statusLabel = isApiWaiting
-    ? `Waiting ${waitingSec}s (${apiInFlight})`
-    : isSyncing
-      ? `Sync ${syncLabel}`
-      : isConnected
-        ? 'Connected'
-        : 'Not Connected'
-  const compactLastError = lastError ? String(lastError).slice(0, 46) : ''
-  const statusDetail = isApiWaiting
-    ? (isApiSlow ? 'Slow response from API' : 'Request in progress')
-    : (!isConnected && compactLastError)
-      ? `API error: ${compactLastError}${compactLastError.length >= 46 ? '…' : ''}`
-      : (lastDurationMs !== null ? `Last API response: ${lastDurationMs}ms` : '')
+  const isWaiting = isSyncing || isApiWaiting
+  const statusColor = isWaiting ? 'status-dot-yellow' : isConnected ? 'status-dot-green' : 'status-dot-red'
+  const statusLabel = isWaiting
+    ? 'Waiting'
+    : isConnected
+      ? 'Connected'
+      : 'Not connected'
 
   const copyAddress = async () => {
     if (!rawAddress) return
@@ -284,11 +259,6 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               <div className={`status-dot ${statusColor} ${(isSyncing || isApiWaiting) ? 'animate-pulse-sync' : ''}`} />
               <div className="flex flex-col leading-tight">
                 <span className="text-[11px] font-medium text-gray-400">{statusLabel}</span>
-                {statusDetail && (
-                  <span className={`text-[9px] ${compactLastError && !isApiWaiting ? 'text-red-400' : 'text-gray-500'}`}>
-                    {statusDetail}
-                  </span>
-                )}
               </div>
             </div>
 

@@ -106,6 +106,11 @@ export interface SendableItem {
   hidden: boolean
 }
 
+type RefreshActiveBalanceOptions = {
+  fast?: boolean
+  skipZeroBalanceRecheck?: boolean
+}
+
 export interface Account {
   id: string
   name: string
@@ -266,7 +271,7 @@ interface WalletState {
   syncNetworksFromServer: () => Promise<void>
 
   // RPC
-  refreshActiveBalance: (options?: { fast?: boolean; skipZeroBalanceRecheck?: boolean }) => Promise<void>
+  refreshActiveBalance: (options?: RefreshActiveBalanceOptions) => Promise<void>
   probeActiveChainModel: () => Promise<ChainModelLiveSnapshot>
   sendEvmTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
@@ -344,6 +349,8 @@ const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
 const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
 let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
 let sendOperationNextAllowedAtMs = 0
+let refreshActiveBalanceInFlight: Promise<void> | null = null
+let refreshActiveBalanceQueuedOptions: RefreshActiveBalanceOptions | null = null
 const trackedActivityStatusPollers = new Set<string>()
 let xrpAddressModulePromise: Promise<typeof import('../lib/xrpAddress')> | null = null
 let xrpNonCustodialModulePromise: Promise<typeof import('../lib/xrpNonCustodial')> | null = null
@@ -504,6 +511,19 @@ function clampDonationPercent(value: number): number {
 function delay(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve()
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function mergeRefreshActiveBalanceOptions(
+  current: RefreshActiveBalanceOptions | null | undefined,
+  incoming: RefreshActiveBalanceOptions | null | undefined
+): RefreshActiveBalanceOptions | null {
+  if (!current && !incoming) return null
+  const merged: RefreshActiveBalanceOptions = {}
+  if (current?.fast || incoming?.fast) merged.fast = true
+  if (current?.skipZeroBalanceRecheck || incoming?.skipZeroBalanceRecheck) {
+    merged.skipZeroBalanceRecheck = true
+  }
+  return merged
 }
 
 async function waitForSendOperationSlot(): Promise<void> {
@@ -1347,6 +1367,7 @@ const networkAssetsCache = createRequestCache<{
   defaultTtlMs: 25_000,
   maxEntries: 120
 })
+const networkAssetsInFlightByKey = new Map<string, Promise<void>>()
 
 function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
   const input = String(raw || '').trim()
@@ -2694,22 +2715,31 @@ export const useWalletStore = create<WalletState>()(
         }
         if (!address) return
 
-        const force = options?.force === true
         const cacheKey = `assets|${activeNetworkId}|${String(address).trim().toLowerCase()}`
-        if (!force) {
-          const cached = networkAssetsCache.peek(cacheKey)
-           if (cached) {
-             set((state) => ({
-               networkAssets: { ...state.networkAssets, [activeNetworkId]: cached.assets },
-               networkAssetLogos: { ...state.networkAssetLogos, [activeNetworkId]: cached.logos },
-               networkAssetLabels: { ...state.networkAssetLabels, [activeNetworkId]: cached.labels },
-               ...(cached.evmNfts
-                 ? { evmNftAssets: { ...state.evmNftAssets, [activeNetworkId]: cached.evmNfts } }
-                 : {})
-             }))
-             return
-           }
+        const inFlight = networkAssetsInFlightByKey.get(cacheKey)
+        if (inFlight) {
+          await inFlight
+          return
         }
+        let resolveInFlight: (() => void) | null = null
+        const inFlightSignal = new Promise<void>((resolve) => { resolveInFlight = resolve })
+        networkAssetsInFlightByKey.set(cacheKey, inFlightSignal)
+        try {
+          const force = options?.force === true
+          if (!force) {
+            const cached = networkAssetsCache.peek(cacheKey)
+             if (cached) {
+               set((state) => ({
+                 networkAssets: { ...state.networkAssets, [activeNetworkId]: cached.assets },
+                 networkAssetLogos: { ...state.networkAssetLogos, [activeNetworkId]: cached.logos },
+                 networkAssetLabels: { ...state.networkAssetLabels, [activeNetworkId]: cached.labels },
+                 ...(cached.evmNfts
+                   ? { evmNftAssets: { ...state.evmNftAssets, [activeNetworkId]: cached.evmNfts } }
+                   : {})
+               }))
+               return
+             }
+          }
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
@@ -3442,6 +3472,12 @@ export const useWalletStore = create<WalletState>()(
           ).catch(() => {})
         } catch (err) {
           console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
+        }
+        } finally {
+          if (networkAssetsInFlightByKey.get(cacheKey) === inFlightSignal) {
+            networkAssetsInFlightByKey.delete(cacheKey)
+          }
+          if (resolveInFlight) resolveInFlight()
         }
       },
 
@@ -5014,8 +5050,25 @@ export const useWalletStore = create<WalletState>()(
       },
 
       refreshActiveBalance: async (options) => {
-        const fastMode = options?.fast === true
-        const skipZeroBalanceRecheck = options?.skipZeroBalanceRecheck === true
+        if (refreshActiveBalanceInFlight) {
+          refreshActiveBalanceQueuedOptions = mergeRefreshActiveBalanceOptions(
+            refreshActiveBalanceQueuedOptions,
+            options
+          )
+          const inFlight = refreshActiveBalanceInFlight
+          if (inFlight) await inFlight
+          return
+        }
+
+        const runner = (async () => {
+          let pendingOptions: RefreshActiveBalanceOptions | null = options ?? null
+          while (true) {
+            const currentOptions = pendingOptions
+            pendingOptions = null
+            refreshActiveBalanceQueuedOptions = null
+
+            const fastMode = currentOptions?.fast === true
+            const skipZeroBalanceRecheck = currentOptions?.skipZeroBalanceRecheck === true
         const { networks, activeNetworkId, accounts, activeAccountId } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
@@ -5421,6 +5474,19 @@ export const useWalletStore = create<WalletState>()(
           await waitForUiStabilize()
           if (isStaleRequest()) return
           set({ isSyncing: false, isConnected: false, lowSyncStreak: 0 })
+        }
+            const queuedOptions = refreshActiveBalanceQueuedOptions
+            refreshActiveBalanceQueuedOptions = null
+            if (!queuedOptions) break
+            pendingOptions = queuedOptions
+          }
+        })()
+
+        refreshActiveBalanceInFlight = runner
+        try {
+          await runner
+        } finally {
+          if (refreshActiveBalanceInFlight === runner) refreshActiveBalanceInFlight = null
         }
       },
 
