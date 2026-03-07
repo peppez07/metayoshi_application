@@ -181,8 +181,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         from: fromAddress
       }
 
-      // Keep donation support active for supported UTXO coins (including RTM/BTCZ)
-      // while still honoring user percentage when server policy is optional.
+      // Keep donation support active for supported UTXO coins while still
+      // honoring user percentage when server policy is optional.
       if (activeNetwork.coinType === 'UTXO' && supportsCoinDonationPolicy(activeNetwork)) {
         try {
           const policy = await fetchCoinDonationPolicy(activeNetwork)
