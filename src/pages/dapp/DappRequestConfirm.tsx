@@ -66,6 +66,7 @@ const DappRequestConfirm: React.FC = () => {
   const requestAmount = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.qty || '')
     : String((pendingRequest?.request as any)?.amount || '')
+  const requestMemo = String((pendingRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.assetId || '')
     : ''
@@ -171,7 +172,8 @@ const DappRequestConfirm: React.FC = () => {
         ? await sendAssetTransfer({
             assetId: requestAssetId,
             qty: requestAmount,
-            toAddress: requestTo
+            toAddress: requestTo,
+            memo: requestMemo
           })
         : requestNetwork.coinType === 'EVM'
         ? await sendEvmTransaction({
@@ -209,9 +211,10 @@ const DappRequestConfirm: React.FC = () => {
             amount: requestAmount
           })
         : await sendUtxoTransaction({
-            to: requestTo,
-            amount: requestAmount
-          })
+          to: requestTo,
+          amount: requestAmount,
+          memo: requestMemo
+        })
       const txHash = String((tx as any)?.hash || (tx as any)?.txid || '').trim()
       if (!txHash) throw new Error('Transaction hash is missing from wallet response')
 
@@ -303,6 +306,7 @@ const DappRequestConfirm: React.FC = () => {
               <Row label="To" value={requestTo} mono />
               {requestIsAssetSend ? <Row label="Asset" value={requestAssetId} mono /> : null}
               <Row label="Amount" value={`${requestAmount} ${requestIsAssetSend ? '' : (requestNetwork?.symbol || '')}`.trim()} />
+              {requestMemo ? <Row label="Memo" value={requestMemo} mono /> : null}
             </div>
 
             {submitError ? (

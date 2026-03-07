@@ -343,9 +343,9 @@ const provider = {
   getProviderState: () => request({ method: PROVIDER_STATE_METHOD }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
   getCapabilities: (): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities' }),
-  sendTransaction: (params: { to: string; amount: string }) =>
+  sendTransaction: (params: { to: string; amount: string; memo?: string }) =>
     request({ method: 'wallet_sendTransaction', params }),
-  sendAsset: (params: { assetId: string; qty: string; toAddress: string }) =>
+  sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string }) =>
     request({ method: 'wallet_sendAsset', params }),
   sdkInfo: async () => {
     const [stateSnapshot, capabilities, networks] = await Promise.all([

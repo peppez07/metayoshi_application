@@ -18,10 +18,16 @@ import {
 } from './utxoRpc'
 import { getXrpAccountBalance } from './xrpRpc'
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
-import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from './cosmosAddress'
+import { isCosmosAddressForHrp } from './cosmosAddress'
 import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { estimateEvmTxFee } from './evmFee'
+import {
+  fetchCosmosBalanceAndSync,
+  resolveCosmosNetworkConfig
+} from './protocolAdapters/cosmos'
+import { validateProtocolAddress } from './protocolAdapters/addressValidation'
+import { fetchProtocolBalance } from './protocolAdapters/balances'
 
 export interface ChainBalanceSyncResult {
   balance: string
@@ -69,8 +75,6 @@ export interface SendUtxoNonCustodialInput {
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
 let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
-let stellarSdkModulePromise: Promise<typeof import('@stellar/stellar-sdk')> | null = null
-let tronWebModulePromise: Promise<typeof import('tronweb')> | null = null
 let tronNonCustodialModulePromise: Promise<typeof import('./tronNonCustodial')> | null = null
 
 function loadEthersModule() {
@@ -81,16 +85,6 @@ function loadEthersModule() {
 function loadSolanaWeb3Module() {
   if (!solanaWeb3ModulePromise) solanaWeb3ModulePromise = import('@solana/web3.js')
   return solanaWeb3ModulePromise
-}
-
-function loadStellarSdkModule() {
-  if (!stellarSdkModulePromise) stellarSdkModulePromise = import('@stellar/stellar-sdk')
-  return stellarSdkModulePromise
-}
-
-function loadTronWebModule() {
-  if (!tronWebModulePromise) tronWebModulePromise = import('tronweb')
-  return tronWebModulePromise
 }
 
 function loadTronNonCustodialModule() {
@@ -105,92 +99,6 @@ function resolveProtocol(network: Network): string {
 
 function resolveModelId(network: Network): string {
   return resolveRuntimeModelId(network)
-}
-
-function resolveCosmosNetworkConfig(network: Network): { hrp: string; decimals: number } {
-  const cfg = resolveCosmosAddressConfig({
-    runtimeModelId: resolveModelId(network),
-    serverCoinId: String(network.serverCoinId || '').trim(),
-    id: String(network.id || '').trim()
-  })
-  return { hrp: cfg.hrp, decimals: cfg.decimals }
-}
-
-function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
-  const raw = String(bridgeUrl || '').trim().replace(/\/+$/, '')
-  if (!raw) return ''
-  const lower = raw.toLowerCase()
-  const idxV1Bridge = lower.indexOf('/v1/bridge/')
-  if (idxV1Bridge >= 0) return raw.slice(0, idxV1Bridge)
-  const idxBridge = lower.indexOf('/bridge/')
-  if (idxBridge >= 0) return raw.slice(0, idxBridge)
-  if (/\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '')
-  return raw
-}
-
-function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { apiBase: string; coin: string; chain: string } | null {
-  const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig?.bridgeUrl || ''))
-  if (!apiBase) return null
-  const modelId = String(resolveModelId(network) || network.id || '').trim().toLowerCase()
-  const runtimeProfile = getCoinRuntimeProfile(modelId)
-  const coin = String(
-    network.serverCoinId
-    || runtimeProfile?.coinId
-    || modelId
-  ).trim().toLowerCase()
-  if (!coin) return null
-  const chain = String(network.serverChain || 'main').trim().toLowerCase() || 'main'
-  return { apiBase, coin, chain }
-}
-
-async function fetchCosmosStatus(network: Network, rpcConfig?: UtxoRpcConfig): Promise<{ syncPercent: number | null; isSyncing: boolean }> {
-  const meta = resolveCosmosApiMeta(network, rpcConfig)
-  if (!meta) return { syncPercent: null, isSyncing: false }
-  try {
-    const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
-    const response = await fetch(`${meta.apiBase}/v1/status?${params.toString()}`, { method: 'GET' })
-    if (!response.ok) return { syncPercent: null, isSyncing: false }
-    const json = await response.json().catch(() => null) as Record<string, unknown> | null
-    const syncCandidates = [
-      Number((json as any)?.syncPercent),
-      Number((json as any)?.status?.syncPercent),
-      Number((json as any)?.result?.syncPercent)
-    ]
-    const syncingRaw =
-      (json as any)?.isSyncing
-      ?? (json as any)?.syncing
-      ?? (json as any)?.status?.isSyncing
-      ?? (json as any)?.status?.syncing
-      ?? (json as any)?.result?.isSyncing
-      ?? (json as any)?.result?.syncing
-    const syncPercentValue = syncCandidates.find((value) => Number.isFinite(value))
-    const syncPercent = Number.isFinite(syncPercentValue)
-      ? Math.max(0, Math.min(100, Number(syncPercentValue)))
-      : null
-    const isSyncing = typeof syncingRaw === 'boolean'
-      ? syncingRaw
-      : (syncPercent !== null ? syncPercent < 99.9 : false)
-    return { syncPercent, isSyncing }
-  } catch {
-    return { syncPercent: null, isSyncing: false }
-  }
-}
-
-async function fetchCosmosAddressBalance(network: Network, address: string, rpcConfig?: UtxoRpcConfig): Promise<string> {
-  const meta = resolveCosmosApiMeta(network, rpcConfig)
-  if (!meta) throw new Error('Cosmos API base URL is not available')
-  const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
-  const response = await fetch(`${meta.apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`, { method: 'GET' })
-  if (!response.ok) {
-    throw new Error(`Cosmos balance endpoint failed: HTTP ${response.status}`)
-  }
-  const json = await response.json().catch(() => null) as Record<string, unknown> | null
-  const balance =
-    String((json as any)?.balance ?? (json as any)?.result?.balance ?? '').trim()
-  if (!balance || !/^\d+(\.\d+)?$/.test(balance)) {
-    throw new Error('Cosmos balance endpoint returned an invalid balance payload')
-  }
-  return balance
 }
 
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
@@ -520,76 +428,13 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   const address = String(input.address || '').trim()
   if (!address) throw new Error('Address is required')
 
-  if (modelId === 'sol') {
-    if (input.rpcConfig?.bridgeUrl) {
-      try {
-        const balance = await getSolanaBalanceViaBridge(input.rpcConfig, address)
-        return { balance, syncPercent: 100, isSyncing: false }
-      } catch {
-        // Fallback to direct Solana RPC when bridge adapters are incompatible.
-      }
-    }
-    const rpcUrl = String(input.network.rpcUrl || '').trim()
-    if (!rpcUrl) throw new Error('SOL RPC URL is not configured')
-    const balance = await getSolanaBalanceDirectRpc(rpcUrl, address)
-    return { balance, syncPercent: 100, isSyncing: false }
-  }
   if (isCosmosLikeModelId(modelId)) {
     if (!input.rpcConfig) throw new Error('Bridge RPC config is required for Cosmos-like networks')
-    const [status, balance] = await Promise.all([
-      fetchCosmosStatus(input.network, input.rpcConfig),
-      fetchCosmosAddressBalance(input.network, address, input.rpcConfig)
-    ])
-    return { balance, syncPercent: status.syncPercent, isSyncing: status.isSyncing }
+    return await fetchCosmosBalanceAndSync(input.network, address, input.rpcConfig)
   }
-  if (modelId === 'xmr') {
-    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
-      throw new Error('Bridge RPC config is required for XMR')
-    }
-    const balance = await getMoneroBalanceViaBridge(input.rpcConfig)
-    return { balance, syncPercent: 100, isSyncing: false }
-  }
-  if (modelId === 'xlm') {
-    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
-      throw new Error('Bridge RPC config is required for XLM')
-    }
-    const balance = await getStellarBalanceViaBridge(input.rpcConfig, address)
-    return { balance, syncPercent: 100, isSyncing: false }
-  }
-  if (modelId === 'tron') {
-    if (input.rpcConfig?.bridgeUrl) {
-      try {
-        const balance = await getTronBalanceViaBridge(input.rpcConfig, address)
-        return { balance, syncPercent: 100, isSyncing: false }
-      } catch {
-        // Fall back to direct TRON JSON-RPC if bridge compatibility is limited.
-      }
-    }
-    const rpcUrl = String(input.network.rpcUrl || '').trim()
-    if (!rpcUrl) throw new Error('TRON RPC URL is not configured')
-    const { getTronBalance } = await loadTronNonCustodialModule()
-    const balance = await getTronBalance(rpcUrl, address)
-    return { balance, syncPercent: 100, isSyncing: false }
-  }
-
-  if (input.network.coinType === 'EVM') {
-    if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {
-      throw new Error('Bridge RPC config is required for EVM networks')
-    }
-    try {
-      const { ethers } = await loadEthersModule()
-      const balHex = await callBridgeMethod(input.rpcConfig, 'eth_getBalance', [address, 'latest'])
-      const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')
-      return { balance: ethers.formatEther(balanceWei), syncPercent: 100, isSyncing: false }
-    } catch (error) {
-      if (!isEvmBridgePayloadIncompatibleError(error)) throw error
-      const rpcUrl = String(input.network.rpcUrl || '').trim()
-      if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl) || isBlockedDirectEvmRpcUrl(rpcUrl)) throw error
-      const { ethers } = await loadEthersModule()
-      const provider = new ethers.JsonRpcProvider(rpcUrl)
-      const wei = await provider.getBalance(address)
-      return { balance: ethers.formatEther(wei), syncPercent: 100, isSyncing: false }
-    }
+  const protocolBalance = await fetchProtocolBalance(input.network, modelId, address, input.rpcConfig)
+  if (protocolBalance !== null) {
+    return { balance: protocolBalance, syncPercent: 100, isSyncing: false }
   }
 
   if (!input.rpcConfig) {
@@ -645,34 +490,8 @@ export async function validateChainAddress(network: Network, rpcConfig: UtxoRpcC
   const protocol = resolveProtocol(network)
   const value = String(address || '').trim()
   if (!value) return false
-  if (modelId === 'sol') {
-    try {
-      const { PublicKey } = await loadSolanaWeb3Module()
-      void new PublicKey(value)
-      return true
-    } catch {
-      return false
-    }
-  }
-  if (modelId === 'xlm') {
-    const { StrKey } = await loadStellarSdkModule()
-    return StrKey.isValidEd25519PublicKey(value)
-  }
-  if (modelId === 'tron') {
-    const tronweb = await loadTronWebModule()
-    return tronweb.TronWeb.isAddress(value)
-  }
-  if (isCosmosLikeModelId(modelId)) {
-    const { hrp } = resolveCosmosNetworkConfig(network)
-    return isCosmosAddressForHrp(value, hrp)
-  }
-  if (network.coinType === 'EVM') {
-    const { ethers } = await loadEthersModule()
-    return ethers.isAddress(value)
-  }
-  if (protocol === 'xrp-jsonrpc-compat') {
-    return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
-  }
+  const protocolValidated = await validateProtocolAddress(network, modelId, protocol, value)
+  if (typeof protocolValidated === 'boolean') return protocolValidated
   if (!rpcConfig) throw new Error(`RPC config is required for ${network.symbol}`)
   const cacheKey = `${resolveRpcCacheKey(rpcConfig)}|addr:${value}`
   const cached = addressValidationCache.get(cacheKey)

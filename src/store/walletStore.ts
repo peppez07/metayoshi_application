@@ -326,6 +326,7 @@ interface WalletState {
   sendUtxoTransaction: (params: {
     to: string
     amount: string
+    memo?: string
     donation?: {
       address: string
       amount: string
@@ -365,6 +366,7 @@ interface WalletState {
     assetId: string
     qty: string
     toAddress: string
+    memo?: string
     changeAddress?: string
     assetChangeAddress?: string
   }) => Promise<{ txid: string }>
@@ -373,6 +375,7 @@ interface WalletState {
     assetId: string
     qty: string
     toAddress: string
+    memo?: string
     changeAddress?: string
     assetChangeAddress?: string
   }) => Promise<{ txid: string }>
@@ -4041,7 +4044,7 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
-      sendRtmAsset: async ({ assetId, qty, toAddress, changeAddress = '', assetChangeAddress = '' }) => {
+      sendRtmAsset: async ({ assetId, qty, toAddress, memo = '', changeAddress = '', assetChangeAddress = '' }) => {
         await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
@@ -4387,6 +4390,7 @@ export const useWalletStore = create<WalletState>()(
         if (modelId === 'cosmos') {
           const recipient = String(toAddress || '').trim()
           const denom = String(assetId || '').trim()
+          const txMemo = String(memo || '').trim()
           const contractAsset = parseCosmosContractAssetId(denom)
           if (!recipient) throw new Error('Cosmos recipient address is required')
           if (!denom) throw new Error('Cosmos token denom is required')
@@ -4430,7 +4434,8 @@ export const useWalletStore = create<WalletState>()(
                 privateKeyHex: derived.privHex,
                 feeDenom: cosmosCfg.feeDenom,
                 feeAmountRaw: cosmosCfg.feeAmountRaw,
-                gasLimit: cosmosCfg.gasLimit
+                gasLimit: cosmosCfg.gasLimit,
+                memo: txMemo
               })
             } else {
               if (amountRawText !== '1') {
@@ -4450,7 +4455,8 @@ export const useWalletStore = create<WalletState>()(
                 privateKeyHex: derived.privHex,
                 feeDenom: cosmosCfg.feeDenom,
                 feeAmountRaw: cosmosCfg.feeAmountRaw,
-                gasLimit: cosmosCfg.gasLimit
+                gasLimit: cosmosCfg.gasLimit,
+                memo: txMemo
               })
             }
           } else {
@@ -4463,7 +4469,8 @@ export const useWalletStore = create<WalletState>()(
               privateKeyHex: derived.privHex,
               feeDenom: cosmosCfg.feeDenom,
               feeAmountRaw: cosmosCfg.feeAmountRaw,
-              gasLimit: cosmosCfg.gasLimit
+              gasLimit: cosmosCfg.gasLimit,
+              memo: txMemo
             })
           }
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
@@ -5062,7 +5069,12 @@ export const useWalletStore = create<WalletState>()(
           address = null
         }
         if (!address && net.coinType === 'EVM') address = acc.addresses?.EVM ?? null
-        if (!address || net.coinType === 'UTXO') {
+        if (
+          !address
+          || net.coinType === 'UTXO'
+          || net.coinType === 'COSMOS'
+          || modelId === 'cosmos'
+        ) {
           const ensured = await get().ensureNetworkAddress(activeNetworkId)
           if (ensured) address = ensured
         }
@@ -5096,6 +5108,28 @@ export const useWalletStore = create<WalletState>()(
               accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
         } else if (net.coinType === 'XRP') {
+          const { useLocalRpc, localRpcOverrides } = get()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc,
+            localRpcOverride: localRpcOverrides[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const snapshot = await cachedFetchChainBalanceAndSync({
+            network: net,
+            address,
+            rpcConfig,
+            force: fastMode
+          })
+          await waitForUiStabilize()
+          if (isStaleRequest()) return
+          set((state) => ({
+            isSyncing: snapshot.isSyncing,
+            isConnected: true,
+            syncPercent: snapshot.syncPercent,
+            lowSyncStreak: computeLowSyncStreak(state.lowSyncStreak, snapshot, MIN_SYNC_PERCENT_FOR_SEND),
+            accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
+          }))
+        } else if (net.coinType === 'COSMOS' || modelId === 'cosmos') {
           const { useLocalRpc, localRpcOverrides } = get()
           const rpcConfig = await createUtxoRpcConfig(net, {
             useLocalRpc,
@@ -5612,7 +5646,7 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
-      sendUtxoTransaction: async ({ to, amount, donation }) => {
+      sendUtxoTransaction: async ({ to, amount, memo, donation }) => {
         await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked, useLocalRpc: ulr3, localRpcOverrides: lro3 } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
@@ -5643,6 +5677,7 @@ export const useWalletStore = create<WalletState>()(
 
         if (modelId === 'cosmos') {
           const cosmosCfg = resolveCosmosNetworkConfig(net)
+          const txMemo = String(memo || '').trim()
           const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), cosmosCfg.decimals, net.symbol)
           const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)
           if (String(senderAddress || '').trim() !== derived.address) {
@@ -5657,7 +5692,8 @@ export const useWalletStore = create<WalletState>()(
             privateKeyHex: derived.privHex,
             feeDenom: cosmosCfg.feeDenom,
             feeAmountRaw: cosmosCfg.feeAmountRaw,
-            gasLimit: cosmosCfg.gasLimit
+            gasLimit: cosmosCfg.gasLimit,
+            memo: txMemo
           })
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
             coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',

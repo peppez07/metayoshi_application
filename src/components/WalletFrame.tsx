@@ -12,6 +12,7 @@ import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { compareNetworksByModelFamily } from '../lib/coinModel'
 import { getModelIconRingClass } from '../buildConfig'
 import { getEnabledNetworks } from '../lib/networkVisibility'
+import { resolveRuntimeModelId } from '../lib/runtimeModel'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -46,6 +47,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const [copied, setCopied] = React.useState(false)
   const [qrCopied, setQrCopied] = React.useState(false)
   const [qrDataUrl, setQrDataUrl] = React.useState('')
+  const [receiveMemo, setReceiveMemo] = React.useState('')
 
   const enabledNetworks = React.useMemo(
     () => getEnabledNetworks(networks, disabledNetworkIds),
@@ -84,12 +86,21 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const rawAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : undefined)
     || ''
+  const activeModelId = resolveRuntimeModelId(activeNetwork)
+  const supportsReceiveMemo = activeModelId === 'cosmos'
+  const receivePayload = React.useMemo(() => {
+    const address = String(rawAddress || '').trim()
+    if (!address) return ''
+    const memo = String(receiveMemo || '').trim()
+    if (!supportsReceiveMemo || !memo) return address
+    return `cosmos:${address}?memo=${encodeURIComponent(memo)}`
+  }, [rawAddress, receiveMemo, supportsReceiveMemo])
   const shortenedAddress = rawAddress
     ? `${rawAddress.slice(0, 4)}…${rawAddress.slice(-6)}`
     : ''
 
   React.useEffect(() => {
-    if (!showReceiveQr || !rawAddress) {
+    if (!showReceiveQr || !receivePayload) {
       setQrDataUrl('')
       return
     }
@@ -100,7 +111,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     canvas.width = SIZE
     canvas.height = SIZE
 
-    void QRCode.toCanvas(canvas, rawAddress, {
+    void QRCode.toCanvas(canvas, receivePayload, {
       width: SIZE,
       margin: 2,
       errorCorrectionLevel: 'H',
@@ -159,7 +170,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     })
 
     return () => { mounted = false }
-  }, [showReceiveQr, rawAddress])
+  }, [showReceiveQr, receivePayload])
 
   const isApiWaiting = apiInFlight > 0
   const isWaiting = isSyncing || isApiWaiting
@@ -182,9 +193,9 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   }
 
   const copyQrAddress = async () => {
-    if (!rawAddress) return
+    if (!receivePayload) return
     try {
-      await navigator.clipboard.writeText(rawAddress)
+      await navigator.clipboard.writeText(receivePayload)
       setQrCopied(true)
       setTimeout(() => setQrCopied(false), 2000)
     } catch {
@@ -529,14 +540,32 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               <p className="text-[11px] font-mono break-all text-gray-200 leading-relaxed">{rawAddress || 'No address available'}</p>
             </div>
 
+            {supportsReceiveMemo && (
+              <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3 space-y-2">
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-1">Memo</p>
+                  <p className="text-[10px] text-gray-500">Optional ATOM memo to share with the sender.</p>
+                </div>
+                <input
+                  value={receiveMemo}
+                  onChange={(e) => setReceiveMemo(e.target.value)}
+                  placeholder="Optional ATOM memo"
+                  className="input-field bg-dark-700/50 border-dark-600 text-xs"
+                />
+                {receiveMemo.trim() && (
+                  <p className="text-[10px] font-mono break-all text-gray-300">{receivePayload}</p>
+                )}
+              </div>
+            )}
+
             <Button
               className="w-full"
               onClick={() => { void copyQrAddress() }}
-              disabled={!rawAddress}
+              disabled={!receivePayload}
             >
               {qrCopied
                 ? <><IoCheckmark className="w-4 h-4" /> Copied!</>
-                : <><IoCopyOutline className="w-4 h-4" /> Copy Address</>
+                : <><IoCopyOutline className="w-4 h-4" /> Copy {supportsReceiveMemo && receiveMemo.trim() ? 'Address URI' : 'Address'}</>
               }
             </Button>
           </div>

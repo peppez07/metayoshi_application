@@ -8,6 +8,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import { IoArrowBackOutline, IoInformationCircleOutline } from 'react-icons/io5'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
+import { resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -65,6 +66,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  const activeModelId = resolveRuntimeModelId(activeNetwork)
+  const supportsMemo = activeModelId === 'cosmos'
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const nftMode = resolveNftQuantityMode(item)
@@ -81,11 +84,13 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
 
   const [toAddress, setToAddress] = useState('')
   const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
     setToAddress('')
     setError('')
+    setMemo('')
     setAmount(isFixedOneMode ? '1' : '')
   }, [item.id, isFixedOneMode])
 
@@ -205,6 +210,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         amount: normalizedAmount,
         from: fromAddress
       }
+      if (supportsMemo && memo.trim()) txState.memo = memo.trim()
 
       // Keep donation support active for supported UTXO coins while still
       // honoring user percentage when server policy is optional.
@@ -254,7 +260,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         assetLabel: item.label || assetId,
         to: toAddress.trim(),
         amount: normalizedAmount,
-        from: fromAddress
+        from: fromAddress,
+        ...(supportsMemo && memo.trim() ? { memo: memo.trim() } : {})
       }
     })
   }
@@ -341,6 +348,19 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
             <p className="text-[10px] text-gray-500 ml-1">ERC1155 sends require a whole-number quantity.</p>
           )}
         </div>
+
+        {supportsMemo && (
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Memo</label>
+            <textarea
+              placeholder="Optional ATOM memo for exchange deposits or app routing"
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              rows={3}
+              className="input-field min-h-[84px] resize-none bg-dark-700/50 border-dark-600 text-xs"
+            />
+          </div>
+        )}
 
         <div className="flex gap-2.5 p-3 bg-dark-700/20 rounded-xl border border-dark-600/60">
           <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />

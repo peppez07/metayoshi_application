@@ -28,12 +28,14 @@ export interface DappPendingApproval {
 export interface DappSendRequestPayload {
   to: string
   amount: string
+  memo?: string
 }
 
 export interface DappSendAssetRequestPayload {
   assetId: string
   qty: string
   toAddress: string
+  memo?: string
 }
 
 export interface DappRequestError {
@@ -216,8 +218,9 @@ function parseDappSendRequest(raw: unknown): DappSendRequestPayload | null {
   const candidate = raw as Partial<DappSendRequestPayload>
   const to = String(candidate.to || '').trim()
   const amount = String(candidate.amount || '').trim()
+  const memo = String(candidate.memo || '').trim()
   if (!to || !amount) return null
-  return { to, amount }
+  return memo ? { to, amount, memo } : { to, amount }
 }
 
 function parseDappSendAssetRequest(raw: unknown): DappSendAssetRequestPayload | null {
@@ -226,8 +229,9 @@ function parseDappSendAssetRequest(raw: unknown): DappSendAssetRequestPayload | 
   const assetId = String(candidate.assetId || '').trim()
   const qty = String(candidate.qty || '').trim()
   const toAddress = String(candidate.toAddress || '').trim()
+  const memo = String(candidate.memo || '').trim()
   if (!assetId || !qty || !toAddress) return null
-  return { assetId, qty, toAddress }
+  return memo ? { assetId, qty, toAddress, memo } : { assetId, qty, toAddress }
 }
 
 function parseDappRequestError(raw: unknown): DappRequestError | undefined {

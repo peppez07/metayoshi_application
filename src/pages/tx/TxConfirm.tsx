@@ -23,6 +23,7 @@ interface TxState {
   assetLabel?: string
   to?: string
   amount?: string
+  memo?: string
   from?: string
   origin?: string
   enteredAmount?: string
@@ -151,6 +152,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const assetLabel = String(txState.assetLabel || assetId || '').trim()
   const toAddress = txState.to?.trim() ?? ''
   const amount = txState.amount?.trim() ?? ''
+  const memo = String(txState.memo || '').trim()
   const fromAddress = txState.from?.trim() ?? ''
   const requestOrigin = String(txState.origin ?? '').trim() || 'metayoshi provider'
   const hasTxState = Boolean(toAddress && amount)
@@ -370,7 +372,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         const sent = await sendAssetTransfer({
           assetId,
           qty: amount,
-          toAddress: toAddress
+          toAddress: toAddress,
+          memo
         })
         txHash = String(sent.txid || '').trim()
       } else if (activeNetwork.coinType === 'EVM') {
@@ -398,6 +401,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         const res = await sendUtxoTransaction({
           to: toAddress,
           amount,
+          memo,
           donation: donationEnabled
             ? {
                 address: donationAddress,
@@ -522,6 +526,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
             <p className="text-[11px] font-mono text-gray-300">
               {safeAmount > 0 ? `${safeAmount} ${isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}` : 'No amount provided'}
             </p>
+            {memo && (
+              <p className="text-[11px] font-mono text-gray-400 break-all">Memo: {memo}</p>
+            )}
           </div>
           
           <div className="flex items-center gap-2">
@@ -598,6 +605,22 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                   </div>
               </div>
 
+              {memo && (
+                <>
+                  <div className="divider" />
+
+                  <div className="flex justify-between items-start gap-4">
+                     <div className="space-y-0.5">
+                        <p className="text-[12px] font-bold">Memo</p>
+                        <p className="text-[10px] text-gray-500">Included in the signed on-chain payload</p>
+                     </div>
+                     <div className="text-right">
+                        <p className="text-[11px] font-mono break-all max-w-[180px] text-gray-300">{memo}</p>
+                     </div>
+                  </div>
+                </>
+              )}
+
               {!isAssetTransfer && (
                 <>
                   <div className="divider" />
@@ -635,6 +658,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
               <p>{"{"}</p>
               <p className="ml-4">"method": "{isAssetTransfer ? 'send_asset' : 'send'}",</p>
               <p className="ml-4">"params": [{isAssetTransfer ? `"${assetId}", ` : ''}"{toAddress || 'N/A'}", "{amount || '0'}"]</p>
+              {memo && <p className="ml-4">"memo": "{memo}",</p>}
               {donationEnabled && !isAssetTransfer && (
                 <>
                   <p className="ml-4">"donation": {"{"}</p>

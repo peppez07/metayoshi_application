@@ -70,12 +70,14 @@ type MonitorRequest =
 type SendTransactionParams = {
   to: string
   amount: string
+  memo?: string
 }
 
 type SendAssetParams = {
   assetId: string
   qty: string
   toAddress: string
+  memo?: string
 }
 
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
@@ -738,6 +740,7 @@ function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTrans
   const amount = typeof amountRaw === 'string'
     ? amountRaw.trim()
     : (typeof amountRaw === 'number' ? String(amountRaw) : '')
+  const memo = String(payload.memo ?? '').trim()
   if (!amount) {
     throw { code: -32602, message: 'wallet_sendTransaction requires `amount` as a decimal coin string' }
   }
@@ -751,7 +754,7 @@ function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTrans
     throw { code: -32602, message: 'wallet_sendTransaction amount must be greater than zero' }
   }
 
-  return { to, amount }
+  return memo ? { to, amount, memo } : { to, amount }
 }
 
 function parseSendAssetParams(params: unknown): SendAssetParams {
@@ -767,6 +770,7 @@ function parseSendAssetParams(params: unknown): SendAssetParams {
   const qty = typeof qtyRaw === 'string'
     ? qtyRaw.trim()
     : (typeof qtyRaw === 'number' ? String(qtyRaw) : '')
+  const memo = String(payload.memo ?? '').trim()
 
   if (!assetId) throw { code: -32602, message: 'wallet_sendAsset requires `assetId`' }
   if (!toAddress) throw { code: -32602, message: 'wallet_sendAsset requires recipient `toAddress`' }
@@ -774,7 +778,7 @@ function parseSendAssetParams(params: unknown): SendAssetParams {
   if (!/^\d+(\.\d+)?$/.test(qty)) throw { code: -32602, message: 'wallet_sendAsset qty must be a positive decimal string' }
   if (Number(qty) <= 0) throw { code: -32602, message: 'wallet_sendAsset qty must be greater than zero' }
 
-  return { assetId, qty, toAddress }
+  return memo ? { assetId, qty, toAddress, memo } : { assetId, qty, toAddress }
 }
 
 async function requestDappActionApproval(
