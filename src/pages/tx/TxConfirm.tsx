@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { ethers } from 'ethers'
 import { Button } from '../../components/Button'
 import { Tabs } from '../../components/Tabs'
-import { useWalletStore } from '../../store/walletStore'
+import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInformationCircle } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
@@ -133,6 +133,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     sendAssetTransfer,
     refreshActiveBalance,
     networkAssetLogos,
+    accountNetworkAssets,
+    accountNetworkFiatNative,
+    accountNetworkFiatAssets,
     isConnected,
     isSyncing,
     syncPercent,
@@ -190,6 +193,28 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     if (scoped > 0) return scoped
     return parseCoinAmount(activeAccount?.balance)
   }, [activeAccount?.balance, activeAccount?.networkBalances, activeNetworkId])
+  const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  const scopedNativeFiatUsd = Number(accountNetworkFiatNative?.[fiatScopeKey]?.usd)
+  const scopedAssetFiatUsd = Number(accountNetworkFiatAssets?.[fiatScopeKey]?.[assetId]?.usd)
+  const scopedAssetRaw = Number(accountNetworkAssets?.[fiatScopeKey]?.[assetId] ?? 0)
+  const nativeUsdPerCoin = useMemo(() => {
+    if (!Number.isFinite(scopedNativeFiatUsd) || scopedNativeFiatUsd <= 0) return null
+    if (!Number.isFinite(availableNativeBalance) || availableNativeBalance <= 0) return null
+    return scopedNativeFiatUsd / availableNativeBalance
+  }, [availableNativeBalance, scopedNativeFiatUsd])
+  const assetUsdPerUnit = useMemo(() => {
+    if (!isAssetTransfer) return null
+    if (!Number.isFinite(scopedAssetFiatUsd) || scopedAssetFiatUsd <= 0) return null
+    const scopedAssetUnits = scopedAssetRaw / 1e8
+    if (!Number.isFinite(scopedAssetUnits) || scopedAssetUnits <= 0) return null
+    return scopedAssetFiatUsd / scopedAssetUnits
+  }, [isAssetTransfer, scopedAssetFiatUsd, scopedAssetRaw])
+  const estimatedNetworkFeeFiat = nativeUsdPerCoin ? estimatedNetworkFee * nativeUsdPerCoin : null
+  const recipientAmountFiat = isAssetTransfer
+    ? (assetUsdPerUnit ? safeAmount * assetUsdPerUnit : null)
+    : (nativeUsdPerCoin ? safeAmount * nativeUsdPerCoin : null)
+  const donationFiat = nativeUsdPerCoin ? (donationEnabled ? donationAmount : 0) * nativeUsdPerCoin : null
+  const estimatedTotalCostFiat = nativeUsdPerCoin ? estimatedTotalCost * nativeUsdPerCoin : null
 
   useEffect(() => {
     let cancelled = false
@@ -522,6 +547,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                  <div className="text-right">
                     <p className="text-xs font-bold">{formatCoinAmount(estimatedNetworkFee)}</p>
                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
+                    {estimatedNetworkFeeFiat !== null && (
+                      <p className="text-[10px] text-gray-400">{formatFiatValue(estimatedNetworkFeeFiat)}</p>
+                    )}
                     <p className="text-[9px] text-gray-500">
                       {isEstimatingNetworkFee ? 'Updating from network…' : 'Est. fee only'}
                     </p>
@@ -561,6 +589,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                  <div className="text-right">
                     <p className="text-sm font-bold">{formatCoinAmount(safeAmount)}</p>
                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}</p>
+                    {recipientAmountFiat !== null && (
+                      <p className="text-[10px] text-gray-400">{formatFiatValue(recipientAmountFiat)}</p>
+                    )}
                     {donationEnabled && donationMode === 'deduct' && !isAssetTransfer && (
                       <p className="text-[9px] text-gray-500">Entered: <span className="font-bold">{formatCoinAmount(enteredAmount)} {activeNetwork.symbol}</span></p>
                     )}
@@ -579,12 +610,19 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                      <div className="text-right">
                         <p className="text-sm font-bold">{formatCoinAmount(estimatedTotalCost)}</p>
                         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{activeNetwork.symbol}</p>
+                        {estimatedTotalCostFiat !== null && (
+                          <p className="text-[10px] text-gray-400">{formatFiatValue(estimatedTotalCostFiat)}</p>
+                        )}
                         <p className="text-[9px] text-gray-500">
                           Network fee: <span className="font-bold">{formatCoinAmount(estimatedNetworkFee)} {activeNetwork.symbol}</span>
+                          {estimatedNetworkFeeFiat !== null ? <span className="font-bold"> ({formatFiatValue(estimatedNetworkFeeFiat)})</span> : null}
                         </p>
-                        <p className="text-[9px] text-gray-500">
-                          Additional donation: <span className="font-bold">{formatCoinAmount(donationEnabled ? donationAmount : 0)} {activeNetwork.symbol}</span>
-                        </p>
+                        {donationEnabled && (
+                          <p className="text-[9px] text-gray-500">
+                            Additional donation: <span className="font-bold">{formatCoinAmount(donationAmount)} {activeNetwork.symbol}</span>
+                            {donationFiat !== null ? <span className="font-bold"> ({formatFiatValue(donationFiat)})</span> : null}
+                          </p>
+                        )}
                      </div>
                   </div>
                 </>

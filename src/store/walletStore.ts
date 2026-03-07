@@ -20,11 +20,11 @@ import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } 
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
-import { deriveCosmosAddress, isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../lib/cosmosAddress'
+import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
-import { isCroCosmosNetwork, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
+import { requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { buildSolanaAssetId, extractSolanaMintFromAssetId } from '../lib/assetTypes'
@@ -53,6 +53,25 @@ import { STANDARD_RUNTIME_META } from '../coins/standardRuntimeMeta'
 import type { CoinType, Network } from '../coins'
 import type { ServerCoinCatalogItem } from '../coins'
 import { useApiMonitorStore } from './apiMonitorStore'
+import {
+  isCroCosmosModel,
+  normalizeActivityList,
+  normalizeActivityRecord,
+  normalizeDisabledNetworkIdsForState,
+  normalizeNetworkIdAlias,
+  normalizeNetworkSymbol,
+  parseDecimalToAtomicUnits,
+  remapNetworkIdKeyedRecord,
+  resolveCosmosNetworkConfig,
+  resolveEnabledNetworkId,
+  resolveEthereumOnlyNetworkDefaults,
+  resolveKnownNetworkId,
+  shouldForceCanonicalUtxoAddress
+} from './walletStoreStateUtils'
+import {
+  deriveAccountAddresses,
+  deriveSingleNetworkAddress
+} from './walletStoreAddressing'
 
 export type { CoinType, Network } from '../coins'
 
@@ -745,12 +764,19 @@ function normalizeFiatValueMap(input: unknown): FiatValueMap {
 }
 
 export function formatFiatValue(value: number | null | undefined, currency: FiatCurrency = 'usd'): string {
-  if (!Number.isFinite(Number(value))) return ''
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return ''
+  const absolute = Math.abs(numeric)
+  const maximumFractionDigits =
+    absolute > 0 && absolute < 0.01
+      ? 8
+      : 2
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: currency.toUpperCase(),
-    maximumFractionDigits: value && Math.abs(value) >= 100 ? 2 : 2
-  }).format(Number(value))
+    minimumFractionDigits: 2,
+    maximumFractionDigits
+  }).format(numeric)
 }
 
 function getScopedAssetBucket<T>(
@@ -1994,348 +2020,6 @@ function supportsAddressIndexBalance(coinSymbol?: string): boolean {
   return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
 }
 
-function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
-  const symbol = String(coinSymbol || '').trim().toUpperCase()
-  // Tide was previously derived with a legacy coin-type path; always re-derive
-  // from the current canonical path when network address resolution runs.
-  return symbol === 'TIDE'
-}
-
-function isCroCosmosModel(network?: Partial<Network>): boolean {
-  return isCroCosmosNetwork(network)
-}
-
-function resolveCosmosNetworkConfig(network?: Partial<Network>): {
-  hrp: string
-  coinType: number
-  decimals: number
-  nativeDenom: string
-  feeDenom: string
-  feeAmountRaw: string
-  gasLimit: string
-} {
-  const cfg = resolveCosmosAddressConfig({
-    runtimeModelId: String(network?.runtimeModelId || '').trim(),
-    serverCoinId: String(network?.serverCoinId || '').trim(),
-    id: String(network?.id || '').trim()
-  })
-  return {
-    hrp: cfg.hrp,
-    coinType: cfg.coinType,
-    decimals: cfg.decimals,
-    nativeDenom: cfg.nativeDenom,
-    feeDenom: cfg.feeDenom,
-    feeAmountRaw: cfg.feeAmountRaw,
-    gasLimit: cfg.gasLimit
-  }
-}
-
-function parseDecimalToAtomicUnits(value: string, decimals: number, label: string): bigint {
-  const raw = String(value || '').trim()
-  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error(`Invalid ${label} amount`)
-  const [whole, fraction = ''] = raw.split('.')
-  if (fraction.length > decimals) throw new Error(`${label} supports up to ${decimals} decimals`)
-  const atomic = `${whole}${fraction.padEnd(decimals, '0')}`
-  const n = BigInt(atomic)
-  if (n <= 0n) throw new Error(`${label} amount must be greater than 0`)
-  return n
-}
-
-function normalizeNetworkSymbol(network: Network): Network {
-  const serverCoinId = String(network.serverCoinId || '').trim().toLowerCase()
-  const networkId = String(network.id || '').trim().toLowerCase()
-  const networkName = String(network.name || '').trim().toLowerCase()
-  const symbol = String(network.symbol || '').trim().toUpperCase()
-  const coinSymbol = String(network.coinSymbol || '').trim().toUpperCase()
-  const isBitcoin =
-    serverCoinId === 'bitcoin'
-    || networkId === 'srv--bitcoin'
-    || networkName === 'bitcoin'
-    || symbol === 'BITCOI'
-    || coinSymbol === 'BITCOI'
-  if (!isBitcoin) return network
-  return {
-    ...network,
-    symbol: 'BTC',
-    coinSymbol: network.coinType === 'UTXO' ? 'BTC' : (network.coinSymbol || 'BTC')
-  }
-}
-
-function normalizeNetworkIdAlias(value: string): string {
-  const raw = String(value || '').trim()
-  const normalized = raw.toLowerCase()
-  if (!normalized) return ''
-  if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
-  if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
-  if (normalized.endsWith('-mainnet')) {
-    const base = normalized.slice(0, -'-mainnet'.length)
-    if (FROZEN_STABLE_NETWORK_IDS.has(base)) return base
-  }
-  if (FROZEN_STABLE_NETWORK_IDS.has(normalized)) return normalized
-  if (normalized.startsWith('srv--')) return normalized
-  return raw
-}
-
-function resolveKnownNetworkId(networks: Network[], rawNetworkId: string): string | null {
-  const raw = String(rawNetworkId || '').trim()
-  const requested = normalizeNetworkIdAlias(raw)
-  if (!requested && !raw) return null
-
-  const exact = networks.find((network) => (
-    network.id === requested
-    || network.id === raw
-  ))
-  if (exact) return exact.id
-
-  const requestedLower = requested.toLowerCase()
-  const rawLower = raw.toLowerCase()
-  const folded = networks.find((network) => (
-    network.id.toLowerCase() === requestedLower
-    || network.id.toLowerCase() === rawLower
-  ))
-  return folded?.id || null
-}
-
-function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown, networks: Network[]): string[] {
-  if (!Array.isArray(disabledNetworkIds) || networks.length === 0) return []
-  const canonicalByLower = new Map<string, string>()
-  for (const network of networks) {
-    const id = String(network.id || '').trim()
-    if (!id) continue
-    canonicalByLower.set(id.toLowerCase(), id)
-    const alias = normalizeNetworkIdAlias(id)
-    if (alias) canonicalByLower.set(alias.toLowerCase(), id)
-  }
-
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const value of disabledNetworkIds) {
-    const raw = String(value || '').trim()
-    if (!raw) continue
-    const candidates = [raw, normalizeNetworkIdAlias(raw)]
-    let resolved = ''
-    for (const candidate of candidates) {
-      const key = String(candidate || '').trim().toLowerCase()
-      if (!key) continue
-      const mapped = canonicalByLower.get(key)
-      if (mapped) {
-        resolved = mapped
-        break
-      }
-    }
-    if (!resolved || seen.has(resolved)) continue
-    seen.add(resolved)
-    out.push(resolved)
-  }
-  if (networks.length > 0 && out.length >= networks.length) {
-    const firstNetworkId = String(networks[0]?.id || '').trim()
-    return out.filter((networkId) => networkId !== firstNetworkId)
-  }
-  return out
-}
-
-function resolveEnabledNetworkId(
-  networks: Network[],
-  disabledNetworkIds: string[],
-  preferredNetworkId?: string | null
-): string {
-  const normalizedDisabled = new Set(normalizeDisabledNetworkIdsForState(disabledNetworkIds, networks))
-  const preferred = resolveKnownNetworkId(networks, String(preferredNetworkId || '').trim())
-  if (preferred && !normalizedDisabled.has(preferred)) return preferred
-  const firstEnabled = networks.find((network) => !normalizedDisabled.has(network.id))
-  return firstEnabled?.id || networks[0]?.id || DEFAULT_ACTIVE_NETWORK_ID
-}
-
-function resolveEthereumOnlyNetworkDefaults(networks: Network[]): { activeNetworkId: string; disabledNetworkIds: string[] } {
-  const ethereumNetworkId = resolveKnownNetworkId(networks, 'eth')
-  if (!ethereumNetworkId) {
-    return {
-      activeNetworkId: resolveEnabledNetworkId(networks, [], DEFAULT_ACTIVE_NETWORK_ID),
-      disabledNetworkIds: []
-    }
-  }
-
-  const disabledNetworkIds = normalizeDisabledNetworkIdsForState(
-    networks
-      .map((network) => String(network.id || '').trim())
-      .filter((id) => id && id !== ethereumNetworkId),
-    networks
-  )
-
-  return {
-    activeNetworkId: resolveEnabledNetworkId(networks, disabledNetworkIds, ethereumNetworkId),
-    disabledNetworkIds
-  }
-}
-
-function remapNetworkIdKeyedRecord<T>(record: Record<string, T> | undefined): Record<string, T> {
-  const out: Record<string, T> = {}
-  if (!record || typeof record !== 'object') return out
-  for (const [rawKey, value] of Object.entries(record)) {
-    const canonicalKey = normalizeNetworkIdAlias(rawKey) || String(rawKey || '').trim()
-    if (!canonicalKey) continue
-    const isCanonicalInput = canonicalKey === String(rawKey || '').trim()
-    if (!(canonicalKey in out) || isCanonicalInput) {
-      out[canonicalKey] = value
-    }
-  }
-  return out
-}
-
-interface ActivityNormalizationContext {
-  networks: Network[]
-  accounts: Account[]
-  activeNetworkId: string
-  activeAccountId: string | null
-}
-
-function resolveCanonicalActivityNetworkId(
-  rawNetworkId: unknown,
-  context: ActivityNormalizationContext
-): string {
-  const requested = normalizeNetworkIdAlias(String(rawNetworkId || '').trim())
-  if (requested) {
-    const exact = context.networks.find((network) => network.id === requested)
-    if (exact) return exact.id
-    const fold = context.networks.find((network) => network.id.toLowerCase() === requested.toLowerCase())
-    if (fold) return fold.id
-  }
-
-  const activeRequested = normalizeNetworkIdAlias(String(context.activeNetworkId || '').trim())
-  if (activeRequested) {
-    const exact = context.networks.find((network) => network.id === activeRequested)
-    if (exact) return exact.id
-    const fold = context.networks.find((network) => network.id.toLowerCase() === activeRequested.toLowerCase())
-    if (fold) return fold.id
-  }
-
-  return context.networks[0]?.id || activeRequested || requested
-}
-
-function resolveActivityAccountId(
-  rawAccountId: unknown,
-  rawFrom: unknown,
-  rawTo: unknown,
-  networkId: string,
-  context: ActivityNormalizationContext
-): string | undefined {
-  const isKnownAccountId = (candidate: string): boolean => (
-    Boolean(candidate) && context.accounts.some((account) => account.id === candidate)
-  )
-
-  const explicitId = String(rawAccountId || '').trim()
-  if (isKnownAccountId(explicitId)) return explicitId
-
-  const normalizedFrom = String(rawFrom || '').trim().toLowerCase()
-  const normalizedTo = String(rawTo || '').trim().toLowerCase()
-  const hasAddressHint = Boolean(normalizedFrom || normalizedTo)
-
-  const network = context.networks.find((entry) => entry.id === networkId)
-  if (hasAddressHint) {
-    const inferred = context.accounts.find((account) => {
-      const candidates = new Set<string>()
-      const push = (value: unknown) => {
-        const normalized = String(value || '').trim().toLowerCase()
-        if (normalized) candidates.add(normalized)
-      }
-
-      push(account.networkAddresses?.[networkId])
-      if (network?.coinType === 'EVM') push(account.addresses?.EVM)
-      else if (network?.coinType === 'XRP') push(account.addresses?.XRP)
-      else if (network?.coinType === 'UTXO') {
-        push(account.addresses?.UTXO)
-        push(account.addresses?.BTC)
-      } else if (network?.coinType === 'COSMOS') {
-        push(account.addresses?.COSMOS)
-      } else if (!network) {
-        Object.values(account.networkAddresses || {}).forEach(push)
-        push(account.addresses?.EVM)
-        push(account.addresses?.UTXO)
-        push(account.addresses?.BTC)
-        push(account.addresses?.COSMOS)
-        push(account.addresses?.SOL)
-        push(account.addresses?.XRP)
-      }
-
-      return (
-        (normalizedFrom && candidates.has(normalizedFrom))
-        || (normalizedTo && candidates.has(normalizedTo))
-      )
-    })
-    if (inferred?.id) return inferred.id
-  }
-
-  const activeId = String(context.activeAccountId || '').trim()
-  if (isKnownAccountId(activeId)) return activeId
-
-  const firstId = String(context.accounts[0]?.id || '').trim()
-  if (isKnownAccountId(firstId)) return firstId
-
-  return undefined
-}
-
-function normalizeActivityRecord(
-  rawActivity: unknown,
-  context: ActivityNormalizationContext,
-  indexHint: number
-): Activity | null {
-  if (!rawActivity || typeof rawActivity !== 'object') return null
-  const candidate = rawActivity as Partial<Activity>
-  const networkId = resolveCanonicalActivityNetworkId(candidate.networkId, context)
-  if (!networkId) return null
-
-  const timestampRaw = Number(candidate.timestamp)
-  const timestamp = Number.isFinite(timestampRaw) && timestampRaw > 0
-    ? Math.trunc(timestampRaw)
-    : Date.now()
-
-  const typeRaw = String(candidate.type || '').trim().toLowerCase()
-  const type: Activity['type'] =
-    typeRaw === 'received' ? 'received'
-      : typeRaw === 'swap' ? 'swap'
-        : 'sent'
-
-  const statusRaw = String(candidate.status || '').trim().toLowerCase()
-  const status: Activity['status'] =
-    statusRaw === 'pending' ? 'pending'
-      : statusRaw === 'rejected' ? 'rejected'
-        : 'confirmed'
-
-  const id = String(candidate.id || '').trim() || `activity-${timestamp}-${indexHint}`
-  const network = context.networks.find((entry) => entry.id === networkId)
-  const asset = String(candidate.asset || '').trim() || String(network?.symbol || '').trim() || 'UNKNOWN'
-  const amount = String(candidate.amount || '').trim() || '0'
-  const from = String(candidate.from || '').trim()
-  const to = String(candidate.to || '').trim()
-  const accountId = resolveActivityAccountId(candidate.accountId, from, to, networkId, context)
-
-  return {
-    id,
-    type,
-    asset,
-    amount,
-    to: to || undefined,
-    from: from || undefined,
-    accountId,
-    status,
-    timestamp,
-    networkId
-  }
-}
-
-function normalizeActivityList(
-  rawActivity: unknown,
-  context: ActivityNormalizationContext
-): Activity[] {
-  if (!Array.isArray(rawActivity)) return []
-  const out: Activity[] = []
-  rawActivity.forEach((entry, index) => {
-    const normalized = normalizeActivityRecord(entry, context, index)
-    if (normalized) out.push(normalized)
-  })
-  return out
-}
-
 function normalizeNetworkListSymbols(networks: Network[]): Network[] {
   return (Array.isArray(networks) ? networks : []).map((network) => normalizeNetworkSymbol(network))
 }
@@ -2398,130 +2082,6 @@ function getCachedBalanceForNetwork(
   if (!fallbackToLegacy) return '0'
   const legacy = String(account.balance ?? '').trim()
   return legacy || '0'
-}
-
-async function deriveAccountAddresses(
-  mnemonic: string,
-  networks: Network[],
-  derivationIndex: number
-): Promise<{
-  addresses: Record<CoinType, string>
-  networkAddresses: Record<string, string>
-  derivationErrors: string[]
-}> {
-  const evmWallet = deriveEvmWallet(mnemonic, derivationIndex)
-  const networkAddresses: Record<string, string> = {}
-  const derivationErrors: string[] = []
-  let firstUtxoAddress = ''
-  let firstXrpAddress = ''
-  let firstCosmosAddress = ''
-
-  for (const net of networks) {
-    const modelId = resolveNetworkModelId(net)
-    if (net.derivation?.status === 'unsupported') {
-      const reason = net.derivation.reason || `${net.name} derivation is not supported in this build`
-      derivationErrors.push(`${net.symbol}: ${reason}`)
-      continue
-    }
-
-    if (modelId === 'cosmos' || isCroCosmosModel(net)) {
-      try {
-        const cosmosCfg = resolveCosmosNetworkConfig(net)
-        const cosmosAddr = await deriveCosmosAddress(mnemonic, derivationIndex, cosmosCfg)
-        networkAddresses[net.id] = cosmosAddr.address
-        if (!firstCosmosAddress) firstCosmosAddress = cosmosAddr.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} Cosmos address (account ${derivationIndex}):`, err)
-      }
-    } else if (net.coinType === 'UTXO' && net.coinSymbol) {
-      try {
-        const utxo = await deriveUtxoAddress(mnemonic, net.coinSymbol, derivationIndex, 0, 0)
-        networkAddresses[net.id] = utxo.address
-        if (!firstUtxoAddress) firstUtxoAddress = utxo.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.coinSymbol} address (account ${derivationIndex}):`, err)
-      }
-    } else if (net.coinType === 'XRP') {
-      try {
-        const { deriveXrpAddress } = await loadXrpAddressModule()
-        const xrp = await deriveXrpAddress(mnemonic, derivationIndex)
-        networkAddresses[net.id] = xrp.address
-        if (!firstXrpAddress) firstXrpAddress = xrp.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive XRP address (account ${derivationIndex}):`, err)
-      }
-    } else if (net.coinType === 'EVM') {
-      networkAddresses[net.id] = evmWallet.address
-    } else if (modelId === 'sol') {
-      try {
-        const { deriveSolanaAddress } = await loadSolanaAddressModule()
-        const sol = await deriveSolanaAddress(mnemonic, derivationIndex)
-        networkAddresses[net.id] = sol.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
-      }
-    } else if (modelId === 'xlm') {
-      try {
-        const { deriveStellarAddress } = await loadStellarAddressModule()
-        const xlm = await deriveStellarAddress(mnemonic, derivationIndex)
-        networkAddresses[net.id] = xlm.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
-      }
-    } else if (modelId === 'tron') {
-      try {
-        const { deriveTronAddress } = await loadTronAddressModule()
-        const tron = await deriveTronAddress(mnemonic, derivationIndex)
-        networkAddresses[net.id] = tron.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
-      }
-    } else if (modelId === 'ada') {
-      try {
-        const { deriveCardanoAddress } = await loadCardanoAddressModule()
-        const ada = await deriveCardanoAddress(mnemonic, derivationIndex, net.rpcUrl)
-        networkAddresses[net.id] = ada.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
-      }
-    } else if (modelId === 'xmr') {
-      try {
-        const xmr = await deriveMoneroAddress(mnemonic, derivationIndex, net.rpcUrl)
-        networkAddresses[net.id] = xmr.address
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        derivationErrors.push(`${net.symbol}: ${msg}`)
-        console.warn(`Failed to derive ${net.symbol} address (account ${derivationIndex}):`, err)
-      }
-    }
-  }
-
-  return {
-    addresses: {
-      EVM: evmWallet.address,
-      UTXO: firstUtxoAddress,
-      BTC: '',
-      COSMOS: firstCosmosAddress,
-      SOL: '',
-      XRP: firstXrpAddress
-    },
-    networkAddresses,
-    derivationErrors
-  }
 }
 
 function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
@@ -2951,46 +2511,15 @@ export const useWalletStore = create<WalletState>()(
 
         // Derive address on demand
         try {
-          let address = ''
-          if (net.coinType === 'EVM') {
-            address = deriveEvmWallet(sessionMnemonic!, accountIndex).address
-          } else if (net.coinType === 'XRP') {
-            const { deriveXrpAddress } = await loadXrpAddressModule()
-            const derived = await deriveXrpAddress(sessionMnemonic!, accountIndex)
-            address = derived.address
-          } else if (modelId === 'cosmos' || isCroCosmosModel(net)) {
-            const cosmosCfg = resolveCosmosNetworkConfig(net)
-            const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
-            address = derived.address
-          } else if (net.coinType === 'UTXO' && net.coinSymbol) {
-            const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
-            address = derived.address
-            if (forceCanonicalUtxoAddress && existing && existing !== address) {
-              console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
-            } else {
-              console.info(`[${net.symbol}] derived address on demand: ${address}`)
-            }
-          } else if (modelId === 'ada') {
-            const { deriveCardanoAddress } = await loadCardanoAddressModule()
-            const derived = await deriveCardanoAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
-            address = derived.address
-          } else if (modelId === 'xmr') {
-            const derived = await deriveMoneroAddress(sessionMnemonic!, accountIndex, net.rpcUrl)
-            address = derived.address
-          } else if (modelId === 'sol') {
-            const { deriveSolanaAddress } = await loadSolanaAddressModule()
-            const derived = await deriveSolanaAddress(sessionMnemonic!, accountIndex)
-            address = derived.address
-          } else if (modelId === 'xlm') {
-            const { deriveStellarAddress } = await loadStellarAddressModule()
-            const derived = await deriveStellarAddress(sessionMnemonic!, accountIndex)
-            address = derived.address
-          } else if (modelId === 'tron') {
-            const { deriveTronAddress } = await loadTronAddressModule()
-            const derived = await deriveTronAddress(sessionMnemonic!, accountIndex)
-            address = derived.address
-          }
+          const address = await deriveSingleNetworkAddress(sessionMnemonic!, net, accountIndex)
           if (address) {
+            if (net.coinType === 'UTXO' && net.coinSymbol) {
+              if (forceCanonicalUtxoAddress && existing && existing !== address) {
+                console.info(`[${net.symbol}] migrated canonical address ${existing} -> ${address}`)
+              } else {
+                console.info(`[${net.symbol}] derived address on demand: ${address}`)
+              }
+            }
             if (existing !== address) {
               get().updateAccount(acc.id, {
                 networkAddresses: { ...(acc.networkAddresses ?? {}), [networkId]: address }
@@ -5174,41 +4703,7 @@ export const useWalletStore = create<WalletState>()(
         const selectedModelId = resolveNetworkModelId(selectedNetwork)
 
         const derivationIndex = nextAccountIndex >= 0 ? nextAccountIndex : accounts.length
-        let selectedAddress = ''
-
-        if (selectedNetwork.coinType === 'EVM') {
-          selectedAddress = deriveEvmWallet(sessionMnemonic, derivationIndex).address
-        } else if (selectedNetwork.coinType === 'XRP') {
-          const { deriveXrpAddress } = await loadXrpAddressModule()
-          const derived = await deriveXrpAddress(sessionMnemonic, derivationIndex)
-          selectedAddress = derived.address
-        } else if (selectedNetwork.coinType === 'COSMOS') {
-          const cosmosCfg = resolveCosmosNetworkConfig(selectedNetwork)
-          const derived = await deriveCosmosAddress(sessionMnemonic, derivationIndex, cosmosCfg)
-          selectedAddress = derived.address
-        } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
-          const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
-          selectedAddress = derived.address
-        } else if (selectedModelId === 'ada') {
-          const { deriveCardanoAddress } = await loadCardanoAddressModule()
-          const derived = await deriveCardanoAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
-          selectedAddress = derived.address
-        } else if (selectedModelId === 'xmr') {
-          const derived = await deriveMoneroAddress(sessionMnemonic, derivationIndex, selectedNetwork.rpcUrl)
-          selectedAddress = derived.address
-        } else if (selectedModelId === 'sol') {
-          const { deriveSolanaAddress } = await loadSolanaAddressModule()
-          const derived = await deriveSolanaAddress(sessionMnemonic, derivationIndex)
-          selectedAddress = derived.address
-        } else if (selectedModelId === 'xlm') {
-          const { deriveStellarAddress } = await loadStellarAddressModule()
-          const derived = await deriveStellarAddress(sessionMnemonic, derivationIndex)
-          selectedAddress = derived.address
-        } else if (selectedModelId === 'tron') {
-          const { deriveTronAddress } = await loadTronAddressModule()
-          const derived = await deriveTronAddress(sessionMnemonic, derivationIndex)
-          selectedAddress = derived.address
-        }
+        const selectedAddress = await deriveSingleNetworkAddress(sessionMnemonic, selectedNetwork, derivationIndex)
 
         if (!selectedAddress) {
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
@@ -5665,23 +5160,6 @@ export const useWalletStore = create<WalletState>()(
           zeroBalanceRecheckMs: !skipZeroBalanceRecheck && !fastMode ? UTXO_ZERO_BALANCE_RECHECK_MS : 0,
           force: fastMode
         })
-        const connectionMode = useLocalRpc ? 'local-rpc' : 'bridge'
-        const endpoint = useLocalRpc
-          ? String(localRpcOverrides?.[net.id]?.rpcUrl || net.rpcUrl || '').trim() || 'n/a'
-          : String(net.rpcUrl || '').trim() || 'bridge'
-        console.info(`[${net.symbol}] connected via ${connectionMode}`, {
-          networkId: activeNetworkId,
-          runtimeModelId: String(net.runtimeModelId || net.id || '').trim(),
-          accountId: acc.id,
-          address,
-          balance: snapshot.balance,
-          syncPercent: snapshot.syncPercent,
-          isSyncing: snapshot.isSyncing,
-          endpoint,
-          fastMode,
-          skipZeroBalanceRecheck
-        })
-
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({

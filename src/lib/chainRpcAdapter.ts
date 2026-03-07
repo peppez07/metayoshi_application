@@ -116,6 +116,83 @@ function resolveCosmosNetworkConfig(network: Network): { hrp: string; decimals: 
   return { hrp: cfg.hrp, decimals: cfg.decimals }
 }
 
+function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
+  const raw = String(bridgeUrl || '').trim().replace(/\/+$/, '')
+  if (!raw) return ''
+  const lower = raw.toLowerCase()
+  const idxV1Bridge = lower.indexOf('/v1/bridge/')
+  if (idxV1Bridge >= 0) return raw.slice(0, idxV1Bridge)
+  const idxBridge = lower.indexOf('/bridge/')
+  if (idxBridge >= 0) return raw.slice(0, idxBridge)
+  if (/\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '')
+  return raw
+}
+
+function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { apiBase: string; coin: string; chain: string } | null {
+  const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig?.bridgeUrl || ''))
+  if (!apiBase) return null
+  const modelId = String(resolveModelId(network) || network.id || '').trim().toLowerCase()
+  const runtimeProfile = getCoinRuntimeProfile(modelId)
+  const coin = String(
+    network.serverCoinId
+    || runtimeProfile?.coinId
+    || modelId
+  ).trim().toLowerCase()
+  if (!coin) return null
+  const chain = String(network.serverChain || 'main').trim().toLowerCase() || 'main'
+  return { apiBase, coin, chain }
+}
+
+async function fetchCosmosStatus(network: Network, rpcConfig?: UtxoRpcConfig): Promise<{ syncPercent: number | null; isSyncing: boolean }> {
+  const meta = resolveCosmosApiMeta(network, rpcConfig)
+  if (!meta) return { syncPercent: null, isSyncing: false }
+  try {
+    const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
+    const response = await fetch(`${meta.apiBase}/v1/status?${params.toString()}`, { method: 'GET' })
+    if (!response.ok) return { syncPercent: null, isSyncing: false }
+    const json = await response.json().catch(() => null) as Record<string, unknown> | null
+    const syncCandidates = [
+      Number((json as any)?.syncPercent),
+      Number((json as any)?.status?.syncPercent),
+      Number((json as any)?.result?.syncPercent)
+    ]
+    const syncingRaw =
+      (json as any)?.isSyncing
+      ?? (json as any)?.syncing
+      ?? (json as any)?.status?.isSyncing
+      ?? (json as any)?.status?.syncing
+      ?? (json as any)?.result?.isSyncing
+      ?? (json as any)?.result?.syncing
+    const syncPercentValue = syncCandidates.find((value) => Number.isFinite(value))
+    const syncPercent = Number.isFinite(syncPercentValue)
+      ? Math.max(0, Math.min(100, Number(syncPercentValue)))
+      : null
+    const isSyncing = typeof syncingRaw === 'boolean'
+      ? syncingRaw
+      : (syncPercent !== null ? syncPercent < 99.9 : false)
+    return { syncPercent, isSyncing }
+  } catch {
+    return { syncPercent: null, isSyncing: false }
+  }
+}
+
+async function fetchCosmosAddressBalance(network: Network, address: string, rpcConfig?: UtxoRpcConfig): Promise<string> {
+  const meta = resolveCosmosApiMeta(network, rpcConfig)
+  if (!meta) throw new Error('Cosmos API base URL is not available')
+  const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
+  const response = await fetch(`${meta.apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`, { method: 'GET' })
+  if (!response.ok) {
+    throw new Error(`Cosmos balance endpoint failed: HTTP ${response.status}`)
+  }
+  const json = await response.json().catch(() => null) as Record<string, unknown> | null
+  const balance =
+    String((json as any)?.balance ?? (json as any)?.result?.balance ?? '').trim()
+  if (!balance || !/^\d+(\.\d+)?$/.test(balance)) {
+    throw new Error('Cosmos balance endpoint returned an invalid balance payload')
+  }
+  return balance
+}
+
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
 
 export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyMode {
@@ -458,20 +535,11 @@ export async function fetchChainBalanceAndSync(input: FetchChainBalanceInput): P
   }
   if (isCosmosLikeModelId(modelId)) {
     if (!input.rpcConfig) throw new Error('Bridge RPC config is required for Cosmos-like networks')
-    let syncPercent: number | null = null
-    let isSyncing = false
-    try {
-      const chainInfo = await getCachedBlockchainInfo(input.rpcConfig)
-      const parsed = resolveSyncStateFromChainInfo(chainInfo)
-      syncPercent = parsed.syncPercent
-      isSyncing = parsed.isSyncing
-    } catch {
-      // Keep sync unknown if backend doesn't expose chain probe.
-    }
-    const balance = await getUtxoBalance(input.rpcConfig, address, {
-      preferAddressIndex: false
-    })
-    return { balance: String(balance.total), syncPercent, isSyncing }
+    const [status, balance] = await Promise.all([
+      fetchCosmosStatus(input.network, input.rpcConfig),
+      fetchCosmosAddressBalance(input.network, address, input.rpcConfig)
+    ])
+    return { balance, syncPercent: status.syncPercent, isSyncing: status.isSyncing }
   }
   if (modelId === 'xmr') {
     if (!input.rpcConfig || !input.rpcConfig.bridgeUrl) {

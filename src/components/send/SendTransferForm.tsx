@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../Button'
 import { Input } from '../Input'
-import { useWalletStore, type SendableItem } from '../../store/walletStore'
+import { formatFiatValue, useWalletStore, type SendableItem } from '../../store/walletStore'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { IoArrowBackOutline, IoInformationCircleOutline } from 'react-icons/io5'
@@ -52,6 +52,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     networks,
     activeNetworkId,
     donationPercent,
+    fetchNetworkAssets,
+    fetchNetworkFiat,
+    accountNetworkFiatNative,
+    accountNetworkFiatAssets,
     isConnected,
     isSyncing,
     syncPercent,
@@ -69,6 +73,11 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
   const available = Number(item.rawAmount || 0) / 1e8
   const estimatedNativeFee = useMemo(() => estimateNativeSendFee(activeNetwork), [activeNetwork])
+  const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  const availableFiatValue = isNative
+    ? accountNetworkFiatNative?.[fiatScopeKey]?.usd
+    : accountNetworkFiatAssets?.[fiatScopeKey]?.[String(item.assetId || '').trim()]?.usd
+  const displayAvailableFiat = formatFiatValue(availableFiatValue)
 
   const [toAddress, setToAddress] = useState('')
   const [amount, setAmount] = useState('')
@@ -79,6 +88,20 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     setError('')
     setAmount(isFixedOneMode ? '1' : '')
   }, [item.id, isFixedOneMode])
+
+  useEffect(() => {
+    let cancelled = false
+    const hydrateFiat = async () => {
+      if (cancelled) return
+      if (item.requestType === 'asset') {
+        await fetchNetworkAssets().catch(() => {})
+      }
+      if (cancelled) return
+      await fetchNetworkFiat({ force: item.requestType === 'asset' }).catch(() => {})
+    }
+    void hydrateFiat()
+    return () => { cancelled = true }
+  }, [item.id, item.requestType, fetchNetworkAssets, fetchNetworkFiat])
 
   const validateAmount = (): string | null => {
     if (isFixedOneMode) {
@@ -257,6 +280,9 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <p className="text-lg font-bold">
             {formatUnits8(available)} {item.kind === 'native' ? activeNetwork.symbol : item.symbol}
           </p>
+          {displayAvailableFiat && (
+            <p className="text-[11px] text-gray-400 mt-1">{displayAvailableFiat}</p>
+          )}
         </div>
 
         <div className="space-y-1.5">
