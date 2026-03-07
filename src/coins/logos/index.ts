@@ -34,6 +34,20 @@ for (const [path, src] of Object.entries(sharedLogoModules)) {
   }
 }
 
+export function findBundledTokenLogoForAsset(assetName: string): string | null {
+  const raw = String(assetName || '').trim()
+  if (!raw) return null
+  const parsed = splitAssetName(raw)
+  const candidates = [raw, parsed.sub || '', parsed.root]
+  for (const candidate of candidates) {
+    for (const key of variantsOf(candidate)) {
+      const match = logoByKey.get(key)
+      if (match) return match
+    }
+  }
+  return null
+}
+
 export function getUnifiedLogoByName(name: string): string {
   const raw = String(name || '').trim()
   if (!raw) return DEFAULT_ASSET_LOGO
@@ -45,15 +59,5 @@ export function getUnifiedLogoByName(name: string): string {
 }
 
 export function getTokenLogoForAsset(assetName: string): string {
-  const raw = String(assetName || '').trim()
-  if (!raw) return DEFAULT_ASSET_LOGO
-  const parsed = splitAssetName(raw)
-  const candidates = [raw, parsed.sub || '', parsed.root]
-  for (const candidate of candidates) {
-    for (const key of variantsOf(candidate)) {
-      const match = logoByKey.get(key)
-      if (match) return match
-    }
-  }
-  return DEFAULT_ASSET_LOGO
+  return findBundledTokenLogoForAsset(assetName) || DEFAULT_ASSET_LOGO
 }

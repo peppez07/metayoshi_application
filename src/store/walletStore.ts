@@ -49,11 +49,14 @@ import {
   loadServerRegistrySnapshot
 } from '../coins'
 import { getCoinApiInterceptor } from '../coins/interceptors'
+import { STANDARD_RUNTIME_META } from '../coins/standardRuntimeMeta'
 import type { CoinType, Network } from '../coins'
 import type { ServerCoinCatalogItem } from '../coins'
 import { useApiMonitorStore } from './apiMonitorStore'
 
 export type { CoinType, Network } from '../coins'
+
+const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Full backup format Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -157,6 +160,9 @@ export interface ChainModelLiveSnapshot {
   error?: string
 }
 
+type FiatCurrency = 'usd' | 'eur'
+type FiatValueMap = Partial<Record<FiatCurrency, number | null>>
+
 interface WalletState {
   // Auth state
   isInitialized: boolean
@@ -201,6 +207,12 @@ interface WalletState {
   accountNetworkAssetLabels: Record<string, Record<string, string>>
   /** Account+network scoped EVM NFT metadata keyed by `${accountId}::${networkId}`. */
   accountNetworkEvmNftAssets: Record<string, Record<string, EvmNftHolding>>
+  /** Account+network scoped portfolio totals in fiat. */
+  accountNetworkFiatTotals: Record<string, FiatValueMap>
+  /** Account+network scoped native coin fiat value. */
+  accountNetworkFiatNative: Record<string, FiatValueMap>
+  /** Account+network scoped token/NFT fiat values keyed by asset id. */
+  accountNetworkFiatAssets: Record<string, Record<string, FiatValueMap>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
   serverCoinCatalog: ServerCoinCatalogItem[]
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
@@ -307,6 +319,7 @@ interface WalletState {
 
   // Asset layer (cross-chain)
   fetchNetworkAssets: (options?: { force?: boolean }) => Promise<void>
+  fetchNetworkFiat: (options?: { force?: boolean }) => Promise<void>
   fetchAssetDetails: (assetId: string) => Promise<RtmAssetDetails>
   getSendableItems: (options?: {
     accountId?: string
@@ -705,8 +718,39 @@ type ScopedAssetBuckets = {
   evmNfts: Record<string, EvmNftHolding>
 }
 
+type PortfolioAssetFiatBuckets = {
+  totals: FiatValueMap
+  native: FiatValueMap
+  assets: Record<string, FiatValueMap>
+}
+
 function buildAssetStateScopeKey(accountId: string, networkId: string): string {
   return buildSendListPreferenceScopeKey(accountId, networkId)
+}
+
+function normalizeFiatValueMap(input: unknown): FiatValueMap {
+  const source = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {}
+  const read = (key: FiatCurrency): number | null | undefined => {
+    const raw = source[key]
+    if (raw === null) return null
+    const num = Number(raw)
+    return Number.isFinite(num) ? num : undefined
+  }
+  const usd = read('usd')
+  const eur = read('eur')
+  const out: FiatValueMap = {}
+  if (usd !== undefined) out.usd = usd
+  if (eur !== undefined) out.eur = eur
+  return out
+}
+
+export function formatFiatValue(value: number | null | undefined, currency: FiatCurrency = 'usd'): string {
+  if (!Number.isFinite(Number(value))) return ''
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+    maximumFractionDigits: value && Math.abs(value) >= 100 ? 2 : 2
+  }).format(Number(value))
 }
 
 function getScopedAssetBucket<T>(
@@ -1264,6 +1308,198 @@ function parseBridgeEvmNftReference(row: BridgeTokenBalanceRow): { address: stri
   return { address, tokenId }
 }
 
+function resolvePortfolioRequestMeta(network: Network): { apiBase: string; coin: string; chain: string } | null {
+  const apiBase = String(
+    import.meta.env.VITE_API_BASE_URL
+    || deriveApiBaseFromBridgeUrl(String(network.bridgeUrl || ''))
+    || network.rpcUrl
+    || ''
+  ).trim().replace(/\/+$/, '')
+  if (!apiBase) return null
+
+  const modelId = String(resolveNetworkModelId(network) || network.id || '').trim().toLowerCase()
+  const runtimeProfile = getCoinRuntimeProfile(modelId)
+  const coin = String(
+    network.serverCoinId
+    || runtimeProfile?.coinId
+    || STANDARD_RUNTIME_META[modelId]?.coinId
+    || modelId
+  ).trim().toLowerCase()
+  if (!coin) return null
+
+  const chain = String(network.serverChain || 'main').trim().toLowerCase() || 'main'
+  return { apiBase, coin, chain }
+}
+
+function parsePortfolioEvmNftReference(row: Record<string, unknown>): { address: string; tokenId: string; standard: EvmNftStandard } | null {
+  const tokenIdRaw = String(row.tokenId || '').trim()
+  const issuerRaw = String(row.issuer || '').trim()
+  const address = normalizeEvmAddressLoose(issuerRaw || tokenIdRaw.match(/0x[a-fA-F0-9]{40}/)?.[0] || '')
+  if (!address) return null
+  const tokenType = String(row.tokenType || '').trim().toLowerCase()
+  const standard: EvmNftStandard = tokenType.includes('1155') ? 'erc1155' : 'erc721'
+
+  let tokenId = tokenIdRaw
+  if (normalizeEvmAddressLoose(tokenId)) {
+    tokenId = ''
+  }
+  if (!tokenId) {
+    const composite = tokenIdRaw.match(/^0x[a-fA-F0-9]{40}[:/#-](.+)$/)
+    if (composite?.[1]) tokenId = String(composite[1]).trim()
+  }
+  if (!tokenId) return null
+  return { address, tokenId, standard }
+}
+
+function resolvePortfolioAssetId(
+  network: Network,
+  assetIds: string[],
+  logos: Record<string, string>,
+  row: Record<string, unknown>
+): string {
+  const tokenId = String(row.tokenId || '').trim()
+  if (!tokenId) return ''
+
+  if (network.coinType === 'EVM') {
+    const tokenType = String(row.tokenType || '').trim().toLowerCase()
+    if (tokenType.includes('721') || tokenType.includes('1155') || tokenType.includes('nft')) {
+      const nftRef = parsePortfolioEvmNftReference(row)
+      if (!nftRef) return ''
+      return buildEvmNftAssetKey(nftRef.address, nftRef.tokenId, nftRef.standard)
+    }
+
+    const contract = normalizeEvmAddressLoose(String(row.issuer || tokenId).trim())
+    if (!contract) return ''
+    for (const assetId of assetIds) {
+      const logoContract = extractEvmTokenAddressFromLogoUri(String(logos[assetId] || '').trim())
+      if (logoContract && logoContract === contract) return assetId
+    }
+    const contractShort = shortAddress(contract)
+    return assetIds.find((assetId) => assetId.includes(`@${contractShort}`)) || ''
+  }
+
+  const lowerType = String(row.tokenType || '').trim().toLowerCase()
+  if (String(resolveNetworkModelId(network) || network.id || '').trim().toLowerCase() === 'sol') {
+    const candidates = [
+      tokenId,
+      buildSolanaAssetId(tokenId, 'spl-token'),
+      buildSolanaAssetId(tokenId, lowerType.includes('compressed') || lowerType.includes('cnft') ? 'compressed-nft' : 'spl-nft'),
+      buildSolanaAssetId(tokenId, 'compressed-nft'),
+      buildSolanaAssetId(tokenId, 'spl-nft')
+    ].filter(Boolean)
+    return candidates.find((candidate) => assetIds.includes(candidate)) || ''
+  }
+
+  return assetIds.includes(tokenId) ? tokenId : ''
+}
+
+function buildPortfolioFiatBuckets(
+  state: WalletState,
+  accountId: string,
+  network: Network,
+  portfolio: Record<string, unknown>
+): PortfolioAssetFiatBuckets {
+  const networkId = String(network.id || '').trim()
+  const assetsForScope = getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || {}
+  const logosForScope = getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || {}
+  const assetIds = Object.keys(assetsForScope)
+  const out: PortfolioAssetFiatBuckets = {
+    totals: normalizeFiatValueMap(portfolio.totals),
+    native: normalizeFiatValueMap((portfolio.native as Record<string, unknown> | undefined)?.value),
+    assets: {}
+  }
+
+  const appendRows = (rows: unknown) => {
+    if (!Array.isArray(rows)) return
+    for (const rawRow of rows) {
+      if (!rawRow || typeof rawRow !== 'object') continue
+      const row = rawRow as Record<string, unknown>
+      const assetId = resolvePortfolioAssetId(network, assetIds, logosForScope, row)
+      if (!assetId) continue
+      const valueMap = normalizeFiatValueMap(row.value)
+      if (Object.keys(valueMap).length === 0) continue
+      out.assets[assetId] = valueMap
+    }
+  }
+
+  appendRows(portfolio.tokens)
+  appendRows(portfolio.nfts)
+  return out
+}
+
+function buildEvmAssetBucketsFromBridgeRows(
+  rows: BridgeTokenBalanceRow[],
+  chainId: number | null
+): ScopedAssetBuckets {
+  const assets: Record<string, number> = {}
+  const logos: Record<string, string> = {}
+  const labels: Record<string, string> = {}
+  const evmNfts: Record<string, EvmNftHolding> = {}
+  const usedAssetKeys = new Set<string>()
+  const assetKeyByContract = new Map<string, string>()
+
+  for (const row of rows) {
+    const rawBalanceText = String(row.balanceRaw || '').trim()
+    if (!/^\d+$/.test(rawBalanceText)) continue
+    const rawBalance = BigInt(rawBalanceText)
+    if (rawBalance <= 0n) continue
+
+    const tokenType = String(row.tokenType || '').trim()
+    if (isBridgeEvmNftTokenType(tokenType)) {
+      const parsedNft = parseBridgeEvmNftReference(row)
+      if (!parsedNft) continue
+      const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
+      const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
+      const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
+      if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
+      const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
+      assets[assetKey] = quantitySats
+      evmNfts[assetKey] = {
+        address: parsedNft.address,
+        tokenId: parsedNft.tokenId,
+        standard,
+        label: `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`,
+        quantityRaw: rawBalance.toString()
+      }
+      continue
+    }
+
+    const decimalsRaw = Number(row.decimals)
+    const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
+    const displaySats = toAssetDisplaySats(rawBalance, decimals)
+    if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+    const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || row.issuer || '').trim())
+    const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
+    const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
+
+    let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
+    if (!assetKey) {
+      const baseKey = tokenAddress
+        ? `${displaySymbol}@${shortAddress(tokenAddress)}`
+        : displaySymbol
+      assetKey = baseKey
+      let suffix = 2
+      while (usedAssetKeys.has(assetKey)) {
+        assetKey = `${baseKey}-${suffix}`
+        suffix += 1
+      }
+      usedAssetKeys.add(assetKey)
+      if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
+    }
+
+    const prev = Number(assets[assetKey] || 0)
+    assets[assetKey] = Math.max(prev, displaySats)
+    labels[assetKey] = displaySymbol
+    if (tokenAddress) {
+      const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+      if (logoUri) logos[assetKey] = logoUri
+    }
+  }
+
+  return { assets, logos, labels, evmNfts }
+}
+
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return value.toFixed(8).replace(/\.?0+$/, '')
@@ -1454,6 +1690,12 @@ const networkAssetsCache = createRequestCache<{
   maxEntries: 120
 })
 const networkAssetsInFlightByKey = new Map<string, Promise<void>>()
+
+const networkFiatCache = createRequestCache<PortfolioAssetFiatBuckets>({
+  defaultTtlMs: 60_000,
+  maxEntries: 180
+})
+const networkFiatInFlightByKey = new Map<string, Promise<void>>()
 
 function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
   const input = String(raw || '').trim()
@@ -2429,6 +2671,9 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkAssetLogos: {},
       accountNetworkAssetLabels: {},
       accountNetworkEvmNftAssets: {},
+      accountNetworkFiatTotals: {},
+      accountNetworkFiatNative: {},
+      accountNetworkFiatAssets: {},
       serverCoinCatalog: [],
       sendListPreferences: {},
       authorizedSites: [],
@@ -2636,6 +2881,9 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkFiatTotals: {},
+          accountNetworkFiatNative: {},
+          accountNetworkFiatAssets: {},
           sendListPreferences: {},
           activity: []
         }),
@@ -2654,8 +2902,10 @@ export const useWalletStore = create<WalletState>()(
         }))
         void (async () => {
           await get().ensureNetworkAddress(activeNetworkId)
-          await get().refreshActiveBalance()
-          await get().fetchNetworkAssets()
+          await Promise.allSettled([
+            get().refreshActiveBalance(),
+            get().fetchNetworkAssets()
+          ])
         })()
       },
 
@@ -2787,6 +3037,88 @@ export const useWalletStore = create<WalletState>()(
 
       setConnected: (connected) => set({ isConnected: connected }),
       setSyncing: (syncing) => set({ isSyncing: syncing }),
+      fetchNetworkFiat: async (options) => {
+        const { networks, activeNetworkId, accounts, activeAccountId } = get()
+        const network = networks.find((item) => item.id === activeNetworkId)
+        const account = accounts.find((item) => item.id === activeAccountId) || accounts[0]
+        if (!network || !account) return
+
+        const requestAccountId = String(account.id || '').trim()
+        const requestNetworkId = String(activeNetworkId || '').trim()
+        let address = String(account.networkAddresses?.[requestNetworkId] || '').trim()
+        if (!address) {
+          const ensured = await get().ensureNetworkAddress(requestNetworkId)
+          address = String(ensured || '').trim()
+        }
+        if (!address) return
+
+        const requestMeta = resolvePortfolioRequestMeta(network)
+        if (!requestMeta) return
+
+        const cacheKey = `fiat|${requestNetworkId}|${address.toLowerCase()}|usd,eur`
+        const inFlight = networkFiatInFlightByKey.get(cacheKey)
+        if (inFlight) {
+          await inFlight
+          return
+        }
+
+        let resolveInFlight: (() => void) | null = null
+        const inFlightSignal = new Promise<void>((resolve) => { resolveInFlight = resolve })
+        networkFiatInFlightByKey.set(cacheKey, inFlightSignal)
+        try {
+          const force = options?.force === true
+          if (!force) {
+            const cached = networkFiatCache.peek(cacheKey)
+            if (cached) {
+              const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
+              set((state) => ({
+                accountNetworkFiatTotals: { ...state.accountNetworkFiatTotals, [scopeKey]: cached.totals },
+                accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: cached.native },
+                accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: cached.assets }
+              }))
+              return
+            }
+          }
+
+          const params = new URLSearchParams({
+            coin: requestMeta.coin,
+            chain: requestMeta.chain,
+            fiat: 'usd,eur'
+          })
+          const url = `${requestMeta.apiBase}/v1/address/${encodeURIComponent(address)}/portfolio?${params.toString()}`
+          const headers: Record<string, string> = {}
+          if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+          const response = await fetch(url, { method: 'GET', headers })
+          if (!response.ok) return
+          const json = await response.json().catch(() => null) as Record<string, unknown> | null
+          const portfolio = (json?.portfolio && typeof json.portfolio === 'object')
+            ? json.portfolio as Record<string, unknown>
+            : null
+          if (!portfolio) return
+
+          const buckets = buildPortfolioFiatBuckets(get(), requestAccountId, network, portfolio)
+          const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
+          set((state) => ({
+            accountNetworkFiatTotals: { ...state.accountNetworkFiatTotals, [scopeKey]: buckets.totals },
+            accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: buckets.native },
+            accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: buckets.assets }
+          }))
+
+          networkFiatCache.get(
+            cacheKey,
+            async () => buckets,
+            undefined,
+            { force: true }
+          ).catch(() => {})
+        } catch (error) {
+          console.warn(`[${network.symbol}] fetchNetworkFiat failed for ${requestNetworkId} (${address}).`, error)
+        } finally {
+          if (networkFiatInFlightByKey.get(cacheKey) === inFlightSignal) {
+            networkFiatInFlightByKey.delete(cacheKey)
+          }
+          ;(resolveInFlight as (() => void) | null)?.()
+        }
+      },
 
       fetchNetworkAssets: async (options) => {
         const {
@@ -2862,6 +3194,34 @@ export const useWalletStore = create<WalletState>()(
               // Use a higher read timeout to reduce false AbortError failures.
               timeoutMs: Math.max(Number(baseRpcConfig.timeoutMs ?? 10000), 30000)
             }
+            const bridgeCoin = String(
+              net.serverCoinId
+              || (activeNetworkId === 'eth' ? 'ethereum' : activeNetworkId)
+            ).trim().toLowerCase()
+            const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
+
+            try {
+              const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+                coin: bridgeCoin,
+                chain: bridgeChain,
+                owner: address,
+                wallet: String(net.rpcWallet || '').trim() || undefined
+              })
+              const bridgeBuckets = buildEvmAssetBucketsFromBridgeRows(bridgeRows, chainId)
+              if (Object.keys(bridgeBuckets.assets).length > 0) {
+                set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, bridgeBuckets))
+
+                networkAssetsCache.get(
+                  cacheKey,
+                  async () => bridgeBuckets,
+                  undefined,
+                  { force: true }
+                ).catch(() => {})
+                return
+              }
+            } catch {
+              // Fall through to slower RPC/explorer scan.
+            }
 
             const activityTxids = activity
               .filter((entry) =>
@@ -2879,11 +3239,6 @@ export const useWalletStore = create<WalletState>()(
               address,
               activityTxids
             ).catch(() => [])
-            const bridgeCoin = String(
-              net.serverCoinId
-              || (activeNetworkId === 'eth' ? 'ethereum' : activeNetworkId)
-            ).trim().toLowerCase()
-            const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
             const assetsEndpointContracts = await discoverEvmTokenContractsFromAddressAssets(rpcConfig, {
               coin: bridgeCoin,
               chain: bridgeChain,
@@ -4696,6 +5051,9 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLabels: {},
           evmNftAssets: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkFiatTotals: {},
+          accountNetworkFiatNative: {},
+          accountNetworkFiatAssets: {},
           lastActiveTimestamp: Date.now()
         })
       },
@@ -6062,6 +6420,9 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkFiatTotals: {},
+          accountNetworkFiatNative: {},
+          accountNetworkFiatAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }

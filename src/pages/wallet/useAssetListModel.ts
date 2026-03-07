@@ -21,13 +21,20 @@ export function isRootAssetName(name: string): boolean {
 
 export function useAssetListModel() {
   const {
+    activeAccountId,
     networks,
     activeNetworkId,
     networkAssets,
     networkAssetLogos,
     networkAssetLabels,
     evmNftAssets,
+    accountNetworkAssets,
+    accountNetworkAssetLogos,
+    accountNetworkAssetLabels,
+    accountNetworkEvmNftAssets,
+    accountNetworkFiatAssets,
     fetchNetworkAssets,
+    fetchNetworkFiat,
     fetchAssetDetails,
     activity
   } = useWalletStore()
@@ -54,10 +61,12 @@ export function useAssetListModel() {
     || activeNetwork?.coinType === 'XRP'
   const canOpenAssetSend = caps.features.assetSend
 
-  const rawAssets = networkAssets[activeNetworkId] ?? {}
-  const assetLogos = networkAssetLogos[activeNetworkId] ?? {}
-  const assetLabels = networkAssetLabels[activeNetworkId] ?? {}
-  const nftLookup = evmNftAssets[activeNetworkId] ?? {}
+  const fiatScopeKey = `${String(activeAccountId || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  const rawAssets = accountNetworkAssets[fiatScopeKey] ?? networkAssets[activeNetworkId] ?? {}
+  const assetLogos = accountNetworkAssetLogos[fiatScopeKey] ?? networkAssetLogos[activeNetworkId] ?? {}
+  const assetLabels = accountNetworkAssetLabels[fiatScopeKey] ?? networkAssetLabels[activeNetworkId] ?? {}
+  const nftLookup = accountNetworkEvmNftAssets[fiatScopeKey] ?? evmNftAssets[activeNetworkId] ?? {}
+  const fiatByAsset = accountNetworkFiatAssets[fiatScopeKey] ?? {}
   const allEntries = useMemo(() => Object.entries(rawAssets), [rawAssets])
 
   const assetUsage = useMemo(() => {
@@ -86,6 +95,7 @@ export function useAssetListModel() {
     [allEntries, byUsageThenName]
   )
   const sorted = useMemo(() => [...roots, ...subs], [roots, subs])
+  const assetSignature = useMemo(() => sorted.map(([name]) => name).join('|'), [sorted])
 
   const isPreviewableAssetName = useCallback((name: string): boolean => {
     if (!supportsPreview) return false
@@ -99,7 +109,8 @@ export function useAssetListModel() {
 
   useEffect(() => {
     if (caps.features.assetLayer) void fetchNetworkAssets()
-  }, [activeNetworkId, caps.features.assetLayer, fetchNetworkAssets])
+    void fetchNetworkFiat()
+  }, [activeNetworkId, activeAccountId, caps.features.assetLayer, assetSignature, fetchNetworkAssets, fetchNetworkFiat])
 
   const setPreviewState = useCallback((assetName: string, hasPreview: boolean) => {
     setPreviewByAsset((previous) => {
@@ -158,12 +169,14 @@ export function useAssetListModel() {
     subs,
     assetLogos,
     assetLabels,
+    fiatByAsset,
     nftLookup,
     previewByAsset,
     resolveAssetDisplayName,
     isPreviewableAssetName,
     ensurePreviewAvailability,
-    fetchNetworkAssets
+    fetchNetworkAssets,
+    fetchNetworkFiat
   }
 }
 

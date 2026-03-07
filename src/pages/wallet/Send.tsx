@@ -6,7 +6,7 @@ import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-import { getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
 import {
   IoArrowBackOutline,
   IoChevronDownOutline,
@@ -66,13 +66,38 @@ type TokenCircleLogoProps = {
 }
 
 const TokenCircleLogo: React.FC<TokenCircleLogoProps> = ({ logoUrl, assetName, alt, className }) => {
+  const bundledLogo = useMemo(() => findBundledTokenLogoForAsset(assetName), [assetName])
   const fallbackLogo = useMemo(() => getTokenLogoForAsset(assetName), [assetName])
-  const primaryLogo = String(logoUrl || '').trim() || fallbackLogo
-  const [resolvedSrc, setResolvedSrc] = useState(primaryLogo)
+  const remoteLogo = String(logoUrl || '').trim()
+  const [resolvedSrc, setResolvedSrc] = useState(bundledLogo || fallbackLogo)
 
   useEffect(() => {
-    setResolvedSrc(primaryLogo)
-  }, [primaryLogo])
+    if (bundledLogo) {
+      setResolvedSrc(bundledLogo)
+      return
+    }
+
+    if (!remoteLogo) {
+      setResolvedSrc(fallbackLogo)
+      return
+    }
+
+    let cancelled = false
+    const probe = new Image()
+    probe.onload = () => {
+      if (!cancelled) setResolvedSrc(remoteLogo)
+    }
+    probe.onerror = () => {
+      if (!cancelled) setResolvedSrc(fallbackLogo)
+    }
+    probe.src = remoteLogo
+
+    return () => {
+      cancelled = true
+      probe.onload = null
+      probe.onerror = null
+    }
+  }, [bundledLogo, remoteLogo, fallbackLogo])
 
   if (!resolvedSrc) {
     return <IoLayersOutline className="w-4.5 h-4.5 text-gray-300" />
@@ -83,13 +108,7 @@ const TokenCircleLogo: React.FC<TokenCircleLogoProps> = ({ logoUrl, assetName, a
       src={resolvedSrc}
       alt={alt}
       className={className}
-      onError={() => {
-        if (resolvedSrc !== fallbackLogo) {
-          setResolvedSrc(fallbackLogo)
-          return
-        }
-        setResolvedSrc('')
-      }}
+      onError={() => setResolvedSrc(fallbackLogo)}
     />
   )
 }
@@ -1013,13 +1032,6 @@ const Send: React.FC = () => {
       accountId: originalActiveAccountId,
       networkId: originalActiveNetworkId
     }
-    const originalAssetsSnapshot = {
-      networkAssets: stateBefore.networkAssets,
-      networkAssetLogos: stateBefore.networkAssetLogos,
-      networkAssetLabels: stateBefore.networkAssetLabels,
-      evmNftAssets: stateBefore.evmNftAssets
-    }
-
     const shouldCancel = () => scanRunIdRef.current !== runId
     const scanAccounts = [...stateBefore.accounts]
     const scanNetworks = stateBefore.networks.filter((network) => {
@@ -1258,13 +1270,6 @@ const Send: React.FC = () => {
     } finally {
       const cancelled = shouldCancel()
       if (!cancelled) {
-        useWalletStore.setState({
-          networkAssets: originalAssetsSnapshot.networkAssets,
-          networkAssetLogos: originalAssetsSnapshot.networkAssetLogos,
-          networkAssetLabels: originalAssetsSnapshot.networkAssetLabels,
-          evmNftAssets: originalAssetsSnapshot.evmNftAssets
-        })
-
         if (originalActiveAccountId) {
           useWalletStore.setState({ activeAccountId: originalActiveAccountId })
         }

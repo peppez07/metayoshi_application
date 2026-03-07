@@ -2,7 +2,7 @@
 import { useNavigate } from 'react-router-dom'
 import { IoChevronForward, IoLayersOutline } from 'react-icons/io5'
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
-import { useWalletStore } from '../../store/walletStore'
+import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import AssetListRow from './AssetListRow'
 import { useAssetListModel } from './useAssetListModel'
 
@@ -22,6 +22,7 @@ const Assets: React.FC = () => {
     isSolanaEcosystem,
     canOpenAssetSend,
     assetLogos,
+    fiatByAsset,
     previewByAsset,
     resolveAssetDisplayName,
     isPreviewableAssetName,
@@ -108,6 +109,7 @@ const Assets: React.FC = () => {
             metaLabel={isSolanaEcosystem ? (resolveSolanaAssetTypeLabel(name) || undefined) : undefined}
             logoUrl={assetLogos[name]}
             rawAmount={rawAmount}
+            fiatValue={formatFiatValue(fiatByAsset[name]?.usd)}
             onClick={() => {
               if (canOpenAssetSend) {
                 navigate('/wallet/send', { state: { assetId: name } })

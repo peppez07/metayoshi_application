@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { IoArrowUpOutline, IoChevronForward, IoEyeOffOutline, IoEyeOutline, IoLayersOutline } from 'react-icons/io5'
-import { getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { formatAssetAmount, parseAssetName } from './useAssetListModel'
 
 interface AssetListRowProps {
@@ -10,6 +10,7 @@ interface AssetListRowProps {
   metaLabel?: string
   logoUrl?: string
   rawAmount: number
+  fiatValue?: string
   onClick: () => void
   onPreview: () => void
   previewAvailable?: boolean
@@ -26,6 +27,7 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
   metaLabel,
   logoUrl,
   rawAmount,
+  fiatValue,
   onClick,
   onPreview,
   previewAvailable = false,
@@ -37,14 +39,39 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
   const effectiveName = displayName || name
   const { root, sub } = parseAssetName(effectiveName)
   const isRootAsset = !sub
+  const bundledLogo = useMemo(() => findBundledTokenLogoForAsset(effectiveName), [effectiveName])
   const fallbackLogo = useMemo(() => getTokenLogoForAsset(effectiveName), [effectiveName])
-  const primaryLogo = String(logoUrl || '').trim() || fallbackLogo
-  const [logoSrc, setLogoSrc] = useState(primaryLogo)
+  const remoteLogo = String(logoUrl || '').trim()
+  const [logoSrc, setLogoSrc] = useState(bundledLogo || fallbackLogo)
   const compact = variant === 'compact'
 
   useEffect(() => {
-    setLogoSrc(primaryLogo)
-  }, [primaryLogo])
+    if (bundledLogo) {
+      setLogoSrc(bundledLogo)
+      return
+    }
+
+    if (!remoteLogo) {
+      setLogoSrc(fallbackLogo)
+      return
+    }
+
+    let cancelled = false
+    const probe = new Image()
+    probe.onload = () => {
+      if (!cancelled) setLogoSrc(remoteLogo)
+    }
+    probe.onerror = () => {
+      if (!cancelled) setLogoSrc(fallbackLogo)
+    }
+    probe.src = remoteLogo
+
+    return () => {
+      cancelled = true
+      probe.onload = null
+      probe.onerror = null
+    }
+  }, [bundledLogo, remoteLogo, fallbackLogo])
 
   return (
     <div className={`w-full flex items-center gap-2 px-2 py-1.5 border-b border-dark-600/50 transition-colors ${
@@ -65,13 +92,7 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
                 src={logoSrc}
                 alt={`${name} logo`}
                 className="w-full h-full rounded-full object-cover"
-                onError={() => {
-                  if (logoSrc !== fallbackLogo) {
-                    setLogoSrc(fallbackLogo)
-                    return
-                  }
-                  setLogoSrc('')
-                }}
+                onError={() => setLogoSrc(fallbackLogo)}
               />
             ) : (
               <IoLayersOutline className={`${compact ? 'w-4.5 h-4.5' : 'w-5 h-5'} ${isRootAsset ? 'text-yellow-400' : 'text-blue-400'}`} />
@@ -103,7 +124,12 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
 
         {compact ? (
           <div className="flex items-center gap-2 shrink-0 pl-2">
-            <span className="text-sm font-bold font-mono">{formatAssetAmount(rawAmount)}</span>
+            <div className="flex flex-col items-end shrink-0">
+              <span className="text-sm font-bold font-mono">{formatAssetAmount(rawAmount)}</span>
+              {fiatValue && (
+                <span className="text-[10px] text-gray-400">{fiatValue}</span>
+              )}
+            </div>
             {hiddenInSendHub && (
               <span className="text-[9px] font-bold uppercase text-gray-500">Hidden</span>
             )}
@@ -112,6 +138,9 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
         ) : (
           <div className="flex flex-col items-end shrink-0">
             <span className="text-sm font-bold font-mono">{formatAssetAmount(rawAmount)}</span>
+            {fiatValue && (
+              <span className="text-[10px] text-gray-400 mt-0.5">{fiatValue}</span>
+            )}
             {hiddenInSendHub && (
               <span className="text-[9px] font-bold uppercase text-gray-500 mt-0.5">Hidden in send</span>
             )}

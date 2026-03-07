@@ -8,7 +8,7 @@ import {
   IoRefreshOutline
 } from 'react-icons/io5'
 import { Input } from '../../components/Input'
-import { useWalletStore } from '../../store/walletStore'
+import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import AssetListRow from './AssetListRow'
 import { useAssetListModel } from './useAssetListModel'
@@ -36,11 +36,13 @@ const AssetsPage: React.FC = () => {
     subs,
     assetLogos,
     assetLabels,
+    fiatByAsset,
     previewByAsset,
     resolveAssetDisplayName,
     isPreviewableAssetName,
     ensurePreviewAvailability,
-    fetchNetworkAssets
+    fetchNetworkAssets,
+    fetchNetworkFiat
   } = useAssetListModel()
 
   const [search, setSearch] = useState('')
@@ -105,7 +107,10 @@ const AssetsPage: React.FC = () => {
     if (refreshing) return
     setRefreshing(true)
     try {
-      await fetchNetworkAssets({ force: true })
+      await Promise.allSettled([
+        fetchNetworkAssets({ force: true }),
+        fetchNetworkFiat({ force: true })
+      ])
     } finally {
       setRefreshing(false)
     }
@@ -146,6 +151,7 @@ const AssetsPage: React.FC = () => {
       metaLabel={isSolanaEcosystem ? (resolveSolanaAssetTypeLabel(name) || undefined) : undefined}
       logoUrl={assetLogos[name]}
       rawAmount={rawAmount}
+      fiatValue={formatFiatValue(fiatByAsset[name]?.usd)}
       onClick={() => handleAssetRowClick(name)}
       onPreview={() => {
         if (!isPreviewableAssetName(name)) return

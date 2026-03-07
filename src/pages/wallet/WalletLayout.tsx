@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 import { WalletFrame } from '../../components/WalletFrame'
-import { useWalletStore } from '../../store/walletStore'
+import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import {
   IoArrowUpOutline,
   IoClose,
@@ -50,10 +50,13 @@ const WalletLayout: React.FC = () => {
     networks,
     disabledNetworkIds,
     activeNetworkId,
+    accountNetworkFiatTotals,
+    accountNetworkFiatNative,
     activity,
     setActiveAccount,
     setActiveNetwork,
-    refreshActiveBalance
+    refreshActiveBalance,
+    fetchNetworkFiat
   } = useWalletStore()
 
   // ── sheet visibility ──────────────────────────────────────────────────────
@@ -78,6 +81,11 @@ const WalletLayout: React.FC = () => {
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = enabledNetworks.find(n => n.id === activeNetworkId) || enabledNetworks[0]
   const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
+  const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  const portfolioFiatValue =
+    accountNetworkFiatTotals[fiatScopeKey]?.usd
+    ?? accountNetworkFiatNative[fiatScopeKey]?.usd
+  const displayFiatValue = formatFiatValue(portfolioFiatValue)
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
@@ -102,6 +110,10 @@ const WalletLayout: React.FC = () => {
   }, [networkSearch, rankedNetworks])
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   // Balance refresh (visibility-aware to avoid bridge/RPC spam while popup is hidden)
+  useEffect(() => {
+    void fetchNetworkFiat()
+  }, [activeAccountId, activeNetworkId, fetchNetworkFiat])
+
   useEffect(() => {
     if (isSendRoute) return
 
@@ -181,6 +193,11 @@ const WalletLayout: React.FC = () => {
             <p className="text-base font-semibold uppercase tracking-wide text-gray-300 mt-0.5">
               {activeNetwork.symbol}
             </p>
+            {displayFiatValue && (
+              <p className="text-sm font-medium text-gray-400 mt-1">
+                {displayFiatValue}
+              </p>
+            )}
           </div>
         </div>
 
