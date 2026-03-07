@@ -57,17 +57,28 @@ function resolveDefaultBridgePath(coinId: string): string {
   return `/v1/bridge/${coinId}/main`
 }
 
+function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo['protocol'] {
+  if (networkId === 'cosmos' || coinId === 'cosmos') return 'cosmos-rest-bridge'
+  if (networkId === 'eth' || networkId === 'base' || coinId === 'ethereum' || coinId === 'base') return 'evm-jsonrpc'
+  return 'utxo-jsonrpc'
+}
+
+function usesWalletScopedSendRoutes(coinId: string): boolean {
+  return coinId === 'raptoreum' || coinId === 'xrp'
+}
+
 function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
   const meta = STANDARD_RUNTIME_META[networkId]
   if (!meta) return undefined
   const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
   const bridgePath = resolveDefaultBridgePath(meta.coinId)
+  const walletScopedSend = usesWalletScopedSendRoutes(meta.coinId)
   return {
     networkId,
     symbol: meta.symbol,
     coinId: meta.coinId,
     chain: 'main',
-    protocol: 'utxo-jsonrpc',
+    protocol: resolveStandardProtocol(networkId, meta.coinId),
     apiBaseUrl,
     defaultRpcUrl: apiBaseUrl,
     defaultBridgeUrl: `${apiBaseUrl}${bridgePath}`,
@@ -75,8 +86,12 @@ function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
     defaultExplorerUrl: '',
     healthUrl: `${apiBaseUrl}/health`,
     bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/${meta.coinId}`,
-    sendCoinPathTemplate: `/v1/bridge/send/coin/${meta.coinId}/main/:wallet`,
-    sendAssetPathTemplate: `/v1/bridge/send/asset/${meta.coinId}/main/:wallet`,
+    sendCoinPathTemplate: walletScopedSend
+      ? `/v1/bridge/send/coin/${meta.coinId}/main/:wallet`
+      : `/v1/bridge/send/coin/${meta.coinId}/main`,
+    sendAssetPathTemplate: walletScopedSend
+      ? `/v1/bridge/send/asset/${meta.coinId}/main/:wallet`
+      : `/v1/bridge/send/asset/${meta.coinId}/main`,
     payloads: getCoinPayloadCatalog(networkId)
   }
 }

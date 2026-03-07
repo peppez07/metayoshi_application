@@ -207,6 +207,7 @@ export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyM
     return enabled ? 'non-custodial' : 'unsupported'
   }
   if (network.coinType === 'EVM') return 'non-custodial'
+  if (protocol === 'cosmos-rest-bridge') return 'non-custodial'
   if (protocol === 'utxo-jsonrpc') return 'non-custodial'
   if (protocol === 'xrp-jsonrpc-compat') return 'non-custodial'
   if (protocol === 'cardano-wallet-compat' || protocol === 'monero-wallet-compat') return 'unsupported'

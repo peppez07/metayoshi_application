@@ -72,6 +72,10 @@ import {
   deriveAccountAddresses,
   deriveSingleNetworkAddress
 } from './walletStoreAddressing'
+import {
+  computeLowSyncStreak,
+  updateAccountsWithNetworkBalance
+} from './walletStoreBalanceHelpers'
 
 export type { CoinType, Network } from '../coins'
 
@@ -5089,18 +5093,7 @@ export const useWalletStore = create<WalletState>()(
               isConnected: true,
               syncPercent: 100,
               lowSyncStreak: 0,
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
         } else if (net.coinType === 'XRP') {
           const { useLocalRpc, localRpcOverrides } = get()
@@ -5121,26 +5114,8 @@ export const useWalletStore = create<WalletState>()(
             isSyncing: snapshot.isSyncing,
             isConnected: true,
             syncPercent: snapshot.syncPercent,
-            lowSyncStreak: (() => {
-              const syncPercentIsLow =
-                typeof snapshot.syncPercent === 'number'
-                && Number.isFinite(snapshot.syncPercent)
-                && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-              const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
-              return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
-            })(),
-            accounts: state.accounts.map((a) =>
-              a.id === acc.id
-                ? {
-                    ...a,
-                    balance: snapshot.balance,
-                    networkBalances: {
-                      ...(a.networkBalances ?? {}),
-                      [activeNetworkId]: snapshot.balance
-                    }
-                  }
-                : a
-            )
+            lowSyncStreak: computeLowSyncStreak(state.lowSyncStreak, snapshot, MIN_SYNC_PERCENT_FOR_SEND),
+            accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
           }))
         } else if (net.coinType === 'UTXO') {
         const { useLocalRpc, localRpcOverrides } = get()
@@ -5163,26 +5138,11 @@ export const useWalletStore = create<WalletState>()(
             await waitForUiStabilize()
             if (isStaleRequest()) return
             set((state) => ({
-              lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
-                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
-              })(),
+              lowSyncStreak: computeLowSyncStreak(state.lowSyncStreak, snapshot, MIN_SYNC_PERCENT_FOR_SEND),
               isSyncing: snapshot.isSyncing,
               isConnected: true,
               syncPercent: snapshot.syncPercent,
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'ada') {
             const { useLocalRpc, localRpcOverrides } = get()
@@ -5202,23 +5162,8 @@ export const useWalletStore = create<WalletState>()(
               isSyncing: snapshot.isSyncing,
               isConnected: true,
               syncPercent: snapshot.syncPercent,
-              lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
-                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
-              })(),
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              lowSyncStreak: computeLowSyncStreak(state.lowSyncStreak, snapshot, MIN_SYNC_PERCENT_FOR_SEND),
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'xmr') {
             const { useLocalRpc, localRpcOverrides } = get()
@@ -5238,23 +5183,8 @@ export const useWalletStore = create<WalletState>()(
               isSyncing: snapshot.isSyncing,
               isConnected: true,
               syncPercent: snapshot.syncPercent,
-              lowSyncStreak: (() => {
-                const syncPercentIsLow = typeof snapshot.syncPercent === 'number' && Number.isFinite(snapshot.syncPercent) && snapshot.syncPercent < MIN_SYNC_PERCENT_FOR_SEND
-                const lowSyncCheck = snapshot.isSyncing || syncPercentIsLow
-                return lowSyncCheck ? Math.min(50, (state.lowSyncStreak || 0) + 1) : 0
-              })(),
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              lowSyncStreak: computeLowSyncStreak(state.lowSyncStreak, snapshot, MIN_SYNC_PERCENT_FOR_SEND),
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'sol') {
             const rpcConfig = await createUtxoRpcConfig(net, {
@@ -5272,18 +5202,7 @@ export const useWalletStore = create<WalletState>()(
               isConnected: true,
               syncPercent: 100,
               lowSyncStreak: 0,
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'xlm') {
             const rpcConfig = await createUtxoRpcConfig(net, {
@@ -5302,18 +5221,7 @@ export const useWalletStore = create<WalletState>()(
               isConnected: true,
               syncPercent: 100,
               lowSyncStreak: 0,
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'tron') {
             const rpcConfig = await createUtxoRpcConfig(net, {
@@ -5332,18 +5240,7 @@ export const useWalletStore = create<WalletState>()(
               isConnected: true,
               syncPercent: 100,
               lowSyncStreak: 0,
-              accounts: state.accounts.map((a) =>
-                a.id === acc.id
-                  ? {
-                      ...a,
-                      balance: snapshot.balance,
-                      networkBalances: {
-                        ...(a.networkBalances ?? {}),
-                        [activeNetworkId]: snapshot.balance
-                      }
-                    }
-                  : a
-              )
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else {
             // Unsupported runtime family in current build.
