@@ -3224,6 +3224,7 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
+            const cosmosCfg = resolveCosmosNetworkConfig(net)
             const rows = await fetchBridgeTokenBalances(rpcConfig, {
               coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
               chain: String(net.serverChain || 'main').trim() || 'main',
@@ -3234,11 +3235,27 @@ export const useWalletStore = create<WalletState>()(
             for (const row of rows) {
               const tokenId = String(row.tokenId || '').trim()
               if (!tokenId) continue
-              const rawQtyText = String(row.balanceRaw || row.balance || '0').trim()
-              if (!/^\d+(\.\d+)?$/.test(rawQtyText)) continue
-              const qty = Number(rawQtyText)
-              if (!Number.isFinite(qty) || qty <= 0) continue
-              assets[tokenId] = Math.round(qty * 1e8)
+              if (tokenId === cosmosCfg.nativeDenom) continue
+
+              const decimalsRaw = Number(row.decimals)
+              const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30
+                ? decimalsRaw
+                : cosmosCfg.decimals
+
+              let displaySats = 0
+              const balanceRawText = String(row.balanceRaw || '').trim()
+              if (/^\d+$/.test(balanceRawText)) {
+                displaySats = toAssetDisplaySats(BigInt(balanceRawText), decimals)
+              } else {
+                const balanceUiText = String(row.balance || '0').trim()
+                if (!/^\d+(\.\d+)?$/.test(balanceUiText)) continue
+                const qty = Number(balanceUiText)
+                if (!Number.isFinite(qty) || qty <= 0) continue
+                displaySats = Math.round(qty * 1e8)
+              }
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+              assets[tokenId] = displaySats
               const label = String(row.symbol || row.name || tokenId).trim()
               if (label) labels[tokenId] = label
             }
