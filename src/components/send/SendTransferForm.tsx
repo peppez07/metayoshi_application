@@ -10,9 +10,25 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 import { resolveRuntimeModelId } from '../../lib/runtimeModel'
 
-function formatUnits8(value: number): string {
+function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
-  return value.toFixed(8).replace(/\.?0+$/, '')
+  return value.toFixed(maxDecimals).replace(/\.?0+$/, '')
+}
+
+function clampDecimalInput(value: string, maxDecimals: number): string {
+  const normalized = String(value || '').replace(',', '.')
+  if (!normalized) return ''
+  const startsWithDot = normalized.startsWith('.')
+  const sanitized = normalized.replace(/[^0-9.]/g, '')
+  const [wholeRaw = '', ...rest] = sanitized.split('.')
+  const fractionRaw = rest.join('')
+  const whole = wholeRaw.replace(/^0+(?=\d)/, '')
+  if (sanitized.includes('.')) {
+    const fraction = fractionRaw.slice(0, Math.max(0, maxDecimals))
+    const left = whole || (startsWithDot ? '0' : '')
+    return `${left}.${fraction}`
+  }
+  return whole
 }
 
 function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
@@ -74,6 +90,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const isNative = item.requestType === 'native'
   const isIntegerMode = nftMode === 'erc1155-integer'
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
+  const nativeInputDecimals = isNative && activeModelId === 'cosmos' ? 6 : 8
   const available = Number(item.rawAmount || 0) / 1e8
   const estimatedNativeFee = useMemo(() => estimateNativeSendFee(activeNetwork), [activeNetwork])
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
@@ -150,7 +167,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
       setError(isNative ? 'Insufficient balance' : 'Insufficient asset balance')
       return null
     }
-    return formatUnits8(numeric)
+    return formatUnits(numeric, nativeInputDecimals)
   }
 
   const handleSetPercent = (pct: number) => {
@@ -160,7 +177,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
       setAmount(String(target))
       return
     }
-    setAmount(formatUnits8(available * pct))
+    setAmount(formatUnits(available * pct, nativeInputDecimals))
   }
 
   const handleMax = () => {
@@ -172,7 +189,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
       setAmount(String(Math.max(0, Math.floor(available))))
       return
     }
-    setAmount(formatUnits8(available))
+    setAmount(formatUnits(available, nativeInputDecimals))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -230,11 +247,11 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
                 txState.donationEnabled = true
                 txState.donationPercent = Number(effectivePercent.toFixed(4))
                 txState.donationMode = 'add'
-                txState.donationAmount = formatUnits8(donationAmount)
+                txState.donationAmount = formatUnits(donationAmount, 8)
                 txState.donationAddress = policy.address
                 txState.donationRequired = policy.required === true
-                txState.enteredAmount = formatUnits8(spend)
-                txState.totalBeforeNetworkFee = formatUnits8(spend + donationAmount)
+                txState.enteredAmount = formatUnits(spend, 8)
+                txState.totalBeforeNetworkFee = formatUnits(spend + donationAmount, 8)
               }
             }
           }
@@ -285,7 +302,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           </div>
           <p className="text-[10px] text-gray-500 font-bold uppercase">Available</p>
           <p className="text-lg font-bold">
-            {formatUnits8(available)} {item.kind === 'native' ? activeNetwork.symbol : item.symbol}
+            {formatUnits(available, nativeInputDecimals)} {item.kind === 'native' ? activeNetwork.symbol : item.symbol}
           </p>
           {displayAvailableFiat && (
             <p className="text-[11px] text-gray-400 mt-1">{displayAvailableFiat}</p>
@@ -309,12 +326,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <div className="relative">
             <Input
               type="number"
-              step={isIntegerMode || isFixedOneMode ? '1' : '0.00000001'}
+              step={isIntegerMode || isFixedOneMode ? '1' : (nativeInputDecimals === 6 ? '0.000001' : '0.00000001')}
               min={isIntegerMode || isFixedOneMode ? '1' : '0'}
               value={isFixedOneMode ? '1' : amount}
               onChange={(e) => {
                 if (isFixedOneMode) return
-                setAmount(e.target.value)
+                setAmount(isIntegerMode ? e.target.value : clampDecimalInput(e.target.value, nativeInputDecimals))
               }}
               className="bg-dark-700/50 border-dark-600 pr-20"
               disabled={isFixedOneMode}
@@ -366,7 +383,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
           <p className="text-[10px] text-gray-600 leading-relaxed">
             {isNative
-              ? `Estimated required fee: ~${formatUnits8(estimatedNativeFee)} ${activeNetwork.symbol}.`
+              ? `Estimated required fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}.`
               : `Asset transfer fee is paid in native ${activeNetwork.symbol}. Keep native balance for fees.`}
           </p>
         </div>

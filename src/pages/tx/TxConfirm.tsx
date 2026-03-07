@@ -397,6 +397,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       } else if (activeNetwork.id === 'tron') {
         const res = await sendTronTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
+      } else if (activeNetwork.coinType === 'COSMOS' || activeNetwork.id === 'cosmos') {
+        const res = await sendUtxoTransaction({ to: toAddress, amount, memo })
+        txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'UTXO') {
         const res = await sendUtxoTransaction({
           to: toAddress,

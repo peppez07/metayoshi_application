@@ -5671,7 +5671,9 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find((n) => n.id === activeNetworkId)
         const modelId = resolveNetworkModelId(net)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-        if (!net || net.coinType !== 'UTXO') throw new Error('Active network is not UTXO')
+        if (!net || (net.coinType !== 'UTXO' && !(net.coinType === 'COSMOS' || modelId === 'cosmos'))) {
+          throw new Error('Active network is not UTXO/COSMOS')
+        }
         if (!net.coinSymbol) throw new Error('Network missing coinSymbol')
         if (isCroCosmosModel(net)) {
           const cosmosCfg = resolveCosmosNetworkConfig(net)

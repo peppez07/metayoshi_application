@@ -318,14 +318,16 @@ function getEnvOverride(config: CosmosAddressConfig): Partial<CosmosAddressConfi
   if (!prefix) return {}
 
   const out: Partial<CosmosAddressConfig> = {}
-  const coinType = Number(env[`VITE_${prefix}_COIN_TYPE`] ?? '')
-  const decimals = Number(env[`VITE_${prefix}_DECIMALS`] ?? '')
+  const coinTypeRaw = String(env[`VITE_${prefix}_COIN_TYPE`] ?? '').trim()
+  const decimalsRaw = String(env[`VITE_${prefix}_DECIMALS`] ?? '').trim()
   const nativeDenom = String(env[`VITE_${prefix}_NATIVE_DENOM`] ?? '').trim()
   const feeDenom = String(env[`VITE_${prefix}_FEE_DENOM`] ?? '').trim()
   const feeAmountRaw = String(env[`VITE_${prefix}_FEE_AMOUNT_RAW`] ?? '').trim()
   const gasLimit = String(env[`VITE_${prefix}_GAS_LIMIT`] ?? '').trim()
   const hrp = String(env[`VITE_${prefix}_HRP`] ?? '').trim()
   const symbol = String(env[`VITE_${prefix}_SYMBOL`] ?? '').trim()
+  const coinType = coinTypeRaw ? Number(coinTypeRaw) : NaN
+  const decimals = decimalsRaw ? Number(decimalsRaw) : NaN
 
   if (hrp) out.hrp = hrp
   if (Number.isInteger(coinType) && coinType > 0) out.coinType = coinType
