@@ -39,7 +39,7 @@ export function isCosmosLikeNetwork(network?: RuntimeModelSource): boolean {
 export function requiresMnemonicForNetwork(network?: RuntimeModelSource): boolean {
   const modelId = resolveRuntimeModelId(network)
   const coinType = String(network?.coinType || '').trim().toUpperCase()
-  if (coinType === 'EVM' || coinType === 'XRP' || coinType === 'UTXO') return true
+  if (coinType === 'EVM' || coinType === 'XRP' || coinType === 'UTXO' || coinType === 'COSMOS') return true
   if (modelId === 'ada') return true
   if (modelId === 'xmr') return true
   if (modelId === 'sol') return true

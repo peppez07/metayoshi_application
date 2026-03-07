@@ -193,6 +193,14 @@ interface WalletState {
   networkAssetLabels: Record<string, Record<string, string>>
   /** EVM NFT metadata key lookup by network id and asset key. */
   evmNftAssets: Record<string, Record<string, EvmNftHolding>>
+  /** Account+network scoped asset balances keyed by `${accountId}::${networkId}`. */
+  accountNetworkAssets: Record<string, Record<string, number>>
+  /** Account+network scoped asset logos keyed by `${accountId}::${networkId}`. */
+  accountNetworkAssetLogos: Record<string, Record<string, string>>
+  /** Account+network scoped asset labels keyed by `${accountId}::${networkId}`. */
+  accountNetworkAssetLabels: Record<string, Record<string, string>>
+  /** Account+network scoped EVM NFT metadata keyed by `${accountId}::${networkId}`. */
+  accountNetworkEvmNftAssets: Record<string, Record<string, EvmNftHolding>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
   serverCoinCatalog: ServerCoinCatalogItem[]
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
@@ -688,6 +696,84 @@ type EvmNftHolding = {
   standard: EvmNftStandard
   label: string
   quantityRaw: string
+}
+
+type ScopedAssetBuckets = {
+  assets: Record<string, number>
+  logos: Record<string, string>
+  labels: Record<string, string>
+  evmNfts: Record<string, EvmNftHolding>
+}
+
+function buildAssetStateScopeKey(accountId: string, networkId: string): string {
+  return buildSendListPreferenceScopeKey(accountId, networkId)
+}
+
+function getScopedAssetBucket<T>(
+  buckets: Record<string, T> | undefined,
+  accountId: string,
+  networkId: string
+): T | undefined {
+  return buckets?.[buildAssetStateScopeKey(accountId, networkId)]
+}
+
+function buildScopedAssetProjection(
+  state: WalletState,
+  accountId: string,
+  networkId: string
+): Pick<WalletState, 'networkAssets' | 'networkAssetLogos' | 'networkAssetLabels' | 'evmNftAssets'> {
+  const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  return {
+    networkAssets: {
+      ...state.networkAssets,
+      [networkId]: state.accountNetworkAssets[scopeKey] || {}
+    },
+    networkAssetLogos: {
+      ...state.networkAssetLogos,
+      [networkId]: state.accountNetworkAssetLogos[scopeKey] || {}
+    },
+    networkAssetLabels: {
+      ...state.networkAssetLabels,
+      [networkId]: state.accountNetworkAssetLabels[scopeKey] || {}
+    },
+    evmNftAssets: {
+      ...state.evmNftAssets,
+      [networkId]: state.accountNetworkEvmNftAssets[scopeKey] || {}
+    }
+  }
+}
+
+function buildScopedAssetStateUpdate(
+  state: WalletState,
+  accountId: string,
+  networkId: string,
+  payload: ScopedAssetBuckets
+): Partial<WalletState> {
+  const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  const next: Partial<WalletState> = {
+    accountNetworkAssets: {
+      ...state.accountNetworkAssets,
+      [scopeKey]: payload.assets
+    },
+    accountNetworkAssetLogos: {
+      ...state.accountNetworkAssetLogos,
+      [scopeKey]: payload.logos
+    },
+    accountNetworkAssetLabels: {
+      ...state.accountNetworkAssetLabels,
+      [scopeKey]: payload.labels
+    },
+    accountNetworkEvmNftAssets: {
+      ...state.accountNetworkEvmNftAssets,
+      [scopeKey]: payload.evmNfts
+    }
+  }
+
+  if (state.activeAccountId === accountId && state.activeNetworkId === networkId) {
+    Object.assign(next, buildScopedAssetProjection(state, accountId, networkId))
+  }
+
+  return next
 }
 
 const DEFAULT_ETH_TRACKED_TOKENS: EvmTrackedToken[] = [
@@ -1917,11 +2003,14 @@ function resolveActivityAccountId(
       else if (network?.coinType === 'UTXO') {
         push(account.addresses?.UTXO)
         push(account.addresses?.BTC)
+      } else if (network?.coinType === 'COSMOS') {
+        push(account.addresses?.COSMOS)
       } else if (!network) {
         Object.values(account.networkAddresses || {}).forEach(push)
         push(account.addresses?.EVM)
         push(account.addresses?.UTXO)
         push(account.addresses?.BTC)
+        push(account.addresses?.COSMOS)
         push(account.addresses?.SOL)
         push(account.addresses?.XRP)
       }
@@ -2083,6 +2172,7 @@ async function deriveAccountAddresses(
   const derivationErrors: string[] = []
   let firstUtxoAddress = ''
   let firstXrpAddress = ''
+  let firstCosmosAddress = ''
 
   for (const net of networks) {
     const modelId = resolveNetworkModelId(net)
@@ -2097,6 +2187,7 @@ async function deriveAccountAddresses(
         const cosmosCfg = resolveCosmosNetworkConfig(net)
         const cosmosAddr = await deriveCosmosAddress(mnemonic, derivationIndex, cosmosCfg)
         networkAddresses[net.id] = cosmosAddr.address
+        if (!firstCosmosAddress) firstCosmosAddress = cosmosAddr.address
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         derivationErrors.push(`${net.symbol}: ${msg}`)
@@ -2182,6 +2273,7 @@ async function deriveAccountAddresses(
       EVM: evmWallet.address,
       UTXO: firstUtxoAddress,
       BTC: '',
+      COSMOS: firstCosmosAddress,
       SOL: '',
       XRP: firstXrpAddress
     },
@@ -2209,6 +2301,7 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
         EVM: addresses.EVM ?? '',
         UTXO: addresses.UTXO ?? '',
         BTC: addresses.BTC ?? '',
+        COSMOS: addresses.COSMOS ?? '',
         SOL: addresses.SOL ?? '',
         XRP: addresses.XRP ?? ''
       },
@@ -2332,6 +2425,10 @@ export const useWalletStore = create<WalletState>()(
       networkAssetLogos: {},
       networkAssetLabels: {},
       evmNftAssets: {},
+      accountNetworkAssets: {},
+      accountNetworkAssetLogos: {},
+      accountNetworkAssetLabels: {},
+      accountNetworkEvmNftAssets: {},
       serverCoinCatalog: [],
       sendListPreferences: {},
       authorizedSites: [],
@@ -2455,7 +2552,7 @@ export const useWalletStore = create<WalletState>()(
               name: 'Account 1',
               networkNames: {},
               derivationIndex: 0,
-              addresses: { EVM: '', UTXO: '', BTC: '', SOL: '', XRP: '' },
+              addresses: { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', XRP: '' },
               networkAddresses: {},
               networkBalances: {},
               balance: '0'
@@ -2473,6 +2570,7 @@ export const useWalletStore = create<WalletState>()(
                 EVM: account.addresses?.EVM || '',
                 UTXO: account.addresses?.UTXO || '',
                 BTC: account.addresses?.BTC || '',
+                COSMOS: account.addresses?.COSMOS || '',
                 SOL: account.addresses?.SOL || '',
                 XRP: account.addresses?.XRP || ''
               },
@@ -2534,6 +2632,10 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
+          accountNetworkAssets: {},
+          accountNetworkAssetLogos: {},
+          accountNetworkAssetLabels: {},
+          accountNetworkEvmNftAssets: {},
           sendListPreferences: {},
           activity: []
         }),
@@ -2548,23 +2650,7 @@ export const useWalletStore = create<WalletState>()(
               ? { ...account, balance: getCachedBalanceForNetwork(account, activeNetworkId, false) }
               : account
           )),
-          // Prevent showing stale assets from the previous account while reloading.
-          networkAssets: {
-            ...state.networkAssets,
-            [activeNetworkId]: {}
-          },
-          networkAssetLogos: {
-            ...state.networkAssetLogos,
-            [activeNetworkId]: {}
-          },
-          networkAssetLabels: {
-            ...state.networkAssetLabels,
-            [activeNetworkId]: {}
-          },
-          evmNftAssets: {
-            ...state.evmNftAssets,
-            [activeNetworkId]: {}
-          }
+          ...buildScopedAssetProjection(state, id, activeNetworkId)
         }))
         void (async () => {
           await get().ensureNetworkAddress(activeNetworkId)
@@ -2574,7 +2660,7 @@ export const useWalletStore = create<WalletState>()(
       },
 
       ensureNetworkAddress: async (networkId) => {
-        const { networks, accounts, activeAccountId, sessionMnemonic } = get()
+        const { networks, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
         const net = networks.find(n => n.id === networkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return null
@@ -2609,7 +2695,7 @@ export const useWalletStore = create<WalletState>()(
           return null
         }
         const requiresMnemonic = requiresMnemonicForNetwork(net)
-        if (requiresMnemonic && !sessionMnemonic) return null
+        if (isLocked || (requiresMnemonic && !sessionMnemonic)) return null
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const forceCanonicalUtxoAddress = net.coinType === 'UTXO' && shouldForceCanonicalUtxoAddress(net.coinSymbol)
 
@@ -2689,7 +2775,8 @@ export const useWalletStore = create<WalletState>()(
           return {
             activeNetworkId: normalizedId,
             lastActiveTimestamp: Date.now(),
-            accounts: nextAccounts
+            accounts: nextAccounts,
+            ...(activeAccount ? buildScopedAssetProjection(state, activeAccount.id, normalizedId) : {})
           }
         })
         await get().ensureNetworkAddress(normalizedId)
@@ -2715,6 +2802,8 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === activeNetworkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return
+        const requestAccountId = String(acc.id || '').trim()
+        const requestNetworkId = String(activeNetworkId || '').trim()
         const bridgeCooldownMs = getTransientBridgeCooldownRemainingMs(activeNetworkId)
         if (bridgeCooldownMs > 0 && options?.force !== true) return
         const activeModelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
@@ -2741,13 +2830,11 @@ export const useWalletStore = create<WalletState>()(
           if (!force) {
             const cached = networkAssetsCache.peek(cacheKey)
              if (cached) {
-               set((state) => ({
-                 networkAssets: { ...state.networkAssets, [activeNetworkId]: cached.assets },
-                 networkAssetLogos: { ...state.networkAssetLogos, [activeNetworkId]: cached.logos },
-                 networkAssetLabels: { ...state.networkAssetLabels, [activeNetworkId]: cached.labels },
-                 ...(cached.evmNfts
-                   ? { evmNftAssets: { ...state.evmNftAssets, [activeNetworkId]: cached.evmNfts } }
-                   : {})
+               set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+                 assets: cached.assets,
+                 logos: cached.logos,
+                 labels: cached.labels,
+                 evmNfts: cached.evmNfts || {}
                }))
                return
              }
@@ -3071,23 +3158,11 @@ export const useWalletStore = create<WalletState>()(
               return
             }
 
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: fungibleAssetLogos
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: fungibleAssetLabels
-              },
-              evmNftAssets: {
-                ...state.evmNftAssets,
-                [activeNetworkId]: nftLookup
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos: fungibleAssetLogos,
+              labels: fungibleAssetLabels,
+              evmNfts: nftLookup
             }))
 
             networkAssetsCache.get(
@@ -3143,19 +3218,11 @@ export const useWalletStore = create<WalletState>()(
               logos[key] = encodeTronContractLogoHint(baseLogo || '', row.token.contract)
             }
 
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: logos
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: {}
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos,
+              labels: {},
+              evmNfts: {}
             }))
 
             networkAssetsCache.get(
@@ -3197,19 +3264,11 @@ export const useWalletStore = create<WalletState>()(
               if (!Number.isFinite(balNum) || balNum === 0) continue
               assets[`${currency}|${issuer}`] = Math.round(Math.abs(balNum) * 1e8)
             }
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: {}
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: {}
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos: {},
+              labels: {},
+              evmNfts: {}
             }))
 
             networkAssetsCache.get(
@@ -3248,19 +3307,11 @@ export const useWalletStore = create<WalletState>()(
               // UI asset renderer expects sat-like integer scale.
               assets[tokenId] = Math.round(qty * 1e8)
             }
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: {}
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: {}
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos: {},
+              labels: {},
+              evmNfts: {}
             }))
 
             networkAssetsCache.get(
@@ -3300,19 +3351,11 @@ export const useWalletStore = create<WalletState>()(
               const label = String(row.symbol || row.name || tokenId).trim()
               if (label) labels[tokenId] = label
             }
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: {}
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: labels
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos: {},
+              labels,
+              evmNfts: {}
             }))
 
             networkAssetsCache.get(
@@ -3429,19 +3472,11 @@ export const useWalletStore = create<WalletState>()(
               const logoUri = String(info?.logoURI || '').trim()
               if (logoUri) logos[assetKey] = logoUri
             }
-            set((state) => ({
-              networkAssets: {
-                ...state.networkAssets,
-                [activeNetworkId]: assets
-              },
-              networkAssetLogos: {
-                ...state.networkAssetLogos,
-                [activeNetworkId]: logos
-              },
-              networkAssetLabels: {
-                ...state.networkAssetLabels,
-                [activeNetworkId]: labels
-              }
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos,
+              labels,
+              evmNfts: {}
             }))
 
             networkAssetsCache.get(
@@ -3464,19 +3499,11 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           const assets = await listAssetBalancesByAddress(rpcConfig, address)
-          set(state => ({
-            networkAssets: {
-              ...state.networkAssets,
-              [activeNetworkId]: assets ?? {}
-            },
-            networkAssetLogos: {
-              ...state.networkAssetLogos,
-              [activeNetworkId]: {}
-            },
-            networkAssetLabels: {
-              ...state.networkAssetLabels,
-              [activeNetworkId]: {}
-            }
+          set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            assets: assets ?? {},
+            logos: {},
+            labels: {},
+            evmNfts: {}
           }))
 
           networkAssetsCache.get(
@@ -3902,6 +3929,10 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos,
           networkAssetLabels,
           evmNftAssets,
+          accountNetworkAssets,
+          accountNetworkAssetLogos,
+          accountNetworkAssetLabels,
+          accountNetworkEvmNftAssets,
           sendListPreferences
         } = get()
 
@@ -3975,10 +4006,15 @@ export const useWalletStore = create<WalletState>()(
         }
         addOrMergeItem(nativeRow, [requestedNetworkId])
 
-        const rawAssets = networkAssets?.[requestedNetworkId] || {}
-        const rawLogos = networkAssetLogos?.[requestedNetworkId] || {}
-        const rawLabels = networkAssetLabels?.[requestedNetworkId] || {}
-        const nftLookup = evmNftAssets?.[requestedNetworkId] || {}
+        const isActiveScope = requestedAccountId === String(activeAccountId || '').trim()
+        const rawAssets = getScopedAssetBucket(accountNetworkAssets, account.id, requestedNetworkId)
+          || (isActiveScope ? (networkAssets?.[requestedNetworkId] || {}) : {})
+        const rawLogos = getScopedAssetBucket(accountNetworkAssetLogos, account.id, requestedNetworkId)
+          || (isActiveScope ? (networkAssetLogos?.[requestedNetworkId] || {}) : {})
+        const rawLabels = getScopedAssetBucket(accountNetworkAssetLabels, account.id, requestedNetworkId)
+          || (isActiveScope ? (networkAssetLabels?.[requestedNetworkId] || {}) : {})
+        const nftLookup = getScopedAssetBucket(accountNetworkEvmNftAssets, account.id, requestedNetworkId)
+          || (isActiveScope ? (evmNftAssets?.[requestedNetworkId] || {}) : {})
 
         for (const [assetIdRaw, rawAmountValue] of Object.entries(rawAssets)) {
           const assetId = String(assetIdRaw || '').trim()
@@ -4608,6 +4644,7 @@ export const useWalletStore = create<WalletState>()(
               EVM:  derived.addresses.EVM  || acc.addresses?.EVM  || '',
               UTXO: derived.addresses.UTXO || acc.addresses?.UTXO || '',
               BTC:  acc.addresses?.BTC || '',
+              COSMOS: derived.addresses.COSMOS || acc.addresses?.COSMOS || '',
               SOL:  acc.addresses?.SOL || '',
               XRP:  derived.addresses.XRP || acc.addresses?.XRP || ''
             },
@@ -4650,11 +4687,15 @@ export const useWalletStore = create<WalletState>()(
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
           donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
-          networkAssets:    remapNetworkIdKeyedRecord(backup.networkAssets ?? {}),
+          networkAssets:    {},
+          accountNetworkAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord(backup.sendListPreferences ?? {}),
           networkAssetLogos: {},
+          accountNetworkAssetLogos: {},
           networkAssetLabels: {},
+          accountNetworkAssetLabels: {},
           evmNftAssets: {},
+          accountNetworkEvmNftAssets: {},
           lastActiveTimestamp: Date.now()
         })
       },
@@ -4679,12 +4720,12 @@ export const useWalletStore = create<WalletState>()(
       updateLastActive: () => set({ lastActiveTimestamp: Date.now() }),
       
       checkAutolock: () => {
-        const { lastActiveTimestamp, autolockMinutes, isLocked, isInitialized } = get()
+        const { lastActiveTimestamp, autolockMinutes, isLocked, isInitialized, lock } = get()
         if (!isInitialized || isLocked) return
 
         const now = Date.now()
         if (now - lastActiveTimestamp > autolockMinutes * 60 * 1000) {
-          set({ isLocked: true })
+          lock()
         }
       },
 
@@ -4783,6 +4824,10 @@ export const useWalletStore = create<WalletState>()(
           const { deriveXrpAddress } = await loadXrpAddressModule()
           const derived = await deriveXrpAddress(sessionMnemonic, derivationIndex)
           selectedAddress = derived.address
+        } else if (selectedNetwork.coinType === 'COSMOS') {
+          const cosmosCfg = resolveCosmosNetworkConfig(selectedNetwork)
+          const derived = await deriveCosmosAddress(sessionMnemonic, derivationIndex, cosmosCfg)
+          selectedAddress = derived.address
         } else if (selectedNetwork.coinType === 'UTXO' && selectedNetwork.coinSymbol) {
           const derived = await deriveUtxoAddress(sessionMnemonic, selectedNetwork.coinSymbol, derivationIndex, 0, 0)
           selectedAddress = derived.address
@@ -4811,9 +4856,10 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
         }
 
-        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', SOL: '', XRP: '' }
+        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', XRP: '' }
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
+        if (selectedNetwork.coinType === 'COSMOS') addresses.COSMOS = selectedAddress
         if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
         if (selectedModelId === 'sol') addresses.SOL = selectedAddress
 
@@ -5977,9 +6023,17 @@ export const useWalletStore = create<WalletState>()(
           activeNetworkId,
           activeAccountId
         })
+        const autolockMinutes = Math.max(1, Number(merged.autolockMinutes ?? 5))
+        const lastActiveTimestamp = Number(merged.lastActiveTimestamp ?? Date.now())
+        const shouldAutolockOnHydration = Boolean(
+          merged.isInitialized
+          && !merged.isLocked
+          && (Date.now() - lastActiveTimestamp > autolockMinutes * 60 * 1000)
+        )
 
         return {
           ...merged,
+          isLocked: shouldAutolockOnHydration ? true : merged.isLocked,
           accounts: accountsWithActiveNetworkBalance,
           nextAccountIndex,
           activeAccountId,
@@ -6000,6 +6054,14 @@ export const useWalletStore = create<WalletState>()(
               rpcWallet: string
             }>
           ),
+          networkAssets: {},
+          networkAssetLogos: {},
+          networkAssetLabels: {},
+          evmNftAssets: {},
+          accountNetworkAssets: {},
+          accountNetworkAssetLogos: {},
+          accountNetworkAssetLabels: {},
+          accountNetworkEvmNftAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }

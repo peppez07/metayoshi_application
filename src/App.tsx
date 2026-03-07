@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useEffect, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { useWalletStore } from './store/walletStore'
 import { resolveNetworkCapabilities } from './lib/networkCapabilities'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from './lib/coinModel'
@@ -97,6 +97,7 @@ const TxRouteGate = ({ element }: { element: ReactElement }) => {
 }
 
 function App() {
+  const [hasHydrated, setHasHydrated] = useState(() => useWalletStore.persist.hasHydrated())
   const {
     isLocked,
     isInitialized,
@@ -107,6 +108,18 @@ function App() {
     syncNetworksFromServer
   } = useWalletStore()
   const location = useLocation()
+
+  useEffect(() => {
+    if (useWalletStore.persist.hasHydrated()) {
+      setHasHydrated(true)
+      return
+    }
+
+    const unsubscribe = useWalletStore.persist.onFinishHydration(() => {
+      setHasHydrated(true)
+    })
+    return unsubscribe
+  }, [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -131,20 +144,68 @@ function App() {
     void syncNetworksFromServer()
   }, [syncNetworksFromServer])
 
-  // Force lock on every popup open when there is no in-memory session.
-  // sessionMnemonic is never persisted to localStorage, so it is always null
-  // after the extension popup is closed and reopened. isLocked IS persisted,
-  // so without this guard the wallet could appear unlocked with no mnemonic.
+  // Persisted state hydrates asynchronously from extension storage.
+  // Re-check after hydration so the wallet never renders as unlocked without
+  // an in-memory mnemonic in a freshly opened popup.
   useEffect(() => {
+    if (!hasHydrated) return
     if (isInitialized && !isLocked && !sessionMnemonic) {
       lock()
     }
-  }, []) // intentionally only on mount
+  }, [hasHydrated, isInitialized, isLocked, sessionMnemonic, lock])
 
   useEffect(() => {
+    if (!hasHydrated) return
+    checkAutolock()
     const interval = setInterval(checkAutolock, 60000)
     return () => clearInterval(interval)
-  }, [checkAutolock])
+  }, [hasHydrated, checkAutolock])
+
+  useEffect(() => {
+    if (!hasHydrated || typeof window === 'undefined') return
+
+    let lastActivityWrite = 0
+    const markActive = () => {
+      const state = useWalletStore.getState()
+      if (!state.isInitialized || state.isLocked) return
+
+      const now = Date.now()
+      if (now - lastActivityWrite < 15000) return
+      lastActivityWrite = now
+      state.updateLastActive()
+    }
+    const handleVisibilityChange = () => {
+      if (typeof document === 'undefined') return
+      if (document.visibilityState === 'visible') {
+        markActive()
+      }
+    }
+    const lockOnPageHide = () => {
+      const state = useWalletStore.getState()
+      if (!state.isInitialized || state.isLocked) return
+      state.lock()
+    }
+
+    window.addEventListener('pointerdown', markActive, true)
+    window.addEventListener('keydown', markActive, true)
+    window.addEventListener('focus', markActive)
+    window.addEventListener('pagehide', lockOnPageHide)
+    window.addEventListener('beforeunload', lockOnPageHide)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    return () => {
+      window.removeEventListener('pointerdown', markActive, true)
+      window.removeEventListener('keydown', markActive, true)
+      window.removeEventListener('focus', markActive)
+      window.removeEventListener('pagehide', lockOnPageHide)
+      window.removeEventListener('beforeunload', lockOnPageHide)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+  }, [hasHydrated])
 
   return (
     <div className="w-full h-full bg-dark-900 overflow-hidden">

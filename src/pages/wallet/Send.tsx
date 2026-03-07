@@ -731,6 +731,7 @@ const Send: React.FC = () => {
     activeAccountId,
     activeNetworkId,
     networkAssets,
+    sendListPreferences,
     getSendableItems,
     setActiveAccount,
     setActiveNetwork,
@@ -792,10 +793,53 @@ const Send: React.FC = () => {
     }
     return out
   }, [activePairItems])
-  const visibleScanRows = useMemo(
-    () => scanRows.filter((row) => enabledNetworkIds.has(row.networkId)),
-    [scanRows, enabledNetworkIds]
-  )
+  const hiddenItemIdsByScope = useMemo(() => {
+    const out = new Map<string, Set<string>>()
+    for (const account of accounts) {
+      for (const network of enabledNetworks) {
+        const scopeKey = `${account.id}::${network.id}`.toLowerCase()
+        const preferredHidden = sendListPreferences?.[scopeKey]?.hidden
+        if (!Array.isArray(preferredHidden) || preferredHidden.length === 0) continue
+        const items = getSendableItems({
+          accountId: account.id,
+          networkId: network.id,
+          includeHidden: true,
+          includeZeroBalance: true
+        })
+        const hiddenIds = new Set(
+          items
+            .filter((item) => item.requestType === 'asset' && item.hidden)
+            .map((item) => item.id)
+        )
+        if (hiddenIds.size > 0) out.set(scopeKey, hiddenIds)
+      }
+    }
+    return out
+  }, [accounts, enabledNetworks, sendListPreferences, getSendableItems, networkAssets])
+  const visibleScanRows = useMemo(() => {
+    const nextRows: AggregatedScanRow[] = []
+    for (const row of scanRows) {
+      if (!enabledNetworkIds.has(row.networkId)) continue
+      if (row.requestType !== 'asset') {
+        nextRows.push(row)
+        continue
+      }
+      const holders = row.holders.filter((holder) => {
+        const scopeKey = `${holder.accountId}::${holder.networkId}`.toLowerCase()
+        const hiddenIds = hiddenItemIdsByScope.get(scopeKey)
+        return !hiddenIds?.has(holder.itemId)
+      })
+      if (holders.length === 0) continue
+      const rawAmount = holders.reduce((sum, holder) => sum + Math.max(0, Number(holder.rawAmount || 0)), 0)
+      nextRows.push({
+        ...row,
+        holders,
+        rawAmount,
+        amount: formatUnits8(rawAmount / 1e8)
+      })
+    }
+    return nextRows
+  }, [scanRows, enabledNetworkIds, hiddenItemIdsByScope])
 
   useEffect(() => {
     scanRowsRef.current = scanRows

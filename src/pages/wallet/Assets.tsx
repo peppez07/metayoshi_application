@@ -2,11 +2,18 @@
 import { useNavigate } from 'react-router-dom'
 import { IoChevronForward, IoLayersOutline } from 'react-icons/io5'
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { useWalletStore } from '../../store/walletStore'
 import AssetListRow from './AssetListRow'
 import { useAssetListModel } from './useAssetListModel'
 
 const Assets: React.FC = () => {
   const navigate = useNavigate()
+  const {
+    activeAccountId,
+    activeNetworkId,
+    getSendableItems,
+    setSendListPreferences
+  } = useWalletStore()
   const {
     activeNetwork,
     caps,
@@ -24,8 +31,44 @@ const Assets: React.FC = () => {
   const previewRows = useMemo(() => sorted.slice(0, 3), [sorted])
   const previewAssetNames = useMemo(() => previewRows.map(([name]) => name), [previewRows])
   const total = sorted.length
+  const sendHubAccountId = activeAccountId || undefined
+  const sendHubNetworkId = activeNetworkId || undefined
+  const sendableItems = getSendableItems({ accountId: sendHubAccountId, networkId: sendHubNetworkId, includeHidden: true })
+  const sendAssetIdByName = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const item of sendableItems) {
+      if (item.requestType !== 'asset' || !item.assetId) continue
+      out[item.assetId] = item.id
+    }
+    return out
+  }, [sendableItems])
+  const hiddenSendAssetIds = useMemo(() => {
+    const out = new Set<string>()
+    for (const item of sendableItems) {
+      if (item.requestType !== 'asset' || !item.assetId || !item.hidden) continue
+      out.add(item.assetId)
+    }
+    return out
+  }, [sendableItems])
 
   useEffect(() => ensurePreviewAvailability(previewAssetNames), [ensurePreviewAvailability, previewAssetNames])
+
+  const toggleSendHubHidden = (name: string): void => {
+    const targetId = sendAssetIdByName[name]
+    if (!targetId) return
+    const nextHidden = new Set(
+      sendableItems
+        .filter((item) => item.hidden)
+        .map((item) => item.id)
+    )
+    if (nextHidden.has(targetId)) nextHidden.delete(targetId)
+    else nextHidden.add(targetId)
+    setSendListPreferences({
+      accountId: sendHubAccountId,
+      networkId: sendHubNetworkId,
+      hidden: [...nextHidden]
+    })
+  }
 
   if (!caps.features.assetLayer) {
     return (
@@ -62,7 +105,7 @@ const Assets: React.FC = () => {
             name={name}
             displayName={resolveAssetDisplayName(name)}
             nft={isEvmNftAssetKey(name)}
-            metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
+            metaLabel={isSolanaEcosystem ? (resolveSolanaAssetTypeLabel(name) || undefined) : undefined}
             logoUrl={assetLogos[name]}
             rawAmount={rawAmount}
             onClick={() => {
@@ -78,6 +121,8 @@ const Assets: React.FC = () => {
             }}
             previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
             hideMetaLabels={isEvmEcosystem}
+            hiddenInSendHub={hiddenSendAssetIds.has(name)}
+            onToggleSendHubHidden={() => toggleSendHubHidden(name)}
           />
         ))}
 

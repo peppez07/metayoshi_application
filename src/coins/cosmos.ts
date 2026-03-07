@@ -19,7 +19,7 @@ export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
     runtimeModelId: 'cosmos',
     name: 'Cosmos Hub',
     symbol: 'ATOM',
-    coinType: 'UTXO',
+    coinType: 'COSMOS',
     coinSymbol: 'ATOM',
     rpcUrl: String(env.VITE_COSMOS_RPC || DEFAULT_COSMOS_RPC_URL).trim() || DEFAULT_COSMOS_RPC_URL,
     rpcWallet: '',

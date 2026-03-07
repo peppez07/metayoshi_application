@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { IoArrowUpOutline, IoChevronForward, IoEyeOutline, IoLayersOutline } from 'react-icons/io5'
+import { IoArrowUpOutline, IoChevronForward, IoEyeOffOutline, IoEyeOutline, IoLayersOutline } from 'react-icons/io5'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { formatAssetAmount, parseAssetName } from './useAssetListModel'
 
@@ -14,6 +14,8 @@ interface AssetListRowProps {
   onPreview: () => void
   previewAvailable?: boolean
   hideMetaLabels?: boolean
+  hiddenInSendHub?: boolean
+  onToggleSendHubHidden?: () => void
   variant?: 'compact' | 'full'
 }
 
@@ -28,6 +30,8 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
   onPreview,
   previewAvailable = false,
   hideMetaLabels = false,
+  hiddenInSendHub = false,
+  onToggleSendHubHidden,
   variant = 'full'
 }) => {
   const effectiveName = displayName || name
@@ -100,15 +104,35 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
         {compact ? (
           <div className="flex items-center gap-2 shrink-0 pl-2">
             <span className="text-sm font-bold font-mono">{formatAssetAmount(rawAmount)}</span>
+            {hiddenInSendHub && (
+              <span className="text-[9px] font-bold uppercase text-gray-500">Hidden</span>
+            )}
             <IoChevronForward className="text-gray-500 w-4 h-4" />
           </div>
         ) : (
           <div className="flex flex-col items-end shrink-0">
             <span className="text-sm font-bold font-mono">{formatAssetAmount(rawAmount)}</span>
+            {hiddenInSendHub && (
+              <span className="text-[9px] font-bold uppercase text-gray-500 mt-0.5">Hidden in send</span>
+            )}
             <IoArrowUpOutline className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-400 transition-colors mt-0.5" />
           </div>
         )}
       </button>
+
+      {onToggleSendHubHidden && (
+        <button
+          onClick={onToggleSendHubHidden}
+          className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${
+            hiddenInSendHub
+              ? 'border-yellow-500/40 bg-yellow-500/10 hover:bg-yellow-500/20'
+              : 'border-dark-600 bg-dark-700/40 hover:bg-dark-700'
+          }`}
+          title={hiddenInSendHub ? 'Show in send hub' : 'Hide in send hub'}
+        >
+          <IoEyeOffOutline className={`w-4.5 h-4.5 ${hiddenInSendHub ? 'text-yellow-300' : 'text-gray-300'}`} />
+        </button>
+      )}
 
       <button
         onClick={onPreview}

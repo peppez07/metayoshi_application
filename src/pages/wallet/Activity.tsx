@@ -79,6 +79,7 @@ const Activity: React.FC = () => {
       push(activeAccount.addresses?.UTXO)
       push(activeAccount.addresses?.BTC)
     }
+    if (activeNetwork.coinType === 'COSMOS') push(activeAccount.addresses?.COSMOS)
     if (activeNetwork.coinType === 'SOL') push(activeAccount.addresses?.SOL)
     return set
   }, [activeAccount, activeNetwork, activeNetworkId])

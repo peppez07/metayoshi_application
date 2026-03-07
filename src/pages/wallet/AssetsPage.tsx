@@ -16,7 +16,13 @@ import { useAssetListModel } from './useAssetListModel'
 const AssetsPage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { serverCoinCatalog } = useWalletStore()
+  const {
+    serverCoinCatalog,
+    activeAccountId,
+    activeNetworkId,
+    getSendableItems,
+    setSendListPreferences
+  } = useWalletStore()
 
   const {
     activeNetwork,
@@ -63,6 +69,25 @@ const AssetsPage: React.FC = () => {
     const rows = (isSearching ? filtered : sorted).slice(0, 40)
     return rows.map(([name]) => name)
   }, [filtered, isSearching, sorted])
+  const sendHubAccountId = activeAccountId || undefined
+  const sendHubNetworkId = activeNetworkId || undefined
+  const sendableItems = getSendableItems({ accountId: sendHubAccountId, networkId: sendHubNetworkId, includeHidden: true })
+  const sendAssetIdByName = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const item of sendableItems) {
+      if (item.requestType !== 'asset' || !item.assetId) continue
+      out[item.assetId] = item.id
+    }
+    return out
+  }, [sendableItems])
+  const hiddenSendAssetIds = useMemo(() => {
+    const out = new Set<string>()
+    for (const item of sendableItems) {
+      if (item.requestType !== 'asset' || !item.assetId || !item.hidden) continue
+      out.add(item.assetId)
+    }
+    return out
+  }, [sendableItems])
 
   const deepLinkedSendAsset = String((location.state as { sendAsset?: string } | null)?.sendAsset || '').trim()
 
@@ -91,6 +116,23 @@ const AssetsPage: React.FC = () => {
     navigate('/wallet/send', { state: { assetId: name } })
   }
 
+  const toggleSendHubHidden = (name: string): void => {
+    const targetId = sendAssetIdByName[name]
+    if (!targetId) return
+    const nextHidden = new Set(
+      sendableItems
+        .filter((item) => item.hidden)
+        .map((item) => item.id)
+    )
+    if (nextHidden.has(targetId)) nextHidden.delete(targetId)
+    else nextHidden.add(targetId)
+    setSendListPreferences({
+      accountId: sendHubAccountId,
+      networkId: sendHubNetworkId,
+      hidden: [...nextHidden]
+    })
+  }
+
   const renderAssetRows = (
     rows: Array<[string, number]>,
     options?: { hideMetaLabels?: boolean }
@@ -101,7 +143,7 @@ const AssetsPage: React.FC = () => {
       name={name}
       displayName={resolveAssetDisplayName(name)}
       nft={isEvmNftAssetKey(name)}
-      metaLabel={isSolanaEcosystem ? resolveSolanaAssetTypeLabel(name) : undefined}
+      metaLabel={isSolanaEcosystem ? (resolveSolanaAssetTypeLabel(name) || undefined) : undefined}
       logoUrl={assetLogos[name]}
       rawAmount={rawAmount}
       onClick={() => handleAssetRowClick(name)}
@@ -111,6 +153,8 @@ const AssetsPage: React.FC = () => {
       }}
       previewAvailable={isPreviewableAssetName(name) && previewByAsset[name] === true}
       hideMetaLabels={options?.hideMetaLabels}
+      hiddenInSendHub={hiddenSendAssetIds.has(name)}
+      onToggleSendHubHidden={() => toggleSendHubHidden(name)}
     />
   ))
 

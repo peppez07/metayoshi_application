@@ -131,7 +131,7 @@ interface WalletState {
   hasVault?: boolean
   accounts?: Array<{
     id: string
-    addresses: { EVM?: string; UTXO?: string; XRP?: string }
+    addresses: { EVM?: string; UTXO?: string; XRP?: string; COSMOS?: string }
     networkAddresses?: Record<string, string>
   }>
   activeAccountId?: string | null
@@ -274,6 +274,9 @@ function getActiveAddressFromState(state: WalletState, networkId: string): strin
   }
   if (network.coinType === 'XRP') {
     return account.addresses?.XRP || null
+  }
+  if (network.coinType === 'COSMOS') {
+    return account.addresses?.COSMOS || null
   }
   if (network.coinType === 'UTXO') {
     return account.addresses?.UTXO || null
