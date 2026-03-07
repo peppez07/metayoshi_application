@@ -20,6 +20,7 @@ import Sync from './pages/wallet/Sync'
 import Disconnected from './pages/wallet/Disconnected'
 import EvmModelPage from './pages/wallet/models/EvmModelPage'
 import CardanoModelPage from './pages/wallet/models/CardanoModelPage'
+import CosmosModelPage from './pages/wallet/models/CosmosModelPage'
 import MoneroModelPage from './pages/wallet/models/MoneroModelPage'
 import UtxoAssetsModelPage from './pages/wallet/models/UtxoAssetsModelPage'
 import UtxoClassicModelPage from './pages/wallet/models/UtxoClassicModelPage'
@@ -166,6 +167,7 @@ function App() {
             <Route path="model/utxo-classic" element={<UtxoClassicModelPage />} />
             <Route path="model/xrp" element={<XrpModelPage />} />
             <Route path="model/evm" element={<EvmModelPage />} />
+            <Route path="model/cosmos" element={<CosmosModelPage />} />
             <Route path="model/cardano" element={<CardanoModelPage />} />
             <Route path="model/monero" element={<MoneroModelPage />} />
             <Route path="model/generic" element={<GenericModelPage />} />

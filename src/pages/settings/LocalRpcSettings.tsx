@@ -234,7 +234,11 @@ const LocalRpcSettings: React.FC = () => {
   } = useWalletStore()
 
   // Only show UTXO networks that have a local RPC default
-  const utxoNetworks = networks.filter(n => n.coinType === 'UTXO' && resolveNetworkCapabilities(n).features.nativeSend)
+  const utxoNetworks = networks.filter((n) => {
+    const modelId = String(n.runtimeModelId || n.id || '').trim().toLowerCase()
+    const isCosmosLike = modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos'
+    return n.coinType === 'UTXO' && !isCosmosLike && resolveNetworkCapabilities(n).features.nativeSend
+  })
 
   const getSaved = (networkId: string) => {
     const saved = localRpcOverrides[networkId]

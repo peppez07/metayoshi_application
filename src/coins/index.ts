@@ -1,5 +1,6 @@
 import { baseCoin } from './base'
 import { btczCoin } from './btcz'
+import { cosmosCoin } from './cosmos'
 import { dashCoin } from './dash'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
@@ -51,6 +52,7 @@ const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   ethCoin,
   baseCoin,
+  cosmosCoin,
   solCoin,
   firoCoin,
   dashCoin,
@@ -341,8 +343,31 @@ function isLikelyTokenServerCoin(coin: ServerCoinRow): boolean {
 
 const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   raptoreum: 'rtm',
+  atomone: 'cosmos',
+  axelar: 'cosmos',
+  babylon: 'cosmos',
+  bitcanna: 'cosmos',
   dogecoin: 'doge',
   bitcoinz: 'btcz',
+  celestia: 'cosmos',
+  chihuahua: 'cosmos',
+  comdex: 'cosmos',
+  cosmos: 'cosmos',
+  coreum: 'cosmos',
+  evmos: 'cosmos',
+  injective: 'cosmos',
+  juno: 'cosmos',
+  kujira: 'cosmos',
+  neutron: 'cosmos',
+  osmosis: 'cosmos',
+  persistence: 'cosmos',
+  quicksilver: 'cosmos',
+  regen: 'cosmos',
+  sei: 'cosmos',
+  stargaze: 'cosmos',
+  stride: 'cosmos',
+  terra: 'cosmos',
+  'terra-classic': 'cosmos',
   tidecoin: 'tide',
   firo: 'firo',
   xrp: 'xrp',
@@ -566,6 +591,7 @@ type NetworkCandidate = {
 }
 
 const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
+const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos'])
 function flattenServerMethodGroups(methodGroups: Record<string, string[]> | undefined): string[] {
   if (!methodGroups || typeof methodGroups !== 'object') return []
   const out: string[] = []
@@ -819,6 +845,11 @@ function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string): strin
       return `eth-l2--${sanitizeServerCoinId(normalizedServerCoinId)}`
     }
 
+    return `${normalizedBaseNetworkId}--${sanitizeServerCoinId(normalizedServerCoinId)}`
+  }
+
+  if (COSMOS_MODEL_NETWORK_IDS.has(normalizedBaseNetworkId)) {
+    if (normalizedServerCoinId === 'cosmos') return normalizedBaseNetworkId
     return `${normalizedBaseNetworkId}--${sanitizeServerCoinId(normalizedServerCoinId)}`
   }
 

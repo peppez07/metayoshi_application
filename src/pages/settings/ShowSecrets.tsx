@@ -12,8 +12,10 @@ import {
 } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 import { ethers } from 'ethers'
+import { deriveCosmosAddress, resolveCosmosAddressConfig } from '../../lib/cosmosAddress'
 import { deriveUtxoAddress } from '../../lib/utxoAddress'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 const ShowSecrets: React.FC = () => {
   const { sessionMnemonic, accounts, activeAccountId, networks, activeNetworkId } = useWalletStore()
@@ -51,10 +53,22 @@ const ShowSecrets: React.FC = () => {
       }
 
       try {
+        const modelId = resolveRuntimeModelId(activeNetwork)
         if (activeNetwork.coinType === 'EVM') {
           const path = `m/44'/60'/${derivationIndex}'/0/0`
           const wallet = ethers.HDNodeWallet.fromPhrase(decryptedMnemonic, undefined, path)
           if (!cancelled) setDerivedPrivKey(wallet.privateKey)
+          return
+        }
+
+        if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') {
+          const cosmosCfg = resolveCosmosAddressConfig({
+            runtimeModelId: activeNetwork.runtimeModelId,
+            serverCoinId: activeNetwork.serverCoinId,
+            id: activeNetwork.id
+          })
+          const derived = await deriveCosmosAddress(decryptedMnemonic, derivationIndex, cosmosCfg)
+          if (!cancelled) setDerivedPrivKey(derived.privHex)
           return
         }
 

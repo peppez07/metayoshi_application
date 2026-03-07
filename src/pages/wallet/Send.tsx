@@ -38,6 +38,8 @@ function parseCoinAmount(value: unknown): number {
 }
 
 function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
+  const modelId = String((network as any)?.runtimeModelId || (network as any)?.id || '').trim().toLowerCase()
+  if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 0.0025
   if (network.coinType === 'UTXO') {
     const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
     let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))

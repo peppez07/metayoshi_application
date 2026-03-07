@@ -1677,17 +1677,29 @@ function isCroCosmosModel(network?: Partial<Network>): boolean {
   return isCroCosmosNetwork(network)
 }
 
-function resolveCosmosNetworkConfig(network?: Partial<Network>): { hrp: string; coinType: number } {
+function resolveCosmosNetworkConfig(network?: Partial<Network>): {
+  hrp: string
+  coinType: number
+  decimals: number
+  nativeDenom: string
+  feeDenom: string
+  feeAmountRaw: string
+  gasLimit: string
+} {
   const cfg = resolveCosmosAddressConfig({
     runtimeModelId: String(network?.runtimeModelId || '').trim(),
     serverCoinId: String(network?.serverCoinId || '').trim(),
     id: String(network?.id || '').trim()
   })
-  return { hrp: cfg.hrp, coinType: cfg.coinType }
-}
-
-function resolveCosmosNativeDenom(): string {
-  return String((import.meta as any)?.env?.VITE_COSMOS_NATIVE_DENOM || 'uatom').trim() || 'uatom'
+  return {
+    hrp: cfg.hrp,
+    coinType: cfg.coinType,
+    decimals: cfg.decimals,
+    nativeDenom: cfg.nativeDenom,
+    feeDenom: cfg.feeDenom,
+    feeAmountRaw: cfg.feeAmountRaw,
+    gasLimit: cfg.gasLimit
+  }
 }
 
 function parseDecimalToAtomicUnits(value: string, decimals: number, label: string): bigint {
@@ -3276,6 +3288,7 @@ export const useWalletStore = create<WalletState>()(
               owner: address
             })
             const assets: Record<string, number> = {}
+            const labels: Record<string, string> = {}
             for (const row of rows) {
               const tokenId = String(row.tokenId || '').trim()
               if (!tokenId) continue
@@ -3284,6 +3297,8 @@ export const useWalletStore = create<WalletState>()(
               const qty = Number(rawQtyText)
               if (!Number.isFinite(qty) || qty <= 0) continue
               assets[tokenId] = Math.round(qty * 1e8)
+              const label = String(row.symbol || row.name || tokenId).trim()
+              if (label) labels[tokenId] = label
             }
             set((state) => ({
               networkAssets: {
@@ -3296,13 +3311,13 @@ export const useWalletStore = create<WalletState>()(
               },
               networkAssetLabels: {
                 ...state.networkAssetLabels,
-                [activeNetworkId]: {}
+                [activeNetworkId]: labels
               }
             }))
 
             networkAssetsCache.get(
               cacheKey,
-              async () => ({ assets, logos: {}, labels: {} }),
+              async () => ({ assets, logos: {}, labels }),
               undefined,
               { force: true }
             ).catch(() => {})
@@ -4488,7 +4503,10 @@ export const useWalletStore = create<WalletState>()(
                 fromAddress: derived.address,
                 contractAddress: contractAsset.contract,
                 executeMsg,
-                privateKeyHex: derived.privHex
+                privateKeyHex: derived.privHex,
+                feeDenom: cosmosCfg.feeDenom,
+                feeAmountRaw: cosmosCfg.feeAmountRaw,
+                gasLimit: cosmosCfg.gasLimit
               })
             } else {
               if (amountRawText !== '1') {
@@ -4505,7 +4523,10 @@ export const useWalletStore = create<WalletState>()(
                 fromAddress: derived.address,
                 contractAddress: contractAsset.contract,
                 executeMsg,
-                privateKeyHex: derived.privHex
+                privateKeyHex: derived.privHex,
+                feeDenom: cosmosCfg.feeDenom,
+                feeAmountRaw: cosmosCfg.feeAmountRaw,
+                gasLimit: cosmosCfg.gasLimit
               })
             }
           } else {
@@ -4515,7 +4536,10 @@ export const useWalletStore = create<WalletState>()(
               toAddress: recipient,
               denom,
               amountRaw: amountRawText,
-              privateKeyHex: derived.privHex
+              privateKeyHex: derived.privHex,
+              feeDenom: cosmosCfg.feeDenom,
+              feeAmountRaw: cosmosCfg.feeAmountRaw,
+              gasLimit: cosmosCfg.gasLimit
             })
           }
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
@@ -5840,8 +5864,7 @@ export const useWalletStore = create<WalletState>()(
 
         if (modelId === 'cosmos') {
           const cosmosCfg = resolveCosmosNetworkConfig(net)
-          const nativeDenom = resolveCosmosNativeDenom()
-          const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), 6, net.symbol)
+          const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), cosmosCfg.decimals, net.symbol)
           const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)
           if (String(senderAddress || '').trim() !== derived.address) {
             throw new Error(`Active COSMOS address does not match derived signer address (${senderAddress} != ${derived.address})`)
@@ -5850,14 +5873,17 @@ export const useWalletStore = create<WalletState>()(
             rpcUrl: net.rpcUrl,
             fromAddress: derived.address,
             toAddress: String(to || '').trim(),
-            denom: nativeDenom,
+            denom: cosmosCfg.nativeDenom,
             amountRaw: amountRaw.toString(),
-            privateKeyHex: derived.privHex
+            privateKeyHex: derived.privHex,
+            feeDenom: cosmosCfg.feeDenom,
+            feeAmountRaw: cosmosCfg.feeAmountRaw,
+            gasLimit: cosmosCfg.gasLimit
           })
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
             coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
             chain: String(net.serverChain || 'main').trim() || 'main',
-            tokenId: nativeDenom,
+            tokenId: cosmosCfg.nativeDenom,
             toAddress: String(to || '').trim(),
             fromAddress: derived.address,
             amount: amountRaw.toString(),

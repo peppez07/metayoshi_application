@@ -6,6 +6,7 @@ export type CoinModelFamily =
   | 'utxo-classic'
   | 'xrp-ledger'
   | 'evm'
+  | 'cosmos'
   | 'cardano'
   | 'monero'
   | 'generic'
@@ -15,23 +16,26 @@ export type CoinModelRouteKey =
   | 'utxo-classic'
   | 'xrp'
   | 'evm'
+  | 'cosmos'
   | 'cardano'
   | 'monero'
   | 'generic'
 
 const COIN_MODEL_FAMILY_SORT_ORDER: Record<CoinModelFamily, number> = {
   evm: 0,
-  'utxo-assets': 1,
-  'utxo-classic': 2,
-  'xrp-ledger': 3,
-  cardano: 4,
-  monero: 5,
-  generic: 6
+  cosmos: 1,
+  'utxo-assets': 2,
+  'utxo-classic': 3,
+  'xrp-ledger': 4,
+  cardano: 5,
+  monero: 6,
+  generic: 7
 }
 
 export function resolveCoinModelFamily(network: Network): CoinModelFamily {
   const modelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
   if (modelId === 'ada') return 'cardano'
+  if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 'cosmos'
   if (modelId === 'xmr') return 'monero'
   if (network.coinType === 'EVM') return 'evm'
   if (network.coinType === 'XRP') return 'xrp-ledger'
@@ -55,6 +59,7 @@ export function coinModelRouteKeyToFamily(route: string): CoinModelFamily {
     route === 'utxo-assets'
     || route === 'utxo-classic'
     || route === 'evm'
+    || route === 'cosmos'
     || route === 'cardano'
     || route === 'monero'
     || route === 'generic'
