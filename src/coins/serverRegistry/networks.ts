@@ -159,8 +159,8 @@ export function resolveBridgeUrlForNetwork(
 
 export function createGenericServerNetwork(input: {
   apiBaseUrl: string
-  defaultBridgeUser: string
-  defaultBridgePassword: string
+  defaultBridgeUser?: string
+  defaultBridgePassword?: string
   coinId: string
   coin: ServerCoinRow
   chain: 'main' | 'test'
@@ -187,8 +187,8 @@ export function createGenericServerNetwork(input: {
     rpcUsername: String(input.selectedNetwork?.rpcUser || '').trim(),
     rpcPassword: '',
     bridgeUrl: `${input.apiBaseUrl}/v1/bridge/${input.coinId}/${input.chain}`,
-    bridgeUsername: input.defaultBridgeUser,
-    bridgePassword: input.defaultBridgePassword,
+    bridgeUsername: input.defaultBridgeUser || undefined,
+    bridgePassword: input.defaultBridgePassword || undefined,
     derivation: {
       status: 'unsupported',
       reason: `${input.coinId} address derivation is not supported in this build`

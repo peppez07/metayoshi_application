@@ -23,8 +23,8 @@ import type { NetworkCandidate, ServerCoinCatalogItem, ServerCoinRow } from './t
 export async function loadServerRegistrySnapshotFromApi(input: {
   apiBaseUrl: string
   appApiKey: string
-  defaultBridgeUser: string
-  defaultBridgePassword: string
+  defaultBridgeUser?: string
+  defaultBridgePassword?: string
   allNetworks: Network[]
   allCoinIds: Set<string>
 }): Promise<{
@@ -82,8 +82,8 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         rpcWallet: rpcWallet || base.rpcWallet || '',
         rpcUsername: String(selectedNetwork?.rpcUser || base.rpcUsername || '').trim(),
         bridgeUrl: resolveBridgeUrlForNetwork(input.apiBaseUrl, modelNetworkId, coinId, chain, rpcWallet),
-        bridgeUsername: input.defaultBridgeUser,
-        bridgePassword: input.defaultBridgePassword,
+        bridgeUsername: input.defaultBridgeUser || undefined,
+        bridgePassword: input.defaultBridgePassword || undefined,
         capabilities: mergedCapabilities
       }
       if (!isNetworkSpendable(mappedNetwork)) continue

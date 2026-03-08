@@ -630,10 +630,7 @@ async function createUtxoRpcConfig(
   } = {}
 ): Promise<UtxoRpcConfig> {
   const override = opts.localRpcOverride
-  const effectiveBridgePassword = String(net.bridgePassword || '').trim()
-  const bridgeTxKeyCandidates = await resolveBridgeTxKeyCandidates({
-    fallbackSecret: effectiveBridgePassword
-  })
+  const bridgeTxKeyCandidates = await resolveBridgeTxKeyCandidates()
   const bridgeTxKey = bridgeTxKeyCandidates[0]
   const secureBridgeWritesEnabled = (() => {
     return getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)

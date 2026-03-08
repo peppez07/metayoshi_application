@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { IoRefresh, IoWarningOutline, IoCloseCircleOutline } from 'react-icons/io5'
 import clsx from 'clsx'
+import { assertBridgeCredentialsConfigured } from '../lib/bridgeCredentials'
 import { useWalletStore } from '../store/walletStore'
 import type { Network } from '../store/walletStore'
 import { getModelIconFrameClass } from '../buildConfig'
@@ -82,6 +83,12 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
   }
 
   // 3) Optional bridge smoke check
+  assertBridgeCredentialsConfigured({
+    bridgeUrl: network.bridgeUrl,
+    bridgeUsername: network.bridgeUsername,
+    bridgePassword: network.bridgePassword,
+    name: network.name
+  })
   const auth = buildBasicAuth(network)
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'

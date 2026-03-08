@@ -4,6 +4,7 @@ import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { recordRuntimeError } from './runtimeErrorMonitor'
 import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { getBuildFeatureFlag } from '../buildConfig'
+import { assertBridgeCredentialsConfigured } from './bridgeCredentials'
 
 // UTXO JSON-RPC client — all production connections go through the public bridge gateway.
 //
@@ -78,12 +79,32 @@ function resolveConnection(config: UtxoRpcConfig): {
       'Enable Local RPC mode in Settings → Local Node RPC.'
     )
   }
+  assertBridgeCredentialsConfigured({
+    bridgeUrl: config.bridgeUrl,
+    bridgeUsername: config.bridgeUsername,
+    bridgePassword: config.bridgePassword,
+    name: config.networkId || config.coinSymbol || 'bridge transport'
+  })
   return {
     url: config.bridgeUrl.trim(),
     username: config.bridgeUsername,
     password: config.bridgePassword,
     isBridge: true
   }
+}
+
+function applyBridgeBasicAuthHeaders(
+  headers: Record<string, string>,
+  config: UtxoRpcConfig,
+  label: string
+): void {
+  assertBridgeCredentialsConfigured({
+    bridgeUrl: config.bridgeUrl,
+    bridgeUsername: config.bridgeUsername,
+    bridgePassword: config.bridgePassword,
+    name: label
+  })
+  headers['Authorization'] = `Basic ${btoa(`${config.bridgeUsername!}:${config.bridgePassword!}`)}`
 }
 
 function asError(error: unknown): Error {
@@ -501,9 +522,7 @@ async function fetchBridgeAddressAssetUtxos(
 
   const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos${params.toString() ? `?${params.toString()}` : ''}`
   const headers: Record<string, string> = {}
-  if (config.bridgeUsername && config.bridgePassword) {
-    headers['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
-  }
+  applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'asset UTXO lookup')
 
   const res = await fetch(url, { method: 'GET', headers })
   if (!res.ok) return []
@@ -2475,9 +2494,7 @@ export async function sendRtmAsset(
   const dedupedSendUrls = Array.from(new Set(sendUrlCandidates))
 
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (assetConfig.bridgeUsername && assetConfig.bridgePassword) {
-    baseHeaders['Authorization'] = `Basic ${btoa(`${assetConfig.bridgeUsername}:${assetConfig.bridgePassword}`)}`
-  }
+  applyBridgeBasicAuthHeaders(baseHeaders, assetConfig, assetConfig.networkId || assetConfig.coinSymbol || 'asset transfer')
   const bridgeTxKeyCandidates = dedupeStringList([
     ...(assetConfig.bridgeTxKeyCandidates || []),
     assetConfig.bridgeTxKey
@@ -2684,9 +2701,7 @@ export async function sendBridgeTokenTransfer(
 
   const url = `${apiBase}/v1/bridge/token/transfer/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (config.bridgeUsername && config.bridgePassword) {
-    baseHeaders['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
-  }
+  applyBridgeBasicAuthHeaders(baseHeaders, config, config.networkId || config.coinSymbol || 'token transfer')
 
   const txKeyCandidates = dedupeStringList([
     ...(config.bridgeTxKeyCandidates || []),
@@ -2804,9 +2819,7 @@ export async function sendBridgeEvmSignedRelay(
   const baseUrl = `${apiBase}/v1/bridge/send/${input.kind}/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const url = wallet ? `${baseUrl}/${encodeURIComponent(wallet)}` : baseUrl
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (config.bridgeUsername && config.bridgePassword) {
-    baseHeaders['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
-  }
+  applyBridgeBasicAuthHeaders(baseHeaders, config, config.networkId || config.coinSymbol || `evm relay ${input.kind}`)
 
   const txKeyCandidates = dedupeStringList([
     ...(config.bridgeTxKeyCandidates || []),
@@ -2913,9 +2926,7 @@ export async function fetchBridgeTokenBalances(
 
   const url = `${apiBase}/v1/bridge/token/balance/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (config.bridgeUsername && config.bridgePassword) {
-    headers['Authorization'] = `Basic ${btoa(`${config.bridgeUsername}:${config.bridgePassword}`)}`
-  }
+  applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'token balance')
 
   const body: Record<string, unknown> = { id: `tok-bal-${Date.now()}` }
   const owner = String(input.owner || '').trim()

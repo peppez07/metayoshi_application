@@ -15,6 +15,7 @@ import { resolveEnabledNetworkIds } from './coinSelection'
 import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
 import { validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
+import { normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import type { ServerCoinCatalogItem, ServerCoinCatalogKind } from './serverRegistry/types'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
@@ -24,8 +25,15 @@ export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile
 
 const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-const GLOBAL_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || '').trim()
-const GLOBAL_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || '').trim()
+const GLOBAL_BRIDGE_USER = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_USER)
+const GLOBAL_BRIDGE_PASSWORD = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD)
+
+if ((GLOBAL_BRIDGE_USER && !GLOBAL_BRIDGE_PASSWORD) || (!GLOBAL_BRIDGE_USER && GLOBAL_BRIDGE_PASSWORD)) {
+  throw new Error(
+    'Bridge credentials are partially configured. ' +
+    'Set both VITE_BRIDGE_USER and VITE_BRIDGE_PASSWORD, or leave both unset.'
+  )
+}
 
 if (!API_BASE_URL) {
   throw new Error('VITE_API_BASE_URL is required. Set it in your environment (for example .env.local).')
@@ -128,9 +136,6 @@ export function estimateNetworkFee(networkId: string, txBytes: number): number |
   return undefined
 }
 
-const DEFAULT_BRIDGE_USER = String((import.meta as any)?.env?.VITE_BRIDGE_USER || 'bridgeuser').trim() || 'bridgeuser'
-const DEFAULT_BRIDGE_PASSWORD = String((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD || 'bridgepass').trim() || 'bridgepass'
-
 validateEthereumLayer2NetworkIdMapping()
 validateEthereumLayer2NetworkIdMapping()
 
@@ -141,8 +146,8 @@ export async function loadServerRegistrySnapshot(): Promise<{
   return loadServerRegistrySnapshotFromApi({
     apiBaseUrl: API_BASE_URL,
     appApiKey: APP_API_KEY,
-    defaultBridgeUser: DEFAULT_BRIDGE_USER,
-    defaultBridgePassword: DEFAULT_BRIDGE_PASSWORD,
+    defaultBridgeUser: GLOBAL_BRIDGE_USER,
+    defaultBridgePassword: GLOBAL_BRIDGE_PASSWORD,
     allNetworks: ALL_NETWORKS,
     allCoinIds: ALL_COIN_IDS
   })

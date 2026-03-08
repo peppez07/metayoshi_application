@@ -1,3 +1,4 @@
+import { readBridgeCredentialsFromEnv } from '../lib/bridgeCredentials'
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const FULL_ASSET_CAPABILITIES: NetworkCapabilitiesInput = {
@@ -13,23 +14,19 @@ export const NATIVE_ONLY_CAPABILITIES: NetworkCapabilitiesInput = {
 type BridgeCredentialConfig = {
   userEnvKey?: string
   passEnvKey?: string
-  fallbackUser?: string
-  fallbackPass?: string
+  label?: string
 }
 
 export function resolveBridgeCredentials(config?: BridgeCredentialConfig): {
-  bridgeUsername: string
-  bridgePassword: string
+  bridgeUsername?: string
+  bridgePassword?: string
 } {
-  const fallbackUser = String(config?.fallbackUser || 'bridgeuser').trim() || 'bridgeuser'
-  const fallbackPass = String(config?.fallbackPass || 'bridgepass').trim() || 'bridgepass'
-  const userEnvKey = String(config?.userEnvKey || 'VITE_BRIDGE_USER').trim()
-  const passEnvKey = String(config?.passEnvKey || 'VITE_BRIDGE_PASSWORD').trim()
-
   const env = (import.meta as any)?.env || {}
-  const bridgeUsername = String(env[userEnvKey] || fallbackUser).trim() || fallbackUser
-  const bridgePassword = String(env[passEnvKey] || fallbackPass).trim() || fallbackPass
-  return { bridgeUsername, bridgePassword }
+  return readBridgeCredentialsFromEnv(env, {
+    userEnvKey: config?.userEnvKey,
+    passEnvKey: config?.passEnvKey,
+    label: config?.label
+  })
 }
 
 type EvmCoinFactoryConfig = {
@@ -71,8 +68,11 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
     rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, 'main'),
-    bridgeUsername: String(env[config.bridgeUserEnvKey] || 'bridgeuser').trim() || 'bridgeuser',
-    bridgePassword: String(env[config.bridgePasswordEnvKey] || 'bridgepass').trim() || 'bridgepass',
+    ...readBridgeCredentialsFromEnv(env, {
+      userEnvKey: config.bridgeUserEnvKey,
+      passEnvKey: config.bridgePasswordEnvKey,
+      label: config.id
+    }),
     explorerUrl: String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim() || config.defaultExplorerUrl,
     capabilities,
     logo: config.logo
