@@ -2737,24 +2737,12 @@ export const useWalletStore = create<WalletState>()(
             const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
 
             try {
-              const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+              await fetchBridgeTokenBalances(rpcConfig, {
                 coin: bridgeCoin,
                 chain: bridgeChain,
                 owner: address,
                 wallet: String(net.rpcWallet || '').trim() || undefined
               })
-              const bridgeBuckets = buildEvmAssetBucketsFromBridgeRows(bridgeRows, chainId)
-              if (Object.keys(bridgeBuckets.assets).length > 0) {
-                set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, bridgeBuckets))
-
-                networkAssetsCache.get(
-                  cacheKey,
-                  async () => bridgeBuckets,
-                  undefined,
-                  { force: true }
-                ).catch(() => {})
-                return
-              }
             } catch {
               // Fall through to slower RPC/explorer scan.
             }
