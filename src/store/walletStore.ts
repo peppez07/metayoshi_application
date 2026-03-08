@@ -109,6 +109,7 @@ export interface FullBackupV1 {
   networkAssets: Record<string, Record<string, number>>
   sendListPreferences?: Record<string, SendListPreferenceBucket>
   networkModelPreferences?: Record<string, NetworkModelPreferences>
+  onboardingCompleted?: boolean
 }
 
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
@@ -204,6 +205,7 @@ interface WalletState {
   backupConfirmed: boolean
   createdAt: number | null
   sessionMnemonic: string | null
+  onboardingCompleted: boolean
 
   // Wallet state
   accounts: Account[]
@@ -280,6 +282,7 @@ interface WalletState {
   setLocked: (locked: boolean) => void
   setInitialized: (initialized: boolean) => void
   setBackupConfirmed: (confirmed: boolean) => void
+  setOnboardingCompleted: (completed: boolean) => void
   wipeVault: () => void
   
   setActiveAccount: (id: string) => void
@@ -2342,6 +2345,7 @@ export const useWalletStore = create<WalletState>()(
       backupConfirmed: false,
       createdAt: null,
       sessionMnemonic: null,
+      onboardingCompleted: false,
       
       accounts: [],
       nextAccountIndex: 1,
@@ -2432,6 +2436,7 @@ export const useWalletStore = create<WalletState>()(
           backupConfirmed: false,
           createdAt: Date.now(),
           sessionMnemonic: normalizedMnemonic,
+          onboardingCompleted: false,
           accounts: [initialAccount],
           nextAccountIndex: 1,
           activeAccountId: 'acc-1',
@@ -2551,6 +2556,7 @@ export const useWalletStore = create<WalletState>()(
       setLocked: (locked) => set({ isLocked: locked }),
       setInitialized: (initialized) => set({ isInitialized: initialized }),
       setBackupConfirmed: (confirmed) => set({ backupConfirmed: confirmed }),
+      setOnboardingCompleted: (completed) => set({ onboardingCompleted: completed }),
       wipeVault: () =>
         set({
           isInitialized: false,
@@ -2560,6 +2566,7 @@ export const useWalletStore = create<WalletState>()(
           backupConfirmed: false,
           createdAt: null,
           sessionMnemonic: null,
+          onboardingCompleted: false,
           accounts: [],
           nextAccountIndex: 1,
           activeAccountId: null,
@@ -4794,6 +4801,7 @@ export const useWalletStore = create<WalletState>()(
           backupConfirmed:  backup.backupConfirmed ?? true,
           createdAt:        backup.createdAt ?? Date.now(),
           sessionMnemonic:  normalizedMnemonic,
+          onboardingCompleted: backup.onboardingCompleted ?? false,
           accounts:         reHydratedAccounts,
           nextAccountIndex: backup.nextAccountIndex ?? reHydratedAccounts.length,
           activeAccountId:  safeActiveAccountId,
@@ -6012,6 +6020,7 @@ export const useWalletStore = create<WalletState>()(
         backupConfirmed: state.backupConfirmed,
         createdAt: state.createdAt,
         accounts: state.accounts,
+        onboardingCompleted: state.onboardingCompleted,
         nextAccountIndex: state.nextAccountIndex,
         activeAccountId: state.activeAccountId,
         activeNetworkId: state.activeNetworkId,
@@ -6067,6 +6076,10 @@ export const useWalletStore = create<WalletState>()(
           activeNetworkId,
           activeAccountId
         })
+        const onboardingCompleted =
+          typeof (persisted as any).onboardingCompleted === 'boolean'
+            ? Boolean((persisted as any).onboardingCompleted)
+            : Boolean(merged.isInitialized || merged.hasVault)
         const autolockMinutes = Math.max(1, Number(merged.autolockMinutes ?? 5))
         const lastActiveTimestamp = Number(merged.lastActiveTimestamp ?? Date.now())
         const shouldAutolockOnHydration = Boolean(
@@ -6079,6 +6092,7 @@ export const useWalletStore = create<WalletState>()(
           ...merged,
           isLocked: shouldAutolockOnHydration ? true : merged.isLocked,
           accounts: accountsWithActiveNetworkBalance,
+          onboardingCompleted,
           nextAccountIndex,
           activeAccountId,
           networks: normalizedNetworks,

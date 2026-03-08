@@ -43,6 +43,7 @@ const BackupSettings: React.FC = () => {
     autolockMinutes,
     donationPercent,
     backupConfirmed,
+    onboardingCompleted,
     networkAssets,
     sendListPreferences,
     networkModelPreferences,
@@ -106,6 +107,7 @@ const BackupSettings: React.FC = () => {
       autolockMinutes,
       donationPercent,
       backupConfirmed,
+      onboardingCompleted,
       networkAssets,
       sendListPreferences,
       networkModelPreferences

@@ -115,7 +115,7 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
 
 const Connecting: React.FC = () => {
   const navigate = useNavigate()
-  const { ensureNetworkAddress, refreshActiveBalance, activeNetworkId, networks } = useWalletStore()
+  const { ensureNetworkAddress, refreshActiveBalance, activeNetworkId, networks, onboardingCompleted } = useWalletStore()
 
   const [status, setStatus] = useState('Initialising wallet...')
   const [phase, setPhase] = useState<Phase>('connecting')
@@ -180,8 +180,8 @@ const Connecting: React.FC = () => {
       await sleep(3000)
     }
 
-    navigate('/wallet/assets')
-  }, [ensureNetworkAddress, refreshActiveBalance, activeNetworkId, activeNetwork, navigate])
+    navigate(onboardingCompleted ? '/wallet/assets' : '/welcome')
+  }, [ensureNetworkAddress, refreshActiveBalance, activeNetworkId, activeNetwork, navigate, onboardingCompleted])
 
   useEffect(() => {
     const timer = setTimeout(() => { void connect() }, 300)

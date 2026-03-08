@@ -3,7 +3,7 @@ export type ThemeMode = 'dark' | 'light'
 const STORAGE_KEY = 'metayoshi.theme.mode'
 
 function normalizeThemeMode(value: unknown): ThemeMode {
-  return String(value || '').trim().toLowerCase() === 'light' ? 'light' : 'dark'
+  return String(value || '').trim().toLowerCase() === 'dark' ? 'dark' : 'light'
 }
 
 export function getStoredThemeMode(): ThemeMode {
@@ -11,7 +11,7 @@ export function getStoredThemeMode(): ThemeMode {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     return normalizeThemeMode(raw)
   } catch {
-    return 'dark'
+    return 'light'
   }
 }
 

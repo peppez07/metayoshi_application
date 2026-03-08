@@ -157,7 +157,7 @@ const SECTIONS: TermSection[] = [
     title: '14. Contact',
     body: (
       <p>
-        Questions about these Terms can be sent to <code>admin@metayoshi.app</code>.
+        Questions about these Terms can be sent to <code>support@metayoshi.app</code>.
       </p>
     ),
   },

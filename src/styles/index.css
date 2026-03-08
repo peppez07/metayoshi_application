@@ -271,6 +271,10 @@ html.theme-light .hover\:text-white:hover {
   color: rgb(var(--color-text-primary)) !important;
 }
 
+html.theme-light .text-gray-100 {
+  color: rgb(var(--color-text-primary)) !important;
+}
+
 html.theme-light .text-gray-200 {
   color: rgb(var(--color-text-muted-200)) !important;
 }
@@ -289,6 +293,30 @@ html.theme-light .text-gray-500 {
 
 html.theme-light .text-gray-600 {
   color: rgb(var(--color-text-muted-600)) !important;
+}
+
+html.theme-light .text-orange-100 {
+  color: rgb(154, 52, 18) !important;
+}
+
+html.theme-light .text-orange-200 {
+  color: rgb(194, 65, 12) !important;
+}
+
+html.theme-light .text-orange-300 {
+  color: rgb(234, 88, 12) !important;
+}
+
+html.theme-light .text-green-200 {
+  color: rgb(22, 101, 52) !important;
+}
+
+html.theme-light .text-green-300 {
+  color: rgb(21, 128, 61) !important;
+}
+
+html.theme-light .text-red-300 {
+  color: rgb(185, 28, 28) !important;
 }
 
 html.theme-light .placeholder-gray-400::placeholder {

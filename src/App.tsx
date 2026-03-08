@@ -9,6 +9,7 @@ import { getEnabledNetworks } from './lib/networkVisibility'
 import Register from './pages/Register'
 import Unlock from './pages/Unlock'
 import Connecting from './pages/Connecting'
+import WelcomeGuide from './pages/WelcomeGuide'
 import WalletLayout from './pages/wallet/WalletLayout'
 import Assets from './pages/wallet/Assets'
 import AssetsPage from './pages/wallet/AssetsPage'
@@ -86,6 +87,21 @@ const LegacyAssetSendRedirect = () => {
   return <Navigate to="/wallet/send" replace state={assetId ? { assetId } : null} />
 }
 
+const WelcomeRouteGate = () => {
+  const { isLocked, isInitialized, hasVault, onboardingCompleted } = useWalletStore()
+  if (!hasVault || !isInitialized) return <Navigate to="/register" replace />
+  if (isLocked) return <Navigate to="/unlock" replace />
+  if (onboardingCompleted) return <WalletIndexRedirect />
+  return <WelcomeGuide />
+}
+
+const WalletShellGate = () => {
+  const { isLocked, onboardingCompleted } = useWalletStore()
+  if (isLocked) return <Navigate to="/unlock" replace />
+  if (!onboardingCompleted) return <Navigate to="/welcome" replace />
+  return <WalletLayout />
+}
+
 const TxRouteGate = ({ element }: { element: ReactElement }) => {
   const { isLocked, networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
@@ -102,6 +118,7 @@ function App() {
     isLocked,
     isInitialized,
     hasVault,
+    onboardingCompleted,
     checkAutolock,
     sessionMnemonic,
     lock,
@@ -215,11 +232,12 @@ function App() {
           <Route path="/register" element={hasVault ? <Navigate to="/unlock" replace /> : <Register />} />
           <Route path="/terms" element={<TermsAndRules />} />
           <Route path="/unlock" element={<Unlock />} />
+          <Route path="/welcome" element={<WelcomeRouteGate />} />
           
           {/* Main Wallet Flow */}
           <Route path="/connecting" element={<Connecting />} />
           
-          <Route path="/wallet" element={isLocked ? <Navigate to="/unlock" /> : <WalletLayout />}>
+          <Route path="/wallet" element={<WalletShellGate />}>
             <Route index element={<WalletIndexRedirect />} />
             <Route path="assets" element={<AssetsRouteGate />} />
             <Route path="activity" element={<Activity />} />
@@ -239,9 +257,9 @@ function App() {
           </Route>
 
           {/* Full Assets Page */}
-          <Route path="/assets" element={isLocked ? <Navigate to="/unlock" /> : <AssetsPage />} />
-          <Route path="/assets/send" element={isLocked ? <Navigate to="/unlock" /> : <LegacyAssetSendRedirect />} />
-          <Route path="/assets/preview" element={isLocked ? <Navigate to="/unlock" /> : <AssetPreviewPage />} />
+          <Route path="/assets" element={isLocked ? <Navigate to="/unlock" /> : (!onboardingCompleted ? <Navigate to="/welcome" replace /> : <AssetsPage />)} />
+          <Route path="/assets/send" element={isLocked ? <Navigate to="/unlock" /> : (!onboardingCompleted ? <Navigate to="/welcome" replace /> : <LegacyAssetSendRedirect />)} />
+          <Route path="/assets/preview" element={isLocked ? <Navigate to="/unlock" /> : (!onboardingCompleted ? <Navigate to="/welcome" replace /> : <AssetPreviewPage />)} />
 
           {/* Dapp Flow */}
           <Route path="/dapp/connect/1" element={<DappConnectStep1 />} />
@@ -253,7 +271,7 @@ function App() {
           <Route path="/tx/reject" element={<TxRouteGate element={<TxReject />} />} />
 
           {/* Settings Flow */}
-          <Route path="/settings" element={<SettingsLayout />}>
+          <Route path="/settings" element={isLocked ? <Navigate to="/unlock" replace /> : (!onboardingCompleted ? <Navigate to="/welcome" replace /> : <SettingsLayout />)}>
             <Route index element={<MainSettings />} />
             <Route path="security" element={<SecuritySettings />} />
             <Route path="backup" element={<BackupSettings />} />
@@ -275,6 +293,7 @@ function App() {
           <Route path="*" element={
             !hasVault || !isInitialized ? <Navigate to="/register" /> : 
             isLocked ? <Navigate to="/unlock" /> : 
+            !onboardingCompleted ? <Navigate to="/welcome" replace /> :
             <WalletIndexRedirect />
           } />
         </Routes>
