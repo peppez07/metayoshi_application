@@ -1,16 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IoCheckmarkCircle } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import { PasswordGate } from '../../components/PasswordGate'
 import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
   type DappScope
 } from '../../lib/dappPermissions'
-import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
-import { compareNetworksByModelFamily } from '../../lib/coinModel'
-import { getEnabledNetworks } from '../../lib/networkVisibility'
+import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
@@ -18,91 +15,41 @@ function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'Read wallet addresses and balances'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
   if (scope === 'send_coin') return 'Request native coin transfers'
+  if (scope === 'select_account') return 'Request to switch your active wallet account'
+  if (scope === 'switch_network') return 'Switch your active wallet network for this site'
   return 'Request token/NFT transfers (ERC20/721/1155, SPL Tokens/SPL NFTs/cNFTs, CW20/721, denom assets where supported)'
 }
 
 const DappConnectStep1: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, activeAccountId, activeNetworkId, isLocked, networks, disabledNetworkIds } = useWalletStore()
-  const enabledNetworks = useMemo(
-    () => getEnabledNetworks(networks, disabledNetworkIds),
-    [networks, disabledNetworkIds]
-  )
-  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [coinFilter, setCoinFilter] = useState('all')
+  const { accounts, activeAccountId, activeNetworkId, isLocked, networks } = useWalletStore()
   const { pendingApproval, loadingApproval } = usePendingDappApproval()
 
-  useEffect(() => {
-    const defaultAccountId = activeAccountId || accounts[0]?.id
-    if (!defaultAccountId) return
-    setSelectedAccounts((current) => {
-      if (current.length > 0) return current
-      return [defaultAccountId]
-    })
-  }, [accounts, activeAccountId])
-
-  const toggleAccount = (id: string): void => {
-    setSelectedAccounts((prev) => (
-      prev.includes(id) ? prev.filter((candidate) => candidate !== id) : [...prev, id]
-    ))
-  }
-
-  const coinOptions = useMemo(
-    () => [...enabledNetworks]
-      .sort((a, b) => {
-        const familyDelta = compareNetworksByModelFamily(a, b)
-        if (familyDelta !== 0) return familyDelta
-        return a.name.localeCompare(b.name)
-      })
-      .map((network) => ({
-        id: network.id,
-        label: `${network.symbol} (${network.name})`
-      })),
-    [enabledNetworks]
+  const activeAccount = useMemo(
+    () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
+    [accounts, activeAccountId]
   )
+  const activeNetwork = useMemo(
+    () => networks.find((network) => network.id === activeNetworkId) || networks[0],
+    [networks, activeNetworkId]
+  )
+  const activeAccountName = useMemo(
+    () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
+    [activeAccount, activeNetworkId]
+  )
+  const activeAddress = useMemo(() => {
+    if (!activeAccount) return ''
 
-  const filteredAccounts = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase()
+    const networkAddress = String(activeAccount.networkAddresses?.[activeNetworkId] || '').trim()
+    if (networkAddress) return networkAddress
 
-    return accounts.filter((account) => {
-      const filteredCoinAddress = coinFilter === 'all' ? '' : String(account.networkAddresses[coinFilter] || '').trim()
-      const displayNameNetworkId = coinFilter === 'all' ? activeNetworkId : coinFilter
-      const displayName = getAccountDisplayName(account, displayNameNetworkId, account.name)
-      if (coinFilter !== 'all' && !filteredCoinAddress) return false
+    if (activeNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
+    if (activeNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
+    if (activeNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
+    if (activeNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
 
-      if (!normalizedQuery) return true
-
-      if (displayName.toLowerCase().includes(normalizedQuery)) return true
-      if (account.name.toLowerCase().includes(normalizedQuery)) return true
-      if (filteredCoinAddress.toLowerCase().includes(normalizedQuery)) return true
-
-      const allAddresses = new Set<string>([
-        ...Object.values(account.networkAddresses),
-        ...Object.values(account.addresses)
-      ])
-
-      for (const address of allAddresses) {
-        if (String(address).toLowerCase().includes(normalizedQuery)) return true
-      }
-
-      return false
-    })
-  }, [accounts, coinFilter, searchQuery, activeNetworkId])
-
-  const resolvePreviewAddress = (account: typeof accounts[number]): string => {
-    if (coinFilter !== 'all') {
-      const coinAddress = String(account.networkAddresses[coinFilter] || '').trim()
-      return coinAddress || 'No address for selected coin'
-    }
-
-    for (const option of coinOptions) {
-      const networkAddress = String(account.networkAddresses[option.id] || '').trim()
-      if (networkAddress) return networkAddress
-    }
-
-    return account.addresses.UTXO || account.addresses.EVM || 'No address'
-  }
+    return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
+  }, [activeAccount, activeNetwork, activeNetworkId])
 
   const rejectAndClose = async (): Promise<void> => {
     if (canUseChromeStorage() && pendingApproval) {
@@ -149,73 +96,40 @@ const DappConnectStep1: React.FC = () => {
               ))}
             </div>
           </div>
-          <p className="text-xs font-bold text-gray-400 uppercase">Select the account(s) to use on this site</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search account or address"
-              className="h-10 rounded-lg border border-dark-600 bg-dark-700/60 px-3 text-xs text-white placeholder:text-gray-500 outline-none focus:border-primary"
-            />
-            <select
-              value={coinFilter}
-              onChange={(event) => setCoinFilter(event.target.value)}
-              className="h-10 rounded-lg border border-dark-600 bg-dark-700/60 px-3 text-xs text-white outline-none focus:border-primary"
-            >
-              <option value="all">All coins</option>
-              {coinOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="text-[10px] text-gray-500">
-            {selectedAccounts.length} selected · {coinOptions.length} enabled networks available in SDK
-          </p>
-          <div className="space-y-2">
-            {filteredAccounts.map((account) => {
-              const previewAddress = resolvePreviewAddress(account)
-              const displayName = getAccountDisplayName(
-                account,
-                coinFilter === 'all' ? activeNetworkId : coinFilter,
-                account.name
-              )
-              return (
-                <div
-                  key={account.id}
-                  className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                    selectedAccounts.includes(account.id)
-                      ? 'border-primary bg-primary/5'
-                      : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
-                  }`}
-                  onClick={() => toggleAccount(account.id)}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-yellow-500" />
-                    <div className="flex flex-col">
-                      <span className="text-sm font-bold">{displayName}</span>
-                      <span className="text-[10px] text-gray-400 font-mono">
-                        {previewAddress.startsWith('No address')
-                          ? previewAddress
-                          : `${previewAddress.slice(0, 14)}...`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    selectedAccounts.includes(account.id) ? 'bg-primary border-primary' : 'border-dark-600'
-                  }`}>
-                    {selectedAccounts.includes(account.id) && <IoCheckmarkCircle className="text-white w-4 h-4" />}
+
+          <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Current connection</p>
+              <div className="rounded-xl border border-dark-600 bg-dark-800/80 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-yellow-500" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold truncate">{activeAccountName}</p>
+                    <p className="text-[10px] text-gray-400">{activeNetwork?.name || 'Active network'}</p>
                   </div>
                 </div>
-              )
-            })}
-            {filteredAccounts.length === 0 && (
-              <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/30 text-xs text-center text-gray-400">
-                No accounts match this filter.
+                <p className="mt-3 break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
+                  {activeAddress || 'No address available on the current active network'}
+                </p>
               </div>
-            )}
+            </div>
+
+            <div className="space-y-2 text-[11px] leading-relaxed">
+              <p className="text-gray-300">
+                This approval connects the site to your current active wallet account. MetaYoshi does not apply this
+                approval to a custom account list.
+              </p>
+              <p className="text-gray-400">
+                If the site later asks to change accounts, MetaYoshi will require a separate approval before switching
+                your active wallet account.
+              </p>
+              {!activeAddress && (
+                <p className="text-red-300">
+                  Switch to an account with an address on {activeNetwork?.name || 'the active network'} before
+                  continuing.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -224,11 +138,7 @@ const DappConnectStep1: React.FC = () => {
         <Button variant="outline" className="flex-1" onClick={() => { void rejectAndClose() }}>
           Cancel
         </Button>
-        <Button
-          className="flex-1 btn-primary"
-          onClick={() => navigate('/dapp/connect/2')}
-          disabled={selectedAccounts.length === 0}
-        >
+        <Button className="flex-1 btn-primary" onClick={() => navigate('/dapp/connect/2')} disabled={!activeAddress}>
           Next
         </Button>
       </footer>

@@ -68,6 +68,8 @@ type ProviderCapabilities = {
     sign: boolean
     send_coin: boolean
     send_asset: boolean
+    select_account: boolean
+    switch_network: boolean
   }
   methods: string[]
   networks: ProviderNetwork[]

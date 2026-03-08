@@ -7,8 +7,8 @@ import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
   type DappScope
 } from '../../lib/dappPermissions'
-import { useWalletStore } from '../../store/walletStore'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
@@ -16,22 +16,41 @@ function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'View your wallet address and balances'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
   if (scope === 'send_coin') return 'Suggest native coin transactions'
+  if (scope === 'select_account') return 'Request to switch your active wallet account'
+  if (scope === 'switch_network') return 'Switch the active wallet network'
   return 'Suggest token and NFT transfer transactions'
 }
 
 const DappConnectStep2: React.FC = () => {
   const navigate = useNavigate()
-  const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, isLocked } = useWalletStore()
+  const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, isLocked, networks } = useWalletStore()
   const { pendingApproval, loadingApproval } = usePendingDappApproval()
 
   const activeAccount = useMemo(
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
+  const activeNetwork = useMemo(
+    () => networks.find((network) => network.id === activeNetworkId) || networks[0],
+    [networks, activeNetworkId]
+  )
   const activeAccountName = useMemo(
     () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
     [activeAccount, activeNetworkId]
   )
+  const activeAddress = useMemo(() => {
+    if (!activeAccount) return ''
+
+    const networkAddress = String(activeAccount.networkAddresses?.[activeNetworkId] || '').trim()
+    if (networkAddress) return networkAddress
+
+    if (activeNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
+    if (activeNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
+    if (activeNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
+    if (activeNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
+
+    return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
+  }, [activeAccount, activeNetwork, activeNetworkId])
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
     if (!pendingApproval || !canUseChromeStorage()) {
@@ -92,6 +111,21 @@ const DappConnectStep2: React.FC = () => {
             </ul>
           </div>
 
+          <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
+            <p className="text-xs font-bold text-gray-400 uppercase">Connection summary</p>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              This site will connect to your current active wallet account on {activeNetwork?.name || 'the active network'}.
+              It will not receive a custom list of selected accounts from this approval.
+            </p>
+            <p className="break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
+              {activeAddress || 'No address available on the current active network'}
+            </p>
+            <p className="text-[10px] text-gray-500 leading-tight">
+              If the site later requests an account change, MetaYoshi will prompt again before switching your active
+              wallet account.
+            </p>
+          </div>
+
           <p className="text-[10px] text-gray-500 leading-tight">
             Only connect with trusted sites. Asset scope includes ERC20/ERC721/ERC1155 on EVM, SPL Tokens/SPL NFTs/Compressed NFTs on Solana, Cosmos denom/CW20/CW721 where enabled, and other network-native asset layers.
           </p>
@@ -102,7 +136,7 @@ const DappConnectStep2: React.FC = () => {
         <Button variant="outline" className="flex-1" onClick={() => { void finishApproval('rejected') }}>
           Cancel
         </Button>
-        <Button className="flex-1 btn-primary" onClick={() => { void finishApproval('approved') }}>
+        <Button className="flex-1 btn-primary" onClick={() => { void finishApproval('approved') }} disabled={!activeAddress}>
           Connect
         </Button>
       </footer>

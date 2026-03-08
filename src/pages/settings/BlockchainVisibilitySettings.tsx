@@ -5,6 +5,7 @@ import { useWalletStore } from '../../store/walletStore'
 import { compareNetworksByModelFamily } from '../../lib/coinModel'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getEnabledNetworks, normalizeDisabledNetworkIds } from '../../lib/networkVisibility'
+import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 
 const BlockchainVisibilitySettings: React.FC = () => {
   const {
@@ -52,14 +53,18 @@ const BlockchainVisibilitySettings: React.FC = () => {
         <div className="flex gap-2.5 p-3 bg-dark-700/20 border border-dark-600/60 rounded-xl">
           <IoWarningOutline className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
           <p className="text-[10px] text-gray-300 leading-relaxed">
-            Disable chains you do not need. Hidden chains are removed from wallet lists and skipped by send-hub scans to reduce RPC/TPS load.
+            Keep only the chains you really use. The wallet allows at most {MAX_ACTIVE_REFRESH_NETWORKS} active blockchains for refresh, and new wallets start with the classic 10 enabled by default.
           </p>
         </div>
+
+        <p className="text-[10px] text-gray-500">
+          {enabledCount} / {MAX_ACTIVE_REFRESH_NETWORKS} active for refresh
+        </p>
 
         <div className="space-y-2">
           {rankedNetworks.map((network) => {
             const isEnabled = !disabledSet.has(network.id)
-            const canDisable = isEnabled ? enabledCount > 1 : true
+            const canToggle = isEnabled ? enabledCount > 1 : enabledCount < MAX_ACTIVE_REFRESH_NETWORKS
             const capabilities = resolveNetworkCapabilities(network)
             return (
               <label
@@ -98,7 +103,7 @@ const BlockchainVisibilitySettings: React.FC = () => {
                   type="checkbox"
                   checked={isEnabled}
                   onChange={(event) => setNetworkEnabled(network.id, event.target.checked)}
-                  disabled={!canDisable}
+                  disabled={!canToggle}
                   className="w-4 h-4 accent-primary disabled:opacity-50"
                 />
               </label>
@@ -109,6 +114,11 @@ const BlockchainVisibilitySettings: React.FC = () => {
         {enabledCount <= 1 && (
           <p className="text-[10px] text-yellow-300">
             At least one blockchain must stay enabled.
+          </p>
+        )}
+        {enabledCount >= MAX_ACTIVE_REFRESH_NETWORKS && (
+          <p className="text-[10px] text-yellow-300">
+            Maximum active blockchains reached. Disable one before enabling another.
           </p>
         )}
       </div>

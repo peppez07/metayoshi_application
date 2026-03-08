@@ -4,7 +4,7 @@ export const DAPP_PENDING_REQUEST_STORAGE_KEY = 'metayoshi-dapp-pending-request-
 export const DAPP_APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
 export const DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE = 'Blocked internal application origin'
 
-export type DappScope = 'read' | 'sign' | 'send_coin' | 'send_asset'
+export type DappScope = 'read' | 'sign' | 'send_coin' | 'send_asset' | 'select_account' | 'switch_network'
 export type DappApprovalStatus = 'pending' | 'approved' | 'rejected'
 export type DappRequestStatus = 'pending' | 'approved' | 'rejected' | 'executed' | 'failed'
 
@@ -63,7 +63,7 @@ export interface DappPendingRequest {
   error?: DappRequestError
 }
 
-const VALID_SCOPES: DappScope[] = ['read', 'sign', 'send_coin', 'send_asset']
+const VALID_SCOPES: DappScope[] = ['read', 'sign', 'send_coin', 'send_asset', 'select_account', 'switch_network']
 
 function isDappScope(value: unknown): value is DappScope {
   return VALID_SCOPES.includes(value as DappScope)

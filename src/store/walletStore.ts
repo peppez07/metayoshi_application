@@ -54,7 +54,9 @@ import type { CoinType, Network } from '../coins'
 import type { ServerCoinCatalogItem } from '../coins'
 import { useApiMonitorStore } from './apiMonitorStore'
 import {
+  clampDisabledNetworkIdsToMaxEnabled,
   isCroCosmosModel,
+  MAX_ACTIVE_REFRESH_NETWORKS,
   normalizeActivityList,
   normalizeActivityRecord,
   normalizeDisabledNetworkIdsForState,
@@ -63,6 +65,7 @@ import {
   parseDecimalToAtomicUnits,
   remapNetworkIdKeyedRecord,
   resolveCosmosNetworkConfig,
+  resolveDefaultDisabledNetworkIds,
   resolveEnabledNetworkId,
   resolveEthereumOnlyNetworkDefaults,
   resolveKnownNetworkId,
@@ -393,7 +396,9 @@ const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
   eth: 60_000,
   firo: 45_000
 }
+const DEFAULT_UNSUPPORTED_BRIDGE_ASSET_ENDPOINT_TTL_MS = 30 * 60 * 1000
 const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
+const unsupportedBridgeAssetEndpointUntilByKey = new Map<string, number>()
 let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
 let sendOperationNextAllowedAtMs = 0
 let refreshActiveBalanceInFlight: Promise<void> | null = null
@@ -597,6 +602,50 @@ function isTransientBridgeFailure(error: unknown): boolean {
     || /rpc endpoint appears incompatible/i.test(message)
     || /deprecated v1 endpoint/i.test(message)
   )
+}
+
+type BridgeAssetEndpointKind = 'token-balance' | 'address-assets'
+
+function compactBridgeAssetErrorText(value: string, maxLen = 220): string {
+  const compact = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!compact) return ''
+  if (compact.length <= maxLen) return compact
+  return `${compact.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`
+}
+
+function isUnsupportedBridgeAssetEndpointError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    /\bhttp 501\b/i.test(message)
+    || /\b501\b.*\bnot implemented\b/i.test(message)
+    || /\bnot implemented\b/i.test(message)
+    || /\bhandler is not implemented\b/i.test(message)
+  )
+}
+
+function buildUnsupportedBridgeAssetEndpointKey(networkId: string, endpoint: BridgeAssetEndpointKind): string {
+  const normalizedNetworkId = String(networkId || '').trim().toLowerCase()
+  if (!normalizedNetworkId) return ''
+  return `${normalizedNetworkId}|${endpoint}`
+}
+
+function isUnsupportedBridgeAssetEndpointCached(networkId: string, endpoint: BridgeAssetEndpointKind): boolean {
+  const key = buildUnsupportedBridgeAssetEndpointKey(networkId, endpoint)
+  if (!key) return false
+  const until = Number(unsupportedBridgeAssetEndpointUntilByKey.get(key) || 0)
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    unsupportedBridgeAssetEndpointUntilByKey.delete(key)
+    return false
+  }
+  return true
+}
+
+function markUnsupportedBridgeAssetEndpoint(networkId: string, endpoint: BridgeAssetEndpointKind): boolean {
+  const key = buildUnsupportedBridgeAssetEndpointKey(networkId, endpoint)
+  if (!key) return false
+  const alreadyCached = isUnsupportedBridgeAssetEndpointCached(networkId, endpoint)
+  unsupportedBridgeAssetEndpointUntilByKey.set(key, Date.now() + DEFAULT_UNSUPPORTED_BRIDGE_ASSET_ENDPOINT_TTL_MS)
+  return !alreadyCached
 }
 
 function resolveTransientBridgeCooldownMs(networkId?: string): number {
@@ -1905,8 +1954,29 @@ async function discoverEvmTokenContractsFromAddressAssets(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? 10000))
   try {
-    const res = await fetch(url, { method: 'GET', headers, signal: controller.signal })
-    if (!res.ok) return []
+    let res: Response
+    try {
+      res = await fetch(url, { method: 'GET', headers, signal: controller.signal })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error(`Address asset discovery failed [timeout]: ${url}`)
+      }
+      throw error
+    }
+    if (!res.ok) {
+      const rawText = await res.text().catch(() => '')
+      const json = (() => {
+        try { return rawText ? JSON.parse(rawText) : null } catch { return null }
+      })()
+      const detail = compactBridgeAssetErrorText(String(
+        json?.error?.message
+        || json?.error
+        || json?.message
+        || rawText
+        || `HTTP ${res.status}`
+      ))
+      throw new Error(`Address asset discovery failed [HTTP ${res.status}]: ${detail}`)
+    }
     const json = await res.json().catch(() => null) as any
     const erc20Rows = Array.isArray(json?.assets?.erc20) ? json.assets.erc20 : []
     const out = new Set<string>()
@@ -2258,7 +2328,7 @@ export const useWalletStore = create<WalletState>()(
       activeAccountId: null,
       activeNetworkId: DEFAULT_ACTIVE_NETWORK_ID,
       networks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
-      disabledNetworkIds: [],
+      disabledNetworkIds: resolveDefaultDisabledNetworkIds(normalizeNetworkListSymbols(INITIAL_NETWORKS)),
       
       isConnected: false,
       isSyncing: false,
@@ -2472,7 +2542,7 @@ export const useWalletStore = create<WalletState>()(
           accounts: [],
           nextAccountIndex: 1,
           activeAccountId: null,
-          disabledNetworkIds: [],
+          disabledNetworkIds: resolveDefaultDisabledNetworkIds(normalizeNetworkListSymbols(INITIAL_NETWORKS)),
           syncPercent: null,
           lowSyncStreak: 0,
           donationPercent: MIN_DONATION_PERCENT,
@@ -2771,16 +2841,31 @@ export const useWalletStore = create<WalletState>()(
               || (activeNetworkId === 'eth' ? 'ethereum' : activeNetworkId)
             ).trim().toLowerCase()
             const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
+            let tokenBalanceEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'token-balance')
+            let addressAssetsEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'address-assets')
 
-            try {
-              await fetchBridgeTokenBalances(rpcConfig, {
-                coin: bridgeCoin,
-                chain: bridgeChain,
-                owner: address,
-                wallet: String(net.rpcWallet || '').trim() || undefined
-              })
-            } catch {
-              // Fall through to slower RPC/explorer scan.
+            if (!tokenBalanceEndpointUnsupported) {
+              try {
+                await fetchBridgeTokenBalances(rpcConfig, {
+                  coin: bridgeCoin,
+                  chain: bridgeChain,
+                  owner: address,
+                  wallet: String(net.rpcWallet || '').trim() || undefined
+                })
+              } catch (error) {
+                if (isUnsupportedBridgeAssetEndpointError(error)) {
+                  tokenBalanceEndpointUnsupported = true
+                  const firstMark = markUnsupportedBridgeAssetEndpoint(activeNetworkId, 'token-balance')
+                  if (firstMark) {
+                    console.warn(
+                      `[${net.symbol}] bridge token.balance asset endpoint is not implemented for ${activeNetworkId}; `
+                      + 'using direct EVM token reads for now.',
+                      error
+                    )
+                  }
+                }
+                // Fall through to slower RPC/explorer scan.
+              }
             }
 
             const activityTxids = activity
@@ -2799,11 +2884,28 @@ export const useWalletStore = create<WalletState>()(
               address,
               activityTxids
             ).catch(() => [])
-            const assetsEndpointContracts = await discoverEvmTokenContractsFromAddressAssets(rpcConfig, {
-              coin: bridgeCoin,
-              chain: bridgeChain,
-              ownerAddress: address
-            }).catch(() => [])
+            let assetsEndpointContracts: string[] = []
+            if (!addressAssetsEndpointUnsupported) {
+              try {
+                assetsEndpointContracts = await discoverEvmTokenContractsFromAddressAssets(rpcConfig, {
+                  coin: bridgeCoin,
+                  chain: bridgeChain,
+                  ownerAddress: address
+                })
+              } catch (error) {
+                if (isUnsupportedBridgeAssetEndpointError(error)) {
+                  addressAssetsEndpointUnsupported = true
+                  const firstMark = markUnsupportedBridgeAssetEndpoint(activeNetworkId, 'address-assets')
+                  if (firstMark) {
+                    console.warn(
+                      `[${net.symbol}] address asset discovery endpoint is not implemented for ${activeNetworkId}; `
+                      + 'skipping that bridge probe until the backend supports it.',
+                      error
+                    )
+                  }
+                }
+              }
+            }
             for (const discoveredAddress of discoveredAddresses) {
               if (trackedByAddress.has(discoveredAddress)) continue
               trackedByAddress.set(discoveredAddress, {
@@ -2987,79 +3089,93 @@ export const useWalletStore = create<WalletState>()(
             }
 
             let bridgeFallbackRowsApplied = 0
-            try {
-              const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
-                coin: bridgeCoin,
-                chain: bridgeChain,
-                owner: address,
-                wallet: String(net.rpcWallet || '').trim() || undefined
-              })
-              for (const row of bridgeRows) {
-                const rawBalanceText = String(row.balanceRaw || '').trim()
-                if (!/^\d+$/.test(rawBalanceText)) continue
-                const rawBalance = BigInt(rawBalanceText)
-                if (rawBalance <= 0n) continue
+            if (!tokenBalanceEndpointUnsupported) {
+              try {
+                const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
+                  coin: bridgeCoin,
+                  chain: bridgeChain,
+                  owner: address,
+                  wallet: String(net.rpcWallet || '').trim() || undefined
+                })
+                for (const row of bridgeRows) {
+                  const rawBalanceText = String(row.balanceRaw || '').trim()
+                  if (!/^\d+$/.test(rawBalanceText)) continue
+                  const rawBalance = BigInt(rawBalanceText)
+                  if (rawBalance <= 0n) continue
 
-                const tokenType = String(row.tokenType || '').trim()
-                if (isBridgeEvmNftTokenType(tokenType)) {
-                  const parsedNft = parseBridgeEvmNftReference(row)
-                  if (!parsedNft) continue
-                  const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
-                  const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
-                  const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
-                  if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
-                  const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
-                  const displayLabel = `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`
-                  nftAssets[assetKey] = quantitySats
-                  nftLookup[assetKey] = {
-                    address: parsedNft.address,
-                    tokenId: parsedNft.tokenId,
-                    standard,
-                    label: displayLabel,
-                    quantityRaw: rawBalance.toString()
+                  const tokenType = String(row.tokenType || '').trim()
+                  if (isBridgeEvmNftTokenType(tokenType)) {
+                    const parsedNft = parseBridgeEvmNftReference(row)
+                    if (!parsedNft) continue
+                    const standard: EvmNftStandard = /1155/i.test(tokenType) ? 'erc1155' : 'erc721'
+                    const assetKey = buildEvmNftAssetKey(parsedNft.address, parsedNft.tokenId, standard)
+                    const quantitySats = Number(rawBalance > 9999999999n ? 9999999999n : rawBalance) * 1e8
+                    if (!Number.isFinite(quantitySats) || quantitySats <= 0) continue
+                    const collection = String(row.name || row.symbol || 'NFT').trim() || 'NFT'
+                    const displayLabel = `${collection} #${formatTokenIdForLabel(parsedNft.tokenId)} - ${shortAddress(parsedNft.address)}`
+                    nftAssets[assetKey] = quantitySats
+                    nftLookup[assetKey] = {
+                      address: parsedNft.address,
+                      tokenId: parsedNft.tokenId,
+                      standard,
+                      label: displayLabel,
+                      quantityRaw: rawBalance.toString()
+                    }
+                    bridgeFallbackRowsApplied += 1
+                    continue
+                  }
+
+                  const decimalsRaw = Number(row.decimals)
+                  const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
+                  const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                  if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+                  const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || '').trim())
+                  const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
+                  const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
+
+                  let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
+                  if (!assetKey) {
+                    const baseKey = tokenAddress
+                      ? `${displaySymbol}@${shortAddress(tokenAddress)}`
+                      : displaySymbol
+                    assetKey = baseKey
+                    let suffix = 2
+                    while (usedAssetKeys.has(assetKey)) {
+                      assetKey = `${baseKey}-${suffix}`
+                      suffix += 1
+                    }
+                    usedAssetKeys.add(assetKey)
+                    if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
+                  }
+
+                  const prev = Number(fungibleAssets[assetKey] || 0)
+                  fungibleAssets[assetKey] = Math.max(prev, displaySats)
+                  fungibleAssetLabels[assetKey] = displaySymbol
+                  if (tokenAddress) {
+                    const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+                    if (logoUri) fungibleAssetLogos[assetKey] = logoUri
                   }
                   bridgeFallbackRowsApplied += 1
-                  continue
                 }
-
-                const decimalsRaw = Number(row.decimals)
-                const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
-                const displaySats = toAssetDisplaySats(rawBalance, decimals)
-                if (!Number.isFinite(displaySats) || displaySats <= 0) continue
-
-                const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || '').trim())
-                const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
-                const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
-
-                let assetKey = tokenAddress ? String(assetKeyByContract.get(tokenAddress) || '').trim() : ''
-                if (!assetKey) {
-                  const baseKey = tokenAddress
-                    ? `${displaySymbol}@${shortAddress(tokenAddress)}`
-                    : displaySymbol
-                  assetKey = baseKey
-                  let suffix = 2
-                  while (usedAssetKeys.has(assetKey)) {
-                    assetKey = `${baseKey}-${suffix}`
-                    suffix += 1
+              } catch (bridgeFallbackError) {
+                if (isUnsupportedBridgeAssetEndpointError(bridgeFallbackError)) {
+                  tokenBalanceEndpointUnsupported = true
+                  const firstMark = markUnsupportedBridgeAssetEndpoint(activeNetworkId, 'token-balance')
+                  if (firstMark) {
+                    console.warn(
+                      `[${net.symbol}] bridge token.balance asset endpoint is not implemented for ${activeNetworkId}; `
+                      + 'keeping RPC-discovered assets only until backend support is added.',
+                      bridgeFallbackError
+                    )
                   }
-                  usedAssetKeys.add(assetKey)
-                  if (tokenAddress) assetKeyByContract.set(tokenAddress, assetKey)
+                } else {
+                  console.warn(
+                    `[${net.symbol}] fetchNetworkAssets bridge token.balance read failed for ${activeNetworkId} (${address}).`,
+                    bridgeFallbackError
+                  )
                 }
-
-                const prev = Number(fungibleAssets[assetKey] || 0)
-                fungibleAssets[assetKey] = Math.max(prev, displaySats)
-                fungibleAssetLabels[assetKey] = displaySymbol
-                if (tokenAddress) {
-                  const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
-                  if (logoUri) fungibleAssetLogos[assetKey] = logoUri
-                }
-                bridgeFallbackRowsApplied += 1
               }
-            } catch (bridgeFallbackError) {
-              console.warn(
-                `[${net.symbol}] fetchNetworkAssets bridge token.balance read failed for ${activeNetworkId} (${address}).`,
-                bridgeFallbackError
-              )
             }
 
             const assets = { ...fungibleAssets, ...nftAssets }
@@ -4854,9 +4970,21 @@ export const useWalletStore = create<WalletState>()(
       },
 
       addNetwork: (network) => {
-        set((state) => ({
-          networks: [...state.networks, normalizeNetworkSymbol(network)]
-        }))
+        set((state) => {
+          const nextNetwork = normalizeNetworkSymbol(network)
+          const nextNetworks = [...state.networks, nextNetwork]
+          const normalizedDisabled = normalizeDisabledNetworkIdsForState(state.disabledNetworkIds, nextNetworks)
+          const enabledCount = nextNetworks.reduce(
+            (count, entry) => count + (normalizedDisabled.includes(entry.id) ? 0 : 1),
+            0
+          )
+          return {
+            networks: nextNetworks,
+            disabledNetworkIds: enabledCount > MAX_ACTIVE_REFRESH_NETWORKS
+              ? clampDisabledNetworkIdsToMaxEnabled([...normalizedDisabled, nextNetwork.id], nextNetworks)
+              : normalizedDisabled
+          }
+        })
       },
 
       removeNetwork: (id) => {
@@ -4901,6 +5029,7 @@ export const useWalletStore = create<WalletState>()(
             (count, network) => count + (disabledSet.has(network.id) ? 0 : 1),
             0
           )
+          if (enabled && enabledCount >= MAX_ACTIVE_REFRESH_NETWORKS) return state
           if (!enabled && enabledCount <= 1) return state
 
           const nextDisabled = enabled
@@ -5008,7 +5137,7 @@ export const useWalletStore = create<WalletState>()(
           })
           const serverOnly = filteredServerNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
           const networks = [...mergedLocal, ...serverOnly]
-          const normalizedDisabled = normalizeDisabledNetworkIdsForState(state.disabledNetworkIds, networks)
+          const normalizedDisabled = clampDisabledNetworkIdsToMaxEnabled(state.disabledNetworkIds, networks)
           const activeNetworkId = resolveEnabledNetworkId(
             networks,
             normalizedDisabled,
@@ -5831,7 +5960,7 @@ export const useWalletStore = create<WalletState>()(
           ? merged.activeAccountId
           : (accounts[0]?.id ?? null)
         const normalizedNetworks = normalizeNetworkListSymbols(INITIAL_NETWORKS)
-        const normalizedDisabledNetworkIds = normalizeDisabledNetworkIdsForState(
+        const normalizedDisabledNetworkIds = clampDisabledNetworkIdsToMaxEnabled(
           (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
           normalizedNetworks
         )

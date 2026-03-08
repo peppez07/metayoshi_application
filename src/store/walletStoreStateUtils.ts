@@ -53,6 +53,20 @@ export interface NormalizedWalletActivity {
 }
 
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
+  'rtm',
+  'srv--bitcoin',
+  'eth',
+  'arb',
+  'op',
+  'base',
+  'polygon',
+  'avaxc',
+  'cronos',
+  'cosmos'
+]
+
+export const MAX_ACTIVE_REFRESH_NETWORKS = 10
 
 export function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
@@ -193,6 +207,60 @@ export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown,
     return out.filter((networkId) => networkId !== firstNetworkId)
   }
   return out
+}
+
+export function resolveDefaultDisabledNetworkIds(networks: Network[]): string[] {
+  if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return []
+
+  const visibleIds: string[] = []
+  const visibleSet = new Set<string>()
+  for (const preferredId of CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS) {
+    const resolved = resolveKnownNetworkId(networks, preferredId)
+    if (!resolved || visibleSet.has(resolved)) continue
+    visibleSet.add(resolved)
+    visibleIds.push(resolved)
+    if (visibleIds.length >= MAX_ACTIVE_REFRESH_NETWORKS) break
+  }
+
+  if (visibleIds.length < MAX_ACTIVE_REFRESH_NETWORKS) {
+    for (const network of networks) {
+      const networkId = String(network.id || '').trim()
+      if (!networkId || visibleSet.has(networkId)) continue
+      visibleSet.add(networkId)
+      visibleIds.push(networkId)
+      if (visibleIds.length >= MAX_ACTIVE_REFRESH_NETWORKS) break
+    }
+  }
+
+  return normalizeDisabledNetworkIdsForState(
+    networks
+      .map((network) => String(network.id || '').trim())
+      .filter((networkId) => networkId && !visibleSet.has(networkId)),
+    networks
+  )
+}
+
+export function clampDisabledNetworkIdsToMaxEnabled(disabledNetworkIds: unknown, networks: Network[]): string[] {
+  const normalizedDisabled = normalizeDisabledNetworkIdsForState(disabledNetworkIds, networks)
+  if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return normalizedDisabled
+
+  const disabledSet = new Set(normalizedDisabled)
+  const enabledNetworks = networks.filter((network) => !disabledSet.has(String(network.id || '').trim()))
+  if (enabledNetworks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return normalizedDisabled
+
+  const keepEnabled = new Set(
+    enabledNetworks
+      .slice(0, MAX_ACTIVE_REFRESH_NETWORKS)
+      .map((network) => String(network.id || '').trim())
+      .filter(Boolean)
+  )
+
+  return normalizeDisabledNetworkIdsForState(
+    networks
+      .map((network) => String(network.id || '').trim())
+      .filter((networkId) => networkId && !keepEnabled.has(networkId)),
+    networks
+  )
 }
 
 export function resolveEnabledNetworkId(

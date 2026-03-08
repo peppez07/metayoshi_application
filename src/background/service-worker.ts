@@ -292,6 +292,21 @@ async function getActiveAddress(networkId: string): Promise<string | null> {
   return getActiveAddressFromState(state, networkId)
 }
 
+async function requireDappScopes(origin: string | undefined, scopes: DappScope[]): Promise<string> {
+  const normalizedOrigin = normalizeDappOrigin(String(origin || ''))
+  if (!normalizedOrigin || normalizedOrigin === 'unknown') {
+    throw { code: 4001, message: 'Untrusted origin' }
+  }
+
+  const approved = await requestScopes(normalizedOrigin, scopes)
+  if (!approved) {
+    throw { code: 4001, message: 'User rejected the request' }
+  }
+
+  await touchLastConnected(normalizedOrigin)
+  return normalizedOrigin
+}
+
 async function getDappPermissionMap(): Promise<Record<string, DappPermission>> {
   try {
     const stored = await chrome.storage.local.get(DAPP_PERMISSIONS_STORAGE_KEY)
@@ -1034,7 +1049,9 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
         read: true,
         sign: features.signMessage,
         send_coin: features.nativeSend,
-        send_asset: features.assetSend
+        send_asset: features.assetSend,
+        select_account: true,
+        switch_network: true
       },
       methods: [...DAPP_SDK_METHODS],
       networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
@@ -1152,6 +1169,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   
   // Select account
   if (SELECT_ACCOUNT_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read', 'select_account'])
+
     const { index } = params || {}
     if (typeof index !== 'number') {
       throw { code: -32602, message: 'Account index is required' }
@@ -1168,8 +1187,13 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       ...current,
       activeAccountId: account.id
     }))
-    
-    const address = await getActiveAddress(currentState.activeNetworkId || DEFAULT_NETWORK_ID)
+
+    const refreshedState = await getWalletState()
+    const address = getActiveAddressFromState(refreshedState, refreshedState.activeNetworkId || DEFAULT_NETWORK_ID)
+    broadcastEvent('accountsChanged', {
+      accounts: address ? [address] : [],
+      address
+    })
     return {
       selectedAddress: address,
       accounts: address ? [address] : []
@@ -1178,6 +1202,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   
   // Switch network
   if (SWITCH_NETWORK_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read', 'switch_network'])
+
     const { networkId } = params || {}
     if (!networkId) {
       throw { code: -32602, message: 'Network ID is required' }
@@ -1215,6 +1241,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
 
 // Broadcast event to all connected content scripts
 function broadcastEvent(event: string, payload: any): void {
+  if (eventPorts.size === 0) return
   const message = { type: 'event', event, payload }
   for (const port of eventPorts) {
     try {
@@ -1222,6 +1249,63 @@ function broadcastEvent(event: string, payload: any): void {
     } catch (err) {
       // Port closed, remove it
       eventPorts.delete(port)
+    }
+  }
+}
+
+function handleWalletStorageBroadcast(
+  changes: { [key: string]: chrome.storage.StorageChange },
+  areaName: string
+): void {
+  if (eventPorts.size === 0) return
+  if (areaName !== 'local' || !changes[WALLET_STORAGE_KEY]) return
+
+  const newValue = changes[WALLET_STORAGE_KEY].newValue
+  const oldValue = changes[WALLET_STORAGE_KEY].oldValue
+  const newState = unwrapPersistedState<WalletState>(newValue)
+  const oldState = unwrapPersistedState<WalletState>(oldValue)
+
+  if (!newState || !oldState) return
+
+  const dappNetworks = resolveDappNetworks(newState)
+  const activeDappNetwork = dappNetworks.find((n) => n.id === newState.activeNetworkId) || dappNetworks[0]
+  const activeDappNetworkId = activeDappNetwork?.id || DEFAULT_NETWORK_ID
+
+  if (
+    newState.activeAccountId !== oldState.activeAccountId ||
+    JSON.stringify(newState.accounts) !== JSON.stringify(oldState.accounts)
+  ) {
+    const address = getActiveAddressFromState(newState, activeDappNetworkId)
+    broadcastEvent('accountsChanged', {
+      accounts: address ? [address] : [],
+      address
+    })
+  }
+
+  if (newState.activeNetworkId !== oldState.activeNetworkId) {
+    const network = resolveDappNetworks(newState).find((n) => n.id === newState.activeNetworkId)
+    if (network && String(network.id || '').trim()) {
+      broadcastEvent('networkChanged', {
+        networkId: network.id,
+        networkLabel: network.name,
+        coinId: network.id,
+        coinName: network.name,
+        coinSymbol: network.symbol,
+        coinDecimals: resolveCoinDecimals(network)
+      })
+    }
+  }
+
+  if (newState.isLocked !== oldState.isLocked) {
+    broadcastEvent('lockChanged', {
+      unlocked: !(newState.isLocked ?? true)
+    })
+
+    if (newState.isLocked) {
+      broadcastEvent('accountsChanged', {
+        accounts: [],
+        address: null
+      })
     }
   }
 }
@@ -1297,63 +1381,12 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
       type: 'ready',
       events: ['accountsChanged', 'networkChanged', 'lockChanged']
     })
-    
-    // Listen for storage changes to broadcast events
-    chrome.storage.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
-      if (areaName === 'local' && changes[WALLET_STORAGE_KEY]) {
-        const newValue = changes[WALLET_STORAGE_KEY].newValue
-        const oldValue = changes[WALLET_STORAGE_KEY].oldValue
-        const newState = unwrapPersistedState<WalletState>(newValue)
-        const oldState = unwrapPersistedState<WalletState>(oldValue)
-        
-        if (newState && oldState) {
-          const dappNetworks = resolveDappNetworks(newState)
-          const activeDappNetwork = dappNetworks.find((n) => n.id === newState.activeNetworkId) || dappNetworks[0]
-          const activeDappNetworkId = activeDappNetwork?.id || DEFAULT_NETWORK_ID
-          
-          // Accounts changed
-          if (newState.activeAccountId !== oldState.activeAccountId || 
-              JSON.stringify(newState.accounts) !== JSON.stringify(oldState.accounts)) {
-            const address = getActiveAddressFromState(newState, activeDappNetworkId)
-            broadcastEvent('accountsChanged', {
-              accounts: address ? [address] : [],
-              address
-            })
-          }
-          
-          // Network changed
-          if (newState.activeNetworkId !== oldState.activeNetworkId) {
-            const network = resolveDappNetworks(newState).find((n) => n.id === newState.activeNetworkId)
-            if (network && String(network.id || '').trim()) {
-              broadcastEvent('networkChanged', {
-                networkId: network.id,
-                networkLabel: network.name,
-                coinId: network.id,
-                coinName: network.name,
-                coinSymbol: network.symbol,
-                coinDecimals: resolveCoinDecimals(network)
-              })
-            }
-          }
-          
-          // Lock state changed
-          if (newState.isLocked !== oldState.isLocked) {
-            broadcastEvent('lockChanged', {
-              unlocked: !(newState.isLocked ?? true)
-            })
-            
-            if (newState.isLocked) {
-              broadcastEvent('accountsChanged', {
-                accounts: [],
-                address: null
-              })
-            }
-          }
-        }
-      }
-    })
   }
 })
+
+if (!chrome.storage.onChanged.hasListener(handleWalletStorageBroadcast)) {
+  chrome.storage.onChanged.addListener(handleWalletStorageBroadcast)
+}
 
 if (chrome.windows?.onBoundsChanged?.addListener) {
   chrome.windows.onBoundsChanged.addListener((win) => {
