@@ -58,8 +58,22 @@ function resolveDefaultBridgePath(coinId: string): string {
 }
 
 function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo['protocol'] {
-  if (networkId === 'cosmos' || coinId === 'cosmos') return 'cosmos-rest-bridge'
-  if (networkId === 'eth' || networkId === 'base' || coinId === 'ethereum' || coinId === 'base') return 'evm-jsonrpc'
+  if (
+    networkId === 'cosmos'
+    || networkId === 'cro'
+    || coinId === 'cosmos'
+    || coinId === 'cronos-pos'
+  ) return 'cosmos-rest-bridge'
+  if (
+    networkId === 'eth'
+    || networkId === 'base'
+    || networkId === 'polygon'
+    || networkId === 'cronos'
+    || coinId === 'ethereum'
+    || coinId === 'base'
+    || coinId === 'polygon-bor'
+    || coinId === 'cronos'
+  ) return 'evm-jsonrpc'
   return 'utxo-jsonrpc'
 }
 

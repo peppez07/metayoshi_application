@@ -26,6 +26,9 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - `public/manifest.json`: base MV3 manifest copied into packaged output.
 - `vite.config.ts`: multi-entry extension build for UI, background, content, and inpage scripts.
 - `scripts/package-browser.mjs` and `scripts/zip-browser.mjs`: browser-specific packaging and release artifact helpers.
+- `agents/**`: local specialist agent-skills used for routing engineering, release, security, and product tasks.
+- `skills/**`: reusable workflow skills, references, and templates for repo-adjacent research and artifact generation.
+- `C:\Users\Giuseppe Grecu\metayoshi_SERVER\_server_support\website`: companion support website repo for public SDK docs, support pages, and wallet-version sync.
 - `dist*`: generated browser builds and packaged artifacts. Treat as outputs unless the task is explicitly about release artifacts.
 
 ## Product behavior guardrails
@@ -54,6 +57,7 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - Prefer small, reviewable changes.
 - Do not rewrite major wallet flows unless explicitly requested.
 - Preserve extension and dapp compatibility unless a breaking change is approved.
+- When wallet version, configured networks, provider methods, approval flows, or public SDK behavior change, review the companion website repo in the same task.
 - Every behavior change should include:
   - validation steps
   - docs update if user-facing
@@ -62,6 +66,7 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - Favor deterministic behavior over hidden magic.
 - Keep secrets and API keys in environment or injected config, never hardcoded.
 - Keep signing and approval flows easy to audit.
+- Keep wallet version claims aligned across `package.json`, `public/manifest.json`, popup UI labels, provider metadata, and companion website metadata.
 - Prefer project-native patterns over introducing a new local architecture.
 - Keep route guards, capability gates, and non-custodial checks explicit.
 - When touching UX, preserve current spacing, interaction rhythm, and popup-size behavior.
@@ -125,6 +130,8 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
   - `npm run build:firefox`
   - `npm run build:browsers`
   - `npm run test:api:firo-eth`
+- For wallet version, SDK, provider, or configured-network changes that affect public docs, also validate:
+  - `node C:\Users\Giuseppe Grecu\metayoshi_SERVER\_server_support\website\scripts\sync-wallet-metadata.mjs --check`
 - For UI work, validate the affected route flow and extension-sized layout, not just compilation.
 - For provider/security work, validate approval, rejection, and locked-wallet cases explicitly.
 - For packaging work, verify expected outputs such as:
@@ -138,10 +145,14 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 When a task is mainly about:
 - React UI, popup pages, route flow, wallet shell, component behavior, theme continuity, state wiring in `src/pages`, `src/components`, `src/App.tsx`, `src/styles` -> frontend-extension-engineer
 - chain adapters, runtime profiles, RPC behavior, balances, payload builders, asset support, server registry, send logic in `src/coins`, `src/lib`, `src/store/walletStore.ts` -> blockchain-wallet-engineer
+- new coin ecosystem R&D, official-doc and trusted-GitHub verification, partial or wrong chain metadata, or pre-implementation support discovery across the extension repo and companion server repo -> coin-ecosystem-researcher
+- wallet-facing SDK docs, provider method documentation, cross-repo public capability claims, and website-facing support copy -> docs-sdk-maintainer
 - manifest, Vite multi-entry build, popup entry HTML, packaging scripts, browser output artifacts in `vite.config.ts`, `public/manifest.json`, `app/src/ui/index.html`, `scripts/**` -> release-packaging-engineer
+- wallet release/version drift and companion website sync in `C:\Users\Giuseppe Grecu\metayoshi_SERVER\_server_support\website` -> wallet-website-sync-owner
 - permissions, message bridges, origin validation, storage safety, dapp approvals, secret handling in `src/background`, `src/content`, `src/inpage`, `src/lib/dappPermissions.ts`, `src/lib/bridgeAuth.ts` -> security-appsec
 - smoke, regression, popup flow validation, packaged build checks, release confidence -> qa-browser-release
 - change sequencing, compatibility decisions, feature scope, user intent tradeoffs -> product-wallet-owner
+- architecture diagrams, draw.io-compatible flows, whitepapers, technical roadmaps spanning wallet app and server responsibilities -> wallet-documentation-architect
 - multi-role delivery coordination across risky changes, release gating, cross-area sequencing -> release-orchestrator
 
 If a task spans multiple areas:

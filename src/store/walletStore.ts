@@ -24,7 +24,7 @@ import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
-import { requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
+import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { buildSolanaAssetId, extractSolanaMintFromAssetId } from '../lib/assetTypes'
@@ -754,6 +754,17 @@ function buildAssetStateScopeKey(accountId: string, networkId: string): string {
   return buildSendListPreferenceScopeKey(accountId, networkId)
 }
 
+function resolveCosmosBridgeCoinId(network: Network): string {
+  const modelId = resolveNetworkModelId(network)
+  const runtimeCoinId = getCoinRuntimeProfile(modelId)?.coinId
+  const resolved = String(
+    network.serverCoinId
+    || runtimeCoinId
+    || (isCroCosmosModelId(modelId) ? 'cronos-pos' : 'cosmos')
+  ).trim().toLowerCase()
+  return resolved || 'cosmos'
+}
+
 function normalizeFiatValueMap(input: unknown): FiatValueMap {
   const source = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {}
   const read = (key: FiatCurrency): number | null | undefined => {
@@ -899,7 +910,7 @@ const evmTrackedTokenCache = new Map<string, {
 const CHAIN_ID_BY_NETWORK_ID: Record<string, number> = {
   eth: 1,
   bnb: 56,
-  cro: 25,
+  cronos: 25,
   polygon: 137,
   arb: 42161,
   'eth-l2--arbitrum-nova': 42170,
@@ -2112,6 +2123,7 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
         BTC: addresses.BTC ?? '',
         COSMOS: addresses.COSMOS ?? '',
         SOL: addresses.SOL ?? '',
+        SUI: addresses.SUI ?? '',
         XRP: addresses.XRP ?? ''
       },
       networkAddresses: networkAddresses,
@@ -2364,7 +2376,7 @@ export const useWalletStore = create<WalletState>()(
               name: 'Account 1',
               networkNames: {},
               derivationIndex: 0,
-              addresses: { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', XRP: '' },
+              addresses: { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '' },
               networkAddresses: {},
               networkBalances: {},
               balance: '0'
@@ -2384,6 +2396,7 @@ export const useWalletStore = create<WalletState>()(
                 BTC: account.addresses?.BTC || '',
                 COSMOS: account.addresses?.COSMOS || '',
                 SOL: account.addresses?.SOL || '',
+                SUI: account.addresses?.SUI || '',
                 XRP: account.addresses?.XRP || ''
               },
               networkNames: { ...(account.networkNames ?? {}) },
@@ -3205,7 +3218,7 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
-        if (activeModelId === 'cosmos') {
+        if (isCosmosLikeModelId(activeModelId)) {
           const rpcConfig = await createUtxoRpcConfig(net, {
             useLocalRpc: ulr,
             localRpcOverride: lro[net.id],
@@ -3214,7 +3227,7 @@ export const useWalletStore = create<WalletState>()(
           try {
             const cosmosCfg = resolveCosmosNetworkConfig(net)
             const rows = await fetchBridgeTokenBalances(rpcConfig, {
-              coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+              coin: resolveCosmosBridgeCoinId(net),
               chain: String(net.serverChain || 'main').trim() || 'main',
               owner: address
             })
@@ -3705,7 +3718,7 @@ export const useWalletStore = create<WalletState>()(
           } as RtmAssetDetails
         }
 
-        if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'cosmos') {
+        if (isCosmosLikeModelId(String(net.runtimeModelId || net.id || '').trim().toLowerCase())) {
           const {
             accounts,
             activeAccountId,
@@ -3719,7 +3732,7 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           const rows = await fetchBridgeTokenBalances(rpcConfig, {
-            coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+            coin: resolveCosmosBridgeCoinId(net),
             chain: String(net.serverChain || 'main').trim() || 'main',
             owner: owner || undefined,
             tokenId: normalizedAssetId
@@ -4392,7 +4405,7 @@ export const useWalletStore = create<WalletState>()(
           return { txid: tx.hash }
         }
 
-        if (modelId === 'cosmos') {
+        if (isCosmosLikeModelId(modelId)) {
           const recipient = String(toAddress || '').trim()
           const denom = String(assetId || '').trim()
           const txMemo = String(memo || '').trim()
@@ -4479,7 +4492,7 @@ export const useWalletStore = create<WalletState>()(
             })
           }
           const sent = await sendBridgeTokenTransfer(rpcConfig, {
-            coin: String(net.serverCoinId || 'cosmos').trim() || 'cosmos',
+            coin: resolveCosmosBridgeCoinId(net),
             chain: String(net.serverChain || 'main').trim() || 'main',
             tokenId: denom,
             toAddress: recipient,
@@ -4546,6 +4559,7 @@ export const useWalletStore = create<WalletState>()(
               BTC:  acc.addresses?.BTC || '',
               COSMOS: derived.addresses.COSMOS || acc.addresses?.COSMOS || '',
               SOL:  acc.addresses?.SOL || '',
+              SUI:  derived.addresses.SUI || acc.addresses?.SUI || '',
               XRP:  derived.addresses.XRP || acc.addresses?.XRP || ''
             },
             networkAddresses: {
@@ -4725,7 +4739,7 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
         }
 
-        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', XRP: '' }
+        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '' }
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
         if (selectedNetwork.coinType === 'COSMOS') addresses.COSMOS = selectedAddress
@@ -5226,6 +5240,24 @@ export const useWalletStore = create<WalletState>()(
               accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
             }))
           } else if (modelId === 'sol') {
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+            const snapshot = await fetchChainBalanceAndSync({
+              network: net,
+              address,
+              rpcConfig
+            })
+            await waitForUiStabilize()
+            if (isStaleRequest()) return
+            set((state) => ({
+              isSyncing: false,
+              isConnected: true,
+              syncPercent: 100,
+              lowSyncStreak: 0,
+              accounts: updateAccountsWithNetworkBalance(state.accounts, acc.id, activeNetworkId, snapshot.balance)
+            }))
+          } else if (modelId === 'sui') {
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })

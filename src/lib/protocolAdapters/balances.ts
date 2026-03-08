@@ -267,6 +267,54 @@ async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoR
   }
 }
 
+async function fetchSuiJsonRpc(endpoint: string, method: string, params: any[]): Promise<any> {
+  const response = await fetch(String(endpoint || '').trim(), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params
+    })
+  })
+  if (!response.ok) throw new Error(`Sui RPC HTTP ${response.status}`)
+  const json = await response.json().catch(() => null)
+  if (!json || json.error) {
+    throw new Error(`Sui RPC error: ${JSON.stringify(json?.error || json)}`)
+  }
+  return json.result
+}
+
+async function getSuiBalance(rpcUrl: string, address: string): Promise<string> {
+  const candidates: Array<{ method: string; params: any[] }> = [
+    { method: 'suix_getBalance', params: [address] },
+    { method: 'suix_getBalance', params: [address, '0x2::sui::SUI'] },
+    { method: 'suix_getAllBalances', params: [address] }
+  ]
+
+  let lastError: unknown = null
+  for (const candidate of candidates) {
+    try {
+      const result = await fetchSuiJsonRpc(rpcUrl, candidate.method, candidate.params)
+      const totalBalance = String(
+        result?.totalBalance
+        || result?.balance
+        || result?.[0]?.totalBalance
+        || result?.[0]?.balance
+        || ''
+      ).trim()
+      if (/^\d+$/.test(totalBalance)) {
+        return formatDecimalUnits(BigInt(totalBalance), 9)
+      }
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Sui balance query failed')
+}
+
 export async function fetchProtocolBalance(network: Network, modelId: string, address: string, rpcConfig?: UtxoRpcConfig): Promise<string | null> {
   if (modelId === 'sol') {
     if (rpcConfig?.bridgeUrl) {
@@ -300,6 +348,11 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
     if (!rpcUrl) throw new Error('TRON RPC URL is not configured')
     const { getTronBalance } = await loadTronNonCustodialModule()
     return await getTronBalance(rpcUrl, address)
+  }
+  if (modelId === 'sui') {
+    const rpcUrl = String(network.rpcUrl || '').trim()
+    if (!rpcUrl) throw new Error('Sui RPC URL is not configured')
+    return await getSuiBalance(rpcUrl, address)
   }
   if (network.coinType === 'EVM') {
     if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for EVM networks')

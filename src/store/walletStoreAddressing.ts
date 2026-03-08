@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import type { CoinType, Network } from '../coins'
 import { deriveCosmosAddress } from '../lib/cosmosAddress'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
+import { deriveSuiAddress } from '../lib/suiAddress'
 import { resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { isCroCosmosModel, resolveCosmosNetworkConfig } from './walletStoreStateUtils'
@@ -83,6 +84,10 @@ export async function deriveSingleNetworkAddress(
     const derived = await deriveSolanaAddress(mnemonic, derivationIndex)
     return derived.address
   }
+  if (modelId === 'sui') {
+    const derived = await deriveSuiAddress(mnemonic, derivationIndex)
+    return derived.address
+  }
   if (modelId === 'xlm') {
     const { deriveStellarAddress } = await loadStellarAddressModule()
     const derived = await deriveStellarAddress(mnemonic, derivationIndex)
@@ -144,6 +149,7 @@ export async function deriveAccountAddresses(
       BTC: '',
       COSMOS: firstCosmosAddress,
       SOL: '',
+      SUI: '',
       XRP: firstXrpAddress
     },
     networkAddresses,

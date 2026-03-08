@@ -10,6 +10,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import { getAccountDisplayName } from '../../lib/accountName'
 import { callBridgeMethod, type UtxoRpcConfig } from '../../lib/utxoRpc'
 import { estimateEvmTxFee } from '../../lib/evmFee'
+import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 interface TxLayoutProps {
   title: string
@@ -160,6 +161,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const safeAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
+  const activeModelId = resolveRuntimeModelId(activeNetwork)
   const activeAccountName = getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -382,22 +384,22 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       } else if (activeNetwork.coinType === 'XRP') {
         const res = await sendXrpTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.id === 'ada') {
+      } else if (activeModelId === 'ada') {
         const res = await sendCardanoTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.id === 'xmr') {
+      } else if (activeModelId === 'xmr') {
         const res = await sendMoneroTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.id === 'sol') {
+      } else if (activeModelId === 'sol') {
         const res = await sendSolanaTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.id === 'xlm') {
+      } else if (activeModelId === 'xlm') {
         const res = await sendStellarTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.id === 'tron') {
+      } else if (activeModelId === 'tron') {
         const res = await sendTronTransaction({ to: toAddress, amount })
         txHash = String(res.hash || '').trim()
-      } else if (activeNetwork.coinType === 'COSMOS' || activeNetwork.id === 'cosmos') {
+      } else if (isCosmosLikeModelId(activeModelId)) {
         const res = await sendUtxoTransaction({ to: toAddress, amount, memo })
         txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'UTXO') {

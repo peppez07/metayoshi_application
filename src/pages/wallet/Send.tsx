@@ -17,6 +17,7 @@ import {
   IoRefreshOutline,
   IoSearchOutline
 } from 'react-icons/io5'
+import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 function formatUnits8(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -519,6 +520,7 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
 
           const scopedState = useWalletStore.getState()
           const scopedNetwork = scopedState.networks.find((network) => network.id === plan.holder.networkId) || rowNetwork
+          const scopedModelId = resolveRuntimeModelId(scopedNetwork)
           const amountText = plan.amount
           let txHash = ''
 
@@ -547,20 +549,23 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
           } else if (scopedNetwork.coinType === 'XRP') {
             const tx = await sendXrpTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
-          } else if (scopedNetwork.id === 'ada') {
+          } else if (scopedModelId === 'ada') {
             const tx = await sendCardanoTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
-          } else if (scopedNetwork.id === 'xmr') {
+          } else if (scopedModelId === 'xmr') {
             const tx = await sendMoneroTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
-          } else if (scopedNetwork.id === 'sol') {
+          } else if (scopedModelId === 'sol') {
             const tx = await sendSolanaTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
-          } else if (scopedNetwork.id === 'xlm') {
+          } else if (scopedModelId === 'xlm') {
             const tx = await sendStellarTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
-          } else if (scopedNetwork.id === 'tron') {
+          } else if (scopedModelId === 'tron') {
             const tx = await sendTronTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (isCosmosLikeModelId(scopedModelId)) {
+            const tx = await sendUtxoTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
           } else if (scopedNetwork.coinType === 'UTXO') {
             const tx = await sendUtxoTransaction({ to: toAddress, amount: amountText })

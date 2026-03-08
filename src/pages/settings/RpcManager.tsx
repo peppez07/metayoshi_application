@@ -112,6 +112,7 @@ const RpcManager: React.FC = () => {
                    <option value="EVM">EVM</option>
                    <option value="BTC">Bitcoin</option>
                    <option value="SOL">Solana</option>
+                   <option value="SUI">Sui</option>
                  </select>
                </div>
                <Input 

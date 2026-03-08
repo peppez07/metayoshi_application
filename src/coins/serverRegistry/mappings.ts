@@ -13,7 +13,6 @@ const TOKEN_MARKERS = new Set([
 
 const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze)/i
 const BLOCKED_SERVER_COIN_IDS = new Set<string>([
-  'cronos-pos',
   'manta-atlantic',
   'syscoin',
   'syscoin-evm',
@@ -27,6 +26,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   babylon: 'cosmos',
   bitcanna: 'cosmos',
   dogecoin: 'doge',
+  bitcoin: 'srv--bitcoin',
   bitcoinz: 'btcz',
   celestia: 'cosmos',
   chihuahua: 'cosmos',
@@ -61,13 +61,16 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   base: 'base',
   bsc: 'bnb',
   'polygon-bor': 'polygon',
+  polygon: 'polygon',
   'avalanche-c-chain': 'avaxc',
   solana: 'sol',
+  sui: 'sui',
   tron: 'tron',
   blast: 'eth',
   berachain: 'eth',
   celo: 'eth',
-  cronos: 'cro',
+  cronos: 'cronos',
+  'cronos-evm': 'cronos',
   fraxtal: 'eth',
   haqq: 'eth',
   mantle: 'eth',
@@ -189,8 +192,8 @@ const SERVER_COIN_VARIANT_SUFFIXES = [
   'tanenbaum'
 ]
 
-export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc'])
-export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos'])
+export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc', 'cronos'])
+export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
 
 export function isBlockedServerCoinId(coinId: string): boolean {
   const normalized = String(coinId || '').trim().toLowerCase()
@@ -221,6 +224,7 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
   if (normalized === 'bsc') return 'bnb'
   if (normalized === 'polygon' || normalized === 'polygon-bor') return 'polygon'
+  if (normalized === 'sui') return 'sui'
   if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
   if (normalized === 'solana') return 'sol'
   if (normalized === 'tron') return 'tron'
@@ -228,7 +232,8 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
   if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
-  if (normalized === 'cronos' || normalized.startsWith('cronos-')) return 'cro'
+  if (normalized === 'cronos-pos' || normalized.startsWith('cronos-pos')) return 'cro'
+  if (normalized === 'cronos' || normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'cronos'
   if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
   if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
   if (normalized === 'linea') return 'eth'
@@ -258,7 +263,6 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'haqq-evm' || normalized.startsWith('haqq-evm')) return 'eth'
   if (normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'eth'
   if (normalized === 'kava-evm' || normalized.startsWith('kava-evm')) return 'eth'
-  if (normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'eth'
   if (normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'eth'
   if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'eth'
   if (normalized === 'evmos-evm' || normalized.startsWith('evmos-evm')) return 'eth'
@@ -316,6 +320,7 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       arb: 'arbitrum-one',
       base: 'base',
       bnb: 'bsc',
+      cronos: 'cronos',
       polygon: 'polygon-bor',
       avaxc: 'avalanche-c-chain'
     }
@@ -330,7 +335,13 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
     return `${normalizedBaseNetworkId}--${sanitizeServerCoinId(normalizedServerCoinId)}`
   }
   if (COSMOS_MODEL_NETWORK_IDS.has(normalizedBaseNetworkId)) {
-    if (normalizedServerCoinId === 'cosmos') return normalizedBaseNetworkId
+    const canonicalServerIdByModel: Record<string, string> = {
+      cosmos: 'cosmos',
+      cro: 'cronos-pos'
+    }
+    if (normalizedServerCoinId === canonicalServerIdByModel[normalizedBaseNetworkId]) {
+      return normalizedBaseNetworkId
+    }
     return `${normalizedBaseNetworkId}--${sanitizeServerCoinId(normalizedServerCoinId)}`
   }
   return normalizedBaseNetworkId
@@ -359,6 +370,8 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('avalanche')) return 'avaxc'
   if (normalized.includes('base')) return 'base'
   if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
+  if (normalized.includes('cronos')) return 'cronos'
+  if (normalized.includes('sui')) return 'sui'
   if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'
   if (normalized.includes('solana') || normalized.includes('spl')) return 'sol'
   if (normalized.includes('tron') || normalized.includes('trc20')) return 'tron'

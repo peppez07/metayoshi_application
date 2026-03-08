@@ -8,7 +8,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import { IoArrowBackOutline, IoInformationCircleOutline } from 'react-icons/io5'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
-import { resolveRuntimeModelId } from '../../lib/runtimeModel'
+import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -83,7 +83,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = resolveRuntimeModelId(activeNetwork)
-  const supportsMemo = activeModelId === 'cosmos'
+  const supportsMemo = isCosmosLikeModelId(activeModelId)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const nftMode = resolveNftQuantityMode(item)
@@ -370,7 +370,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Memo</label>
             <textarea
-              placeholder="Optional ATOM memo for exchange deposits or app routing"
+              placeholder={`Optional ${activeNetwork.symbol} memo for exchange deposits or app routing`}
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
               rows={3}

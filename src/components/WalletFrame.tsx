@@ -12,7 +12,7 @@ import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { compareNetworksByModelFamily } from '../lib/coinModel'
 import { getModelIconRingClass } from '../buildConfig'
 import { getEnabledNetworks } from '../lib/networkVisibility'
-import { resolveRuntimeModelId } from '../lib/runtimeModel'
+import { isCosmosLikeModelId, resolveRuntimeModelId } from '../lib/runtimeModel'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -87,14 +87,16 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : undefined)
     || ''
   const activeModelId = resolveRuntimeModelId(activeNetwork)
-  const supportsReceiveMemo = activeModelId === 'cosmos'
+  const supportsReceiveMemo = isCosmosLikeModelId(activeModelId)
+  const receiveMemoScheme = activeModelId === 'cro' || activeModelId === 'crocosmos' ? 'cro' : 'cosmos'
+  const receiveMemoSymbol = activeNetwork?.symbol || 'ATOM'
   const receivePayload = React.useMemo(() => {
     const address = String(rawAddress || '').trim()
     if (!address) return ''
     const memo = String(receiveMemo || '').trim()
     if (!supportsReceiveMemo || !memo) return address
-    return `cosmos:${address}?memo=${encodeURIComponent(memo)}`
-  }, [rawAddress, receiveMemo, supportsReceiveMemo])
+    return `${receiveMemoScheme}:${address}?memo=${encodeURIComponent(memo)}`
+  }, [rawAddress, receiveMemo, receiveMemoScheme, supportsReceiveMemo])
   const shortenedAddress = rawAddress
     ? `${rawAddress.slice(0, 4)}…${rawAddress.slice(-6)}`
     : ''
@@ -544,12 +546,12 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3 space-y-2">
                 <div>
                   <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-1">Memo</p>
-                  <p className="text-[10px] text-gray-500">Optional ATOM memo to share with the sender.</p>
+                  <p className="text-[10px] text-gray-500">Optional {receiveMemoSymbol} memo to share with the sender.</p>
                 </div>
                 <input
                   value={receiveMemo}
                   onChange={(e) => setReceiveMemo(e.target.value)}
-                  placeholder="Optional ATOM memo"
+                  placeholder={`Optional ${receiveMemoSymbol} memo`}
                   className="input-field bg-dark-700/50 border-dark-600 text-xs"
                 />
                 {receiveMemo.trim() && (

@@ -2,14 +2,15 @@ import type { CoinModule } from './types'
 import { BUILD_CONFIG } from '../buildConfig'
 
 export const DISABLED_NETWORK_IDS = new Set<string>([
-  'srv--cronos-pos'
 ])
 
-export const EVM_COIN_IDS = new Set<string>(['eth', 'base'])
+export const EVM_COIN_IDS = new Set<string>(['eth', 'base', 'polygon', 'cronos'])
 export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['base'])
 
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
   1: 'eth',
+  25: 'cronos',
+  137: 'polygon',
   8453: 'base'
 }
 
@@ -20,7 +21,16 @@ const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   'mainnet-ethereum': 'eth',
   base: 'base',
   'base-mainnet': 'base',
-  'mainnet-base': 'base'
+  'mainnet-base': 'base',
+  polygon: 'polygon',
+  'polygon-pos': 'polygon',
+  'polygon-mainnet': 'polygon',
+  'polygon-bor': 'polygon',
+  'mainnet-polygon': 'polygon',
+  cronos: 'cronos',
+  'cronos-mainnet': 'cronos',
+  'cronos-evm': 'cronos',
+  'mainnet-cronos': 'cronos'
 }
 
 function normalizeCoinSelectionToken(rawToken: string): string {
@@ -51,6 +61,8 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   const token = normalizeCoinSelectionToken(rawToken)
   if (!token) return []
   if (token === 'btc' || token === 'bitcoin') return ['srv--bitcoin']
+  if (token === 'cro' || token === 'cronos-pos') return ['cro']
+  if (token === 'cronos') return ['cronos']
   if (token === 'dash' || token === 'sdash' || token === 'srv--dash') return ['dash']
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]

@@ -43,6 +43,7 @@ export function requiresMnemonicForNetwork(network?: RuntimeModelSource): boolea
   if (modelId === 'ada') return true
   if (modelId === 'xmr') return true
   if (modelId === 'sol') return true
+  if (modelId === 'sui') return true
   if (modelId === 'xlm') return true
   if (modelId === 'tron') return true
   if (isCosmosLikeModelId(modelId)) return true

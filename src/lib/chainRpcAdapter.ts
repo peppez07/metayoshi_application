@@ -96,6 +96,7 @@ export function resolveChainSendCustodyMode(network: Network): ChainSendCustodyM
   if (modelId === 'cosmos') return 'non-custodial'
   if (isCroCosmosModelId(modelId)) return 'custodial-server'
   if (modelId === 'sol' || modelId === 'xlm' || modelId === 'tron') return 'non-custodial'
+  if (modelId === 'sui') return 'unsupported'
   if (modelId === 'ada') return 'non-custodial'
   if (modelId === 'xmr') {
     const enabled = getBuildFeatureFlag('enableXmrNonCustodial', 'VITE_ENABLE_XMR_NON_CUSTODIAL', false)

@@ -13,6 +13,7 @@ import {
 import { useToast } from '../../components/Toast'
 import { ethers } from 'ethers'
 import { deriveCosmosAddress, resolveCosmosAddressConfig } from '../../lib/cosmosAddress'
+import { deriveSuiAddress } from '../../lib/suiAddress'
 import { deriveUtxoAddress } from '../../lib/utxoAddress'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { resolveRuntimeModelId } from '../../lib/runtimeModel'
@@ -68,6 +69,12 @@ const ShowSecrets: React.FC = () => {
             id: activeNetwork.id
           })
           const derived = await deriveCosmosAddress(decryptedMnemonic, derivationIndex, cosmosCfg)
+          if (!cancelled) setDerivedPrivKey(derived.privHex)
+          return
+        }
+
+        if (modelId === 'sui') {
+          const derived = await deriveSuiAddress(decryptedMnemonic, derivationIndex)
           if (!cancelled) setDerivedPrivKey(derived.privHex)
           return
         }

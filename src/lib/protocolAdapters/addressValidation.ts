@@ -1,4 +1,5 @@
 import type { Network } from '../../coins'
+import { isSuiAddress } from '../suiAddress'
 import { isCosmosLikeModelId } from '../runtimeModel'
 import { isValidCosmosAddress } from './cosmos'
 
@@ -49,6 +50,9 @@ export async function validateProtocolAddress(
   if (modelId === 'tron') {
     const tronweb = await loadTronWebModule()
     return tronweb.TronWeb.isAddress(value)
+  }
+  if (modelId === 'sui') {
+    return isSuiAddress(value)
   }
   if (isCosmosLikeModelId(modelId)) {
     return isValidCosmosAddress(network, value)

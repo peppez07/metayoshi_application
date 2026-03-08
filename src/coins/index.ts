@@ -1,11 +1,16 @@
 import { baseCoin } from './base'
+import { btcCoin } from './btc'
 import { btczCoin } from './btcz'
 import { cosmosCoin } from './cosmos'
+import { croCoin } from './cro'
+import { cronosCoin } from './cronos'
 import { dashCoin } from './dash'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
+import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
+import { suiCoin } from './sui'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
@@ -54,10 +59,15 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 
 const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
+  btcCoin,
   ethCoin,
   baseCoin,
+  polygonCoin,
+  cronosCoin,
   cosmosCoin,
+  croCoin,
   solCoin,
+  suiCoin,
   firoCoin,
   dashCoin,
   btczCoin,

@@ -9,6 +9,7 @@ import {
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
+import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -59,6 +60,7 @@ const DappRequestConfirm: React.FC = () => {
     () => networks.find((n) => n.id === pendingRequest?.networkId) || activeNetwork,
     [networks, pendingRequest, activeNetwork]
   )
+  const requestModelId = resolveRuntimeModelId(requestNetwork)
   const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
   const requestTo = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.toAddress || '')
@@ -185,30 +187,36 @@ const DappRequestConfirm: React.FC = () => {
             to: requestTo,
             amount: requestAmount
           })
-        : requestNetwork.id === 'ada'
+        : requestModelId === 'ada'
         ? await sendCardanoTransaction({
             to: requestTo,
             amount: requestAmount
           })
-        : requestNetwork.id === 'xmr'
+        : requestModelId === 'xmr'
         ? await sendMoneroTransaction({
             to: requestTo,
             amount: requestAmount
           })
-        : requestNetwork.id === 'sol'
+        : requestModelId === 'sol'
         ? await sendSolanaTransaction({
             to: requestTo,
             amount: requestAmount
           })
-        : requestNetwork.id === 'xlm'
+        : requestModelId === 'xlm'
         ? await sendStellarTransaction({
             to: requestTo,
             amount: requestAmount
           })
-        : requestNetwork.id === 'tron'
+        : requestModelId === 'tron'
         ? await sendTronTransaction({
             to: requestTo,
             amount: requestAmount
+          })
+        : isCosmosLikeModelId(requestModelId)
+        ? await sendUtxoTransaction({
+            to: requestTo,
+            amount: requestAmount,
+            memo: requestMemo
           })
         : await sendUtxoTransaction({
           to: requestTo,

@@ -147,7 +147,8 @@ export function resolveBridgeUrlForNetwork(
   rpcWallet: string | undefined
 ): string {
   if (networkId === 'cro') {
-    return `${apiBaseUrl}/v1/bridge/cronos-pos/${chain}`
+    const resolvedCoinId = String(coinId || '').trim().toLowerCase() || 'cronos-pos'
+    return `${apiBaseUrl}/v1/bridge/${resolvedCoinId}/${chain}`
   }
   if (networkId === 'rtm' || networkId === 'xrp') {
     const wallet = String(rpcWallet || '').trim() || 'mainwallet'

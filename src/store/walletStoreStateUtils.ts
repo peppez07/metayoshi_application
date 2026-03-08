@@ -9,6 +9,7 @@ type AccountAddressBucket = {
   BTC?: string
   COSMOS?: string
   SOL?: string
+  SUI?: string
   XRP?: string
 }
 
@@ -297,6 +298,8 @@ function resolveActivityAccountId(
         push(account.addresses?.BTC)
       } else if (network?.coinType === 'COSMOS') {
         push(account.addresses?.COSMOS)
+      } else if (network?.coinType === 'SUI') {
+        push(account.addresses?.SUI)
       } else if (!network) {
         Object.values(account.networkAddresses || {}).forEach(push)
         push(account.addresses?.EVM)
@@ -304,6 +307,7 @@ function resolveActivityAccountId(
         push(account.addresses?.BTC)
         push(account.addresses?.COSMOS)
         push(account.addresses?.SOL)
+        push(account.addresses?.SUI)
         push(account.addresses?.XRP)
       }
 
