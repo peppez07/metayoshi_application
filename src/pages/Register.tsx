@@ -618,8 +618,8 @@ const Register: React.FC = () => {
                 <div className="flex items-center justify-between gap-3">
                   <SectionHeader
                     eyebrow="Terms Of Service"
-                    title="Review the important wallet rules"
-                    description="The key risk points stay visible here before vault creation or restore."
+                    title="Open the full terms"
+                    description="Use the canonical terms page before accepting."
                   />
                   <button
                     type="button"
@@ -628,14 +628,6 @@ const Register: React.FC = () => {
                   >
                     Show Terms
                   </button>
-                </div>
-
-                <div className="space-y-2">
-                  <PolicyRow text="MetaYoshi is non-custodial. Only you control your keys and recovery phrase." />
-                  <PolicyRow text="Lost or exposed recovery data can permanently result in loss of funds." />
-                  <PolicyRow text="All transactions and signatures are your responsibility and can be irreversible." />
-                  <PolicyRow text="MetaYoshi is provided as-is and does not provide legal, tax, or investment advice." />
-                  <PolicyRow text="You are responsible for legal and regulatory compliance in your jurisdiction." />
                 </div>
               </section>
 
@@ -772,13 +764,6 @@ const MiniFeature: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon,
   <div className="flex items-center gap-2 rounded-2xl border border-dark-600 bg-dark-700/30 px-3 py-2">
     <span className="text-primary">{icon}</span>
     <span className="text-[10px] font-black uppercase tracking-[0.12em] text-gray-300">{label}</span>
-  </div>
-)
-
-const PolicyRow: React.FC<{ text: string }> = ({ text }) => (
-  <div className="flex items-start gap-3 rounded-2xl border border-dark-600 bg-dark-700/25 px-3 py-2.5">
-    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
-    <p className="text-[11px] leading-relaxed text-gray-300">{text}</p>
   </div>
 )
 
