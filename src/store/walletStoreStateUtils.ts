@@ -125,6 +125,9 @@ export function normalizeNetworkIdAlias(value: string): string {
   if (!normalized) return ''
   if (normalized === 'sdash' || normalized === 'srv--dash') return 'dash'
   if (normalized === 'btc' || normalized === 'bitcoin' || normalized === 'srv--btc') return 'srv--bitcoin'
+  if (normalized === 'arb' || normalized === 'arbitrum' || normalized === 'arbitrum-one') return 'arb'
+  if (normalized === 'op' || normalized === 'optimism' || normalized === 'eth-l2--optimism') return 'op'
+  if (normalized === 'avax' || normalized === 'avaxc' || normalized === 'avalanche' || normalized === 'avalanche-c-chain') return 'avaxc'
   if (normalized.endsWith('-mainnet')) {
     const base = normalized.slice(0, -'-mainnet'.length)
     if (FROZEN_STABLE_NETWORK_IDS.has(base)) return base

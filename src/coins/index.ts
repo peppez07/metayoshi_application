@@ -1,3 +1,5 @@
+import { arbCoin } from './arb'
+import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
 import { btcCoin } from './btc'
 import { btczCoin } from './btcz'
@@ -7,6 +9,7 @@ import { cronosCoin } from './cronos'
 import { dashCoin } from './dash'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
+import { opCoin } from './op'
 import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
@@ -69,8 +72,11 @@ const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   btcCoin,
   ethCoin,
+  arbCoin,
+  opCoin,
   baseCoin,
   polygonCoin,
+  avaxcCoin,
   cronosCoin,
   cosmosCoin,
   croCoin,

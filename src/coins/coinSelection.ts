@@ -4,13 +4,16 @@ import { BUILD_CONFIG } from '../buildConfig'
 export const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 
-export const EVM_COIN_IDS = new Set<string>(['eth', 'base', 'polygon', 'cronos'])
-export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['base'])
+export const EVM_COIN_IDS = new Set<string>(['eth', 'arb', 'op', 'base', 'polygon', 'avaxc', 'cronos'])
+export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['arb', 'op', 'base'])
 
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
   1: 'eth',
+  10: 'op',
   25: 'cronos',
   137: 'polygon',
+  42161: 'arb',
+  43114: 'avaxc',
   8453: 'base'
 }
 
@@ -19,6 +22,14 @@ const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   ethereum: 'eth',
   'ethereum-mainnet': 'eth',
   'mainnet-ethereum': 'eth',
+  arb: 'arb',
+  arbitrum: 'arb',
+  'arbitrum-one': 'arb',
+  'mainnet-arbitrum': 'arb',
+  op: 'op',
+  optimism: 'op',
+  'optimism-mainnet': 'op',
+  'mainnet-optimism': 'op',
   base: 'base',
   'base-mainnet': 'base',
   'mainnet-base': 'base',
@@ -27,6 +38,11 @@ const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   'polygon-mainnet': 'polygon',
   'polygon-bor': 'polygon',
   'mainnet-polygon': 'polygon',
+  avax: 'avaxc',
+  avaxc: 'avaxc',
+  avalanche: 'avaxc',
+  'avalanche-c-chain': 'avaxc',
+  'mainnet-avalanche': 'avaxc',
   cronos: 'cronos',
   'cronos-mainnet': 'cronos',
   'cronos-evm': 'cronos',

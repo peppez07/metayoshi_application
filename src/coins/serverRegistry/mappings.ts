@@ -58,6 +58,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   ethereum: 'eth',
   'arbitrum-one': 'arb',
   'arbitrum-nova': 'arb',
+  optimism: 'op',
   base: 'base',
   bsc: 'bnb',
   'polygon-bor': 'polygon',
@@ -80,7 +81,6 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   avail: 'eth',
   peaq: 'eth',
   'syscoin-tanenbaum-evm': 'eth',
-  optimism: 'eth',
   pulsechain: 'eth',
   scroll: 'eth',
   somnia: 'eth',
@@ -192,7 +192,7 @@ const SERVER_COIN_VARIANT_SUFFIXES = [
   'tanenbaum'
 ]
 
-export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'base', 'bnb', 'polygon', 'avaxc', 'cronos'])
+export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'op', 'base', 'bnb', 'polygon', 'avaxc', 'cronos'])
 export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
 
 export function isBlockedServerCoinId(coinId: string): boolean {
@@ -223,6 +223,7 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'ethereum-holesky') return 'eth'
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'
   if (normalized === 'bsc') return 'bnb'
+  if (normalized === 'optimism' || normalized.startsWith('optimism-')) return 'op'
   if (normalized === 'polygon' || normalized === 'polygon-bor') return 'polygon'
   if (normalized === 'sui') return 'sui'
   if (normalized.startsWith('avalanche-') && normalized.includes('c-chain')) return 'avaxc'
@@ -318,6 +319,7 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
     const canonicalServerIdByModel: Record<string, string> = {
       eth: 'ethereum',
       arb: 'arbitrum-one',
+      op: 'optimism',
       base: 'base',
       bnb: 'bsc',
       cronos: 'cronos',
@@ -366,6 +368,7 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   const normalized = String(coinId || '').trim().toLowerCase()
   if (!normalized) return null
   if (normalized.includes('arbitrum')) return 'arb'
+  if (normalized.includes('optimism')) return 'op'
   if (normalized.includes('polygon')) return 'polygon'
   if (normalized.includes('avalanche')) return 'avaxc'
   if (normalized.includes('base')) return 'base'

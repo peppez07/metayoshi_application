@@ -13,8 +13,11 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   cro: { symbol: 'CRO', coinId: 'cronos-pos' },
   cronos: { symbol: 'CRO', coinId: 'cronos' },
   eth: { symbol: 'ETH', coinId: 'ethereum' },
+  arb: { symbol: 'ETH', coinId: 'arbitrum-one' },
+  op: { symbol: 'ETH', coinId: 'optimism' },
   base: { symbol: 'ETH', coinId: 'base' },
   polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
+  avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
   sol: { symbol: 'SOL', coinId: 'solana' },
   sui: { symbol: 'SUI', coinId: 'sui' }
 }

@@ -896,6 +896,24 @@ const DEFAULT_BASE_TRACKED_TOKENS: EvmTrackedToken[] = [
   { address: '0x6E7c5Faaaa2ccA8437C8FA20EA2eE5A5cF5077DC', symbol: 'MASTERBOT', decimals: 18 }
 ]
 
+const DEFAULT_ARB_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
+  { address: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', symbol: 'USDT', decimals: 6 },
+  { address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', symbol: 'WETH', decimals: 18 }
+]
+
+const DEFAULT_OP_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0x0b2c639c533813f4aa9d7837caf62653d097ff85', symbol: 'USDC', decimals: 6 },
+  { address: '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58', symbol: 'USDT', decimals: 6 },
+  { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+]
+
+const DEFAULT_AVAXC_TRACKED_TOKENS: EvmTrackedToken[] = [
+  { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
+  { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6 },
+  { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.E', decimals: 18 }
+]
+
 const MIN_TRACKED_EVM_TOKENS_PER_CHAIN = 100
 const MAX_TRACKED_EVM_TOKENS_PER_CHAIN = 220
 const EVM_TRACKED_TOKEN_CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -906,6 +924,7 @@ const evmTrackedTokenCache = new Map<string, {
 
 const CHAIN_ID_BY_NETWORK_ID: Record<string, number> = {
   eth: 1,
+  op: 10,
   bnb: 56,
   cronos: 25,
   polygon: 137,
@@ -925,6 +944,7 @@ const CHAIN_ID_BY_NETWORK_ID: Record<string, number> = {
 
 const COINGECKO_CHAIN_SLUG_BY_CHAIN_ID: Record<number, string> = {
   1: 'ethereum',
+  10: 'optimism',
   56: 'binance-smart-chain',
   25: 'cronos',
   137: 'polygon-pos',
@@ -1024,11 +1044,17 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_TOKENS`] || ''))
   if (byModel.length > 0) return byModel
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
+  if (modelId.toLowerCase() === 'arb') return DEFAULT_ARB_TRACKED_TOKENS
+  if (modelId.toLowerCase() === 'op') return DEFAULT_OP_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'bnb') return DEFAULT_BNB_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'base') return DEFAULT_BASE_TRACKED_TOKENS
+  if (modelId.toLowerCase() === 'avaxc') return DEFAULT_AVAXC_TRACKED_TOKENS
   const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
   if (chainId === 1) return DEFAULT_ETH_TRACKED_TOKENS
+  if (chainId === 10) return DEFAULT_OP_TRACKED_TOKENS
   if (chainId === 56) return DEFAULT_BNB_TRACKED_TOKENS
+  if (chainId === 42161) return DEFAULT_ARB_TRACKED_TOKENS
+  if (chainId === 43114) return DEFAULT_AVAXC_TRACKED_TOKENS
   if (chainId === 8453) return DEFAULT_BASE_TRACKED_TOKENS
   return []
 }
