@@ -518,7 +518,10 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             </div>
 
             {/* QR container — dark MetaYoshi-branded frame */}
-            <div className="rounded-2xl border border-primary/30 bg-dark-900 p-4 flex items-center justify-center shadow-[0_0_24px_rgba(245,132,31,0.10)]">
+            <div className="rounded-2xl border border-primary/30 bg-dark-900 p-4 flex flex-col items-center justify-center gap-3 shadow-[0_0_24px_rgba(245,132,31,0.10)]">
+              <span className="text-[11px] font-black uppercase tracking-[0.28em] text-gray-300">
+                MetaYoshi
+              </span>
               {qrDataUrl ? (
                 <img
                   src={qrDataUrl}
