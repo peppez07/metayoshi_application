@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security AppSec"
+  short_description: "Bridge, permissions, and signing security"
+  default_prompt: "Use $security-appsec to review bridge, approval, and permission changes for abuse risk and non-custodial safety."

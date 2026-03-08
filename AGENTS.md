@@ -11,6 +11,45 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - reliable packaging across Chromium and Firefox
 - backward-compatible wallet and dapp behavior
 
+## Actual project structure
+- `src/background/service-worker.ts`: extension background/service worker, popup lifecycle, dapp RPC handling, approval orchestration.
+- `src/content/content-script.ts`: webpage bridge bootstrap, runtime error capture, injection allowlist, background messaging.
+- `src/inpage/inpage-provider.ts`: injected `window.metayoshi` / `window.rtm` provider surface for dapps.
+- `src/App.tsx`: top-level route tree and route guards for auth, wallet, dapp approvals, tx flows, and settings.
+- `src/pages/**`: popup pages and route-level flows such as register, unlock, wallet, dapp, tx, and settings.
+- `src/components/**`: reusable popup UI, wallet shell, tabs, inputs, toasts, send forms.
+- `src/store/**`: Zustand wallet state, persistence, balances, account addressing, activity, send actions.
+- `src/coins/**`: network catalog, runtime profiles, server registry, payload builders, interceptors, token/logo assets.
+- `src/lib/**`: shared protocol helpers, non-custodial signing modules, RPC adapters, permissions, storage, theming.
+- `src/styles/index.css`: global theme tokens, popup component classes, animation utilities, light/dark treatment.
+- `app/src/ui/index.html`: popup HTML entry used by Vite and packaged extension routes.
+- `public/manifest.json`: base MV3 manifest copied into packaged output.
+- `vite.config.ts`: multi-entry extension build for UI, background, content, and inpage scripts.
+- `scripts/package-browser.mjs` and `scripts/zip-browser.mjs`: browser-specific packaging and release artifact helpers.
+- `dist*`: generated browser builds and packaged artifacts. Treat as outputs unless the task is explicitly about release artifacts.
+
+## Product behavior guardrails
+- Keep the existing wallet UI style and flow unless the user explicitly asks for a redesign.
+- Preserve the current route model:
+  - `/register`, `/unlock`, `/terms`
+  - `/wallet/*`
+  - `/assets*`
+  - `/dapp/*`
+  - `/tx/*`
+  - `/settings/*`
+- Preserve the current visual language:
+  - compact extension-sized layouts
+  - dark-first wallet chrome with light theme support
+  - rounded cards, sheets, and dense information layout
+  - orange primary accents and the existing MetaYoshi identity
+- Innovate by extending the current product language, not by replacing it.
+- Prefer targeted UX improvements, clearer states, and smarter defaults over sweeping rewrites.
+- Infer the user's likely intent from the flow, route, and files involved before changing behavior.
+- If intent is ambiguous, choose the smallest reversible change that keeps existing behavior stable.
+- Keep user-facing copy natural and direct. Avoid robotic or over-explained language in UI text.
+- Keep code comments human, short, and useful. Explain why, risk, or constraints; do not narrate obvious code.
+- Watch for encoding regressions in user-facing text and comments. Do not introduce mojibake or mixed-encoding literals.
+
 ## Global engineering rules
 - Prefer small, reviewable changes.
 - Do not rewrite major wallet flows unless explicitly requested.
@@ -23,6 +62,12 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - Favor deterministic behavior over hidden magic.
 - Keep secrets and API keys in environment or injected config, never hardcoded.
 - Keep signing and approval flows easy to audit.
+- Prefer project-native patterns over introducing a new local architecture.
+- Keep route guards, capability gates, and non-custodial checks explicit.
+- When touching UX, preserve current spacing, interaction rhythm, and popup-size behavior.
+- Do not hardcode bridge credentials, fallback secrets, or auth defaults in the client bundle.
+- Do not route chain-specific behavior off ad hoc string checks when `runtimeModelId` or existing capability helpers already define the correct model boundary.
+- Verify old audit notes, reports, and markdown plans against current code before treating them as truth.
 
 ## Architecture principles
 - The extension is split into clearly bounded modules:
@@ -32,9 +77,29 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
   - wallet store/state management
   - chain adapters and payload builders
   - browser packaging/manifest handling
+- In this codebase, those boundaries are primarily implemented in:
+  - `src/background`
+  - `src/content`
+  - `src/inpage`
+  - `src/pages` and `src/components`
+  - `src/store`
+  - `src/coins`
+  - `src/lib`
+  - `vite.config.ts`, `public/manifest.json`, and `scripts/**`
 - Chain-specific logic must stay isolated behind adapter-style boundaries.
 - Browser-specific packaging differences must not silently change wallet semantics.
 - Dapp-facing provider compatibility is a product requirement, not a nice-to-have.
+- UI route decisions should continue to flow through store state plus capability helpers such as:
+  - `resolveNetworkCapabilities`
+  - `resolveCoinModelFamily`
+  - `getEnabledNetworks`
+- Wallet persistence, active account/network state, approvals, balances, and send flows should stay centered in the Zustand store and its helpers, not scattered into route components.
+- Provider behavior exposed to webpages must remain consistent across:
+  - `src/inpage/inpage-provider.ts`
+  - `src/content/content-script.ts`
+  - `src/background/service-worker.ts`
+- Global listeners in bridge/background code must have explicit lifecycle ownership. Do not attach per-connection listeners without cleanup.
+- Dapp transaction routing should align with runtime model helpers, not only literal network ids.
 
 ## Safety and security rules
 - Assume all external input is hostile.
@@ -43,6 +108,7 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - Review every new permission, message bridge, or injected provider change for abuse risk.
 - Avoid silent auto-approval behavior.
 - Minimize attack surface in background, content, and inpage scripts.
+- Treat bundled bridge usernames/passwords as secret-like operational material. Missing config must fail explicitly, not fall back to production-looking defaults.
 
 ## Delivery rules
 - For every non-trivial change, include:
@@ -51,16 +117,32 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
   3. risks
   4. validation performed
   5. follow-up recommendations
+- Add rollback notes when the change affects wallet behavior, bridge behavior, approvals, or browser packaging.
+- Prefer concrete validation using repo commands when applicable:
+  - `npm run lint`
+  - `npm run build`
+  - `npm run build:chrome`
+  - `npm run build:firefox`
+  - `npm run build:browsers`
+  - `npm run test:api:firo-eth`
+- For UI work, validate the affected route flow and extension-sized layout, not just compilation.
+- For provider/security work, validate approval, rejection, and locked-wallet cases explicitly.
+- For packaging work, verify expected outputs such as:
+  - `dist/background.js`
+  - `dist/assets/ui.js`
+  - `dist/assets/ui.css`
+  - `dist/app/src/ui/index.html`
+- For text-heavy UI changes, scan for encoding corruption in rendered labels, placeholders, token labels, and comments.
 
 ## Team routing
 When a task is mainly about:
-- React UI, extension pages, UX, navigation, state wiring -> frontend-extension-engineer
-- chain adapters, RPC behavior, assets, send/swap/runtime model logic -> blockchain-wallet-engineer
-- manifest, Vite build, browser packaging, release artifacts -> release-packaging-engineer
-- permissions, signing safety, secrets, bridge boundaries -> security-appsec
-- smoke, regression, browser validation, release confidence -> qa-browser-release
-- change sequencing, compatibility decisions, scope control -> product-wallet-owner
-- multi-role delivery coordination across risky changes -> release-orchestrator
+- React UI, popup pages, route flow, wallet shell, component behavior, theme continuity, state wiring in `src/pages`, `src/components`, `src/App.tsx`, `src/styles` -> frontend-extension-engineer
+- chain adapters, runtime profiles, RPC behavior, balances, payload builders, asset support, server registry, send logic in `src/coins`, `src/lib`, `src/store/walletStore.ts` -> blockchain-wallet-engineer
+- manifest, Vite multi-entry build, popup entry HTML, packaging scripts, browser output artifacts in `vite.config.ts`, `public/manifest.json`, `app/src/ui/index.html`, `scripts/**` -> release-packaging-engineer
+- permissions, message bridges, origin validation, storage safety, dapp approvals, secret handling in `src/background`, `src/content`, `src/inpage`, `src/lib/dappPermissions.ts`, `src/lib/bridgeAuth.ts` -> security-appsec
+- smoke, regression, popup flow validation, packaged build checks, release confidence -> qa-browser-release
+- change sequencing, compatibility decisions, feature scope, user intent tradeoffs -> product-wallet-owner
+- multi-role delivery coordination across risky changes, release gating, cross-area sequencing -> release-orchestrator
 
 If a task spans multiple areas:
 - identify a primary owner

@@ -1,0 +1,4 @@
+interface:
+  display_name: "QA Browser Release"
+  short_description: "Wallet release smoke and regression QA"
+  default_prompt: "Use $qa-browser-release to define or run the highest-risk wallet smoke and regression checks for this change."
