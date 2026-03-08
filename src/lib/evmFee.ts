@@ -1,5 +1,6 @@
 import { ethers } from 'ethers'
 import { callBridgeMethod, type UtxoRpcConfig } from './utxoRpc'
+import type { EvmGasLane } from './coinFeatureModel'
 
 export type EvmFeeQuote = {
   gasLimit: bigint
@@ -17,6 +18,13 @@ type EstimateInput = {
   valueWei?: bigint
   data?: string
   fallbackGasLimitHex: string
+  lane?: EvmGasLane
+}
+
+function scaleFee(value: bigint, lane: EvmGasLane | undefined): bigint {
+  if (lane === 'economy') return (value * 85n) / 100n
+  if (lane === 'priority') return (value * 130n) / 100n
+  return value
 }
 
 function parseHexBigInt(value: unknown, fallback = 0n): bigint {
@@ -30,6 +38,7 @@ function parseHexBigInt(value: unknown, fallback = 0n): bigint {
 }
 
 export async function estimateEvmTxFee(input: EstimateInput): Promise<EvmFeeQuote> {
+  const lane = input.lane || 'balanced'
   const valueWei = input.valueWei ?? 0n
   const txForEstimate: Record<string, string> = {
     from: input.from,
@@ -73,10 +82,19 @@ export async function estimateEvmTxFee(input: EstimateInput): Promise<EvmFeeQuot
       // Keep fallback priority fee.
     }
 
+    maxPriorityFeePerGas = scaleFee(maxPriorityFeePerGas, lane)
+    if (maxPriorityFeePerGas < 1_000_000_000n) {
+      maxPriorityFeePerGas = 1_000_000_000n
+    }
+
     // Keep max fee above both (2 * base + priority) and current gasPrice.
     const candidateFromBase = (baseFeeWei * 2n) + maxPriorityFeePerGas
     const candidateFromGasPrice = gasPriceWei + maxPriorityFeePerGas
-    const maxFeePerGas = candidateFromBase > candidateFromGasPrice ? candidateFromBase : candidateFromGasPrice
+    let maxFeePerGas = candidateFromBase > candidateFromGasPrice ? candidateFromBase : candidateFromGasPrice
+    maxFeePerGas = scaleFee(maxFeePerGas, lane)
+    if (maxFeePerGas <= maxPriorityFeePerGas) {
+      maxFeePerGas = maxPriorityFeePerGas + 1_000_000_000n
+    }
     return {
       type: 2,
       gasLimit,
@@ -86,10 +104,11 @@ export async function estimateEvmTxFee(input: EstimateInput): Promise<EvmFeeQuot
     }
   }
 
+  gasPriceWei = scaleFee(gasPriceWei, lane)
+  if (gasPriceWei <= 0n) gasPriceWei = 1_000_000_000n
   return {
     gasLimit,
     gasPrice: gasPriceWei,
     estimatedFeeWei: gasLimit * gasPriceWei
   }
 }
-

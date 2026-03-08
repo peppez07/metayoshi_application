@@ -1,13 +1,10 @@
 import React from 'react'
 import { IoCubeOutline, IoGlobeOutline, IoServerOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
-import { ModelRuntimeStatus } from './ModelRuntimeStatus'
-import { useChainModelLiveData } from './useChainModelLiveData'
 
 const CosmosModelPage: React.FC = () => {
   const { networks, activeNetworkId } = useWalletStore()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
-  const { snapshot, loading, refresh } = useChainModelLiveData()
   const coinId = String(activeNetwork?.serverCoinId || activeNetwork?.id || 'cosmos').trim()
 
   return (
@@ -25,7 +22,6 @@ const CosmosModelPage: React.FC = () => {
         <Row icon={<IoServerOutline className="w-4 h-4 text-primary" />} label="Backend" value="Cosmos bridge adapter" />
       </section>
 
-      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

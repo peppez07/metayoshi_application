@@ -8,6 +8,10 @@ export interface EvmExternalSignTxInput {
   valueWei?: bigint
   data?: string
   gasLimit?: bigint
+  gasPrice?: bigint
+  maxFeePerGas?: bigint
+  maxPriorityFeePerGas?: bigint
+  type?: 2
 }
 
 export interface EvmExternalSigner {
@@ -110,7 +114,11 @@ function createInjectedHardwareSigner(): EvmExternalSigner {
           to: normalizeEvmAddress(input.to),
           value: input.valueWei ?? 0n,
           data: String(input.data || '').trim() || undefined,
-          gasLimit: input.gasLimit ?? undefined
+          gasLimit: input.gasLimit ?? undefined,
+          gasPrice: input.gasPrice ?? undefined,
+          maxFeePerGas: input.maxFeePerGas ?? undefined,
+          maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+          type: input.type ?? undefined
         })
         return { hash: String(tx?.hash || '').trim() }
       }, expectedAddress)
@@ -167,7 +175,11 @@ function createWalletConnectSigner(): EvmExternalSigner {
           to: normalizeEvmAddress(input.to),
           value: input.valueWei ?? 0n,
           data: String(input.data || '').trim() || undefined,
-          gasLimit: input.gasLimit ?? undefined
+          gasLimit: input.gasLimit ?? undefined,
+          gasPrice: input.gasPrice ?? undefined,
+          maxFeePerGas: input.maxFeePerGas ?? undefined,
+          maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+          type: input.type ?? undefined
         })
         return { hash: String(tx?.hash || '').trim() }
       }, expectedAddress)

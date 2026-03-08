@@ -27,6 +27,11 @@ import { getBuildFeatureFlag } from '../buildConfig'
 import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import {
+  normalizeNetworkModelPreferences,
+  normalizeNetworkModelPreferencesRecord,
+  type NetworkModelPreferences
+} from '../lib/coinFeatureModel'
 import { buildSolanaAssetId, extractSolanaMintFromAssetId } from '../lib/assetTypes'
 import { validateWatchOnlyAddress } from '../lib/watchOnlyAddress'
 import { getTokenLogoForAsset } from '../coins/tokenlogos'
@@ -103,6 +108,7 @@ export interface FullBackupV1 {
   backupConfirmed: boolean
   networkAssets: Record<string, Record<string, number>>
   sendListPreferences?: Record<string, SendListPreferenceBucket>
+  networkModelPreferences?: Record<string, NetworkModelPreferences>
 }
 
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
@@ -243,6 +249,8 @@ interface WalletState {
   serverCoinCatalog: ServerCoinCatalogItem[]
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
   sendListPreferences: Record<string, SendListPreferenceBucket>
+  /** Per-network execution preferences for model-specific send controls. */
+  networkModelPreferences: Record<string, NetworkModelPreferences>
   authorizedSites: string[]
   autolockMinutes: number
   donationPercent: number
@@ -360,6 +368,11 @@ interface WalletState {
     order?: string[]
     pinned?: string[]
     hidden?: string[]
+  }) => void
+  getNetworkModelPreferences: (networkId?: string) => NetworkModelPreferences
+  setNetworkModelPreferences: (params: {
+    networkId?: string
+    updates: Partial<NetworkModelPreferences>
   }) => void
   resetSendListPreferences: (params?: {
     accountId?: string
@@ -1671,6 +1684,13 @@ function normalizeSendListPreferencesRecord(
   return out
 }
 
+function normalizeNetworkModelPreferencesState(
+  raw: Record<string, NetworkModelPreferences> | undefined | null,
+  networks: Network[]
+): Record<string, NetworkModelPreferences> {
+  return normalizeNetworkModelPreferencesRecord(remapNetworkIdKeyedRecord(raw || {}), networks)
+}
+
 function buildNativeSendEntryId(networkId: string): string {
   const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim()).toLowerCase()
   return `${SEND_LIST_NATIVE_PREFIX}${normalizedNetworkId}`
@@ -2348,6 +2368,7 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkFiatAssets: {},
       serverCoinCatalog: [],
       sendListPreferences: {},
+      networkModelPreferences: {},
       authorizedSites: [],
       autolockMinutes: 5,
       donationPercent: MIN_DONATION_PERCENT,
@@ -2558,6 +2579,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
           sendListPreferences: {},
+          networkModelPreferences: {},
           activity: []
         }),
 
@@ -4179,6 +4201,35 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
+      getNetworkModelPreferences: (networkId) => {
+        const { networks, activeNetworkId, networkModelPreferences } = get()
+        const resolvedNetworkId = normalizeNetworkIdAlias(String(networkId || activeNetworkId || '').trim())
+        const network = networks.find((row) => row.id === resolvedNetworkId)
+        return normalizeNetworkModelPreferences(networkModelPreferences?.[resolvedNetworkId], network)
+      },
+
+      setNetworkModelPreferences: (params) => {
+        const { networks, activeNetworkId } = get()
+        const resolvedNetworkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!resolvedNetworkId) return
+        const network = networks.find((row) => row.id === resolvedNetworkId)
+        if (!network) return
+
+        set((state) => {
+          const current = normalizeNetworkModelPreferences(state.networkModelPreferences?.[resolvedNetworkId], network)
+          const next = normalizeNetworkModelPreferences(
+            { ...current, ...(params?.updates || {}) },
+            network
+          )
+          return {
+            networkModelPreferences: {
+              ...state.networkModelPreferences,
+              [resolvedNetworkId]: next
+            }
+          }
+        })
+      },
+
       resetSendListPreferences: (params) => {
         const {
           accounts,
@@ -4276,6 +4327,7 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: lro2[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
+          const modelPreferences = get().getNetworkModelPreferences(activeNetworkId)
           const externalSigner = isExternalEvmSignerEnabled() ? await resolveEvmExternalSigner() : null
           if (isExternalEvmSignerEnabled() && !externalSigner) {
             throw new Error('External EVM signer is not available')
@@ -4359,7 +4411,8 @@ export const useWalletStore = create<WalletState>()(
               to: tokenAddress,
               data: transferData,
               valueWei: 0n,
-              fallbackGasLimitHex: '0x30d40'
+              fallbackGasLimitHex: '0x30d40',
+              lane: modelPreferences.evmGasLane
             })
 
             if (externalSigner) {
@@ -4368,7 +4421,11 @@ export const useWalletStore = create<WalletState>()(
                 to: tokenAddress,
                 valueWei: 0n,
                 data: transferData,
-                gasLimit: feeQuote.gasLimit
+                gasLimit: feeQuote.gasLimit,
+                gasPrice: feeQuote.gasPrice,
+                maxFeePerGas: feeQuote.maxFeePerGas,
+                maxPriorityFeePerGas: feeQuote.maxPriorityFeePerGas,
+                type: feeQuote.type
               })
               await get().fetchNetworkAssets()
               return { txid: sent.hash }
@@ -4452,7 +4509,8 @@ export const useWalletStore = create<WalletState>()(
             to: tokenAddress,
             data: transferData,
             valueWei: 0n,
-            fallbackGasLimitHex: '0x186a0'
+            fallbackGasLimitHex: '0x186a0',
+            lane: modelPreferences.evmGasLane
           })
           if (externalSigner) {
             const sent = await externalSigner.sendTransaction({
@@ -4460,7 +4518,11 @@ export const useWalletStore = create<WalletState>()(
               to: tokenAddress,
               valueWei: 0n,
               data: transferData,
-              gasLimit: feeQuote.gasLimit
+              gasLimit: feeQuote.gasLimit,
+              gasPrice: feeQuote.gasPrice,
+              maxFeePerGas: feeQuote.maxFeePerGas,
+              maxPriorityFeePerGas: feeQuote.maxPriorityFeePerGas,
+              type: feeQuote.type
             })
             await get().fetchNetworkAssets()
             return { txid: sent.hash }
@@ -4743,6 +4805,7 @@ export const useWalletStore = create<WalletState>()(
           networkAssets:    {},
           accountNetworkAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord(backup.sendListPreferences ?? {}),
+          networkModelPreferences: normalizeNetworkModelPreferencesState(backup.networkModelPreferences ?? {}, networks),
           networkAssetLogos: {},
           accountNetworkAssetLogos: {},
           networkAssetLabels: {},
@@ -5646,16 +5709,33 @@ export const useWalletStore = create<WalletState>()(
 
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const modelPreferences = get().getNetworkModelPreferences(activeNetworkId)
         if (!net || net.coinType !== 'EVM') throw new Error('Active network is not EVM')
         if (!acc?.addresses?.EVM && !isExternalEvmSignerEnabled()) throw new Error('No active account')
 
         if (isExternalEvmSignerEnabled()) {
           const signer = await resolveEvmExternalSigner()
           if (!signer) throw new Error('External EVM signer is not available')
+          const rpcConfig = await createUtxoRpcConfig(net)
+          const fromAddress = await signer.getAddress()
+          const valueWei = ethers.parseEther(String(amount))
+          const feeQuote = await estimateEvmTxFee({
+            rpcConfig,
+            from: fromAddress,
+            to,
+            valueWei,
+            fallbackGasLimitHex: '0x5208',
+            lane: modelPreferences.evmGasLane
+          })
           const sent = await signer.sendTransaction({
             chainId: net.chainId,
             to,
-            valueWei: ethers.parseEther(String(amount))
+            valueWei,
+            gasLimit: feeQuote.gasLimit,
+            gasPrice: feeQuote.gasPrice,
+            maxFeePerGas: feeQuote.maxFeePerGas,
+            maxPriorityFeePerGas: feeQuote.maxPriorityFeePerGas,
+            type: feeQuote.type
           })
           return { hash: sent.hash }
         }
@@ -5671,7 +5751,8 @@ export const useWalletStore = create<WalletState>()(
           rpcConfig,
           evm: {
             mnemonic: sessionMnemonic,
-            accountIndex
+            accountIndex,
+            gasLane: modelPreferences.evmGasLane
           }
         })
       },
@@ -5906,6 +5987,8 @@ export const useWalletStore = create<WalletState>()(
           to,
           amount,
           donation,
+          feePreset: get().getNetworkModelPreferences(activeNetworkId).utxoFeePreset,
+          inputStrategy: get().getNetworkModelPreferences(activeNetworkId).utxoInputStrategy,
           deriveSigningKey: async (resolvedSenderAddress) => {
             const derived = await deriveSigningKeyForSenderAddress(
               sessionMnemonic,
@@ -5939,6 +6022,7 @@ export const useWalletStore = create<WalletState>()(
         syncPercent: state.syncPercent,
         serverCoinCatalog: state.serverCoinCatalog,
         sendListPreferences: state.sendListPreferences,
+        networkModelPreferences: state.networkModelPreferences,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
@@ -6026,6 +6110,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
+          networkModelPreferences: normalizeNetworkModelPreferencesState((persisted as any).networkModelPreferences, normalizedNetworks),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }
       }

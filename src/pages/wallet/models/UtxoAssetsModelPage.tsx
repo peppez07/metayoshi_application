@@ -1,15 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { IoCubeOutline, IoFunnelOutline, IoGitCompareOutline } from 'react-icons/io5'
+import { resolveNetworkModelControls } from '../../../lib/coinFeatureModel'
 import { useWalletStore } from '../../../store/walletStore'
-import { ModelRuntimeStatus } from './ModelRuntimeStatus'
-import { useChainModelLiveData } from './useChainModelLiveData'
 
 const UtxoAssetsModelPage: React.FC = () => {
-  const { accounts, activeAccountId, activeNetworkId, networkAssets, fetchNetworkAssets } = useWalletStore()
+  const {
+    accounts,
+    activeAccountId,
+    activeNetworkId,
+    networkAssets,
+    fetchNetworkAssets,
+    networks,
+    getNetworkModelPreferences,
+    setNetworkModelPreferences
+  } = useWalletStore()
   const [query, setQuery] = useState('')
-  const [composer, setComposer] = useState<'single' | 'batch'>('single')
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-  const { snapshot, loading, refresh } = useChainModelLiveData()
+  const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0]
+  const composer = getNetworkModelPreferences(activeNetworkId).utxoTransferComposer || 'single'
+  const controls = activeNetwork ? resolveNetworkModelControls(activeNetwork) : []
   const assetsMap = networkAssets?.[activeNetworkId] || {}
   const assetRows = useMemo(
     () => Object.entries(assetsMap).map(([symbol, rawAmount]) => ({ symbol, amount: Number(rawAmount) })),
@@ -34,7 +43,9 @@ const UtxoAssetsModelPage: React.FC = () => {
     <div className="h-full overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
       <section className="rounded-2xl border border-primary/30 bg-gradient-to-br from-dark-700/90 to-dark-900 p-4">
         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-primary">UTXO Asset Studio</p>
-        <p className="text-[11px] text-gray-400 mt-2">Coin + asset orchestration page for RTM-like multi-layer chains.</p>
+        <p className="text-[11px] text-gray-400 mt-2">
+          Transfer Composer now feeds the Send Hub routing on {activeNetwork?.name || 'this network'}.
+        </p>
       </section>
 
       {activeNetworkId !== 'rtm' && (
@@ -77,7 +88,7 @@ const UtxoAssetsModelPage: React.FC = () => {
             <button
               key={mode}
               type="button"
-              onClick={() => setComposer(mode)}
+              onClick={() => setNetworkModelPreferences({ networkId: activeNetworkId, updates: { utxoTransferComposer: mode } })}
               className={`rounded-lg border py-1.5 text-[10px] font-bold uppercase ${
                 composer === mode ? 'border-primary/50 bg-primary/15 text-orange-200' : 'border-dark-600 bg-dark-700/40 text-gray-400'
               }`}
@@ -86,14 +97,35 @@ const UtxoAssetsModelPage: React.FC = () => {
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-gray-400">Composer mode: {composer}</p>
+        <p className="text-[11px] text-gray-400">
+          Single keeps direct sends. Batch prefers the consolidated multi-holder flow when Send Hub can build one.
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-gray-300">Feature Audit</p>
+          <span className="text-[9px] text-gray-500">Per network</span>
+        </div>
+        <div className="space-y-2">
+          {controls.map((control) => (
+            <div key={control.key} className="rounded-lg border border-dark-600 bg-dark-700/30 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] font-bold text-gray-200">{control.label}</p>
+                <span className="text-[9px] px-2 py-0.5 rounded-full border uppercase border-green-500/40 bg-green-500/10 text-green-200">
+                  {control.status}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-gray-400">{control.description}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <div className="rounded-lg border border-dark-600 bg-dark-800/40 p-2 text-[10px] font-mono text-gray-500 break-all">
         {address || 'No active address'}
       </div>
 
-      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

@@ -22,6 +22,7 @@ import { isCosmosAddressForHrp } from './cosmosAddress'
 import { isCosmosLikeModelId, isCroCosmosModelId, resolveRuntimeModelId } from './runtimeModel'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { estimateEvmTxFee } from './evmFee'
+import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import {
   fetchCosmosBalanceAndSync,
   resolveCosmosNetworkConfig
@@ -52,6 +53,7 @@ export interface SendChainTransactionInput {
   evm?: {
     mnemonic: string
     accountIndex: number
+    gasLane?: EvmGasLane
   }
   utxoSend?: () => Promise<{ hash: string }>
   xrpSend?: () => Promise<{ hash: string }>
@@ -70,6 +72,8 @@ export interface SendUtxoNonCustodialInput {
   to: string
   amount: string
   donation?: UtxoDonationInput
+  feePreset?: UtxoFeePreset
+  inputStrategy?: UtxoInputStrategy
   deriveSigningKey: (senderAddress: string) => Promise<{ privHex: string }>
 }
 
@@ -317,7 +321,8 @@ export async function sendChainTransaction(input: SendChainTransactionInput): Pr
       from,
       to,
       valueWei,
-      fallbackGasLimitHex: '0x5208'
+      fallbackGasLimitHex: '0x5208',
+      lane: input.evm?.gasLane
     })
 
     const tx: any = {
@@ -456,6 +461,9 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const rawFeePerByteCoins = net.feePerByte ?? estimateNetworkFee(net.id, 1) ?? 0.0000002
   let feePerByteSats = Math.max(1, sat(rawFeePerByteCoins))
   if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+  const feePreset = String(input.feePreset || 'fast').trim().toLowerCase()
+  if (feePreset === 'cheap') feePerByteSats = Math.max(1, Math.floor((feePerByteSats * 80) / 100))
+  if (feePreset === 'premium') feePerByteSats = Math.max(1, Math.ceil((feePerByteSats * 145) / 100))
   const OVERHEAD_BYTES = 10
   const INPUT_BYTES = 148
   const OUTPUT_BYTES = 34
@@ -465,7 +473,12 @@ export async function sendUtxoNonCustodialTransaction(input: SendUtxoNonCustodia
   const outputsWithoutChange = 1 + (donationAmountSats > 0 ? 1 : 0)
   const isRtmSelfSend = resolveModelId(net) === 'rtm' && String(input.to || '').trim() === senderAddress
 
-  const sorted = [...unspent].sort((a, b) => b.amount - a.amount)
+  const inputStrategy = String(input.inputStrategy || 'minimize-inputs').trim().toLowerCase()
+  const sorted = [...unspent].sort((a, b) => (
+    inputStrategy === 'consolidate-fragments'
+      ? a.amount - b.amount
+      : b.amount - a.amount
+  ))
   const selectedUtxos: UtxoUnspent[] = []
   let accumulatedSats = 0
   for (const utxo of sorted) {

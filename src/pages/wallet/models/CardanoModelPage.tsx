@@ -1,14 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { IoGitNetworkOutline, IoLeafOutline, IoPulseOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../../store/walletStore'
-import { ModelRuntimeStatus } from './ModelRuntimeStatus'
-import { useChainModelLiveData } from './useChainModelLiveData'
 
 const CardanoModelPage: React.FC = () => {
   const { accounts, activeAccountId, activeNetworkId } = useWalletStore()
   const [view, setView] = useState<'utxo' | 'staking' | 'policies'>('utxo')
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-  const { snapshot, loading, refresh } = useChainModelLiveData()
 
   const cardanoAddress = useMemo(
     () => activeAccount?.networkAddresses?.[activeNetworkId] || '',
@@ -37,7 +34,7 @@ const CardanoModelPage: React.FC = () => {
         <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-3 space-y-2">
           <p className="text-xs font-bold uppercase text-gray-300">EUTXO Lens</p>
           <p className="text-[11px] text-gray-500">
-            UTXO-level Cardano breakdown is not yet exposed by current adapter/node response. Use runtime panel for live balance/sync.
+            UTXO-level Cardano breakdown is not yet exposed by current adapter/node response.
           </p>
         </section>
       )}
@@ -64,7 +61,6 @@ const CardanoModelPage: React.FC = () => {
         {cardanoAddress || 'No Cardano address available'}
       </div>
 
-      <ModelRuntimeStatus snapshot={snapshot} loading={loading} onRefresh={() => void refresh()} />
     </div>
   )
 }

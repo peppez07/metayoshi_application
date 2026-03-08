@@ -756,6 +756,7 @@ const Send: React.FC = () => {
     activeNetworkId,
     networkAssets,
     sendListPreferences,
+    getNetworkModelPreferences,
     getSendableItems,
     setActiveAccount,
     setActiveNetwork,
@@ -995,7 +996,22 @@ const Send: React.FC = () => {
 
     const dedupeKey = `${requestedEntryId}|${requestedAssetId}|${requestedQuickNative ? 'native' : ''}`
     if (handledDeepLinkRef.current === dedupeKey) return
-    handledDeepLinkRef.current = dedupeKey
+
+    const composerPreference = getNetworkModelPreferences(activeNetworkId).utxoTransferComposer
+    if (requestedAssetId && composerPreference === 'batch') {
+      const batchMatch = visibleScanRows.find((row) => (
+        row.networkId === activeNetworkId
+        && row.assetId === requestedAssetId
+        && row.holders.length > 1
+      ))
+      if (batchMatch) {
+        handledDeepLinkRef.current = dedupeKey
+        setSelectedId(null)
+        setSelectedBatchKey(batchMatch.key)
+        navigate('/wallet/send', { replace: true, state: null })
+        return
+      }
+    }
 
     const match = allItems.find((item) => (
       (requestedEntryId && item.id === requestedEntryId)
@@ -1003,12 +1019,14 @@ const Send: React.FC = () => {
       || (requestedQuickNative && item.requestType === 'native')
     ))
     if (match) {
+      handledDeepLinkRef.current = dedupeKey
       setSelectedId(match.id)
       setSelectedBatchKey(null)
     }
 
+    if (!match) handledDeepLinkRef.current = dedupeKey
     navigate('/wallet/send', { replace: true, state: null })
-  }, [location.state, allItems, navigate])
+  }, [location.state, allItems, navigate, activeNetworkId, getNetworkModelPreferences, visibleScanRows])
 
   const runGlobalScan = useCallback(async (options?: GlobalScanOptions) => {
     if (isScanningRef.current) return
@@ -1539,6 +1557,8 @@ const Send: React.FC = () => {
           const rowCanBatchSend = row.requestType === 'native'
             ? rowCaps.features.nativeSend
             : rowCaps.features.assetSend
+          const rowBatchPreferred = row.requestType === 'asset'
+            && getNetworkModelPreferences(row.networkId).utxoTransferComposer === 'batch'
           const rowPinned = pinnedRowKeys.has(row.key)
           return (
             <div
@@ -1625,9 +1645,13 @@ const Send: React.FC = () => {
                           setSelectedBatchKey(row.key)
                         }}
                         disabled={!rowCanBatchSend}
-                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border border-blue-400/40 bg-blue-500/20 text-blue-200 hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border disabled:opacity-60 disabled:cursor-not-allowed ${
+                          rowBatchPreferred
+                            ? 'border-primary/40 bg-primary/20 text-primary hover:text-white'
+                            : 'border-blue-400/40 bg-blue-500/20 text-blue-200 hover:text-white'
+                        }`}
                       >
-                        Send All Holders
+                        {rowBatchPreferred ? 'Preferred Batch' : 'Send All Holders'}
                       </button>
                     )}
                   </div>
