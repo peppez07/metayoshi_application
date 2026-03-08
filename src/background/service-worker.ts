@@ -142,6 +142,8 @@ interface WalletState {
   networks?: Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
 }
 
+type DappNetworkEntry = { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }
+
 type DappNetworkDescriptor = {
   id: string
   runtimeModelId: string | null
@@ -158,7 +160,7 @@ type DappNetworkDescriptor = {
 }
 
 function buildDappNetworkDescriptor(
-  network: { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any },
+  network: DappNetworkEntry,
   active: boolean
 ): DappNetworkDescriptor & { active: boolean } {
   const caps = resolveNetworkCapabilities(network || {})
@@ -179,11 +181,82 @@ function buildDappNetworkDescriptor(
   }
 }
 
-function resolveDappNetworks(state: WalletState): Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
+function resolveDappNetworks(state: WalletState): DappNetworkEntry[] {
   return (state.networks || []).filter((network) => {
     const id = String(network?.id || '').trim()
     return Boolean(id)
   })
+}
+
+function getRpcParamObject(params: unknown): Record<string, unknown> | null {
+  const candidate = Array.isArray(params) ? params[0] : params
+  if (!candidate || typeof candidate !== 'object') return null
+  return candidate as Record<string, unknown>
+}
+
+function parseRequestedChainId(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return null
+  if (/^0x[0-9a-f]+$/i.test(normalized)) {
+    const parsed = Number.parseInt(normalized, 16)
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+  }
+  if (/^\d+$/.test(normalized)) {
+    const parsed = Number(normalized)
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+  }
+  return null
+}
+
+function resolveRequestedDappNetwork(
+  dappNetworks: DappNetworkEntry[],
+  params: unknown
+): { network?: DappNetworkEntry; hintProvided: boolean; hintSummary: string | null } {
+  const payload = getRpcParamObject(params)
+  if (!payload) return { network: undefined, hintProvided: false, hintSummary: null }
+
+  const textHints = [
+    payload.networkId,
+    payload.coinId,
+    payload.coin,
+    payload.symbol,
+    payload.runtimeModelId,
+    payload.network,
+    payload.blockchain
+  ]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+  const requestedChainId = parseRequestedChainId(payload.chainId)
+  const hintProvided = textHints.length > 0 || requestedChainId !== null
+  if (!hintProvided) {
+    return { network: undefined, hintProvided: false, hintSummary: null }
+  }
+
+  const normalizedTextHints = textHints.map((value) => value.toLowerCase())
+  const symbolHints = textHints.map((value) => value.toUpperCase())
+  const network = dappNetworks.find((entry) => {
+    const id = String(entry.id || '').trim().toLowerCase()
+    const runtimeModelId = String(entry.runtimeModelId || '').trim().toLowerCase()
+    const name = String(entry.name || '').trim().toLowerCase()
+    const symbol = String(entry.symbol || '').trim().toUpperCase()
+    const entryChainId = typeof entry.chainId === 'number' ? entry.chainId : null
+
+    if (normalizedTextHints.includes(id)) return true
+    if (runtimeModelId && normalizedTextHints.includes(runtimeModelId)) return true
+    if (name && normalizedTextHints.includes(name)) return true
+    if (symbol && symbolHints.includes(symbol)) return true
+    if (requestedChainId !== null && entryChainId === requestedChainId) return true
+    return false
+  })
+
+  const hintSummary = [
+    ...textHints,
+    ...(requestedChainId !== null ? [String(requestedChainId)] : [])
+  ].join(', ') || null
+
+  return { network, hintProvided: true, hintSummary }
 }
 
 function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?: string }): number {
@@ -853,7 +926,11 @@ async function requestDappActionApproval(
 }
 
 // Request scope permission(s) in a single approval popup.
-async function requestScopes(origin: string, scopes: DappScope[]): Promise<boolean> {
+async function requestScopes(
+  origin: string,
+  scopes: DappScope[],
+  options?: { networkId?: string }
+): Promise<boolean> {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') return false
 
@@ -890,6 +967,7 @@ async function requestScopes(origin: string, scopes: DappScope[]): Promise<boole
     id: approvalId,
     origin: normalizedOrigin,
     scopes: uniqDappScopes([...(pending?.origin === normalizedOrigin ? pending.scopes : []), ...missingScopes]),
+    networkId: String(options?.networkId || '').trim() || undefined,
     status: 'pending',
     requestedAt: pending?.origin === normalizedOrigin ? pending.requestedAt : now,
     updatedAt: now,
@@ -923,8 +1001,8 @@ async function requestScope(origin: string, scope: DappScope): Promise<boolean> 
 
 type DappRuntimeContext = {
   state: WalletState
-  dappNetworks: Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
-  network: { id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any } | undefined
+  dappNetworks: DappNetworkEntry[]
+  network: DappNetworkEntry | undefined
   effectiveNetworkId: string
   address: string | null
   connected: boolean
@@ -944,9 +1022,12 @@ type DappRuntimeContext = {
   }
 }
 
-function buildDappRuntimeContext(state: WalletState): DappRuntimeContext {
+function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string): DappRuntimeContext {
   const dappNetworks = resolveDappNetworks(state)
-  const network = dappNetworks.find((n) => n.id === state.activeNetworkId) || dappNetworks[0]
+  const normalizedRequestedNetworkId = String(requestedNetworkId || '').trim()
+  const network = dappNetworks.find((n) => n.id === normalizedRequestedNetworkId)
+    || dappNetworks.find((n) => n.id === state.activeNetworkId)
+    || dappNetworks[0]
   const effectiveNetworkId = network?.id || DEFAULT_NETWORK_ID
   const address = getActiveAddressFromState(state, effectiveNetworkId)
   const connected = !(state.isLocked ?? true) && (state.isInitialized ?? false) && address !== null
@@ -983,10 +1064,19 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     throw { code: 4001, message: DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE }
   }
 
-  const runtime = buildDappRuntimeContext(await getWalletState())
+  const walletState = await getWalletState()
+  const dappNetworks = resolveDappNetworks(walletState)
+  const requestedNetwork = resolveRequestedDappNetwork(dappNetworks, params)
+  if (requestedNetwork.hintProvided && !requestedNetwork.network) {
+    throw {
+      code: -32602,
+      message: `Unsupported network for MetaYoshi DApp SDK: ${requestedNetwork.hintSummary || 'unknown'}`
+    }
+  }
+
+  const runtime = buildDappRuntimeContext(walletState, requestedNetwork.network?.id)
   const {
     state,
-    dappNetworks,
     network,
     effectiveNetworkId,
     address,
@@ -1002,14 +1092,14 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
 
   if (CONNECT_METHODS.has(method)) {
     if (origin) {
-      const approved = await requestScope(origin, 'read')
+      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
       await touchLastConnected(origin)
     }
 
-    const refreshed = buildDappRuntimeContext(await getWalletState())
+    const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
     if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
@@ -1054,25 +1144,25 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
         switch_network: true
       },
       methods: [...DAPP_SDK_METHODS],
-      networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
+      networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === effectiveNetworkId))
     }
   }
 
   if (NETWORKS_METHODS.has(method)) {
-    return dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
+    return dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === effectiveNetworkId))
   }
   
   // Request accounts / enable
   if (REQUEST_ACCOUNTS_METHODS.has(method)) {
     if (origin) {
-      const approved = await requestScope(origin, 'read')
+      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
       await touchLastConnected(origin)
     }
 
-    const refreshed = buildDappRuntimeContext(await getWalletState())
+    const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
     if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
@@ -1118,7 +1208,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
 
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_coin'])
+      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
@@ -1149,7 +1239,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
 
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_asset'])
+      const approved = await requestScopes(origin, ['read', 'send_asset'], { networkId: effectiveNetworkId })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }

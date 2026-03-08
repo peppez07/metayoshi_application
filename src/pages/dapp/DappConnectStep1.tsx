@@ -29,27 +29,28 @@ const DappConnectStep1: React.FC = () => {
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
-  const activeNetwork = useMemo(
-    () => networks.find((network) => network.id === activeNetworkId) || networks[0],
-    [networks, activeNetworkId]
+  const approvalNetworkId = String(pendingApproval?.networkId || activeNetworkId || '').trim()
+  const approvalNetwork = useMemo(
+    () => networks.find((network) => network.id === approvalNetworkId) || networks.find((network) => network.id === activeNetworkId) || networks[0],
+    [networks, approvalNetworkId, activeNetworkId]
   )
   const activeAccountName = useMemo(
-    () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
-    [activeAccount, activeNetworkId]
+    () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
+    [activeAccount, approvalNetworkId, activeNetworkId]
   )
-  const activeAddress = useMemo(() => {
+  const approvalAddress = useMemo(() => {
     if (!activeAccount) return ''
 
-    const networkAddress = String(activeAccount.networkAddresses?.[activeNetworkId] || '').trim()
+    const networkAddress = String(activeAccount.networkAddresses?.[approvalNetworkId] || '').trim()
     if (networkAddress) return networkAddress
 
-    if (activeNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
-    if (activeNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
-    if (activeNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
-    if (activeNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
+    if (approvalNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
+    if (approvalNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
+    if (approvalNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
+    if (approvalNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
 
     return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
-  }, [activeAccount, activeNetwork, activeNetworkId])
+  }, [activeAccount, approvalNetwork, approvalNetworkId])
 
   const rejectAndClose = async (): Promise<void> => {
     if (canUseChromeStorage() && pendingApproval) {
@@ -99,33 +100,33 @@ const DappConnectStep1: React.FC = () => {
 
           <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
             <div>
-              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Current connection</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Requested connection</p>
               <div className="rounded-xl border border-dark-600 bg-dark-800/80 p-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-yellow-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold truncate">{activeAccountName}</p>
-                    <p className="text-[10px] text-gray-400">{activeNetwork?.name || 'Active network'}</p>
+                    <p className="text-[10px] text-gray-400">{approvalNetwork?.name || 'Requested network'}</p>
                   </div>
                 </div>
                 <p className="mt-3 break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
-                  {activeAddress || 'No address available on the current active network'}
+                  {approvalAddress || 'No address available on the requested network'}
                 </p>
               </div>
             </div>
 
             <div className="space-y-2 text-[11px] leading-relaxed">
               <p className="text-gray-300">
-                This approval connects the site to your current active wallet account. MetaYoshi does not apply this
-                approval to a custom account list.
+                This approval connects the site to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
+                MetaYoshi does not apply this approval to a custom account list.
               </p>
               <p className="text-gray-400">
                 If the site later asks to change accounts, MetaYoshi will require a separate approval before switching
                 your active wallet account.
               </p>
-              {!activeAddress && (
+              {!approvalAddress && (
                 <p className="text-red-300">
-                  Switch to an account with an address on {activeNetwork?.name || 'the active network'} before
+                  Switch to an account with an address on {approvalNetwork?.name || 'the requested network'} before
                   continuing.
                 </p>
               )}
@@ -138,7 +139,7 @@ const DappConnectStep1: React.FC = () => {
         <Button variant="outline" className="flex-1" onClick={() => { void rejectAndClose() }}>
           Cancel
         </Button>
-        <Button className="flex-1 btn-primary" onClick={() => navigate('/dapp/connect/2')} disabled={!activeAddress}>
+        <Button className="flex-1 btn-primary" onClick={() => navigate('/dapp/connect/2')} disabled={!approvalAddress}>
           Next
         </Button>
       </footer>

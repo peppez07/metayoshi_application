@@ -149,6 +149,10 @@ const DappRequestConfirm: React.FC = () => {
       return
     }
     setIsSubmitting(true)
+    const previousNetworkId = String(activeNetworkId || '').trim()
+    const previousAccountId = String(activeAccountId || '').trim()
+    const shouldRestoreNetwork = Boolean(previousNetworkId) && previousNetworkId !== pendingRequest.networkId
+    const shouldRestoreAccount = Boolean(previousAccountId) && previousAccountId !== pendingRequest.accountId
 
     try {
       if (!canUseChromeStorage()) {
@@ -281,6 +285,16 @@ const DappRequestConfirm: React.FC = () => {
       navigate('/wallet/assets')
       window.close()
     } finally {
+      try {
+        if (shouldRestoreAccount) {
+          setActiveAccount(previousAccountId)
+        }
+        if (shouldRestoreNetwork) {
+          await setActiveNetwork(previousNetworkId, { skipRefresh: true })
+        }
+      } catch {
+        // Keep the dapp request outcome authoritative even if UI restoration fails.
+      }
       setIsSubmitting(false)
     }
   }

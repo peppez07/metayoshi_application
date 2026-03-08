@@ -30,27 +30,28 @@ const DappConnectStep2: React.FC = () => {
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
-  const activeNetwork = useMemo(
-    () => networks.find((network) => network.id === activeNetworkId) || networks[0],
-    [networks, activeNetworkId]
+  const approvalNetworkId = String(pendingApproval?.networkId || activeNetworkId || '').trim()
+  const approvalNetwork = useMemo(
+    () => networks.find((network) => network.id === approvalNetworkId) || networks.find((network) => network.id === activeNetworkId) || networks[0],
+    [networks, approvalNetworkId, activeNetworkId]
   )
   const activeAccountName = useMemo(
-    () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
-    [activeAccount, activeNetworkId]
+    () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
+    [activeAccount, approvalNetworkId, activeNetworkId]
   )
-  const activeAddress = useMemo(() => {
+  const approvalAddress = useMemo(() => {
     if (!activeAccount) return ''
 
-    const networkAddress = String(activeAccount.networkAddresses?.[activeNetworkId] || '').trim()
+    const networkAddress = String(activeAccount.networkAddresses?.[approvalNetworkId] || '').trim()
     if (networkAddress) return networkAddress
 
-    if (activeNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
-    if (activeNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
-    if (activeNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
-    if (activeNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
+    if (approvalNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
+    if (approvalNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
+    if (approvalNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
+    if (approvalNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
 
     return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
-  }, [activeAccount, activeNetwork, activeNetworkId])
+  }, [activeAccount, approvalNetwork, approvalNetworkId])
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
     if (!pendingApproval || !canUseChromeStorage()) {
@@ -114,11 +115,11 @@ const DappConnectStep2: React.FC = () => {
           <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
             <p className="text-xs font-bold text-gray-400 uppercase">Connection summary</p>
             <p className="text-xs text-gray-300 leading-relaxed">
-              This site will connect to your current active wallet account on {activeNetwork?.name || 'the active network'}.
+              This site will connect to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
               It will not receive a custom list of selected accounts from this approval.
             </p>
             <p className="break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
-              {activeAddress || 'No address available on the current active network'}
+              {approvalAddress || 'No address available on the requested network'}
             </p>
             <p className="text-[10px] text-gray-500 leading-tight">
               If the site later requests an account change, MetaYoshi will prompt again before switching your active
@@ -136,7 +137,7 @@ const DappConnectStep2: React.FC = () => {
         <Button variant="outline" className="flex-1" onClick={() => { void finishApproval('rejected') }}>
           Cancel
         </Button>
-        <Button className="flex-1 btn-primary" onClick={() => { void finishApproval('approved') }} disabled={!activeAddress}>
+        <Button className="flex-1 btn-primary" onClick={() => { void finishApproval('approved') }} disabled={!approvalAddress}>
           Connect
         </Button>
       </footer>

@@ -19,6 +19,7 @@ export interface DappPendingApproval {
   id: string
   origin: string
   scopes: DappScope[]
+  networkId?: string
   status: DappApprovalStatus
   requestedAt: number
   updatedAt: number
@@ -194,11 +195,15 @@ export function parseDappPendingApproval(raw: unknown): DappPendingApproval | nu
   const requestedAt = typeof candidate.requestedAt === 'number' ? candidate.requestedAt : now
   const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : requestedAt
   const expiresAt = typeof candidate.expiresAt === 'number' ? candidate.expiresAt : requestedAt + DAPP_APPROVAL_TIMEOUT_MS
+  const networkId = typeof candidate.networkId === 'string' && candidate.networkId.trim()
+    ? candidate.networkId.trim()
+    : undefined
 
   return {
     id: candidate.id,
     origin,
     scopes,
+    networkId,
     status,
     requestedAt,
     updatedAt,

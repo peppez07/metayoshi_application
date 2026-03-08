@@ -75,6 +75,14 @@ type ProviderCapabilities = {
   networks: ProviderNetwork[]
 }
 
+type ProviderNetworkRequest = {
+  networkId?: string
+  coinId?: string
+  coin?: string
+  symbol?: string
+  chainId?: string | number
+}
+
 const listeners = new Map<string, Set<Listener>>()
 const pending = new Map<number, { method: string; resolve: (value: any) => void; reject: (err: any) => void }>()
 let nextId = 1
@@ -177,10 +185,12 @@ function request({ method, params }: { method: string; params?: any }): Promise<
   return new Promise((resolve, reject) => {
     pending.set(id, { method, resolve, reject })
     window.postMessage({ target: IP_CONTENT_CHANNEL, type: 'request', id, request: payload }, '*')
-  }).then((result: any) => {
+  }).then(async (result: any) => {
     if (REQUEST_ACCOUNTS_METHODS.has(method)) {
       state.connected = true
       updateAccounts(normalizeAccountAddresses(result))
+      const scopedState = await request({ method: PROVIDER_STATE_METHOD, params }).catch(() => null)
+      if (scopedState) applyProviderState(scopedState)
     }
     if (ACCOUNTS_METHODS.has(method)) {
       updateAccounts(normalizeAccountAddresses(result))
@@ -340,19 +350,19 @@ const provider = {
   // RPC methods
   request,
   send: request,
-  enable: () => request({ method: PROVIDER_ENABLE_METHOD }),
-  connect: () => request({ method: 'wallet_connect' }),
-  getProviderState: () => request({ method: PROVIDER_STATE_METHOD }),
+  enable: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_ENABLE_METHOD, params }),
+  connect: (params?: ProviderNetworkRequest) => request({ method: 'wallet_connect', params }),
+  getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
-  getCapabilities: (): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities' }),
-  sendTransaction: (params: { to: string; amount: string; memo?: string }) =>
+  getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities', params }),
+  sendTransaction: (params: { to: string; amount: string; memo?: string } & ProviderNetworkRequest) =>
     request({ method: 'wallet_sendTransaction', params }),
-  sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string }) =>
+  sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string } & ProviderNetworkRequest) =>
     request({ method: 'wallet_sendAsset', params }),
-  sdkInfo: async () => {
+  sdkInfo: async (params?: ProviderNetworkRequest) => {
     const [stateSnapshot, capabilities, networks] = await Promise.all([
-      request({ method: PROVIDER_STATE_METHOD }),
-      request({ method: 'wallet_getCapabilities' }),
+      request({ method: PROVIDER_STATE_METHOD, params }),
+      request({ method: 'wallet_getCapabilities', params }),
       request({ method: 'wallet_getNetworks' })
     ])
     return {

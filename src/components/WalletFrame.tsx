@@ -1,10 +1,10 @@
 import React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import clsx from 'clsx'
 import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
-import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline } from 'react-icons/io5'
+import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline, IoSettingsOutline } from 'react-icons/io5'
 import { Button } from './Button'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
@@ -123,6 +123,12 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       const ctx = canvas.getContext('2d')
       if (!ctx) { setQrDataUrl(canvas.toDataURL()); return }
 
+      const logoSrc = String(activeNetwork?.logo || '').trim()
+      if (!logoSrc) {
+        setQrDataUrl(canvas.toDataURL())
+        return
+      }
+
       const logo = new Image()
       logo.onload = () => {
         if (!mounted) return
@@ -131,7 +137,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
         const cy = SIZE / 2
         const logoSize = logoR * 2
 
-        // Add a rounded square badge so the center logo stays readable.
+        // Add a rounded square badge so the center coin logo stays readable.
         const badgePadding = Math.max(6, Math.round(SIZE * 0.02))
         const badgeSize = logoSize + badgePadding * 2
         const badgeX = cx - (badgeSize / 2)
@@ -165,14 +171,14 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
         // Logo unavailable — use plain QR
         if (mounted) setQrDataUrl(canvas.toDataURL())
       }
-      logo.src = '/MetayoshiLogo.png'
+      logo.src = logoSrc
     }).catch(() => {
       if (!mounted) return
       setQrDataUrl('')
     })
 
     return () => { mounted = false }
-  }, [showReceiveQr, receivePayload])
+  }, [showReceiveQr, receivePayload, activeNetwork?.logo])
 
   const isApiWaiting = apiInFlight > 0
   const isWaiting = isSyncing || isApiWaiting
@@ -229,15 +235,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
       {!hideHeader && (
         <>
           <header className="p-3 flex items-center justify-between border-b border-dark-600">
-            <div className="flex items-center gap-2">
-              <Link to="/wallet/assets" className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden border border-primary bg-gradient-to-b from-primary/30 to-primary/10 shadow-sm shadow-primary/25">
-                  <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.1] translate-y-px" />
-                </div>
-                <span className="text-[9px] leading-tight text-gray-500 max-w-[90px]">
-                </span>
-              </Link>
-            </div>
+            <div className="w-8 h-8" aria-hidden="true" />
 
             <div className="flex items-center gap-2">
               <div
@@ -256,13 +254,13 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 <IoChevronDown className="text-gray-500 w-3 h-3" />
               </div>
 
-              {/* Settings avatar */}
               <button
-                className="w-8 h-8 rounded-full border-2 border-dark-600 flex items-center justify-center cursor-pointer hover:border-primary overflow-hidden transition-all focus:outline-none"
+                className="w-8 h-8 rounded-full border border-dark-600 bg-dark-700/60 flex items-center justify-center cursor-pointer hover:border-primary hover:bg-dark-700 transition-all focus:outline-none"
                 onClick={() => navigate('/settings')}
                 title="Settings"
-                style={{ background: SESSION_GRADIENT }}
-              />
+              >
+                <IoSettingsOutline className="w-4.5 h-4.5 text-gray-300" />
+              </button>
             </div>
           </header>
 
