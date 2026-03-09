@@ -4,7 +4,7 @@ export type EvmExternalSignerMode = 'local' | 'hardware' | 'walletconnect'
 
 export interface EvmExternalSignTxInput {
   chainId?: number
-  to: string
+  to?: string
   valueWei?: bigint
   data?: string
   gasLimit?: bigint
@@ -111,7 +111,7 @@ function createInjectedHardwareSigner(): EvmExternalSigner {
       await maybeSwitchChain(injected, input.chainId)
       return await withBrowserSigner(injected, async ({ signer }) => {
         const tx = await signer.sendTransaction({
-          to: normalizeEvmAddress(input.to),
+          to: input.to ? normalizeEvmAddress(input.to) : undefined,
           value: input.valueWei ?? 0n,
           data: String(input.data || '').trim() || undefined,
           gasLimit: input.gasLimit ?? undefined,
@@ -172,7 +172,7 @@ function createWalletConnectSigner(): EvmExternalSigner {
       await maybeSwitchChain(wc, input.chainId)
       return await withBrowserSigner(wc, async ({ signer }) => {
         const tx = await signer.sendTransaction({
-          to: normalizeEvmAddress(input.to),
+          to: input.to ? normalizeEvmAddress(input.to) : undefined,
           value: input.valueWei ?? 0n,
           data: String(input.data || '').trim() || undefined,
           gasLimit: input.gasLimit ?? undefined,

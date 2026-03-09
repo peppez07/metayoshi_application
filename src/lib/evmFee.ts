@@ -14,7 +14,7 @@ export type EvmFeeQuote = {
 type EstimateInput = {
   rpcConfig: UtxoRpcConfig
   from: string
-  to: string
+  to?: string
   valueWei?: bigint
   data?: string
   fallbackGasLimitHex: string
@@ -42,9 +42,10 @@ export async function estimateEvmTxFee(input: EstimateInput): Promise<EvmFeeQuot
   const valueWei = input.valueWei ?? 0n
   const txForEstimate: Record<string, string> = {
     from: input.from,
-    to: input.to,
     value: ethers.toQuantity(valueWei)
   }
+  const to = String(input.to || '').trim()
+  if (to) txForEstimate.to = to
   const data = String(input.data || '').trim()
   if (data) txForEstimate.data = data
 

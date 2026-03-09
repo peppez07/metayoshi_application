@@ -26,11 +26,25 @@ export interface DappPendingApproval {
   expiresAt: number
 }
 
-export interface DappSendRequestPayload {
+export interface DappSendCoinRequestPayload {
   to: string
   amount: string
   memo?: string
 }
+
+export interface DappSendEvmTransactionPayload {
+  to?: string
+  amount?: string
+  value?: string
+  data: string
+  gasLimit?: string
+  gasPrice?: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+  type?: 2
+}
+
+export type DappSendRequestPayload = DappSendCoinRequestPayload | DappSendEvmTransactionPayload
 
 export interface DappSendAssetRequestPayload {
   assetId: string
@@ -218,12 +232,46 @@ function parseDappRequestStatus(raw: unknown): DappRequestStatus {
   return 'pending'
 }
 
+function parseOptionalNonEmptyString(value: unknown): string | undefined {
+  const text = String(value ?? '').trim()
+  return text || undefined
+}
+
+function parseOptionalTxType(value: unknown): 2 | undefined {
+  if (value === 2 || value === '2') return 2
+  return undefined
+}
+
 function parseDappSendRequest(raw: unknown): DappSendRequestPayload | null {
   if (!raw || typeof raw !== 'object') return null
   const candidate = raw as Partial<DappSendRequestPayload>
-  const to = String(candidate.to || '').trim()
-  const amount = String(candidate.amount || '').trim()
-  const memo = String(candidate.memo || '').trim()
+  const data = String((candidate as Partial<DappSendEvmTransactionPayload>).data || '').trim()
+  if (data) {
+    const to = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).to)
+    const amount = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).amount)
+    const value = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).value)
+    const gasLimit = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).gasLimit)
+    const gasPrice = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).gasPrice)
+    const maxFeePerGas = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).maxFeePerGas)
+    const maxPriorityFeePerGas = parseOptionalNonEmptyString((candidate as Partial<DappSendEvmTransactionPayload>).maxPriorityFeePerGas)
+    const type = parseOptionalTxType((candidate as Partial<DappSendEvmTransactionPayload>).type)
+
+    return {
+      data,
+      ...(to ? { to } : {}),
+      ...(amount ? { amount } : {}),
+      ...(value ? { value } : {}),
+      ...(gasLimit ? { gasLimit } : {}),
+      ...(gasPrice ? { gasPrice } : {}),
+      ...(maxFeePerGas ? { maxFeePerGas } : {}),
+      ...(maxPriorityFeePerGas ? { maxPriorityFeePerGas } : {}),
+      ...(type ? { type } : {})
+    }
+  }
+
+  const to = String((candidate as Partial<DappSendCoinRequestPayload>).to || '').trim()
+  const amount = String((candidate as Partial<DappSendCoinRequestPayload>).amount || '').trim()
+  const memo = String((candidate as Partial<DappSendCoinRequestPayload>).memo || '').trim()
   if (!to || !amount) return null
   return memo ? { to, amount, memo } : { to, amount }
 }

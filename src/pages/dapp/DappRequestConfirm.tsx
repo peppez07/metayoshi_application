@@ -5,7 +5,8 @@ import { PasswordGate } from '../../components/PasswordGate'
 import {
   DAPP_PENDING_REQUEST_STORAGE_KEY,
   parseDappPendingRequest,
-  type DappPendingRequest
+  type DappPendingRequest,
+  type DappSendEvmTransactionPayload
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
@@ -13,6 +14,10 @@ import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeMod
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
+}
+
+function isDappEvmTransactionRequest(request: DappPendingRequest['request'] | null | undefined): request is DappSendEvmTransactionPayload {
+  return Boolean(request && typeof request === 'object' && 'data' in request)
 }
 
 const DappRequestConfirm: React.FC = () => {
@@ -62,16 +67,48 @@ const DappRequestConfirm: React.FC = () => {
   )
   const requestModelId = resolveRuntimeModelId(requestNetwork)
   const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
+  const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
+  const requestTypeLabel = requestIsAssetSend
+    ? 'Asset Transfer'
+    : requestIsEvmTx
+    ? (String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() ? 'Contract Call' : 'Contract Deployment')
+    : 'Native Coin Transfer'
   const requestTo = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.toAddress || '')
+    : requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() || 'Contract Creation'
     : String((pendingRequest?.request as any)?.to || '')
   const requestAmount = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.qty || '')
+    : requestIsEvmTx
+    ? String(
+      (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.value
+      || (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.amount
+      || '0'
+    )
     : String((pendingRequest?.request as any)?.amount || '')
   const requestMemo = String((pendingRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.assetId || '')
     : ''
+  const requestData = requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.data || '').trim()
+    : ''
+  const requestGasLimit = requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasLimit || '').trim()
+    : ''
+  const requestGasPrice = requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasPrice || '').trim()
+    : ''
+  const requestMaxFeePerGas = requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxFeePerGas || '').trim()
+    : ''
+  const requestMaxPriorityFeePerGas = requestIsEvmTx
+    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxPriorityFeePerGas || '').trim()
+    : ''
+  const requestTxType = requestIsEvmTx
+    ? (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.type
+    : undefined
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -183,8 +220,21 @@ const DappRequestConfirm: React.FC = () => {
           })
         : requestNetwork.coinType === 'EVM'
         ? await sendEvmTransaction({
-            to: requestTo,
-            amount: requestAmount
+            ...(requestIsEvmTx
+              ? {
+                  to: requestTo === 'Contract Creation' ? undefined : requestTo,
+                  value: requestAmount,
+                  data: requestData,
+                  gasLimit: requestGasLimit || undefined,
+                  gasPrice: requestGasPrice || undefined,
+                  maxFeePerGas: requestMaxFeePerGas || undefined,
+                  maxPriorityFeePerGas: requestMaxPriorityFeePerGas || undefined,
+                  type: requestTxType
+                }
+              : {
+                  to: requestTo,
+                  amount: requestAmount
+                })
           })
         : requestNetwork.coinType === 'XRP'
         ? await sendXrpTransaction({
@@ -247,7 +297,7 @@ const DappRequestConfirm: React.FC = () => {
           asset: requestIsAssetSend ? requestAssetId : networkForActivity.symbol,
           amount: requestAmount,
           from: senderAddress,
-          to: requestTo,
+          to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : requestTo,
           accountId: pendingRequest.accountId,
           status: 'pending',
           timestamp: Date.now(),
@@ -324,11 +374,20 @@ const DappRequestConfirm: React.FC = () => {
             <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
               <Row label="Network" value={requestNetwork?.name || pendingRequest.networkId} />
               <Row label="Runtime Model" value={String(requestNetwork?.runtimeModelId || requestNetwork?.id || 'unknown')} mono />
-              <Row label="Type" value={requestIsAssetSend ? 'Asset Transfer' : 'Native Coin Transfer'} />
+              <Row label="Type" value={requestTypeLabel} />
               <Row label="To" value={requestTo} mono />
               {requestIsAssetSend ? <Row label="Asset" value={requestAssetId} mono /> : null}
-              <Row label="Amount" value={`${requestAmount} ${requestIsAssetSend ? '' : (requestNetwork?.symbol || '')}`.trim()} />
+              <Row
+                label={requestIsEvmTx ? 'Value' : 'Amount'}
+                value={`${requestAmount} ${requestIsAssetSend ? '' : (requestNetwork?.symbol || '')}`.trim()}
+              />
               {requestMemo ? <Row label="Memo" value={requestMemo} mono /> : null}
+              {requestData ? <Row label="Data" value={requestData} mono /> : null}
+              {requestGasLimit ? <Row label="Gas Limit" value={requestGasLimit} mono /> : null}
+              {requestGasPrice ? <Row label="Gas Price" value={requestGasPrice} mono /> : null}
+              {requestMaxFeePerGas ? <Row label="Max Fee" value={requestMaxFeePerGas} mono /> : null}
+              {requestMaxPriorityFeePerGas ? <Row label="Priority Fee" value={requestMaxPriorityFeePerGas} mono /> : null}
+              {requestTxType ? <Row label="Tx Type" value={String(requestTxType)} mono /> : null}
             </div>
 
             {submitError ? (

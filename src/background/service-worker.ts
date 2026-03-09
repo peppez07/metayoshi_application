@@ -67,11 +67,22 @@ type MonitorRequest =
   | { type: 'METAYOSHI_MONITOR_GET_ERRORS' }
   | { type: 'METAYOSHI_MONITOR_CLEAR_ERRORS' }
 
-type SendTransactionParams = {
-  to: string
-  amount: string
-  memo?: string
-}
+type SendTransactionParams =
+  | {
+      to: string
+      amount: string
+      memo?: string
+    }
+  | {
+      to?: string
+      value?: string
+      data: string
+      gasLimit?: string
+      gasPrice?: string
+      maxFeePerGas?: string
+      maxPriorityFeePerGas?: string
+      type?: 2
+    };
 
 type SendAssetParams = {
   assetId: string
@@ -812,35 +823,114 @@ async function waitForRequestDecision(
   })
 }
 
-function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTransactionParams {
+function normalizeDecimalCoinAmount(
+  value: unknown,
+  maxDecimals: number,
+  label: string,
+  options?: { required?: boolean; allowZero?: boolean }
+): string | undefined {
+  const required = options?.required ?? true
+  const allowZero = options?.allowZero ?? false
+  const amount = typeof value === 'string'
+    ? value.trim()
+    : (typeof value === 'number' ? String(value) : '')
+
+  if (!amount) {
+    if (required) {
+      throw { code: -32602, message: `wallet_sendTransaction requires \`${label}\` as a decimal coin string` }
+    }
+    return undefined
+  }
+  if (!/^\d+(\.\d+)?$/.test(amount)) {
+    throw { code: -32602, message: `wallet_sendTransaction ${label} must be a positive decimal string` }
+  }
+  if (amount.includes('.') && amount.split('.')[1].length > maxDecimals) {
+    throw { code: -32602, message: `wallet_sendTransaction supports up to ${maxDecimals} decimal places` }
+  }
+  if (!allowZero && Number(amount) <= 0) {
+    throw { code: -32602, message: `wallet_sendTransaction ${label} must be greater than zero` }
+  }
+  if (allowZero && Number(amount) < 0) {
+    throw { code: -32602, message: `wallet_sendTransaction ${label} must be zero or greater` }
+  }
+  return amount
+}
+
+function normalizeRpcQuantity(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value) || value < 0) {
+      throw { code: -32602, message: `wallet_sendTransaction ${label} must be a non-negative integer or hex quantity` }
+    }
+    return String(value)
+  }
+
+  const text = String(value).trim()
+  if (!text) return undefined
+  if (/^\d+$/.test(text)) return text
+  if (/^0x[0-9a-f]+$/i.test(text)) return text.toLowerCase()
+  throw { code: -32602, message: `wallet_sendTransaction ${label} must be a non-negative integer or hex quantity` }
+}
+
+function parseSendTransactionParams(
+  params: unknown,
+  network: DappNetworkEntry | undefined,
+  maxDecimals = 8
+): SendTransactionParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
-    throw { code: -32602, message: 'wallet_sendTransaction requires params { to, amount }' }
+    throw { code: -32602, message: 'wallet_sendTransaction requires params { to, amount } or EVM tx params { data, value? }' }
   }
 
   const payload = candidate as Record<string, unknown>
+  const data = String(payload.data ?? '').trim()
+  if (data) {
+    if (network?.coinType !== 'EVM') {
+      throw { code: -32602, message: 'wallet_sendTransaction EVM tx payloads are only supported on EVM networks' }
+    }
+    if (!/^0x([0-9a-f]{2})*$/i.test(data)) {
+      throw { code: -32602, message: 'wallet_sendTransaction data must be a 0x-prefixed hex string' }
+    }
+
+    const to = String(payload.to ?? payload.address ?? '').trim()
+    const value = normalizeDecimalCoinAmount(payload.value ?? payload.amount ?? '0', maxDecimals, 'value', {
+      required: false,
+      allowZero: true
+    }) || '0'
+    const parsedGasLimit = normalizeRpcQuantity(payload.gasLimit, 'gasLimit')
+    const parsedGasPrice = normalizeRpcQuantity(payload.gasPrice, 'gasPrice')
+    const parsedMaxFeePerGas = normalizeRpcQuantity(payload.maxFeePerGas, 'maxFeePerGas')
+    const parsedMaxPriorityFeePerGas = normalizeRpcQuantity(payload.maxPriorityFeePerGas, 'maxPriorityFeePerGas')
+    const txTypeRaw = payload.type
+    const txType = txTypeRaw === 2 || txTypeRaw === '2'
+      ? 2
+      : undefined
+    if (txTypeRaw !== undefined && txType === undefined) {
+      throw { code: -32602, message: 'wallet_sendTransaction only supports EVM transaction type 2' }
+    }
+
+    return {
+      ...(to ? { to } : {}),
+      value,
+      data,
+      ...(parsedGasLimit ? { gasLimit: parsedGasLimit } : {}),
+      ...(parsedGasPrice ? { gasPrice: parsedGasPrice } : {}),
+      ...(parsedMaxFeePerGas ? { maxFeePerGas: parsedMaxFeePerGas } : {}),
+      ...(parsedMaxPriorityFeePerGas ? { maxPriorityFeePerGas: parsedMaxPriorityFeePerGas } : {}),
+      ...(txType ? { type: txType } : {})
+    }
+  }
+
   const to = String(payload.to ?? payload.address ?? '').trim()
   if (!to) {
     throw { code: -32602, message: 'wallet_sendTransaction requires a recipient `to` address' }
   }
 
-  const amountRaw = payload.amount ?? payload.value
-  const amount = typeof amountRaw === 'string'
-    ? amountRaw.trim()
-    : (typeof amountRaw === 'number' ? String(amountRaw) : '')
-  const memo = String(payload.memo ?? '').trim()
+  const amount = normalizeDecimalCoinAmount(payload.amount ?? payload.value, maxDecimals, 'amount')
   if (!amount) {
     throw { code: -32602, message: 'wallet_sendTransaction requires `amount` as a decimal coin string' }
   }
-  if (!/^\d+(\.\d+)?$/.test(amount)) {
-    throw { code: -32602, message: 'wallet_sendTransaction amount must be a positive decimal string' }
-  }
-  if (amount.includes('.') && amount.split('.')[1].length > maxDecimals) {
-    throw { code: -32602, message: `wallet_sendTransaction supports up to ${maxDecimals} decimal places` }
-  }
-  if (Number(amount) <= 0) {
-    throw { code: -32602, message: 'wallet_sendTransaction amount must be greater than zero' }
-  }
+  const memo = String(payload.memo ?? '').trim()
 
   return memo ? { to, amount, memo } : { to, amount }
 }
@@ -1215,7 +1305,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       await touchLastConnected(origin)
     }
 
-    const parsedSend = parseSendTransactionParams(params, resolveCoinDecimals(network))
+    const parsedSend = parseSendTransactionParams(params, network, resolveCoinDecimals(network))
     const result = await requestDappActionApproval(
       origin || 'unknown',
       network.id,

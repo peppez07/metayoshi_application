@@ -1,5 +1,5 @@
 import type { CoinModule } from './types'
-import { BUILD_CONFIG } from '../buildConfig'
+import { BUILD_CONFIG, getTestedModelIds } from '../buildConfig'
 
 export const DISABLED_NETWORK_IDS = new Set<string>([
 ])
@@ -147,6 +147,10 @@ function parseEnabledCoinIdsFromBuildConfig(defaultEnabledCoinIds: string[], all
   const base = (() => {
     if (!enabledRaw) return new Set(defaultEnabledCoinIds)
     if (enabledRaw === 'all' || enabledRaw === '*') return new Set(allowedCoinIds)
+    if (enabledRaw === 'tested') {
+      const tested = getTestedModelIds().filter((id) => allowedCoinIds.has(id))
+      return tested.length > 0 ? new Set(tested) : new Set(defaultEnabledCoinIds)
+    }
     if (Array.isArray(enabledRaw)) {
       const selected = normalizeEnabledCoinIdTokens(
         enabledRaw

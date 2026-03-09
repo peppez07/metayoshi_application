@@ -83,6 +83,24 @@ type ProviderNetworkRequest = {
   chainId?: string | number
 }
 
+type ProviderSendCoinParams = {
+  to: string
+  amount: string
+  memo?: string
+}
+
+type ProviderSendEvmTransactionParams = {
+  to?: string
+  value?: string
+  amount?: string
+  data: string
+  gasLimit?: string
+  gasPrice?: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+  type?: 2
+}
+
 const listeners = new Map<string, Set<Listener>>()
 const pending = new Map<number, { method: string; resolve: (value: any) => void; reject: (err: any) => void }>()
 let nextId = 1
@@ -355,7 +373,7 @@ const provider = {
   getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
   getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities', params }),
-  sendTransaction: (params: { to: string; amount: string; memo?: string } & ProviderNetworkRequest) =>
+  sendTransaction: (params: (ProviderSendCoinParams | ProviderSendEvmTransactionParams) & ProviderNetworkRequest) =>
     request({ method: 'wallet_sendTransaction', params }),
   sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string } & ProviderNetworkRequest) =>
     request({ method: 'wallet_sendAsset', params }),

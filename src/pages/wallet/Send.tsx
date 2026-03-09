@@ -6,6 +6,8 @@ import SendTransferForm from '../../components/send/SendTransferForm'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
+import { EVM_ETHEREUM_L2_COIN_IDS } from '../../coins/coinSelection'
+import { getUnifiedLogoByName } from '../../coins/logos'
 import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
 import {
   IoArrowBackOutline,
@@ -1715,6 +1717,17 @@ const Send: React.FC = () => {
         {filteredScanRows.map((row) => {
           const expanded = expandedRows[row.key] === true
           const rowNetwork = networkById.get(row.networkId) || activeNetwork
+          const rowModelId = resolveRuntimeModelId(rowNetwork)
+          const isEthereumL2NativeRow = row.requestType === 'native' && EVM_ETHEREUM_L2_COIN_IDS.has(rowModelId)
+          const rowPrimaryLogoUrl = isEthereumL2NativeRow ? row.networkLogo : row.logoUrl
+          const rowPrimaryAssetName = isEthereumL2NativeRow
+            ? (rowNetwork?.name || row.networkName || row.label || row.symbol)
+            : (row.label || row.symbol)
+          const rowPrimaryAlt = isEthereumL2NativeRow
+            ? (rowNetwork?.name || row.networkName || row.label)
+            : row.label
+          const rowBadgeLogo = isEthereumL2NativeRow ? getUnifiedLogoByName('ethereum') : row.networkLogo
+          const rowBadgeSymbol = isEthereumL2NativeRow ? 'ETH' : row.networkSymbol
           const mergedRawAmount = row.holders.reduce((sum, holder) => sum + Math.max(0, Number(holder.rawAmount || 0)), 0)
           const rowCaps = resolveNetworkCapabilities(rowNetwork)
           const rowCanBatchSend = row.requestType === 'native'
@@ -1740,9 +1753,9 @@ const Send: React.FC = () => {
               >
                 <div className="w-9 h-9 rounded-full border border-dark-600 bg-dark-700/60 overflow-hidden flex items-center justify-center shrink-0">
                   <TokenCircleLogo
-                    logoUrl={row.logoUrl}
-                    assetName={row.label || row.symbol}
-                    alt={row.label}
+                    logoUrl={rowPrimaryLogoUrl}
+                    assetName={rowPrimaryAssetName}
+                    alt={rowPrimaryAlt}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -1767,10 +1780,10 @@ const Send: React.FC = () => {
                       {row.kind === 'native' ? row.networkSymbol : row.symbol}
                     </span>
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-blue-500/30 bg-blue-500/10 text-[9px] font-bold uppercase text-blue-200">
-                      {row.networkLogo
-                        ? <img src={row.networkLogo} alt={row.networkSymbol} className="w-3 h-3 rounded-full object-cover" />
+                      {rowBadgeLogo
+                        ? <img src={rowBadgeLogo} alt={rowBadgeSymbol} className="w-3 h-3 rounded-full object-cover" />
                         : <span className="w-2 h-2 rounded-full bg-blue-300" />}
-                      {row.networkSymbol}
+                      {rowBadgeSymbol}
                     </span>
                   </div>
                 </div>

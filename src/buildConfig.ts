@@ -2,7 +2,7 @@ export type BuildModelStatus = 'tested' | 'untested' | 'blocked'
 
 export type BuildConfig = {
   coins?: {
-    enabled?: 'all' | '*' | string[]
+    enabled?: 'all' | '*' | 'tested' | string[]
     disabled?: string[]
   }
   features?: Record<string, boolean | undefined>
@@ -23,7 +23,7 @@ function normalizeId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
-const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'dash', 'btcz'])
+const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'bnb', 'bnb-testnet', 'dash', 'btcz', 'cosmos'])
 
 function normalizeModelStatusId(value: unknown): string {
   const id = normalizeId(value)
@@ -33,6 +33,29 @@ function normalizeModelStatusId(value: unknown): string {
   if (id === 'srv--dash') return 'dash'
   if (id === 'srv--ethereum' || id === 'ethereum') return 'eth'
   if (id === 'srv--base' || id === 'base-mainnet' || id === 'mainnet-base') return 'base'
+  if (
+    id === 'srv--bnb'
+    || id === 'bsc'
+    || id === 'bnb-mainnet'
+    || id === 'mainnet-bnb'
+    || id === 'bsc-mainnet'
+    || id === 'bnb-smart-chain'
+    || id === 'binance-smart-chain'
+    || id === 'bnb-smart-chain-mainnet'
+    || id === 'binance-smart-chain-mainnet'
+  ) {
+    return 'bnb'
+  }
+  if (
+    id === 'bnbt'
+    || id === 'bsc-testnet'
+    || id === 'chapel'
+    || id === 'bnb-smart-chain-testnet'
+    || id === 'binance-smart-chain-testnet'
+    || id === 'testnet-bnb'
+  ) {
+    return 'bnb-testnet'
+  }
   if (id.startsWith('eth--')) return 'eth'
   if (id.startsWith('base--')) return 'base'
   return id
@@ -64,12 +87,18 @@ function normalizeBuildConfig(raw: unknown): BuildConfig {
   const modelStatus = asRecord(obj.modelStatus)
 
   const enabledRaw = coins?.enabled
-  const enabled =
-    typeof enabledRaw === 'string' && ['all', '*'].includes(enabledRaw.trim().toLowerCase())
-      ? (enabledRaw.trim().toLowerCase() as 'all' | '*')
-      : Array.isArray(enabledRaw)
-        ? enabledRaw.map(normalizeId).filter(Boolean)
-        : undefined
+  const enabled = (() => {
+    if (typeof enabledRaw === 'string') {
+      const normalized = enabledRaw.trim().toLowerCase()
+      if (['all', '*', 'tested'].includes(normalized)) {
+        return normalized as 'all' | '*' | 'tested'
+      }
+    }
+    if (Array.isArray(enabledRaw)) {
+      return enabledRaw.map(normalizeId).filter(Boolean)
+    }
+    return undefined
+  })()
 
   const out: BuildConfig = {
     coins: {
@@ -109,6 +138,25 @@ export const BUILD_CONFIG: BuildConfig = normalizeBuildConfig(
   typeof __METAYOSHI_BUILD_CONFIG__ === 'undefined' ? undefined : __METAYOSHI_BUILD_CONFIG__
 )
 
+function getNormalizedBlockedModelIds(): Set<string> {
+  return new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.blocked).map(normalizeModelStatusId))
+}
+
+function getNormalizedTestedModelIds(): Set<string> {
+  const tested = new Set(HARD_TESTED_MODEL_IDS)
+  for (const modelId of normalizeIdList(BUILD_CONFIG.modelStatus?.tested).map(normalizeModelStatusId)) {
+    if (modelId) tested.add(modelId)
+  }
+  for (const modelId of getNormalizedBlockedModelIds()) {
+    tested.delete(modelId)
+  }
+  return tested
+}
+
+export function getTestedModelIds(): string[] {
+  return [...getNormalizedTestedModelIds()]
+}
+
 export function getBuildFeatureFlag(featureKey: string, envKey: string, fallback: boolean): boolean {
   const fromConfig = BUILD_CONFIG.features?.[featureKey]
   if (typeof fromConfig === 'boolean') return fromConfig
@@ -119,10 +167,10 @@ export function getModelStatus(modelId: string): BuildModelStatus {
   const id = normalizeModelStatusId(modelId)
   if (!id) return 'untested'
 
-  const blocked = new Set(normalizeIdList(BUILD_CONFIG.modelStatus?.blocked).map(normalizeModelStatusId))
+  const blocked = getNormalizedBlockedModelIds()
   if (blocked.has(id)) return 'blocked'
 
-  if (HARD_TESTED_MODEL_IDS.has(id)) return 'tested'
+  if (getNormalizedTestedModelIds().has(id)) return 'tested'
 
   const explicitUntested = normalizeIdList(BUILD_CONFIG.modelStatus?.untested).map(normalizeModelStatusId)
   if (explicitUntested.length > 0) {
