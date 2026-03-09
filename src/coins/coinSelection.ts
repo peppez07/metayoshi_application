@@ -90,6 +90,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))
+  if (token === 'trx' || token === 'tron') return ['tron']
   if (token === 'xlm' || token === 'stellar') return ['xlm']
   const chainlistMapped = mapChainlistAliasToCoinId(token)
   if (chainlistMapped) return [chainlistMapped]

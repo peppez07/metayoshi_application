@@ -5178,22 +5178,13 @@ export const useWalletStore = create<WalletState>()(
         set((state) => {
           const localBaseline = normalizeNetworkListSymbols(INITIAL_NETWORKS)
           const allowedNetworkIds = new Set(localBaseline.map((n) => String(n.id || '').trim()))
-          const allowedModelIds = new Set(
-            localBaseline
-              .map((n) => String(n.runtimeModelId || n.id || '').trim().toLowerCase())
-              .filter(Boolean)
-          )
           const filteredServerNetworks = syncedNetworks.filter((network) => {
             const id = String(network.id || '').trim()
-            if (allowedNetworkIds.has(id)) return true
-            const runtimeModelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
-            return Boolean(runtimeModelId) && allowedModelIds.has(runtimeModelId)
+            return allowedNetworkIds.has(id)
           })
           const filteredServerCatalog = serverCatalog.filter((item) => {
             const appNetworkId = String(item.appNetworkId || '').trim()
-            if (appNetworkId && allowedNetworkIds.has(appNetworkId)) return true
-            const runtimeModelId = String(item.runtimeModelId || '').trim().toLowerCase()
-            return Boolean(runtimeModelId) && allowedModelIds.has(runtimeModelId)
+            return Boolean(appNetworkId) && allowedNetworkIds.has(appNetworkId)
           })
           const serverById = new Map(filteredServerNetworks.map((network) => [network.id, network]))
           const mergedLocal = localBaseline.map((localNetwork) => {
@@ -5209,8 +5200,7 @@ export const useWalletStore = create<WalletState>()(
 
             return serverNetwork
           })
-          const serverOnly = filteredServerNetworks.filter((network) => !localBaseline.some((base) => base.id === network.id))
-          const networks = [...mergedLocal, ...serverOnly]
+          const networks = mergedLocal
           const normalizedDisabled = clampDisabledNetworkIdsToMaxEnabled(state.disabledNetworkIds, networks)
           const activeNetworkId = resolveEnabledNetworkId(
             networks,

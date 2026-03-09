@@ -16,6 +16,7 @@ import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
 import { suiCoin } from './sui'
+import { tronCoin } from './tron'
 import { xlmCoin } from './xlm'
 import { zksyncCoin } from './zksync'
 import { resolveEnabledNetworkIds } from './coinSelection'
@@ -84,6 +85,7 @@ const RAW_COIN_MODULES: CoinModule[] = [
   cronosCoin,
   cosmosCoin,
   croCoin,
+  tronCoin,
   solCoin,
   adaCoin,
   suiCoin,

@@ -22,5 +22,6 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   sol: { symbol: 'SOL', coinId: 'solana' },
   ada: { symbol: 'ADA', coinId: 'cardano' },
   sui: { symbol: 'SUI', coinId: 'sui' },
+  tron: { symbol: 'TRX', coinId: 'tron' },
   xlm: { symbol: 'XLM', coinId: 'stellar' }
 }

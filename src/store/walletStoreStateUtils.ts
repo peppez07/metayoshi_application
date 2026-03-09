@@ -143,6 +143,7 @@ export function normalizeNetworkIdAlias(value: string): string {
   if (normalized === 'arb' || normalized === 'arbitrum' || normalized === 'arbitrum-one') return 'arb'
   if (normalized === 'doge' || normalized === 'dogecoin') return 'doge'
   if (normalized === 'op' || normalized === 'optimism' || normalized === 'eth-l2--optimism') return 'op'
+  if (normalized === 'trx' || normalized === 'tron') return 'tron'
   if (normalized === 'xlm' || normalized === 'stellar') return 'xlm'
   if (normalized === 'avax' || normalized === 'avaxc' || normalized === 'avalanche' || normalized === 'avalanche-c-chain') return 'avaxc'
   if (normalized.endsWith('-mainnet')) {
