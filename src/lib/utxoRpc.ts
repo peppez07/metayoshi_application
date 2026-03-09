@@ -550,6 +550,132 @@ async function fetchBridgeAddressAssetUtxos(
   )
 }
 
+async function fetchBridgeAddressBalance(
+  config: UtxoRpcConfig,
+  address: string
+): Promise<UtxoBalance | null> {
+  if (!config.bridgeUrl) return null
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) return null
+
+  const { coin, chain } = resolveBridgeCoinChainHint(config)
+  if (!coin) return null
+
+  const params = new URLSearchParams()
+  params.set('coin', coin)
+  params.set('chain', chain || 'main')
+  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`
+
+  const controller = new AbortController()
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    })
+    if (!res.ok) return null
+    const json = await res.json().catch(() => null)
+    if (!json?.ok) return null
+
+    const balanceSat = Number(json?.balanceSat)
+    const unconfirmedBalanceSat = Number(json?.unconfirmedBalanceSat)
+    if (Number.isFinite(balanceSat) || Number.isFinite(unconfirmedBalanceSat)) {
+      const confirmed = Number(((Number.isFinite(balanceSat) ? balanceSat : 0) / 1e8).toFixed(8))
+      const unconfirmed = Number(((Number.isFinite(unconfirmedBalanceSat) ? unconfirmedBalanceSat : 0) / 1e8).toFixed(8))
+      return {
+        confirmed,
+        unconfirmed,
+        total: Number((confirmed + unconfirmed).toFixed(8))
+      }
+    }
+
+    const confirmed = Number(json?.balance)
+    const unconfirmed = Number(json?.unconfirmedBalance)
+    if (Number.isFinite(confirmed) || Number.isFinite(unconfirmed)) {
+      const safeConfirmed = Number.isFinite(confirmed) ? Number(confirmed.toFixed(8)) : 0
+      const safeUnconfirmed = Number.isFinite(unconfirmed) ? Number(unconfirmed.toFixed(8)) : 0
+      return {
+        confirmed: safeConfirmed,
+        unconfirmed: safeUnconfirmed,
+        total: Number((safeConfirmed + safeUnconfirmed).toFixed(8))
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchBridgeAddressUtxos(
+  config: UtxoRpcConfig,
+  address: string,
+  minConf = 0
+): Promise<UtxoUnspent[] | null> {
+  if (!config.bridgeUrl) return null
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) return null
+
+  const { coin, chain } = resolveBridgeCoinChainHint(config)
+  if (!coin) return null
+
+  const params = new URLSearchParams()
+  params.set('coin', coin)
+  params.set('chain', chain || 'main')
+  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos?${params.toString()}`
+
+  const controller = new AbortController()
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    })
+    if (!res.ok) return null
+    const json = await res.json().catch(() => null)
+    if (!json?.ok) return null
+
+    const rows = Array.isArray(json?.assets)
+      ? json.assets
+      : Array.isArray(json?.utxos)
+        ? json.utxos
+        : []
+
+    const mapped = rows.map((row: any) => {
+      const satoshis = Number(row?.satoshis ?? row?.value ?? row?.amountSat ?? 0)
+      const amount = Number.isFinite(satoshis) && satoshis > 0
+        ? satoshis / 1e8
+        : Number(row?.amount ?? 0)
+      return {
+        txid: String(row?.txid || ''),
+        vout: Number(row?.vout),
+        address: String(row?.address || address),
+        scriptPubKey: String(row?.scriptPubKey || row?.script || ''),
+        amount,
+        confirmations: Number(row?.confirmations ?? 0)
+      } satisfies UtxoUnspent
+    }).filter((row: UtxoUnspent) =>
+      Boolean(row.txid)
+      && Number.isFinite(row.vout)
+      && Number.isFinite(row.amount)
+      && row.amount > 0
+      && row.confirmations >= minConf
+    )
+
+    return mapped
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function withInterceptorError(
   interceptor: CoinApiInterceptor | undefined,
   context: Omit<RpcInterceptorErrorContext, 'error'> & { error: unknown }
@@ -1020,6 +1146,18 @@ function isBitcoinConfig(config: UtxoRpcConfig): boolean {
   return String(config.coinSymbol || '').trim().toUpperCase() === 'BTC'
 }
 
+function isDogecoinConfig(config: UtxoRpcConfig): boolean {
+  if (config.useLocalRpc) return false
+
+  const networkId = String(config.networkId || '').trim().toLowerCase()
+  if (networkId === 'doge' || networkId === 'dogecoin') return true
+
+  const bridgeUrl = String(config.bridgeUrl || '').trim().toLowerCase()
+  if (bridgeUrl.includes('/bridge/dogecoin/')) return true
+
+  return String(config.coinSymbol || '').trim().toUpperCase() === 'DOGE'
+}
+
 function buildBtczExplorerAddressUrls(address: string, suffix = ''): string[] {
   const encodedAddress = encodeURIComponent(address)
   const configuredBase = String(import.meta.env.VITE_BTCZ_EXPLORER || '').trim()
@@ -1287,6 +1425,10 @@ export async function getUtxoBalance(
     const btcExplorerBalance = await fetchBitcoinExplorerBalance(config, address)
     if (btcExplorerBalance) return btcExplorerBalance
   }
+  if (address && isDogecoinConfig(config)) {
+    const dogeBridgeBalance = await fetchBridgeAddressBalance(config, address)
+    if (dogeBridgeBalance) return dogeBridgeBalance
+  }
 
   let addressIndexFailed = false
   // Address-indexed balance path (Raptoreum family): works for non-wallet addresses.
@@ -1466,6 +1608,10 @@ export async function listUtxoUnspent(
     const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
     if (btcExplorer !== null) return btcExplorer
   }
+  if (address && isDogecoinConfig(config)) {
+    const dogeBridgeUtxos = await fetchBridgeAddressUtxos(config, address, minConf)
+    if (dogeBridgeUtxos !== null) return dogeBridgeUtxos
+  }
 
   const params = address ? [minConf, 9999999, [address]] : [minConf, 9999999]
   try {
@@ -1528,6 +1674,10 @@ export async function getAddressUtxos(
   if (isBitcoinConfig(config)) {
     const btcExplorer = await fetchBitcoinExplorerUtxos(config, address, minConf)
     if (btcExplorer !== null) return btcExplorer
+  }
+  if (isDogecoinConfig(config)) {
+    const dogeBridgeUtxos = await fetchBridgeAddressUtxos(config, address, minConf)
+    if (dogeBridgeUtxos !== null) return dogeBridgeUtxos
   }
 
   let raw: AddressUtxoEntry[] = []

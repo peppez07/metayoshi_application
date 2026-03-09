@@ -13,6 +13,12 @@ type BuildConfig = {
   modelStatus?: { tested?: string[]; untested?: string[]; blocked?: string[] }
 }
 
+type WalletLogoSpec = {
+  coinIds: string[]
+  file: string
+  names: string[]
+}
+
 function loadBuildConfig(): BuildConfig {
   const explicit = String(process.env.METAYOSHI_BUILD_CONFIG_PATH || '').trim()
   const defaultPath = path.resolve(__dirname, 'metayoshi.build.json')
@@ -32,6 +38,69 @@ function loadBuildConfig(): BuildConfig {
 }
 
 const buildConfig = loadBuildConfig()
+
+const VIRTUAL_WALLET_LOGO_REGISTRY_ID = 'virtual:wallet-logo-registry'
+const RESOLVED_VIRTUAL_WALLET_LOGO_REGISTRY_ID = `\0${VIRTUAL_WALLET_LOGO_REGISTRY_ID}`
+
+const WALLET_LOGO_SPECS: WalletLogoSpec[] = [
+  { coinIds: ['rtm'], file: 'raptoreum.png', names: ['raptoreum', 'rtm'] },
+  { coinIds: ['eth'], file: 'ethereum.png', names: ['ethereum', 'eth'] },
+  { coinIds: ['arb'], file: 'arbitrum.png', names: ['arbitrum', 'arb', 'arbitrum-one'] },
+  { coinIds: ['op'], file: 'op.png', names: ['op', 'optimism'] },
+  { coinIds: ['base'], file: 'base.png', names: ['base'] },
+  { coinIds: ['avaxc'], file: 'avalanche.png', names: ['avalanche', 'avax', 'avaxc', 'avalanche-c-chain'] },
+  { coinIds: ['sol'], file: 'solana.png', names: ['solana', 'sol'] },
+  { coinIds: ['dash'], file: 'dash.png', names: ['dash'] },
+  { coinIds: ['doge'], file: 'dogecoin.png', names: ['dogecoin', 'doge'] },
+  { coinIds: ['btcz'], file: 'bitcoinz.png', names: ['bitcoinz', 'btcz'] },
+  { coinIds: ['firo'], file: 'firo.png', names: ['firo'] },
+  { coinIds: ['cosmos'], file: 'cosmos.png', names: ['cosmos', 'atom'] },
+  { coinIds: ['bitcoin'], file: 'bitcoin.png', names: ['bitcoin', 'btc'] },
+  { coinIds: ['polygon'], file: 'polygon.png', names: ['polygon', 'matic'] },
+  { coinIds: ['cronos', 'cro'], file: 'cronos.png', names: ['cronos', 'cro', 'cronos-pos'] },
+  { coinIds: ['sui'], file: 'sui.png', names: ['sui'] },
+  { coinIds: ['zksync'], file: 'ZKsync.png', names: ['zksync', 'zk-sync', 'zk sync', 'zks', 'zk', 'zk era', 'zksync-era'] }
+]
+
+function normalizeCoinId(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function resolveBundledWalletLogoSpecs(config: BuildConfig): WalletLogoSpec[] {
+  const allCoinIds = new Set(WALLET_LOGO_SPECS.flatMap((spec) => spec.coinIds.map(normalizeCoinId)))
+  const disabled = new Set((config.coins?.disabled || []).map(normalizeCoinId).filter(Boolean))
+  const enabledRaw = config.coins?.enabled
+
+  const enabled =
+    enabledRaw === 'all' || enabledRaw === '*'
+      ? new Set(allCoinIds)
+      : Array.isArray(enabledRaw)
+        ? new Set(enabledRaw.map(normalizeCoinId).filter((id) => allCoinIds.has(id)))
+        : new Set(allCoinIds)
+
+  for (const id of disabled) enabled.delete(id)
+
+  return WALLET_LOGO_SPECS.filter((spec) => spec.coinIds.some((id) => enabled.has(normalizeCoinId(id))))
+}
+
+function createWalletLogoRegistryModule(config: BuildConfig): string {
+  const specs = resolveBundledWalletLogoSpecs(config)
+  const imports = specs.map((spec, index) => {
+    const from = `/src/coins/logos/${spec.file}`
+    return `import logo${index} from ${JSON.stringify(from)}`
+  })
+  const entries = specs.map((spec, index) => {
+    return `  { src: logo${index}, names: ${JSON.stringify(spec.names)} }`
+  })
+
+  return [
+    ...imports,
+    '',
+    'export const bundledWalletLogos = [',
+    ...entries.map((entry, index) => `${entry}${index < entries.length - 1 ? ',' : ''}`),
+    ']'
+  ].join('\n')
+}
 
 function parseBooleanLike(value: unknown, fallback: boolean): boolean {
   const normalized = String(value ?? '').trim().toLowerCase()
@@ -151,6 +220,17 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
     react(),
+    {
+      name: 'wallet-logo-registry',
+      resolveId(id) {
+        if (id === VIRTUAL_WALLET_LOGO_REGISTRY_ID) return RESOLVED_VIRTUAL_WALLET_LOGO_REGISTRY_ID
+        return null
+      },
+      load(id) {
+        if (id !== RESOLVED_VIRTUAL_WALLET_LOGO_REGISTRY_ID) return null
+        return createWalletLogoRegistryModule(buildConfig)
+      }
+    },
     {
       name: 'post-build-extension',
       closeBundle() {

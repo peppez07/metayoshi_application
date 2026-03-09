@@ -4,14 +4,15 @@ import { BUILD_CONFIG } from '../buildConfig'
 export const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 
-export const EVM_COIN_IDS = new Set<string>(['eth', 'arb', 'op', 'base', 'polygon', 'avaxc', 'cronos'])
-export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['arb', 'op', 'base'])
+export const EVM_COIN_IDS = new Set<string>(['eth', 'arb', 'op', 'base', 'polygon', 'avaxc', 'cronos', 'zksync'])
+export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['arb', 'op', 'base', 'zksync'])
 
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
   1: 'eth',
   10: 'op',
   25: 'cronos',
   137: 'polygon',
+  324: 'zksync',
   42161: 'arb',
   43114: 'avaxc',
   8453: 'base'
@@ -33,6 +34,10 @@ const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   base: 'base',
   'base-mainnet': 'base',
   'mainnet-base': 'base',
+  zksync: 'zksync',
+  'zksync-era': 'zksync',
+  'zksync-mainnet': 'zksync',
+  'mainnet-zksync': 'zksync',
   polygon: 'polygon',
   'polygon-pos': 'polygon',
   'polygon-mainnet': 'polygon',
@@ -80,6 +85,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   if (token === 'cro' || token === 'cronos-pos') return ['cro']
   if (token === 'cronos') return ['cronos']
   if (token === 'dash' || token === 'sdash' || token === 'srv--dash') return ['dash']
+  if (token === 'doge' || token === 'dogecoin') return ['doge']
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))

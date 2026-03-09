@@ -127,6 +127,7 @@ type GlobalScanOptions = {
   mode?: GlobalScanMode
   refreshBalances?: boolean
   forceAssetRefresh?: boolean
+  resumeIfAvailable?: boolean
 }
 type SendHubScanDiagnostics = {
   mode: GlobalScanMode
@@ -176,9 +177,24 @@ type AggregatedScanRow = {
   holders: ScanHolder[]
 }
 
+type SendHubScanCheckpoint = {
+  mode: GlobalScanMode
+  reason: string
+  startedAt: number
+  total: number
+  done: number
+  nextAccountIndex: number
+  nextNetworkIndex: number
+  accountIds: string[]
+  networkIds: string[]
+  originalActiveAccountId: string | null
+  originalActiveNetworkId: string | null
+}
+
 type CachedScanPayload = {
   rows: AggregatedScanRow[]
   updatedAt: number
+  checkpoint: SendHubScanCheckpoint | null
 }
 
 type BatchPlanRow = {
@@ -299,28 +315,116 @@ function applySendHubPreferences(
   })
 }
 
+type WriteCachedScanRowsOptions = {
+  checkpoint?: SendHubScanCheckpoint | null
+  preserveExistingCheckpoint?: boolean
+}
+
+function normalizeCachedScanCheckpoint(raw: unknown): SendHubScanCheckpoint | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Partial<SendHubScanCheckpoint>
+  const mode = value.mode === 'manual' ? 'manual' : (value.mode === 'auto' ? 'auto' : null)
+  if (!mode) return null
+
+  const accountIds = normalizeKeyList(value.accountIds)
+  const networkIds = normalizeKeyList(value.networkIds)
+  const startedAt = Number(value.startedAt || 0)
+  const total = Math.max(0, Math.trunc(Number(value.total || 0)))
+  const done = Math.max(0, Math.trunc(Number(value.done || 0)))
+  const nextAccountIndex = Math.max(0, Math.trunc(Number(value.nextAccountIndex || 0)))
+  const nextNetworkIndex = Math.max(0, Math.trunc(Number(value.nextNetworkIndex || 0)))
+
+  return {
+    mode,
+    reason: String(value.reason || '').trim(),
+    startedAt: Number.isFinite(startedAt) ? startedAt : 0,
+    total,
+    done,
+    nextAccountIndex,
+    nextNetworkIndex,
+    accountIds,
+    networkIds,
+    originalActiveAccountId: String(value.originalActiveAccountId || '').trim() || null,
+    originalActiveNetworkId: String(value.originalActiveNetworkId || '').trim() || null
+  }
+}
+
 function readCachedScanRows(): CachedScanPayload | null {
   try {
     const raw = localStorage.getItem(SEND_HUB_SCAN_CACHE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as CachedScanPayload
+    const parsed = JSON.parse(raw) as Partial<CachedScanPayload>
     if (!Array.isArray(parsed?.rows)) return null
     const updatedAt = Number(parsed?.updatedAt || 0)
     return {
       rows: parsed.rows,
-      updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+      checkpoint: normalizeCachedScanCheckpoint(parsed?.checkpoint)
     }
   } catch {
     return null
   }
 }
 
-function writeCachedScanRows(rows: AggregatedScanRow[]): void {
+function writeCachedScanRows(rows: AggregatedScanRow[], options?: WriteCachedScanRowsOptions): void {
   try {
-    const payload: CachedScanPayload = { rows, updatedAt: Date.now() }
+    const checkpoint = options?.checkpoint !== undefined
+      ? options.checkpoint
+      : (options?.preserveExistingCheckpoint ? (readCachedScanRows()?.checkpoint || null) : null)
+    const payload: CachedScanPayload = {
+      rows,
+      updatedAt: Date.now(),
+      checkpoint
+    }
     localStorage.setItem(SEND_HUB_SCAN_CACHE_KEY, JSON.stringify(payload))
   } catch {
     // ignore storage quota/runtime failures
+  }
+}
+
+function getNextScanCursor(accountIndex: number, networkIndex: number, networkCount: number): {
+  nextAccountIndex: number
+  nextNetworkIndex: number
+} {
+  if (networkCount <= 0) {
+    return {
+      nextAccountIndex: accountIndex + 1,
+      nextNetworkIndex: 0
+    }
+  }
+  if (networkIndex + 1 < networkCount) {
+    return {
+      nextAccountIndex: accountIndex,
+      nextNetworkIndex: networkIndex + 1
+    }
+  }
+  return {
+    nextAccountIndex: accountIndex + 1,
+    nextNetworkIndex: 0
+  }
+}
+
+function getResumableScanCheckpoint(
+  checkpoint: SendHubScanCheckpoint | null,
+  scanAccounts: Array<{ id: string }>,
+  scanNetworks: Array<{ id: string }>
+): SendHubScanCheckpoint | null {
+  if (!checkpoint) return null
+  const accountIds = scanAccounts.map((account) => account.id)
+  const networkIds = scanNetworks.map((network) => network.id)
+  if (checkpoint.accountIds.length !== accountIds.length) return null
+  if (checkpoint.networkIds.length !== networkIds.length) return null
+  if (!checkpoint.accountIds.every((id, index) => id === accountIds[index])) return null
+  if (!checkpoint.networkIds.every((id, index) => id === networkIds[index])) return null
+  if (checkpoint.nextAccountIndex < 0 || checkpoint.nextAccountIndex >= scanAccounts.length) return null
+  if (scanNetworks.length > 0 && (checkpoint.nextNetworkIndex < 0 || checkpoint.nextNetworkIndex >= scanNetworks.length)) {
+    return null
+  }
+  const total = Math.max(1, accountIds.length * networkIds.length)
+  return {
+    ...checkpoint,
+    total,
+    done: Math.min(Math.max(0, checkpoint.done), total)
   }
 }
 
@@ -981,7 +1085,7 @@ const Send: React.FC = () => {
 
       if (!changed) return current
       const sorted = sortAggregatedScanRows(nextRows)
-      writeCachedScanRows(sorted)
+      writeCachedScanRows(sorted, { preserveExistingCheckpoint: true })
       return sorted
     })
   }, [activeAccountId, activeNetworkId, activePairItemByKey, scanRows.length])
@@ -1039,22 +1143,8 @@ const Send: React.FC = () => {
     const includeBalanceRefresh = options?.refreshBalances ?? (mode === 'manual')
     const forceAssetRefresh = options?.forceAssetRefresh ?? (mode === 'manual')
     const reason = String(options?.reason || '').trim()
-    const startedAt = Date.now()
-    setScanProgress({
-      done: 0,
-      total: 0,
-      label: reason
-        ? `Preparing ${mode === 'manual' ? 'full' : 'background'} scan (${reason})...`
-        : `Preparing ${mode === 'manual' ? 'full' : 'background'} scan...`
-    })
 
     const stateBefore = useWalletStore.getState()
-    const originalActiveAccountId = stateBefore.activeAccountId
-    const originalActiveNetworkId = stateBefore.activeNetworkId
-    scanRestoreSelectionRef.current = {
-      accountId: originalActiveAccountId,
-      networkId: originalActiveNetworkId
-    }
     const shouldCancel = () => scanRunIdRef.current !== runId
     const scanAccounts = [...stateBefore.accounts]
     const scanNetworks = stateBefore.networks.filter((network) => {
@@ -1062,29 +1152,81 @@ const Send: React.FC = () => {
       const networkCaps = resolveNetworkCapabilities(network)
       return networkCaps.features.nativeSend || networkCaps.features.assetLayer || networkCaps.features.assetSend
     })
+    const cached = options?.resumeIfAvailable ? readCachedScanRows() : null
+    const resumeCheckpoint = getResumableScanCheckpoint(cached?.checkpoint || null, scanAccounts, scanNetworks)
+    const startedAt = resumeCheckpoint?.startedAt || Date.now()
+    const originalActiveAccountId = resumeCheckpoint?.originalActiveAccountId ?? stateBefore.activeAccountId
+    const originalActiveNetworkId = resumeCheckpoint?.originalActiveNetworkId ?? stateBefore.activeNetworkId
+    scanRestoreSelectionRef.current = {
+      accountId: originalActiveAccountId,
+      networkId: originalActiveNetworkId
+    }
 
     const total = Math.max(1, scanAccounts.length * scanNetworks.length)
+    const startAccountIndex = resumeCheckpoint?.nextAccountIndex ?? 0
+    const startNetworkIndex = resumeCheckpoint?.nextNetworkIndex ?? 0
+    setScanProgress({
+      done: Math.min(total, resumeCheckpoint ? (resumeCheckpoint.done + 1) : 0),
+      total,
+      label: resumeCheckpoint
+        ? `Resuming ${mode === 'manual' ? 'full' : 'background'} scan (${Math.min(total, resumeCheckpoint.done + 1)}/${total})...`
+        : (reason
+          ? `Preparing ${mode === 'manual' ? 'full' : 'background'} scan (${reason})...`
+          : `Preparing ${mode === 'manual' ? 'full' : 'background'} scan...`)
+    })
     const aggregate = new Map<string, AggregatedScanRow>()
-    for (const row of scanRowsRef.current) {
+    const seedRows = (resumeCheckpoint ? cached?.rows : null) || scanRowsRef.current
+    for (const row of seedRows) {
       aggregate.set(row.key, {
         ...row,
         holders: [...row.holders]
       })
     }
-    let done = 0
+    let done = resumeCheckpoint?.done || 0
     let succeededSteps = 0
     let failedSteps = 0
     let lastFailure = ''
     let lastPublishAt = 0
     const stepDelayMs = mode === 'manual' ? Math.min(SEND_HUB_SCAN_STEP_DELAY_MS, 80) : 0
+    const scanAccountIds = scanAccounts.map((account) => account.id)
+    const scanNetworkIds = scanNetworks.map((network) => network.id)
 
-    const publishProgressRows = (force = false) => {
+    const publishProgressRows = (rows: AggregatedScanRow[], force = false) => {
       const now = Date.now()
       if (!force && now - lastPublishAt < 180) return
       lastPublishAt = now
-      const rows = sortAggregatedScanRows([...aggregate.values()])
       setScanRows(rows)
-      if (force) writeCachedScanRows(rows)
+    }
+
+    const buildCheckpoint = (
+      nextAccountIndex: number,
+      nextNetworkIndex: number
+    ): SendHubScanCheckpoint | null => {
+      if (scanAccounts.length === 0 || scanNetworks.length === 0) return null
+      if (nextAccountIndex < 0 || nextAccountIndex >= scanAccounts.length) return null
+      return {
+        mode,
+        reason,
+        startedAt,
+        total,
+        done,
+        nextAccountIndex,
+        nextNetworkIndex,
+        accountIds: scanAccountIds,
+        networkIds: scanNetworkIds,
+        originalActiveAccountId,
+        originalActiveNetworkId
+      }
+    }
+
+    const persistScanSnapshot = (
+      rows: AggregatedScanRow[],
+      nextAccountIndex: number,
+      nextNetworkIndex: number
+    ) => {
+      writeCachedScanRows(rows, {
+        checkpoint: buildCheckpoint(nextAccountIndex, nextNetworkIndex)
+      })
     }
 
     const replaceAccountNetworkSlice = (networkId: string, accountId: string) => {
@@ -1111,22 +1253,29 @@ const Send: React.FC = () => {
     }
 
     try {
-      for (const account of scanAccounts) {
+      const initialRows = sortAggregatedScanRows([...aggregate.values()])
+      publishProgressRows(initialRows, true)
+      persistScanSnapshot(initialRows, startAccountIndex, startNetworkIndex)
+
+      for (let accountIndex = startAccountIndex; accountIndex < scanAccounts.length; accountIndex += 1) {
+        const account = scanAccounts[accountIndex]
         if (shouldCancel()) throw new Error('[cancelled]')
         useWalletStore.setState((state) => ({
           activeAccountId: account.id
         }))
         if (shouldCancel()) throw new Error('[cancelled]')
 
-        for (const network of scanNetworks) {
+        const networkStartIndex = accountIndex === startAccountIndex ? startNetworkIndex : 0
+        for (let networkIndex = networkStartIndex; networkIndex < scanNetworks.length; networkIndex += 1) {
+          const network = scanNetworks[networkIndex]
           if (shouldCancel()) throw new Error('[cancelled]')
-          done += 1
+          const progressStep = Math.min(total, done + 1)
           setScanProgress({
-            done,
+            done: progressStep,
             total,
             label: failedSteps > 0
-              ? `Scanning ${account.name} on ${network.symbol} (${done}/${total})... ${failedSteps} issue${failedSteps === 1 ? '' : 's'}`
-              : `Scanning ${account.name} on ${network.symbol} (${done}/${total})...`
+              ? `Scanning ${account.name} on ${network.symbol} (${progressStep}/${total})... ${failedSteps} issue${failedSteps === 1 ? '' : 's'}`
+              : `Scanning ${account.name} on ${network.symbol} (${progressStep}/${total})...`
           })
 
           try {
@@ -1224,15 +1373,18 @@ const Send: React.FC = () => {
               if (!holderExists) existing.holders.push(holder)
             }
             succeededSteps += 1
-            publishProgressRows(false)
           } catch (stepError) {
             const message = stepError instanceof Error ? stepError.message : String(stepError)
             if (message === '[cancelled]') throw stepError
             failedSteps += 1
             lastFailure = `[${network.symbol}] ${message}`
-            publishProgressRows(false)
           }
 
+          done += 1
+          const nextCursor = getNextScanCursor(accountIndex, networkIndex, scanNetworks.length)
+          const rows = sortAggregatedScanRows([...aggregate.values()])
+          publishProgressRows(rows)
+          persistScanSnapshot(rows, nextCursor.nextAccountIndex, nextCursor.nextNetworkIndex)
           if (shouldCancel()) throw new Error('[cancelled]')
           if (stepDelayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, stepDelayMs))
@@ -1242,8 +1394,9 @@ const Send: React.FC = () => {
 
       if (shouldCancel()) throw new Error('[cancelled]')
 
-      publishProgressRows(true)
       const rows = sortAggregatedScanRows([...aggregate.values()])
+      publishProgressRows(rows, true)
+      writeCachedScanRows(rows, { checkpoint: null })
       setExpandedRows({})
       const finishedAt = Date.now()
       setScanDiagnostics({
@@ -1344,6 +1497,16 @@ const Send: React.FC = () => {
       setScanRows(cached.rows)
     }
     if (initialAutoScanTriggeredRef.current) return
+    if (cached?.checkpoint && !isScanningRef.current) {
+      initialAutoScanTriggeredRef.current = true
+      void runGlobalScan({
+        mode: cached.checkpoint.mode,
+        reason: cached.checkpoint.reason || 'resume checkpoint',
+        refreshBalances: true,
+        resumeIfAvailable: true
+      })
+      return
+    }
     if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || visibleScanRows.length === 0) && !isScanningRef.current) {
       initialAutoScanTriggeredRef.current = true
       void runGlobalScan({ mode: 'auto', reason: 'initial load', refreshBalances: true })
@@ -1356,7 +1519,7 @@ const Send: React.FC = () => {
     if (requestedModeRaw !== 'global') return
 
     if (routeState?.autoScan === true && visibleScanRows.length === 0 && !isScanningAll) {
-      void runGlobalScan({ mode: 'auto', reason: 'global network entry' })
+      void runGlobalScan({ mode: 'auto', reason: 'global network entry', resumeIfAvailable: true })
     }
 
     navigate('/wallet/send', { replace: true, state: null })

@@ -72,6 +72,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   celo: 'eth',
   cronos: 'cronos',
   'cronos-evm': 'cronos',
+  'zksync-era': 'zksync',
   fraxtal: 'eth',
   haqq: 'eth',
   mantle: 'eth',
@@ -176,7 +177,8 @@ const ETHEREUM_L2_SERVER_COIN_IDS = new Set<string>([
   'scroll',
   'soneium',
   'taiko',
-  'unichain'
+  'unichain',
+  'zksync-era'
 ])
 
 const SERVER_COIN_VARIANT_SUFFIXES = [
@@ -192,7 +194,7 @@ const SERVER_COIN_VARIANT_SUFFIXES = [
   'tanenbaum'
 ]
 
-export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'op', 'base', 'bnb', 'polygon', 'avaxc', 'cronos'])
+export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'op', 'base', 'bnb', 'polygon', 'avaxc', 'cronos', 'zksync'])
 export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
 
 export function isBlockedServerCoinId(coinId: string): boolean {
@@ -235,6 +237,7 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
   if (normalized === 'cronos-pos' || normalized.startsWith('cronos-pos')) return 'cro'
   if (normalized === 'cronos' || normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'cronos'
+  if (normalized === 'zksync' || normalized === 'zksync-era' || normalized.startsWith('zksync-era-')) return 'zksync'
   if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
   if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
   if (normalized === 'linea') return 'eth'
@@ -324,7 +327,8 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       bnb: 'bsc',
       cronos: 'cronos',
       polygon: 'polygon-bor',
-      avaxc: 'avalanche-c-chain'
+      avaxc: 'avalanche-c-chain',
+      zksync: 'zksync-era'
     }
 
     const canonicalServerId = canonicalServerIdByModel[normalizedBaseNetworkId]
@@ -374,6 +378,7 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('base')) return 'base'
   if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
   if (normalized.includes('cronos')) return 'cronos'
+  if (normalized.includes('zksync')) return 'zksync'
   if (normalized.includes('sui')) return 'sui'
   if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'
   if (normalized.includes('solana') || normalized.includes('spl')) return 'sol'

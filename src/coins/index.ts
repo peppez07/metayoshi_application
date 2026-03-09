@@ -7,6 +7,7 @@ import { cosmosCoin } from './cosmos'
 import { croCoin } from './cro'
 import { cronosCoin } from './cronos'
 import { dashCoin } from './dash'
+import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
 import { opCoin } from './op'
@@ -14,6 +15,7 @@ import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
 import { suiCoin } from './sui'
+import { zksyncCoin } from './zksync'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
@@ -82,9 +84,11 @@ const RAW_COIN_MODULES: CoinModule[] = [
   croCoin,
   solCoin,
   suiCoin,
+  dogeCoin,
   firoCoin,
   dashCoin,
   btczCoin,
+  zksyncCoin,
   ...SERVER_SCAFFOLD_COIN_MODULES
 ]
 

@@ -192,7 +192,7 @@ async function deriveEvmWallet(mnemonic: string, accountIndex: number) {
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
 }
 
 function isClientSignerFormatError(error: unknown): boolean {

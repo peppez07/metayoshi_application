@@ -6,6 +6,8 @@ import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline, IoSettingsOutline } from 'react-icons/io5'
 import { Button } from './Button'
+import { EVM_ETHEREUM_L2_COIN_IDS } from '../coins/coinSelection'
+import { getUnifiedLogoByName } from '../coins/logos'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
@@ -90,6 +92,13 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const supportsReceiveMemo = isCosmosLikeModelId(activeModelId)
   const receiveMemoScheme = activeModelId === 'cro' || activeModelId === 'crocosmos' ? 'cro' : 'cosmos'
   const receiveMemoSymbol = activeNetwork?.symbol || 'ATOM'
+  const receiveLayer1 = React.useMemo(() => {
+    if (!EVM_ETHEREUM_L2_COIN_IDS.has(activeModelId)) return null
+    return {
+      name: 'Ethereum',
+      logo: getUnifiedLogoByName('ethereum')
+    }
+  }, [activeModelId])
   const receivePayload = React.useMemo(() => {
     const address = String(rawAddress || '').trim()
     if (!address) return ''
@@ -503,11 +512,21 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
           >
             {/* Header */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Receive</h3>
                 <span className="px-2 py-0.5 rounded-full bg-primary/15 border border-primary/25 text-primary text-[10px] font-bold uppercase tracking-wide">
                   {activeNetwork.symbol}
                 </span>
+                {receiveLayer1 && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-dark-700/70 border border-dark-600 text-gray-200 text-[10px] font-bold uppercase tracking-wide">
+                    <img
+                      src={receiveLayer1.logo}
+                      alt={`${receiveLayer1.name} layer 1`}
+                      className="w-3.5 h-3.5 rounded-full object-cover"
+                    />
+                    L1 {receiveLayer1.name}
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => setShowReceiveQr(false)}
@@ -522,6 +541,19 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               <span className="text-[11px] font-black uppercase tracking-[0.28em] text-gray-300">
                 MetaYoshi
               </span>
+              <div className="flex items-center gap-2 flex-wrap justify-center text-center">
+                <span className="text-xs font-bold text-gray-100">{activeNetwork.name}</span>
+                {receiveLayer1 && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-dark-700/70 border border-dark-600 text-gray-200 text-[10px] font-bold uppercase tracking-wide">
+                    <img
+                      src={receiveLayer1.logo}
+                      alt={`${receiveLayer1.name} layer 1`}
+                      className="w-3.5 h-3.5 rounded-full object-cover"
+                    />
+                    L1
+                  </span>
+                )}
+              </div>
               {qrDataUrl ? (
                 <img
                   src={qrDataUrl}
