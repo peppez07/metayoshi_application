@@ -52,9 +52,9 @@ function normalizeRegistryNetworkId(networkId?: string): string {
   return normalized
 }
 
-function resolveDefaultBridgePath(coinId: string): string {
-  if (coinId === 'raptoreum' || coinId === 'xrp') return `/v1/bridge/${coinId}/main/wallet/mainwallet`
-  return `/v1/bridge/${coinId}/main`
+function resolveDefaultBridgePath(coinId: string, chain: 'main' | 'test'): string {
+  if (coinId === 'raptoreum' || coinId === 'xrp') return `/v1/bridge/${coinId}/${chain}/wallet/mainwallet`
+  return `/v1/bridge/${coinId}/${chain}`
 }
 
 function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo['protocol'] {
@@ -69,6 +69,8 @@ function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo
     || networkId === 'arb'
     || networkId === 'op'
     || networkId === 'base'
+    || networkId === 'bnb'
+    || networkId === 'bnb-testnet'
     || networkId === 'polygon'
     || networkId === 'avaxc'
     || networkId === 'cronos'
@@ -76,6 +78,8 @@ function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo
     || coinId === 'arbitrum-one'
     || coinId === 'optimism'
     || coinId === 'base'
+    || coinId === 'bsc'
+    || coinId === 'bsc-testnet'
     || coinId === 'polygon-bor'
     || coinId === 'avalanche-c-chain'
     || coinId === 'cronos'
@@ -91,13 +95,14 @@ function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
   const meta = STANDARD_RUNTIME_META[networkId]
   if (!meta) return undefined
   const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
-  const bridgePath = resolveDefaultBridgePath(meta.coinId)
+  const chain = meta.chain || 'main'
+  const bridgePath = resolveDefaultBridgePath(meta.coinId, chain)
   const walletScopedSend = usesWalletScopedSendRoutes(meta.coinId)
   return {
     networkId,
     symbol: meta.symbol,
     coinId: meta.coinId,
-    chain: 'main',
+    chain,
     protocol: resolveStandardProtocol(networkId, meta.coinId),
     apiBaseUrl,
     defaultRpcUrl: apiBaseUrl,
@@ -107,11 +112,11 @@ function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
     healthUrl: `${apiBaseUrl}/health`,
     bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/${meta.coinId}`,
     sendCoinPathTemplate: walletScopedSend
-      ? `/v1/bridge/send/coin/${meta.coinId}/main/:wallet`
-      : `/v1/bridge/send/coin/${meta.coinId}/main`,
+      ? `/v1/bridge/send/coin/${meta.coinId}/${chain}/:wallet`
+      : `/v1/bridge/send/coin/${meta.coinId}/${chain}`,
     sendAssetPathTemplate: walletScopedSend
-      ? `/v1/bridge/send/asset/${meta.coinId}/main/:wallet`
-      : `/v1/bridge/send/asset/${meta.coinId}/main`,
+      ? `/v1/bridge/send/asset/${meta.coinId}/${chain}/:wallet`
+      : `/v1/bridge/send/asset/${meta.coinId}/${chain}`,
     payloads: getCoinPayloadCatalog(networkId)
   }
 }

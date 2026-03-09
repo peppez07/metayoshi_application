@@ -31,11 +31,13 @@ export function resolveBridgeCredentials(config?: BridgeCredentialConfig): {
 
 type EvmCoinFactoryConfig = {
   id: string
+  runtimeModelId?: string
   name: string
   symbol: string
   coinSymbol: string
   chainId: number
   bridgeCoinId: string
+  bridgeChain?: 'main' | 'test'
   logo: string
   rpcEnvKey: string
   rpcUserEnvKey: string
@@ -58,6 +60,9 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
 
   const createNetwork = (ctx: CoinRuntimeContext): Network => ({
     id: config.id,
+    runtimeModelId: String(config.runtimeModelId || config.id).trim().toLowerCase(),
+    serverCoinId: config.bridgeCoinId,
+    serverChain: config.bridgeChain || 'main',
     name: config.name,
     symbol: config.symbol,
     coinType: 'EVM',
@@ -67,7 +72,7 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     rpcWallet: '',
     rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
     rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
-    bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, 'main'),
+    bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, config.bridgeChain || 'main'),
     ...readBridgeCredentialsFromEnv(env, {
       userEnvKey: config.bridgeUserEnvKey,
       passEnvKey: config.bridgePasswordEnvKey,

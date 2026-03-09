@@ -48,6 +48,7 @@ const WALLET_LOGO_SPECS: WalletLogoSpec[] = [
   { coinIds: ['arb'], file: 'arbitrum.png', names: ['arbitrum', 'arb', 'arbitrum-one'] },
   { coinIds: ['op'], file: 'op.png', names: ['op', 'optimism'] },
   { coinIds: ['base'], file: 'base.png', names: ['base'] },
+  { coinIds: ['bnb', 'bnb-testnet'], file: 'bnb.png', names: ['bnb', 'bsc', 'bnb-smart-chain', 'binance-smart-chain'] },
   { coinIds: ['avaxc'], file: 'avalanche.png', names: ['avalanche', 'avax', 'avaxc', 'avalanche-c-chain'] },
   { coinIds: ['sol'], file: 'solana.png', names: ['solana', 'sol'] },
   { coinIds: ['dash'], file: 'dash.png', names: ['dash'] },

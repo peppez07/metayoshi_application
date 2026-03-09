@@ -2,6 +2,8 @@ import { adaCoin } from './ada'
 import { arbCoin } from './arb'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
+import { bnbCoin } from './bnb'
+import { bnbTestnetCoin } from './bnbTestnet'
 import { btcCoin } from './btc'
 import { btczCoin } from './btcz'
 import { cosmosCoin } from './cosmos'
@@ -77,6 +79,8 @@ const RAW_COIN_MODULES: CoinModule[] = [
   rtmCoin,
   btcCoin,
   ethCoin,
+  bnbCoin,
+  bnbTestnetCoin,
   arbCoin,
   opCoin,
   baseCoin,

@@ -4,13 +4,15 @@ import { BUILD_CONFIG } from '../buildConfig'
 export const DISABLED_NETWORK_IDS = new Set<string>([
 ])
 
-export const EVM_COIN_IDS = new Set<string>(['eth', 'arb', 'op', 'base', 'polygon', 'avaxc', 'cronos', 'zksync'])
+export const EVM_COIN_IDS = new Set<string>(['eth', 'arb', 'op', 'base', 'bnb', 'polygon', 'avaxc', 'cronos', 'zksync'])
 export const EVM_ETHEREUM_L2_COIN_IDS = new Set<string>(['arb', 'op', 'base', 'zksync'])
 
 const EVM_CHAIN_ID_TO_COIN_ID: Record<number, string> = {
   1: 'eth',
   10: 'op',
   25: 'cronos',
+  56: 'bnb',
+  97: 'bnb-testnet',
   137: 'polygon',
   324: 'zksync',
   42161: 'arb',
@@ -34,6 +36,19 @@ const CHAINLIST_EVM_ALIAS_TO_COIN_ID: Record<string, string> = {
   base: 'base',
   'base-mainnet': 'base',
   'mainnet-base': 'base',
+  bnb: 'bnb',
+  bsc: 'bnb',
+  'bnb-smart-chain': 'bnb',
+  'binance-smart-chain': 'bnb',
+  'bnb-smart-chain-mainnet': 'bnb',
+  'binance-smart-chain-mainnet': 'bnb',
+  'bsc-mainnet': 'bnb',
+  'mainnet-bsc': 'bnb',
+  'bnb-smart-chain-testnet': 'bnb-testnet',
+  'binance-smart-chain-testnet': 'bnb-testnet',
+  'bnb-testnet': 'bnb-testnet',
+  'bsc-testnet': 'bnb-testnet',
+  chapel: 'bnb-testnet',
   zksync: 'zksync',
   'zksync-era': 'zksync',
   'zksync-mainnet': 'zksync',

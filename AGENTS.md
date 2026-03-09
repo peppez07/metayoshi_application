@@ -72,6 +72,8 @@ Build and maintain a production-grade multi-chain browser extension wallet with:
 - When touching UX, preserve current spacing, interaction rhythm, and popup-size behavior.
 - Do not hardcode bridge credentials, fallback secrets, or auth defaults in the client bundle.
 - Do not route chain-specific behavior off ad hoc string checks when `runtimeModelId` or existing capability helpers already define the correct model boundary.
+- When adding an EVM chain that should behave like the built-in L2s, add a dedicated `src/coins/*.ts` module via `createEvmCoinModule`, register it in `src/coins/index.ts`, wire selection aliases/chain IDs in `src/coins/coinSelection.ts`, and ensure its logo is present in `vite.config.ts` via `WALLET_LOGO_SPECS`. Do not treat server-registry aliases or interceptor metadata alone as sufficient support.
+- Use official network metadata for new chain entries. Do not invent chain names, chain IDs, RPC URLs, symbols, explorers, or bridge coin IDs when a primary-source network document exists.
 - Verify old audit notes, reports, and markdown plans against current code before treating them as truth.
 
 ## Architecture principles

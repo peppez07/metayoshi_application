@@ -1064,6 +1064,14 @@ function parseTrackedEvmTokens(raw: string): EvmTrackedToken[] {
   return parsed
 }
 
+function normalizeTrackedTokenEnvKeyPart(value: string): string {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
 function normalizeEvmAddressLoose(address: string): string | null {
   const raw = String(address || '').trim()
   if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return null
@@ -1108,10 +1116,11 @@ function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[
 function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedToken[] {
   const networkId = String(network?.id || '').trim()
   const modelId = String(network?.runtimeModelId || networkId).trim()
-  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${networkId.toUpperCase()}_TRACKED_TOKENS`] || ''))
+  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${normalizeTrackedTokenEnvKeyPart(networkId)}_TRACKED_TOKENS`] || ''))
   if (byNetwork.length > 0) return byNetwork
-  const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_TOKENS`] || ''))
+  const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${normalizeTrackedTokenEnvKeyPart(modelId)}_TRACKED_TOKENS`] || ''))
   if (byModel.length > 0) return byModel
+  if (networkId.toLowerCase() === 'bnb-testnet') return []
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'arb') return DEFAULT_ARB_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'op') return DEFAULT_OP_TRACKED_TOKENS
@@ -1121,6 +1130,7 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
   if (chainId === 1) return DEFAULT_ETH_TRACKED_TOKENS
   if (chainId === 10) return DEFAULT_OP_TRACKED_TOKENS
+  if (chainId === 97) return []
   if (chainId === 56) return DEFAULT_BNB_TRACKED_TOKENS
   if (chainId === 42161) return DEFAULT_ARB_TRACKED_TOKENS
   if (chainId === 43114) return DEFAULT_AVAXC_TRACKED_TOKENS
