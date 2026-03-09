@@ -71,20 +71,11 @@ function normalizeCoinId(value: unknown): string {
 }
 
 function resolveBundledWalletLogoSpecs(config: BuildConfig): WalletLogoSpec[] {
-  const allCoinIds = new Set(WALLET_LOGO_SPECS.flatMap((spec) => spec.coinIds.map(normalizeCoinId)))
   const disabled = new Set((config.coins?.disabled || []).map(normalizeCoinId).filter(Boolean))
-  const enabledRaw = config.coins?.enabled
-
-  const enabled =
-    enabledRaw === 'all' || enabledRaw === '*'
-      ? new Set(allCoinIds)
-      : Array.isArray(enabledRaw)
-        ? new Set(enabledRaw.map(normalizeCoinId).filter((id) => allCoinIds.has(id)))
-        : new Set(allCoinIds)
-
-  for (const id of disabled) enabled.delete(id)
-
-  return WALLET_LOGO_SPECS.filter((spec) => spec.coinIds.some((id) => enabled.has(normalizeCoinId(id))))
+  // Network logo assets must stay available even when the visible network set is
+  // restricted by build config. The app can still surface runtime/server-backed
+  // EVM variants, and missing bundled logos regress to placeholders.
+  return WALLET_LOGO_SPECS.filter((spec) => spec.coinIds.some((id) => !disabled.has(normalizeCoinId(id))))
 }
 
 function createWalletLogoRegistryModule(config: BuildConfig): string {
