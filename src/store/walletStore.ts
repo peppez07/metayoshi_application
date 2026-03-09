@@ -1124,13 +1124,58 @@ function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[
   return out
 }
 
-function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModelId'>): EvmTrackedToken[] {
+function resolveTrackedTokenEnvKeys(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): string[] {
   const networkId = String(network?.id || '').trim()
   const modelId = String(network?.runtimeModelId || networkId).trim()
-  const byNetwork = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${normalizeTrackedTokenEnvKeyPart(networkId)}_TRACKED_TOKENS`] || ''))
-  if (byNetwork.length > 0) return byNetwork
-  const byModel = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${normalizeTrackedTokenEnvKeyPart(modelId)}_TRACKED_TOKENS`] || ''))
-  if (byModel.length > 0) return byModel
+  const chainId = resolveEvmChainId(network)
+  const keys = new Set<string>()
+
+  const add = (value: string) => {
+    const normalized = normalizeTrackedTokenEnvKeyPart(value)
+    if (normalized) keys.add(normalized)
+  }
+
+  add(networkId)
+  add(modelId)
+
+  const lowerNetworkId = networkId.toLowerCase()
+  const lowerModelId = modelId.toLowerCase()
+  if (lowerNetworkId === 'bnb' || lowerModelId === 'bnb' || chainId === 56) {
+    add('bsc')
+    add('bnb')
+  }
+  if (
+    lowerNetworkId === 'bnb-testnet'
+    || lowerNetworkId === 'bsc-testnet'
+    || lowerModelId === 'bnb-testnet'
+    || lowerModelId === 'bsc-testnet'
+    || chainId === 97
+  ) {
+    add('bsc-testnet')
+    add('bnb-testnet')
+  }
+
+  return [...keys]
+}
+
+function resolveTrackedTokensFromEnv(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): EvmTrackedToken[] {
+  for (const key of resolveTrackedTokenEnvKeys(network)) {
+    const parsed = parseTrackedEvmTokens(String((import.meta as any)?.env?.[`VITE_${key}_TRACKED_TOKENS`] || ''))
+    if (parsed.length > 0) return parsed
+  }
+  return []
+}
+
+function shouldAutoEnableRemoteEvmTokenCatalog(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): boolean {
+  const chainId = resolveEvmChainId(network)
+  return chainId === 56
+}
+
+function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): EvmTrackedToken[] {
+  const networkId = String(network?.id || '').trim()
+  const modelId = String(network?.runtimeModelId || networkId).trim()
+  const fromEnv = resolveTrackedTokensFromEnv(network)
+  if (fromEnv.length > 0) return fromEnv
   if (networkId.toLowerCase() === 'bnb-testnet') return []
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'arb') return DEFAULT_ARB_TRACKED_TOKENS
@@ -1229,7 +1274,8 @@ async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeMod
   const chainId = resolveEvmChainId(network)
   if (!chainId) return base
 
-  const enableRemoteCatalog = getBuildFeatureFlag('enableRemoteEvmTokenCatalog', 'VITE_ENABLE_REMOTE_EVM_TOKEN_CATALOG', false)
+  const enableRemoteCatalog = shouldAutoEnableRemoteEvmTokenCatalog(network)
+    || getBuildFeatureFlag('enableRemoteEvmTokenCatalog', 'VITE_ENABLE_REMOTE_EVM_TOKEN_CATALOG', false)
   if (!enableRemoteCatalog) return base
   const remote = await fetchRemoteTrackedTokensForChain(chainId).catch(() => [])
   const merged = mergeTrackedEvmTokens(base, remote)
