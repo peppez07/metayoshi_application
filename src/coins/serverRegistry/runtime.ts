@@ -18,7 +18,14 @@ import {
   scoreCandidate,
   supportsEvmBridgeMethods
 } from './networks'
-import type { NetworkCandidate, ServerCoinCatalogItem, ServerCoinRow } from './types'
+import {
+  isServerCoinBridgeEnabled,
+  resolveServerCoinChain,
+  resolveServerCoinId,
+  type NetworkCandidate,
+  type ServerCoinCatalogItem,
+  type ServerCoinRow
+} from './types'
 
 export async function loadServerRegistrySnapshotFromApi(input: {
   apiBaseUrl: string
@@ -48,27 +55,47 @@ export async function loadServerRegistrySnapshotFromApi(input: {
 
   for (const coin of coins) {
     if (!coin?.enabled) continue
-    if (coin?.features?.bridge === false) continue
-    const coinId = String(coin.coinId || '').trim().toLowerCase()
+    if (!isServerCoinBridgeEnabled(coin)) continue
+    const coinId = resolveServerCoinId(coin)
     if (!coinId) continue
     if (isBlockedServerCoinId(coinId)) continue
     if (isLikelyTokenServerCoin(coin)) continue
 
     const modelNetworkId = mapServerCoinIdToNetworkId(coinId)
     const selectedNetwork = resolveActiveServerNetwork(coin.networks)
-    const chain = String(selectedNetwork?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+    const chain = resolveServerCoinChain(coin, selectedNetwork)
     const rpcWallet = String(selectedNetwork?.rpcWallet || '').trim()
+    const modernBridgeReady = Boolean(
+      coin.bridgeImplemented !== false
+      && coin.capabilities?.rpcBridge !== false
+      && (
+        coin.capabilities?.sync
+        || coin.capabilities?.balance
+        || coin.capabilities?.history
+        || coin.capabilities?.send
+        || coin.capabilities?.broadcast
+      )
+    )
 
     const canUseMappedModel = Boolean(
       modelNetworkId
       && moduleById.get(modelNetworkId)
-      && (!EVM_MODEL_NETWORK_IDS.has(modelNetworkId) || supportsEvmBridgeMethods(coin.methodGroups))
+      && (
+        !EVM_MODEL_NETWORK_IDS.has(modelNetworkId)
+        || supportsEvmBridgeMethods(coin.methodGroups)
+        || modernBridgeReady
+      )
     )
 
     if (canUseMappedModel && modelNetworkId) {
       const base = moduleById.get(modelNetworkId)!
       const appNetworkId = resolveAppNetworkId(modelNetworkId, coinId)
-      const inferredCapabilities = inferBridgeCapabilities(coinId, modelNetworkId, coin.methodGroups)
+      const inferredCapabilities = inferBridgeCapabilities(
+        coinId,
+        modelNetworkId,
+        coin.methodGroups,
+        coin.capabilities
+      )
       const mergedCapabilities = mergeCapabilityInputs(base.capabilities, inferredCapabilities)
       const mappedNetwork: Network = {
         ...base,

@@ -9,6 +9,7 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   dash: { symbol: 'DASH', coinId: 'dash' },
   btcz: { symbol: 'BTCZ', coinId: 'bitcoinz' },
   firo: { symbol: 'FIRO', coinId: 'firo' },
+  doge: { symbol: 'DOGE', coinId: 'dogecoin' },
   cosmos: { symbol: 'ATOM', coinId: 'cosmos' },
   cro: { symbol: 'CRO', coinId: 'cronos-pos' },
   cronos: { symbol: 'CRO', coinId: 'cronos' },
@@ -19,5 +20,7 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
   avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
   sol: { symbol: 'SOL', coinId: 'solana' },
-  sui: { symbol: 'SUI', coinId: 'sui' }
+  ada: { symbol: 'ADA', coinId: 'cardano' },
+  sui: { symbol: 'SUI', coinId: 'sui' },
+  xlm: { symbol: 'XLM', coinId: 'stellar' }
 }

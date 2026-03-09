@@ -1,3 +1,4 @@
+import { adaCoin } from './ada'
 import { arbCoin } from './arb'
 import { avaxcCoin } from './avaxc'
 import { baseCoin } from './base'
@@ -15,6 +16,7 @@ import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
 import { solCoin } from './sol'
 import { suiCoin } from './sui'
+import { xlmCoin } from './xlm'
 import { zksyncCoin } from './zksync'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
@@ -83,7 +85,9 @@ const RAW_COIN_MODULES: CoinModule[] = [
   cosmosCoin,
   croCoin,
   solCoin,
+  adaCoin,
   suiCoin,
+  xlmCoin,
   dogeCoin,
   firoCoin,
   dashCoin,

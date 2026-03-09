@@ -56,7 +56,8 @@ export function supportsEvmBridgeMethods(methodGroups: Record<string, string[]> 
 export function inferBridgeCapabilities(
   coinId: string,
   modelNetworkId: string | null,
-  methodGroups: Record<string, string[]> | undefined
+  methodGroups: Record<string, string[]> | undefined,
+  serverCapabilities?: ServerCoinRow['capabilities']
 ): Network['capabilities'] {
   const methods = new Set(flattenServerMethodGroups(methodGroups))
   const isEvmModel = Boolean(modelNetworkId && EVM_MODEL_NETWORK_IDS.has(modelNetworkId))
@@ -64,6 +65,8 @@ export function inferBridgeCapabilities(
   const isCardano = coinId === 'cardano' || modelNetworkId === 'ada'
 
   const canSendCoin =
+    serverCapabilities?.send === true
+    || serverCapabilities?.broadcast === true
     methods.has('sendtoaddress')
     || methods.has('sendmany')
     || methods.has('eth_sendrawtransaction')

@@ -7,13 +7,14 @@ import {
   normalizeServerCoinSymbol,
   resolveAppNetworkId
 } from './mappings'
+import { isServerCoinBridgeEnabled, resolveServerCoinChain, resolveServerCoinId } from './types'
 
 function resolveActiveServerNetworkChain(coin: ServerCoinRow): 'main' | 'test' {
   const rows = Array.isArray(coin.networks) ? coin.networks.filter((n) => n && n.isActive !== false) : []
-  if (rows.length === 0) return 'main'
+  if (rows.length === 0) return resolveServerCoinChain(coin, null)
   const main = rows.find((n) => String(n.chain || '').trim().toLowerCase() === 'main')
   const selected = main || rows[0]
-  return String(selected?.chain || 'main').trim().toLowerCase() === 'test' ? 'test' : 'main'
+  return resolveServerCoinChain(coin, selected)
 }
 
 export function isLikelyTokenServerCoin(coin: ServerCoinRow): boolean {
@@ -86,8 +87,8 @@ export function buildServerCoinCatalog(coins: ServerCoinRow[]): ServerCoinCatalo
   const out: ServerCoinCatalogItem[] = []
   for (const coin of coins) {
     if (!coin?.enabled) continue
-    if (coin?.features?.bridge === false) continue
-    const coinId = String(coin.coinId || '').trim().toLowerCase()
+    if (!isServerCoinBridgeEnabled(coin)) continue
+    const coinId = resolveServerCoinId(coin)
     if (!coinId) continue
     if (isBlockedServerCoinId(coinId)) continue
 

@@ -82,6 +82,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   const token = normalizeCoinSelectionToken(rawToken)
   if (!token) return []
   if (token === 'btc' || token === 'bitcoin') return ['srv--bitcoin']
+  if (token === 'ada' || token === 'cardano') return ['ada']
   if (token === 'cro' || token === 'cronos-pos') return ['cro']
   if (token === 'cronos') return ['cronos']
   if (token === 'dash' || token === 'sdash' || token === 'srv--dash') return ['dash']
@@ -89,6 +90,7 @@ function expandEnabledCoinSelectionToken(rawToken: string): string[] {
   if (token === 'evm') return [...EVM_COIN_IDS]
   if (token === 'evm-l2' || token === 'eth-l2' || token === 'l2') return [...EVM_ETHEREUM_L2_COIN_IDS]
   if (token === 'evm-l1') return [...EVM_COIN_IDS].filter((id) => !EVM_ETHEREUM_L2_COIN_IDS.has(id))
+  if (token === 'xlm' || token === 'stellar') return ['xlm']
   const chainlistMapped = mapChainlistAliasToCoinId(token)
   if (chainlistMapped) return [chainlistMapped]
   return [token]
