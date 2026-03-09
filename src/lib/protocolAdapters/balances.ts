@@ -1,6 +1,7 @@
 import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
 import { callBridgeMethod } from '../utxoRpc'
+import { fetchServerAddressJson, normalizeServerAddress } from '../serverAddressApi'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
 let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
@@ -184,8 +185,9 @@ async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<stri
 
 async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
   const variants: Array<{ method: string; params: any[] }> = [
-    { method: 'getbalance', params: [address] },
-    { method: 'getbalance', params: [] },
+    { method: 'getaddressbalance', params: [address] },
+    { method: 'getaddressbalance', params: [{ address }] },
+    { method: 'getaddressbalance', params: [{ addresses: [address] }] },
     { method: 'getAccount', params: [address] }
   ]
   const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'stellar-balance')
@@ -201,7 +203,7 @@ async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: str
   for (const call of calls) {
     try {
       const result = await callBridgeMethod(rpcConfig, call.method, call.params)
-      const scalar = asDecimalString((result as any)?.balance ?? result)
+      const scalar = asDecimalString((result as any)?.balance ?? (result as any)?.result?.balance ?? result)
       if (scalar) {
         bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
         return scalar
@@ -220,12 +222,13 @@ async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: str
   throw lastError instanceof Error ? lastError : new Error('Bridge Stellar balance query failed')
 }
 
-async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
+async function getCardanoBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
   const variants: Array<{ method: string; params: any[] }> = [
-    { method: 'getbalance', params: [address] },
-    { method: 'getBalance', params: [address] }
+    { method: 'getaddressbalance', params: [address] },
+    { method: 'getaddressbalance', params: [{ address }] },
+    { method: 'getaddressbalance', params: [{ addresses: [address] }] }
   ]
-  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'tron-balance')
+  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'cardano-balance')
   const cached = bridgeMethodVariantCache.get(cacheKey)
   const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
     ? [
@@ -238,7 +241,12 @@ async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string
   for (const call of calls) {
     try {
       const result = await callBridgeMethod(rpcConfig, call.method, call.params)
-      const decimal = asDecimalString((result as any)?.balance ?? result)
+      const rawBalance = String((result as any)?.balance ?? (result as any)?.result?.balance ?? result ?? '').trim()
+      if (/^\d+$/.test(rawBalance)) {
+        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
+        return formatDecimalUnits(BigInt(rawBalance), 6)
+      }
+      const decimal = asDecimalString(rawBalance)
       if (decimal) {
         bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
         return decimal
@@ -247,7 +255,32 @@ async function getTronBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string
       lastError = error
     }
   }
-  throw lastError instanceof Error ? lastError : new Error('Bridge TRON balance query failed')
+  throw lastError instanceof Error ? lastError : new Error('Bridge Cardano balance query failed')
+}
+
+function parseServerBalanceScalar(json: Record<string, unknown> | null): string {
+  return asDecimalString(
+    json?.balance
+    ?? (json?.result as any)?.balance
+    ?? (json?.payload as any)?.balance
+    ?? ''
+  )
+}
+
+async function getTronBalanceViaServer(network: Network, address: string, timeoutMs?: number): Promise<string> {
+  const response = await fetchServerAddressJson(network, address, 'balance', {}, { timeoutMs })
+  if (!response.ok) {
+    const detail = String(
+      response.json?.error
+      ?? (response.json?.result as any)?.error
+      ?? response.text
+      ?? `HTTP ${response.status}`
+    ).trim()
+    throw new Error(`Server TRON balance query failed [HTTP ${response.status}]: ${detail}`)
+  }
+  const scalar = parseServerBalanceScalar(response.json)
+  if (!scalar) throw new Error(`Server TRON balance query returned no balance: ${response.url}`)
+  return scalar
 }
 
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
@@ -332,14 +365,28 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
     if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for XMR')
     return await getMoneroBalanceViaBridge(rpcConfig)
   }
+  if (modelId === 'ada') {
+    if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for ADA')
+    return await getCardanoBalanceViaBridge(rpcConfig, address)
+  }
   if (modelId === 'xlm') {
     if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for XLM')
     return await getStellarBalanceViaBridge(rpcConfig, address)
   }
   if (modelId === 'tron') {
+    try {
+      return await getTronBalanceViaServer(network, address, Number(rpcConfig?.timeoutMs ?? 15000))
+    } catch {
+      // Fall through to alternate reads.
+    }
     if (rpcConfig?.bridgeUrl) {
       try {
-        return await getTronBalanceViaBridge(rpcConfig, address)
+        const serverAddress = await normalizeServerAddress(network, address)
+        if (/^0x[0-9a-fA-F]{40}$/.test(serverAddress)) {
+          const { ethers } = await loadEthersModule()
+          const raw = await callBridgeMethod(rpcConfig, 'eth_getBalance', [serverAddress, 'latest'])
+          return ethers.formatEther(parseRpcQuantityToBigInt(raw, 'eth_getBalance'))
+        }
       } catch {
         // Fall through to direct RPC.
       }

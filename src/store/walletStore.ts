@@ -22,6 +22,7 @@ import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
+import { normalizeServerAddress } from '../lib/serverAddressApi'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
@@ -1838,6 +1839,25 @@ const networkFiatCache = createRequestCache<PortfolioAssetFiatBuckets>({
   maxEntries: 180
 })
 const networkFiatInFlightByKey = new Map<string, Promise<void>>()
+const networkFiatFailureUntilByKey = new Map<string, number>()
+const NETWORK_FIAT_FAILURE_TTL_MS = 3 * 60_000
+
+function isNetworkFiatFailureCooldownActive(cacheKey: string): boolean {
+  const until = Number(networkFiatFailureUntilByKey.get(cacheKey) || 0)
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    networkFiatFailureUntilByKey.delete(cacheKey)
+    return false
+  }
+  return true
+}
+
+function setNetworkFiatFailureCooldown(cacheKey: string, ttlMs = NETWORK_FIAT_FAILURE_TTL_MS): void {
+  networkFiatFailureUntilByKey.set(cacheKey, Date.now() + Math.max(5_000, ttlMs))
+}
+
+function clearNetworkFiatFailureCooldown(cacheKey: string): void {
+  networkFiatFailureUntilByKey.delete(cacheKey)
+}
 
 function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
   const input = String(raw || '').trim()
@@ -2730,6 +2750,7 @@ export const useWalletStore = create<WalletState>()(
         if (!requestMeta) return
 
         const cacheKey = `fiat|${requestNetworkId}|${address.toLowerCase()}|usd,eur`
+        if (options?.force !== true && isNetworkFiatFailureCooldownActive(cacheKey)) return
         const inFlight = networkFiatInFlightByKey.get(cacheKey)
         if (inFlight) {
           await inFlight
@@ -2754,21 +2775,29 @@ export const useWalletStore = create<WalletState>()(
             }
           }
 
+          const requestAddress = await normalizeServerAddress(network, address)
+          if (!requestAddress) return
           const params = new URLSearchParams({
             coin: requestMeta.coin,
             chain: requestMeta.chain,
             fiat: 'usd,eur'
           })
-          const url = `${requestMeta.apiBase}/v1/address/${encodeURIComponent(address)}/portfolio?${params.toString()}`
+          const url = `${requestMeta.apiBase}/v1/address/${encodeURIComponent(requestAddress)}/portfolio?${params.toString()}`
           const headers: Record<string, string> = {}
           if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
           const response = await fetch(url, { method: 'GET', headers })
-          if (!response.ok) return
+          if (!response.ok) {
+            setNetworkFiatFailureCooldown(cacheKey)
+            return
+          }
           const json = await response.json().catch(() => null) as Record<string, unknown> | null
           const portfolio = (json?.portfolio && typeof json.portfolio === 'object')
             ? json.portfolio as Record<string, unknown>
             : null
-          if (!portfolio) return
+          if (!portfolio) {
+            setNetworkFiatFailureCooldown(cacheKey)
+            return
+          }
 
           const buckets = buildPortfolioFiatBuckets(get(), requestAccountId, network, portfolio)
           const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
@@ -2777,6 +2806,7 @@ export const useWalletStore = create<WalletState>()(
             accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: buckets.native },
             accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: buckets.assets }
           }))
+          clearNetworkFiatFailureCooldown(cacheKey)
 
           networkFiatCache.get(
             cacheKey,
@@ -2785,6 +2815,7 @@ export const useWalletStore = create<WalletState>()(
             { force: true }
           ).catch(() => {})
         } catch (error) {
+          setNetworkFiatFailureCooldown(cacheKey)
           console.warn(`[${network.symbol}] fetchNetworkFiat failed for ${requestNetworkId} (${address}).`, error)
         } finally {
           if (networkFiatInFlightByKey.get(cacheKey) === inFlightSignal) {
@@ -3246,29 +3277,36 @@ export const useWalletStore = create<WalletState>()(
         }
 
         if (activeModelId === 'tron') {
-          const tracked = resolveTrackedTronTokens()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
           try {
+            const serverOwner = await normalizeServerAddress(net, address)
+            const rows = await fetchBridgeTokenBalances(rpcConfig, {
+              coin: 'tron',
+              chain: 'main',
+              owner: serverOwner || undefined,
+              wallet: String(net.rpcWallet || '').trim() || undefined
+            })
             const assets: Record<string, number> = {}
-            const logos: Record<string, string> = {}
+            const labels: Record<string, string> = {}
             const usedKeys = new Set<string>()
 
-            const rows = await mapWithConcurrency(tracked, 6, async (token) => {
-              try {
-                const { readTrc20TokenMetadata, getTrc20BalanceRaw } = await loadTronNonCustodialModule()
-                const meta = await readTrc20TokenMetadata(net.rpcUrl, token.contract)
-                const raw = await getTrc20BalanceRaw(net.rpcUrl, token.contract, address)
-                if (raw <= 0n) return null
-                const displaySats = toAssetDisplaySats(raw, meta.decimals)
-                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
-                return { token, meta, displaySats }
-              } catch {
-                return null
-              }
-            })
-
             for (const row of rows) {
-              if (!row) continue
-              const baseSymbol = String(row.meta.symbol || row.token.symbol || 'TRC20').trim().toUpperCase()
+              const tokenType = String(row.tokenType || '').trim().toLowerCase()
+              if (tokenType.includes('721') || tokenType.includes('1155') || tokenType.includes('nft')) continue
+
+              const rawBalanceText = String(row.balanceRaw || '').trim()
+              if (!/^\d+$/.test(rawBalanceText)) continue
+              const rawBalance = BigInt(rawBalanceText)
+              if (rawBalance <= 0n) continue
+
+              const decimalsRaw = Number(row.decimals)
+              const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
+              const displaySats = toAssetDisplaySats(rawBalance, decimals)
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+              const baseSymbol = String(row.symbol || row.name || row.tokenId || 'TOKEN').trim().toUpperCase()
               let key = baseSymbol
               if (usedKeys.has(key)) {
                 let suffix = 2
@@ -3276,26 +3314,88 @@ export const useWalletStore = create<WalletState>()(
                 key = `${baseSymbol} #${suffix}`
               }
               usedKeys.add(key)
-              assets[key] = row.displaySats
-              const baseLogo = getTokenLogoForAsset(baseSymbol)
-              logos[key] = encodeTronContractLogoHint(baseLogo || '', row.token.contract)
+              assets[key] = displaySats
+              labels[key] = baseSymbol
             }
 
             set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
               assets,
-              logos,
-              labels: {},
+              logos: {},
+              labels,
               evmNfts: {}
             }))
 
             networkAssetsCache.get(
               cacheKey,
-              async () => ({ assets, logos, labels: {} }),
+              async () => ({ assets, logos: {}, labels }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
+          } catch {
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets: {},
+              logos: {},
+              labels: {},
+              evmNfts: {}
+            }))
+          }
+          return
+        }
+
+        if (activeModelId === 'xlm') {
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          try {
+            const rows = await fetchBridgeTokenBalances(rpcConfig, {
+              coin: 'stellar',
+              chain: 'main',
+              owner: address,
+              wallet: String(net.rpcWallet || '').trim() || undefined
+            })
+            const assets: Record<string, number> = {}
+            const labels: Record<string, string> = {}
+            for (const row of rows) {
+              const tokenId = String(row.tokenId || '').trim()
+              const tokenType = String(row.tokenType || '').trim().toLowerCase()
+              if (!tokenId || tokenType === 'native' || tokenId.toLowerCase() === 'native') continue
+
+              const rawBalanceText = String(row.balanceRaw || '').trim()
+              let displaySats = 0
+              if (/^\d+$/.test(rawBalanceText)) {
+                const decimalsRaw = Number(row.decimals)
+                const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 18 ? decimalsRaw : 7
+                displaySats = toAssetDisplaySats(BigInt(rawBalanceText), decimals)
+              } else {
+                const balanceUiText = String(row.balance || '0').trim()
+                if (!/^\d+(\.\d+)?$/.test(balanceUiText)) continue
+                const qty = Number(balanceUiText)
+                if (!Number.isFinite(qty) || qty <= 0) continue
+                displaySats = Math.round(qty * 1e8)
+              }
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+              assets[tokenId] = displaySats
+              labels[tokenId] = String(row.symbol || row.name || tokenId).trim() || tokenId
+            }
+
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos: {},
+              labels,
+              evmNfts: {}
+            }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos: {}, labels }),
               undefined,
               { force: true }
             ).catch(() => {})
           } catch (err) {
-            console.warn(`[${net.symbol}] fetchNetworkAssets (TRON) failed:`, err)
+            console.warn(`[${net.symbol}] fetchNetworkAssets (Stellar) failed:`, err)
           }
           return
         }
@@ -3886,6 +3986,46 @@ export const useWalletStore = create<WalletState>()(
             contract_address: '',
             txid_or_longname: normalizedAssetId,
             ownership_address: policy || assetName || ''
+          } as RtmAssetDetails
+        }
+
+        if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'xlm') {
+          const {
+            accounts,
+            activeAccountId,
+            networkAssets
+          } = get()
+          const activeAcc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+          const owner = String(activeAcc?.networkAddresses?.[activeNetworkId] || '').trim()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const rows = await fetchBridgeTokenBalances(rpcConfig, {
+            coin: 'stellar',
+            chain: 'main',
+            owner: owner || undefined,
+            wallet: String(net.rpcWallet || '').trim() || undefined,
+            tokenId: normalizedAssetId
+          })
+          const row = rows.find((r) => String(r.tokenId || '').trim() === normalizedAssetId)
+          const knownRaw = Number((networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0))
+          const amountUi = knownRaw > 0 ? (knownRaw / 1e8) : Number(String(row?.balance || row?.balanceRaw || '0'))
+          const tokenRef = `https://stellar.expert/explorer/public/asset/${encodeURIComponent(normalizedAssetId)}`
+          return {
+            name: String(row?.name || row?.symbol || normalizedAssetId).trim(),
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: tokenRef,
+            metadata_url: tokenRef,
+            token_id: normalizedAssetId,
+            contract_address: '',
+            txid_or_longname: normalizedAssetId,
+            ownership_address: String(row?.issuer || '').trim()
           } as RtmAssetDetails
         }
 
