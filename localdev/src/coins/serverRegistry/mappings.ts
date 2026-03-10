@@ -26,6 +26,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   babylon: 'cosmos',
   bitcanna: 'cosmos',
   dogecoin: 'doge',
+  dash: 'dash',
   bitcoin: 'srv--bitcoin',
   bitcoinz: 'btcz',
   celestia: 'cosmos',

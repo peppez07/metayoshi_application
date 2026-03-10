@@ -2,6 +2,8 @@
 
 MetaYoshi Wallet is the public browser-extension wallet for the MetaYoshi project. It is built for non-custodial, multi-chain access: users keep control of their keys, approve their own actions, and work through one consistent wallet flow across configured networks.
 
+**Control beats trust.**
+
 This repository is the source for MetaYoshi Wallet `0.1.6`.
 
 ## Why MetaYoshi
@@ -101,36 +103,69 @@ Important:
 - `npm run lint`
 - `npm run test:api:firo-eth`
 
+## Using the public repo
+
+This repository is intended for users, testers, and contributors who want to run the wallet locally, inspect how it works, or build their own test setup.
+
+What to expect:
+
+- the source code is public and reviewable
+- live production credentials are not bundled here
+- some wallet flows need your own backend or bridge configuration
+- available networks can vary based on your environment settings
+
+## Generic token support plan
+
+The long-term goal is a generic asset layer that makes token support feel consistent across different blockchain models instead of treating every network as a one-off integration.
+
+Direction of implementation:
+
+- EVM assets: keep improving ERC-20 token discovery, balance reads, transfer flows, and contract-based asset identification
+- Solana assets: continue SPL token and NFT handling with better metadata, mint recognition, and transfer clarity
+- Cardano assets: expand policy-token support through clearer asset identification and transfer tooling
+- Cosmos-style assets: improve denom-based asset presentation and chain-specific metadata handling
+- Shared asset UX: keep one consistent flow for logo resolution, balances, send confirmation, and transaction review
+- Safety first: token transfers should only be exposed where signing, validation, and fee handling are explicit and reviewable
+
+That means the wallet is moving toward broader generic token support, but actual availability still depends on the network, runtime support, and backend configuration in a given deployment.
+
 ## Support the project
 
-If you want to help MetaYoshi grow, the most useful support is practical support:
+MetaYoshi can be supported in three ways:
 
-- star the repository and follow releases
-- test the wallet on supported chains and report reproducible issues
-- contribute fixes, documentation, and UX improvements
-- help review public claims so docs stay aligned with the real product
-- share the project with users who care about non-custodial multi-chain tooling
+- by using the wallet, testing it, and reporting reproducible issues
+- by contributing code, documentation, and UX improvements
+- by sending a direct donation to one of the project support addresses below
 
-Community support helps improve wallet reliability, documentation quality, and the pace of new integrations.
+Direct donation addresses:
+
+- Ethereum: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
+- Base: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
+- BNB: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
+- Raptoreum: `RFfwc9vv7W6hq3y6H2ZiYsb4PXZZ4Vi83m`
+- Cosmos: `cosmos1dutpffteuk2euly728lg7kkn5lpqn9m9c3d56h`
+- Dash: `Xt1U9CuRRHEwi5pjjNEVbVah3fbwcy2K4Xm`
+
+These are direct support addresses for the project. Availability of any donation prompt inside the wallet can still depend on network, runtime, and backend configuration.
 
 ## Website and contact
 
 - Website: `https://metayoshi.app`
-- Support: `admin@metayoshi.app`
+- Support: `support@metayoshi.app`
 
 For broader project direction, see the public website, FAQ, and whitepaper pages.
 
-## Publish safety
+## Configuration notes
 
-This repository is meant to be shareable without local secrets.
+For local use, create a `.env.local` file from `.env.example` and provide your own values.
 
-Before pushing publicly:
+The public repository does not include:
 
-- do not commit `.env.local`
-- do not commit `dist/`, `node_modules/`, `.zip`, `.crx`, or `.pem` artifacts
-- do not commit internal workflow files such as `AGENTS.md`, `agents/`, or `skills/`
-- use placeholder values only in examples and docs
-- do not publish unreleased token references or internal infrastructure details
+- live server credentials
+- private bridge secrets
+- internal deployment configuration
+
+If a backend-connected feature does not work in your setup, check your environment values first.
 
 ## License
 
