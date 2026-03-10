@@ -68,6 +68,7 @@ function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo
     || networkId === 'op'
     || networkId === 'base'
     || networkId === 'bnb'
+    || networkId === 'bnb-testnet'
     || networkId === 'polygon'
     || networkId === 'avaxc'
     || networkId === 'cronos'

@@ -18,6 +18,7 @@ export const STANDARD_RUNTIME_META: Record<string, StandardRuntimeMeta> = {
   op: { symbol: 'ETH', coinId: 'optimism' },
   base: { symbol: 'ETH', coinId: 'base' },
   bnb: { symbol: 'BNB', coinId: 'bsc' },
+  'bnb-testnet': { symbol: 'tBNB', coinId: 'bsc-testnet', chain: 'test' },
   polygon: { symbol: 'MATIC', coinId: 'polygon-bor' },
   avaxc: { symbol: 'AVAX', coinId: 'avalanche-c-chain' },
   sol: { symbol: 'SOL', coinId: 'solana' },

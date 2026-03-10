@@ -69,12 +69,12 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
   'eth',
-  'arb',
-  'op',
   'base',
-  'polygon',
-  'avaxc',
+  'bnb',
+  'op',
   'sol',
+  'dash',
+  'btcz',
   'cosmos'
 ]
 

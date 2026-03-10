@@ -23,7 +23,7 @@ function normalizeId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
-const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'bnb', 'sol', 'dash', 'btcz', 'cosmos'])
+const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'bnb', 'bnb-testnet', 'sol', 'dash', 'btcz', 'cosmos'])
 
 function normalizeModelStatusId(value: unknown): string {
   const id = normalizeId(value)
@@ -45,6 +45,16 @@ function normalizeModelStatusId(value: unknown): string {
     || id === 'binance-smart-chain-mainnet'
   ) {
     return 'bnb'
+  }
+  if (
+    id === 'bnbt'
+    || id === 'bsc-testnet'
+    || id === 'chapel'
+    || id === 'bnb-smart-chain-testnet'
+    || id === 'binance-smart-chain-testnet'
+    || id === 'testnet-bnb'
+  ) {
+    return 'bnb-testnet'
   }
   if (id.startsWith('eth--')) return 'eth'
   if (id.startsWith('base--')) return 'base'

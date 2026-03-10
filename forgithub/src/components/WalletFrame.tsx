@@ -392,7 +392,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                     className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                       activeNetworkId === n.id ? 'border-primary bg-primary/5' : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
                     }`}
-                    onClick={() => { void setActiveNetwork(n.id); setShowNetworkMenu(false); setNetworkSearch('') }}
+                    onClick={() => {
+                      void setActiveNetwork(n.id)
+                      setShowNetworkMenu(false)
+                      setNetworkSearch('')
+                    }}
                   >
                     <div className="flex items-center gap-3">
                       {n.logo

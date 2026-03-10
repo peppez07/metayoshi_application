@@ -1085,6 +1085,16 @@ function resolveTrackedTokenEnvKeys(network: Pick<Network, 'id' | 'runtimeModelI
     add('bsc')
     add('bnb')
   }
+  if (
+    lowerNetworkId === 'bnb-testnet'
+    || lowerNetworkId === 'bsc-testnet'
+    || lowerModelId === 'bnb-testnet'
+    || lowerModelId === 'bsc-testnet'
+    || chainId === 97
+  ) {
+    add('bsc-testnet')
+    add('bnb-testnet')
+  }
   return [...keys]
 }
 
@@ -1106,6 +1116,7 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   const modelId = String(network?.runtimeModelId || networkId).trim()
   const fromEnv = resolveTrackedTokensFromEnv(network)
   if (fromEnv.length > 0) return fromEnv
+  if (networkId.toLowerCase() === 'bnb-testnet') return []
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'arb') return DEFAULT_ARB_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'op') return DEFAULT_OP_TRACKED_TOKENS

@@ -4,7 +4,7 @@ import QRCode from 'qrcode'
 import clsx from 'clsx'
 import { useWalletStore } from '../store/walletStore'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
-import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline, IoSettingsOutline } from 'react-icons/io5'
+import { IoChevronDown, IoClose, IoCopyOutline, IoCheckmark, IoSearchOutline, IoQrCodeOutline, IoCreateOutline, IoGlobeOutline, IoSettingsOutline, IoCheckmarkCircle, IoCloseCircle } from 'react-icons/io5'
 import { Button } from './Button'
 import { EVM_ETHEREUM_L2_COIN_IDS } from '../coins/coinSelection'
 import { getUnifiedLogoByName } from '../coins/logos'
@@ -12,7 +12,7 @@ import { SESSION_GRADIENT } from '../lib/sessionColor'
 import { getAccountDisplayName } from '../lib/accountName'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { compareNetworksByModelFamily } from '../lib/coinModel'
-import { getModelIconRingClass } from '../buildConfig'
+import { getModelIconRingClass, getModelStatus } from '../buildConfig'
 import { getEnabledNetworks } from '../lib/networkVisibility'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../lib/runtimeModel'
 
@@ -109,6 +109,12 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   const shortenedAddress = rawAddress
     ? `${rawAddress.slice(0, 4)}…${rawAddress.slice(-6)}`
     : ''
+
+  const renderNetworkStatusIcon = React.useCallback((network: { runtimeModelId?: string; id: string }) => {
+    const status = getModelStatus(String(network.runtimeModelId || network.id || ''))
+    if (status === 'tested') return <IoCheckmarkCircle className="w-4 h-4 text-green-400 shrink-0" title="Tested" />
+    return <IoCloseCircle className="w-4 h-4 text-red-400 shrink-0" title="Not tested" />
+  }, [])
 
   React.useEffect(() => {
     if (!showReceiveQr || !receivePayload) {
@@ -387,7 +393,11 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                     className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                       activeNetworkId === n.id ? 'border-primary bg-primary/5' : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
                     }`}
-                    onClick={() => { void setActiveNetwork(n.id); setShowNetworkMenu(false); setNetworkSearch('') }}
+                    onClick={() => {
+                      void setActiveNetwork(n.id)
+                      setShowNetworkMenu(false)
+                      setNetworkSearch('')
+                    }}
                   >
                     <div className="flex items-center gap-3">
                       {n.logo
@@ -401,6 +411,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                       <div className="flex flex-col leading-tight">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold">{n.name}</span>
+                          {renderNetworkStatusIcon(n)}
                           {resolveNetworkCapabilities(n).features.assetLayer && (
                             <span
                               title="Supports assets/tokens"

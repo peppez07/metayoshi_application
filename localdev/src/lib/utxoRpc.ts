@@ -3049,10 +3049,10 @@ export type BridgeTokenBalanceRow = {
   symbol?: string
   name?: string
   issuer?: string
+  logoUri?: string
   decimals?: number | null
   balanceRaw?: string
   balance?: string
-  logoUri?: string
 }
 
 export async function fetchBridgeTokenBalances(
