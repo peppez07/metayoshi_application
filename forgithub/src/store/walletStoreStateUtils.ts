@@ -53,6 +53,15 @@ export interface NormalizedWalletActivity {
 }
 
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const LEGACY_TESTED_DEFAULT_VISIBLE_NETWORK_IDS = [
+  'rtm',
+  'eth',
+  'base',
+  'bnb',
+  'dash',
+  'btcz',
+  'cosmos'
+]
 const CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
@@ -214,18 +223,10 @@ export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown,
 }
 
 export function resolveDefaultDisabledNetworkIds(networks: Network[]): string[] {
-  const testedVisibleIds = networks
-    .filter((network) => getModelStatus(String(network.runtimeModelId || network.id || '')) === 'tested')
-    .map((network) => String(network.id || '').trim())
-    .filter(Boolean)
+  const testedVisibleIds = resolveTestedVisibleNetworkIds(networks)
 
   if (testedVisibleIds.length > 0 && testedVisibleIds.length <= MAX_ACTIVE_REFRESH_NETWORKS) {
-    return normalizeDisabledNetworkIdsForState(
-      networks
-        .map((network) => String(network.id || '').trim())
-        .filter((networkId) => networkId && !testedVisibleIds.includes(networkId)),
-      networks
-    )
+    return resolveDisabledNetworkIdsFromVisible(networks, testedVisibleIds)
   }
 
   if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return []
@@ -256,6 +257,59 @@ export function resolveDefaultDisabledNetworkIds(networks: Network[]): string[] 
       .filter((networkId) => networkId && !visibleSet.has(networkId)),
     networks
   )
+}
+
+export function migrateLegacyDefaultDisabledNetworkIds(disabledNetworkIds: unknown, networks: Network[]): string[] {
+  const normalizedDisabled = normalizeDisabledNetworkIdsForState(disabledNetworkIds, networks)
+  if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return normalizedDisabled
+
+  const testedVisibleIds = resolveTestedVisibleNetworkIds(networks)
+  if (testedVisibleIds.length === 0 || testedVisibleIds.length > MAX_ACTIVE_REFRESH_NETWORKS) {
+    return normalizedDisabled
+  }
+
+  const legacyDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(
+    networks,
+    LEGACY_TESTED_DEFAULT_VISIBLE_NETWORK_IDS
+  )
+  if (!areSameNetworkIdSet(normalizedDisabled, legacyDefaultDisabled)) return normalizedDisabled
+
+  return resolveDisabledNetworkIdsFromVisible(networks, testedVisibleIds)
+}
+
+function resolveTestedVisibleNetworkIds(networks: Network[]): string[] {
+  return networks
+    .filter((network) => getModelStatus(String(network.runtimeModelId || network.id || '')) === 'tested')
+    .map((network) => String(network.id || '').trim())
+    .filter(Boolean)
+}
+
+function resolveDisabledNetworkIdsFromVisible(networks: Network[], visibleNetworkIds: string[]): string[] {
+  return normalizeDisabledNetworkIdsForState(
+    networks
+      .map((network) => String(network.id || '').trim())
+      .filter((networkId) => networkId && !visibleNetworkIds.includes(networkId)),
+    networks
+  )
+}
+
+function resolvePreferredDefaultDisabledNetworkIds(networks: Network[], preferredVisibleNetworkIds: string[]): string[] {
+  return normalizeDisabledNetworkIdsForState(
+    networks
+      .map((network) => String(network.id || '').trim())
+      .filter((networkId) => {
+        if (!networkId) return false
+        const resolved = resolveKnownNetworkId(networks, networkId)
+        return Boolean(resolved && !preferredVisibleNetworkIds.some((preferredId) => resolveKnownNetworkId(networks, preferredId) === resolved))
+      }),
+    networks
+  )
+}
+
+function areSameNetworkIdSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false
+  const rightSet = new Set(right)
+  return left.every((networkId) => rightSet.has(networkId))
 }
 
 export function clampDisabledNetworkIdsToMaxEnabled(disabledNetworkIds: unknown, networks: Network[]): string[] {

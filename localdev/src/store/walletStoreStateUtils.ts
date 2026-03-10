@@ -53,7 +53,7 @@ export interface NormalizedWalletActivity {
 }
 
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
-const CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
+const LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
   'eth',
@@ -63,6 +63,18 @@ const CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'polygon',
   'avaxc',
   'cronos',
+  'cosmos'
+]
+const DEFAULT_VISIBLE_NETWORK_IDS = [
+  'rtm',
+  'srv--bitcoin',
+  'eth',
+  'arb',
+  'op',
+  'base',
+  'polygon',
+  'avaxc',
+  'sol',
   'cosmos'
 ]
 
@@ -214,11 +226,25 @@ export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown,
 }
 
 export function resolveDefaultDisabledNetworkIds(networks: Network[]): string[] {
+  return resolvePreferredDefaultDisabledNetworkIds(networks, DEFAULT_VISIBLE_NETWORK_IDS)
+}
+
+export function migrateLegacyDefaultDisabledNetworkIds(disabledNetworkIds: unknown, networks: Network[]): string[] {
+  const normalizedDisabled = normalizeDisabledNetworkIdsForState(disabledNetworkIds, networks)
+  if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return normalizedDisabled
+
+  const legacyDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(networks, LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS)
+  if (!areSameNetworkIdSet(normalizedDisabled, legacyDefaultDisabled)) return normalizedDisabled
+
+  return resolvePreferredDefaultDisabledNetworkIds(networks, DEFAULT_VISIBLE_NETWORK_IDS)
+}
+
+function resolvePreferredDefaultDisabledNetworkIds(networks: Network[], preferredVisibleNetworkIds: string[]): string[] {
   if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return []
 
   const visibleIds: string[] = []
   const visibleSet = new Set<string>()
-  for (const preferredId of CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS) {
+  for (const preferredId of preferredVisibleNetworkIds) {
     const resolved = resolveKnownNetworkId(networks, preferredId)
     if (!resolved || visibleSet.has(resolved)) continue
     visibleSet.add(resolved)
@@ -242,6 +268,12 @@ export function resolveDefaultDisabledNetworkIds(networks: Network[]): string[] 
       .filter((networkId) => networkId && !visibleSet.has(networkId)),
     networks
   )
+}
+
+function areSameNetworkIdSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false
+  const rightSet = new Set(right)
+  return left.every((networkId) => rightSet.has(networkId))
 }
 
 export function clampDisabledNetworkIdsToMaxEnabled(disabledNetworkIds: unknown, networks: Network[]): string[] {

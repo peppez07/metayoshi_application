@@ -3052,6 +3052,7 @@ export type BridgeTokenBalanceRow = {
   decimals?: number | null
   balanceRaw?: string
   balance?: string
+  logoUri?: string
 }
 
 export async function fetchBridgeTokenBalances(
@@ -3137,7 +3138,20 @@ export async function fetchBridgeTokenBalances(
       issuer: String(row?.issuer || '').trim() || undefined,
       decimals: Number.isFinite(Number(row?.decimals)) ? Number(row.decimals) : null,
       balanceRaw: String(row?.balanceRaw ?? '').trim() || undefined,
-      balance: String(row?.balance ?? '').trim() || undefined
+      balance: String(row?.balance ?? '').trim() || undefined,
+      logoUri: String(
+        row?.logoURI
+        || row?.logoUri
+        || row?.logo_uri
+        || row?.logoUrl
+        || row?.logo_url
+        || row?.logo64
+        || row?.image
+        || row?.image_url
+        || row?.imageUrl
+        || row?.preview_url
+        || ''
+      ).trim() || undefined
     }))
     .filter((row: BridgeTokenBalanceRow) => Boolean(row.tokenId))
 }

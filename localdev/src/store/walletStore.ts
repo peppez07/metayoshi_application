@@ -64,6 +64,7 @@ import {
   clampDisabledNetworkIdsToMaxEnabled,
   isCroCosmosModel,
   MAX_ACTIVE_REFRESH_NETWORKS,
+  migrateLegacyDefaultDisabledNetworkIds,
   normalizeActivityList,
   normalizeActivityRecord,
   normalizeDisabledNetworkIdsForState,
@@ -1203,6 +1204,23 @@ function resolveEvmChainId(network: Pick<Network, 'id' | 'runtimeModelId' | 'cha
   return null
 }
 
+function extractAssetLogoUri(row: Record<string, unknown> | null | undefined): string | undefined {
+  const value = String(
+    row?.logoURI
+    || row?.logoUri
+    || row?.logo_uri
+    || row?.logoUrl
+    || row?.logo_url
+    || row?.logo64
+    || row?.image
+    || row?.image_url
+    || row?.imageUrl
+    || row?.preview_url
+    || ''
+  ).trim()
+  return value || undefined
+}
+
 function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
   const values = Array.isArray(payload?.tokens)
     ? payload.tokens
@@ -1220,7 +1238,7 @@ function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
       address: normalizedAddress,
       symbol: symbol || shortAddress(candidateAddress),
       decimals: Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18,
-      logoUri: String(row?.logoURI || row?.logo_uri || row?.logo || row?.image || '').trim() || undefined
+      logoUri: extractAssetLogoUri(row as Record<string, unknown>)
     })
   }
   return out
@@ -1695,7 +1713,8 @@ function buildEvmAssetBucketsFromBridgeRows(
     assets[assetKey] = Math.max(prev, displaySats)
     labels[assetKey] = displaySymbol
     if (tokenAddress) {
-      const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+      const logoUri = extractAssetLogoUri(row as unknown as Record<string, unknown>)
+        || buildTrustWalletErc20LogoUri(chainId, tokenAddress)
       if (logoUri) logos[assetKey] = logoUri
     }
   }
@@ -2046,10 +2065,10 @@ function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
   return raw
 }
 
-async function discoverEvmTokenContractsFromAddressAssets(
+async function fetchEvmTokensFromAddressAssets(
   rpcConfig: UtxoRpcConfig,
   input: { coin: string; chain: string; ownerAddress: string }
-): Promise<string[]> {
+): Promise<EvmTrackedToken[]> {
   const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig.bridgeUrl || ''))
   if (!apiBase) return []
 
@@ -2092,19 +2111,27 @@ async function discoverEvmTokenContractsFromAddressAssets(
     }
     const json = await res.json().catch(() => null) as any
     const erc20Rows = Array.isArray(json?.assets?.erc20) ? json.assets.erc20 : []
-    const out = new Set<string>()
+    const out = new Map<string, EvmTrackedToken>()
     for (const row of erc20Rows) {
-      const candidate = normalizeEvmAddressLoose(String(
+      const address = normalizeEvmAddressLoose(String(
         row?.contractAddress
         || row?.tokenAddress
         || row?.TokenAddress
         || ''
       ).trim())
-      if (!candidate) continue
-      out.add(candidate)
+      if (!address || out.has(address)) continue
+      const symbol = String(row?.symbol || row?.ticker || row?.name || '').trim().toUpperCase() || shortAddress(address)
+      const decimalsRaw = Number(row?.decimals)
+      out.set(address, {
+        address,
+        symbol,
+        decimals: Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18,
+        logoUri: extractAssetLogoUri(row as Record<string, unknown>),
+        discovered: true
+      })
       if (out.size >= 220) break
     }
-    return [...out]
+    return [...out.values()]
   } catch {
     return []
   } finally {
@@ -3031,10 +3058,10 @@ export const useWalletStore = create<WalletState>()(
               address,
               activityTxids
             ).catch(() => [])
-            let assetsEndpointContracts: string[] = []
+            let assetsEndpointTokens: EvmTrackedToken[] = []
             if (!addressAssetsEndpointUnsupported) {
               try {
-                assetsEndpointContracts = await discoverEvmTokenContractsFromAddressAssets(rpcConfig, {
+                assetsEndpointTokens = await fetchEvmTokensFromAddressAssets(rpcConfig, {
                   coin: bridgeCoin,
                   chain: bridgeChain,
                   ownerAddress: address
@@ -3062,18 +3089,24 @@ export const useWalletStore = create<WalletState>()(
                 discovered: true
               })
             }
-            for (const discoveredAddress of assetsEndpointContracts) {
-              if (trackedByAddress.has(discoveredAddress)) continue
-              trackedByAddress.set(discoveredAddress, {
-                address: discoveredAddress,
-                symbol: shortAddress(discoveredAddress),
-                decimals: 18,
-                discovered: true
-              })
+            for (const token of assetsEndpointTokens) {
+              const existing = trackedByAddress.get(token.address)
+              if (existing) {
+                const shouldPreferServerMeta = existing.discovered === true
+                trackedByAddress.set(token.address, {
+                  ...existing,
+                  discovered: existing.discovered || token.discovered,
+                  logoUri: existing.logoUri || token.logoUri,
+                  symbol: shouldPreferServerMeta ? (token.symbol || existing.symbol) : existing.symbol,
+                  decimals: shouldPreferServerMeta ? token.decimals : existing.decimals
+                })
+                continue
+              }
+              trackedByAddress.set(token.address, token)
             }
 
             let mergedTokens = [...trackedByAddress.values()]
-            if (discoveredAddresses.length === 0 && assetsEndpointContracts.length === 0 && mergedTokens.length > 80) {
+            if (discoveredAddresses.length === 0 && assetsEndpointTokens.length === 0 && mergedTokens.length > 80) {
               // Shared/public RPC providers often throttle large token scan bursts.
               // Keep scan bounded when no dynamic discovery source produced candidates.
               mergedTokens = mergedTokens.slice(0, 80)
@@ -3300,7 +3333,8 @@ export const useWalletStore = create<WalletState>()(
                   fungibleAssets[assetKey] = Math.max(prev, displaySats)
                   fungibleAssetLabels[assetKey] = displaySymbol
                   if (tokenAddress) {
-                    const logoUri = buildTrustWalletErc20LogoUri(chainId, tokenAddress)
+                    const logoUri = extractAssetLogoUri(row as unknown as Record<string, unknown>)
+                      || buildTrustWalletErc20LogoUri(chainId, tokenAddress)
                     if (logoUri) fungibleAssetLogos[assetKey] = logoUri
                   }
                   bridgeFallbackRowsApplied += 1
@@ -6369,7 +6403,10 @@ export const useWalletStore = create<WalletState>()(
           : (accounts[0]?.id ?? null)
         const normalizedNetworks = normalizeNetworkListSymbols(INITIAL_NETWORKS)
         const normalizedDisabledNetworkIds = clampDisabledNetworkIdsToMaxEnabled(
-          (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
+          migrateLegacyDefaultDisabledNetworkIds(
+            (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
+            normalizedNetworks
+          ),
           normalizedNetworks
         )
         const normalizedPersistedNetworkId = normalizeNetworkIdAlias(String(merged.activeNetworkId || ''))

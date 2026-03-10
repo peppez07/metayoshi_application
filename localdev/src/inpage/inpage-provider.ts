@@ -405,7 +405,7 @@ const provider = {
   // Metadata
   _metayoshi: {
     hardwareWallet: String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || '').trim().toLowerCase() === 'hardware',
-    version: import.meta.env.VITE_APP_VERSION ?? 'metayoshi-0.1.7',
+    version: import.meta.env.VITE_APP_VERSION ?? 'metayoshi-0.1.8',
     multiChain: true
   }
 }

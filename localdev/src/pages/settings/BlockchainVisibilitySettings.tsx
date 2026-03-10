@@ -53,7 +53,7 @@ const BlockchainVisibilitySettings: React.FC = () => {
         <div className="flex gap-2.5 p-3 bg-dark-700/20 border border-dark-600/60 rounded-xl">
           <IoWarningOutline className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
           <p className="text-[10px] text-gray-300 leading-relaxed">
-            Keep only the chains you really use. The wallet allows at most {MAX_ACTIVE_REFRESH_NETWORKS} active blockchains for refresh, and new wallets start with the classic 10 enabled by default.
+            Keep only the chains you really use. The wallet allows at most {MAX_ACTIVE_REFRESH_NETWORKS} active blockchains for refresh, and new wallets start with 10 common networks enabled by default.
           </p>
         </div>
 

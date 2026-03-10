@@ -62,6 +62,7 @@ import {
   clampDisabledNetworkIdsToMaxEnabled,
   isCroCosmosModel,
   MAX_ACTIVE_REFRESH_NETWORKS,
+  migrateLegacyDefaultDisabledNetworkIds,
   normalizeActivityList,
   normalizeActivityRecord,
   normalizeDisabledNetworkIdsForState,
@@ -6055,7 +6056,10 @@ export const useWalletStore = create<WalletState>()(
           : (accounts[0]?.id ?? null)
         const normalizedNetworks = normalizeNetworkListSymbols(INITIAL_NETWORKS)
         const normalizedDisabledNetworkIds = clampDisabledNetworkIdsToMaxEnabled(
-          (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
+          migrateLegacyDefaultDisabledNetworkIds(
+            (persisted as any).disabledNetworkIds ?? (merged as any).disabledNetworkIds ?? [],
+            normalizedNetworks
+          ),
           normalizedNetworks
         )
         const normalizedPersistedNetworkId = normalizeNetworkIdAlias(String(merged.activeNetworkId || ''))
