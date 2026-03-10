@@ -95,8 +95,20 @@ export function getEvmChainIdToCoinIdMap(): Record<number, string> {
   return out
 }
 
-export function getStandardRuntimeMetaMap(): Record<string, { symbol: string; coinId: string; chain?: 'main' | 'test' }> {
-  const out: Record<string, { symbol: string; coinId: string; chain?: 'main' | 'test' }> = {}
+export function getStandardRuntimeMetaMap(): Record<string, {
+  symbol: string
+  coinId: string
+  chain?: 'main' | 'test'
+  protocolFamily: CoinManifest['protocolFamily']
+  chainId?: number
+}> {
+  const out: Record<string, {
+    symbol: string
+    coinId: string
+    chain?: 'main' | 'test'
+    protocolFamily: CoinManifest['protocolFamily']
+    chainId?: number
+  }> = {}
   for (const manifest of MANIFESTS) {
     const coin = COIN_BY_ID.get(manifest.id)
     const symbol = String(coin?.coinSymbol || coin?.symbol || '').trim()
@@ -104,7 +116,9 @@ export function getStandardRuntimeMetaMap(): Record<string, { symbol: string; co
     out[manifest.id] = {
       symbol,
       coinId: manifest.coinId,
-      chain: manifest.chain
+      chain: manifest.chain,
+      protocolFamily: manifest.protocolFamily,
+      chainId: manifest.chainId
     }
   }
   return out

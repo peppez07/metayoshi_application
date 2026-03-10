@@ -181,12 +181,73 @@ function applyProviderState(next: any): void {
   state.coinName = next.coinName ?? state.coinName
   state.coinSymbol = next.coinSymbol ?? state.coinSymbol
   state.coinDecimals = next.coinDecimals ?? state.coinDecimals
-  state.chainId = next.networkId ?? next.chainId ?? state.chainId
+  state.chainId = next.chainId ?? next.networkId ?? state.chainId
   state.networkLabel = next.networkLabel ?? state.networkLabel
   updateAccounts(normalizeAccountAddresses(next.accounts))
   if (next.selectedAddress) {
     state.selectedAddress = String(next.selectedAddress)
   }
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i])
+  return btoa(out)
+}
+
+function fromBase64(value: string): Uint8Array {
+  const raw = atob(String(value || '').trim())
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+function normalizeBytesLike(value: Uint8Array | ArrayBuffer | number[]): Uint8Array {
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  if (Array.isArray(value)) return Uint8Array.from(value)
+  throw new Error('Expected byte array input')
+}
+
+function toHexChainId(value: unknown): string | null {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return null
+  if (/^0x[0-9a-f]+$/.test(raw)) return raw
+  if (/^\d+$/.test(raw)) return `0x${Number.parseInt(raw, 10).toString(16)}`
+  return null
+}
+
+function createPublicKeyLike(address: string) {
+  const normalized = String(address || '').trim()
+  return {
+    toString: () => normalized,
+    toBase58: () => normalized,
+    toJSON: () => normalized
+  }
+}
+
+function serializeSolanaTransactionLike(tx: any): string {
+  if (!tx || typeof tx !== 'object') throw new Error('Transaction is required')
+  if (typeof tx.serialize === 'function') {
+    try {
+      return toBase64(normalizeBytesLike(tx.serialize({ requireAllSignatures: false, verifySignatures: false })))
+    } catch {
+      return toBase64(normalizeBytesLike(tx.serialize()))
+    }
+  }
+  throw new Error('Unsupported Solana transaction object')
+}
+
+function deserializeSolanaTransactionLike(original: any, serializedBase64: string): any {
+  const bytes = fromBase64(serializedBase64)
+  const ctor = original?.constructor as any
+  if (ctor?.deserialize && typeof ctor.deserialize === 'function') {
+    return ctor.deserialize(bytes)
+  }
+  if (ctor?.from && typeof ctor.from === 'function') {
+    return ctor.from(bytes)
+  }
+  return original
 }
 
 function request({ method, params }: { method: string; params?: any }): Promise<any> {
@@ -284,6 +345,7 @@ window.addEventListener('message', (event) => {
       }
       state.connected = state.accounts.length > 0
       emit('accountsChanged', payload)
+      emit('ethereum#accountsChanged', state.accounts)
     }
     
     if (eventName === 'networkChanged') {
@@ -300,6 +362,8 @@ window.addEventListener('message', (event) => {
         .catch(() => {})
       
       emit('networkChanged', payload)
+      const hexChainId = toHexChainId(payload.chainId ?? state.chainId)
+      if (hexChainId) emit('chainChanged', hexChainId)
     }
     
     if (eventName === 'lockChanged') {
@@ -310,6 +374,7 @@ window.addEventListener('message', (event) => {
         state.selectedAddress = null
       }
       emit('lockChanged', payload)
+      if (!state.unlocked) emit('disconnect', { code: 4900, message: 'Wallet locked' })
     }
     
     emit(eventName, payload)
@@ -373,6 +438,12 @@ const provider = {
   getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
   getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities', params }),
+  signMessage: (params: { message: string; encoding?: 'utf8' | 'hex' } & ProviderNetworkRequest) =>
+    request({ method: 'wallet_signMessage', params }),
+  signTypedData: (params: { typedData: unknown } & ProviderNetworkRequest) =>
+    request({ method: 'wallet_signTypedData', params }),
+  signTransaction: (params: { ecosystem?: 'evm' | 'solana'; tx?: Record<string, unknown>; serializedTxBase64?: string } & ProviderNetworkRequest) =>
+    request({ method: 'wallet_signTransaction', params }),
   sendTransaction: (params: (ProviderSendCoinParams | ProviderSendEvmTransactionParams) & ProviderNetworkRequest) =>
     request({ method: 'wallet_sendTransaction', params }),
   sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string } & ProviderNetworkRequest) =>
@@ -410,6 +481,166 @@ const provider = {
   }
 }
 
+const ethereumProvider = {
+  isMetaYoshi: true,
+  isMetaMask: false,
+  get selectedAddress() {
+    return state.selectedAddress
+  },
+  get chainId() {
+    return toHexChainId(state.chainId)
+  },
+  request: ({ method, params }: { method: string; params?: any }) => request({ method, params }),
+  send: (payload: { method: string; params?: any }) => request({ method: payload.method, params: payload.params }),
+  enable: () => request({ method: 'eth_requestAccounts' }),
+  on,
+  removeListener,
+  off: removeListener,
+  isConnected: () => state.connected,
+  _metayoshi: provider._metayoshi
+}
+
+const solanaProvider = {
+  isMetaYoshi: true,
+  isPhantom: false,
+  get publicKey() {
+    return state.selectedAddress ? createPublicKeyLike(state.selectedAddress) : null
+  },
+  get isConnected() {
+    return state.connected
+  },
+  connect: async () => {
+    const accounts = await request({ method: 'wallet_requestAccounts', params: { networkId: 'sol' } })
+    const address = Array.isArray(accounts) ? String(accounts[0] || '').trim() : String(state.selectedAddress || '').trim()
+    const payload = { publicKey: createPublicKeyLike(address) }
+    emit('connect', payload)
+    return payload
+  },
+  disconnect: async () => {
+    state.connected = false
+    state.accounts = []
+    state.selectedAddress = null
+    emit('disconnect', { code: 4900, message: 'Disconnected' })
+  },
+  signMessage: async (message: Uint8Array | ArrayBuffer | number[]) => {
+    const result = await request({
+      method: 'wallet_signMessage',
+      params: {
+        ecosystem: 'solana',
+        messageBase64: toBase64(normalizeBytesLike(message))
+      }
+    })
+    return {
+      publicKey: createPublicKeyLike(String(result?.publicKey || state.selectedAddress || '')),
+      signature: fromBase64(String(result?.signatureBase64 || ''))
+    }
+  },
+  signTransaction: async (transaction: any) => {
+    const result = await request({
+      method: 'wallet_signTransaction',
+      params: {
+        ecosystem: 'solana',
+        serializedTxBase64: serializeSolanaTransactionLike(transaction)
+      }
+    })
+    return deserializeSolanaTransactionLike(transaction, String(result?.signedTxBase64 || ''))
+  },
+  signAllTransactions: async (transactions: any[]) => {
+    const result = await request({
+      method: 'wallet_signAllTransactions',
+      params: {
+        serializedTxsBase64: Array.isArray(transactions) ? transactions.map((tx) => serializeSolanaTransactionLike(tx)) : []
+      }
+    })
+    const signed = Array.isArray(result?.signedTxsBase64) ? result.signedTxsBase64 : []
+    return transactions.map((tx, index) => deserializeSolanaTransactionLike(tx, String(signed[index] || '')))
+  },
+  signAndSendTransaction: async (transaction: any) => {
+    const result = await request({
+      method: 'wallet_signAndSendTransaction',
+      params: {
+        ecosystem: 'solana',
+        serializedTxBase64: serializeSolanaTransactionLike(transaction)
+      }
+    })
+    return {
+      signature: String(result?.signature || '')
+    }
+  },
+  on,
+  removeListener,
+  off: removeListener
+}
+
+const keplrProvider = {
+  isMetaYoshi: true,
+  enable: async (_chainId: string | string[]) => {
+    await request({ method: 'wallet_requestAccounts', params: { networkId: 'cosmos' } })
+  },
+  getKey: async (_chainId: string) => {
+    const key = await request({ method: 'wallet_cosmosGetKey', params: { networkId: 'cosmos' } })
+    const bech32Address = String(key?.bech32Address || key?.address || '')
+    return {
+      name: 'MetaYoshi',
+      algo: String(key?.algo || 'secp256k1'),
+      pubKey: fromBase64(String(key?.pubKeyBase64 || '')),
+      address: new TextEncoder().encode(bech32Address),
+      bech32Address
+    }
+  },
+  signDirect: async (_chainId: string, signer: string, signDoc: any) =>
+    request({
+      method: 'wallet_cosmosSignDirect',
+      params: { networkId: 'cosmos', signerAddress: signer, signDoc }
+    }),
+  signAmino: async (_chainId: string, signer: string, signDoc: any) =>
+    request({
+      method: 'wallet_cosmosSignAmino',
+      params: { networkId: 'cosmos', signerAddress: signer, signDoc }
+    }),
+  sendTx: async (_chainId: string, tx: Uint8Array | ArrayBuffer | number[], mode: 'sync' | 'async' | 'block' = 'sync') => {
+    const mappedMode = mode === 'block'
+      ? 'BROADCAST_MODE_BLOCK'
+      : (mode === 'async' ? 'BROADCAST_MODE_ASYNC' : 'BROADCAST_MODE_SYNC')
+    const result = await request({
+      method: 'wallet_cosmosSendTx',
+      params: {
+        networkId: 'cosmos',
+        txBytesBase64: toBase64(normalizeBytesLike(tx)),
+        mode: mappedMode
+      }
+    })
+    const txhash = String(result?.txhash || '').trim()
+    if (/^[0-9a-f]+$/i.test(txhash) && txhash.length % 2 === 0) {
+      const out = new Uint8Array(txhash.length / 2)
+      for (let i = 0; i < txhash.length; i += 2) {
+        out[i / 2] = Number.parseInt(txhash.slice(i, i + 2), 16)
+      }
+      return out
+    }
+    return new TextEncoder().encode(txhash)
+  },
+  getOfflineSigner: (_chainId: string) => ({
+    getAccounts: async () => {
+      const key = await request({ method: 'wallet_cosmosGetKey', params: { networkId: 'cosmos' } })
+      return [{
+        address: String(key?.bech32Address || key?.address || ''),
+        algo: String(key?.algo || 'secp256k1'),
+        pubkey: fromBase64(String(key?.pubKeyBase64 || ''))
+      }]
+    },
+    signAmino: async (signerAddress: string, signDoc: any) => keplrProvider.signAmino('', signerAddress, signDoc),
+    signDirect: async (signerAddress: string, signDoc: any) => keplrProvider.signDirect('', signerAddress, signDoc)
+  }),
+  getOfflineSignerOnlyAmino: (_chainId: string) => ({
+    getAccounts: async () => {
+      const signer = keplrProvider.getOfflineSigner(_chainId)
+      return signer.getAccounts()
+    },
+    signAmino: async (signerAddress: string, signDoc: any) => keplrProvider.signAmino('', signerAddress, signDoc)
+  })
+}
+
 // Inject provider into window
 if (!(window as any).metayoshi) {
   Object.defineProperty(window, 'metayoshi', {
@@ -422,6 +653,30 @@ if (!(window as any).metayoshi) {
 if (!(window as any).rtm) {
   Object.defineProperty(window, 'rtm', {
     value: provider,
+    writable: false,
+    configurable: false
+  })
+}
+
+if (!(window as any).ethereum) {
+  Object.defineProperty(window, 'ethereum', {
+    value: ethereumProvider,
+    writable: false,
+    configurable: false
+  })
+}
+
+if (!(window as any).solana) {
+  Object.defineProperty(window, 'solana', {
+    value: solanaProvider,
+    writable: false,
+    configurable: false
+  })
+}
+
+if (!(window as any).keplr) {
+  Object.defineProperty(window, 'keplr', {
+    value: keplrProvider,
     writable: false,
     configurable: false
   })

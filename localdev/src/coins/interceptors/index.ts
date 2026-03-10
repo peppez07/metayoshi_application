@@ -58,33 +58,33 @@ function resolveDefaultBridgePath(coinId: string, chain: 'main' | 'test'): strin
 }
 
 function resolveStandardProtocol(networkId: string, coinId: string): CoinApiInfo['protocol'] {
-  if (
-    networkId === 'cosmos'
-    || networkId === 'cro'
-    || coinId === 'cosmos'
-    || coinId === 'cronos-pos'
-  ) return 'cosmos-rest-bridge'
-  if (
-    networkId === 'eth'
-    || networkId === 'arb'
-    || networkId === 'op'
-    || networkId === 'base'
-    || networkId === 'bnb'
-    || networkId === 'bnb-testnet'
-    || networkId === 'polygon'
-    || networkId === 'avaxc'
-    || networkId === 'cronos'
-    || coinId === 'ethereum'
-    || coinId === 'arbitrum-one'
-    || coinId === 'optimism'
-    || coinId === 'base'
-    || coinId === 'bsc'
-    || coinId === 'bsc-testnet'
-    || coinId === 'polygon-bor'
-    || coinId === 'avalanche-c-chain'
-    || coinId === 'cronos'
-  ) return 'evm-jsonrpc'
-  return 'utxo-jsonrpc'
+  const meta = STANDARD_RUNTIME_META[networkId]
+  switch (meta?.protocolFamily) {
+    case 'cosmos':
+      return 'cosmos-rest-bridge'
+    case 'evm':
+      return 'evm-jsonrpc'
+    case 'solana':
+      return 'solana-jsonrpc'
+    case 'tron':
+      return 'tron-http'
+    case 'cardano':
+      return 'cardano-bridge'
+    case 'sui':
+      return 'sui-jsonrpc'
+    case 'stellar':
+      return 'stellar-horizon'
+    case 'xrp':
+      return 'xrp-jsonrpc-compat'
+    case 'monero':
+      return 'monero-wallet-compat'
+    case 'generic':
+      return 'generic'
+    case 'utxo':
+    default:
+      if (coinId === 'cosmos' || coinId === 'cronos-pos') return 'cosmos-rest-bridge'
+      return 'utxo-jsonrpc'
+  }
 }
 
 function usesWalletScopedSendRoutes(coinId: string): boolean {
