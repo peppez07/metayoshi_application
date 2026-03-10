@@ -3683,6 +3683,8 @@ export const useWalletStore = create<WalletState>()(
               isNft?: boolean
               tokenType?: string
               symbol?: string
+              name?: string
+              logoUri?: string
             }> = []
 
             const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
@@ -3717,7 +3719,9 @@ export const useWalletStore = create<WalletState>()(
                   amountUi: String(row.balance || '0').trim() || '0',
                   decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
                   tokenType: String(row.tokenType || '').trim(),
-                  symbol: String(row.symbol || '').trim().toUpperCase() || undefined
+                  symbol: String(row.symbol || '').trim().toUpperCase() || undefined,
+                  name: String(row.name || '').trim() || undefined,
+                  logoUri: String(row.logoUri || '').trim() || undefined
                 })
               }
               rows = normalized
@@ -3735,7 +3739,9 @@ export const useWalletStore = create<WalletState>()(
                   amountUi: String(row.amountUi || '').trim(),
                   decimals: Number.isFinite(row.decimals) ? Math.max(0, Math.trunc(row.decimals)) : 0,
                   isNft: Boolean(row.isNft),
-                  symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined
+                  symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined,
+                  name: String((row as any)?.name || '').trim() || undefined,
+                  logoUri: String((row as any)?.logoUri || '').trim() || undefined
                 }))
               } catch {
                 rows = []
@@ -3762,12 +3768,15 @@ export const useWalletStore = create<WalletState>()(
 
               assets[assetKey] = displaySats
               const info = registry[tokenId]
+              const rowName = String(row.name || '').trim()
               const onchainSymbol = String(row.symbol || '').trim().toUpperCase()
-              const displayTicker = onchainSymbol || String(info?.symbol || '').trim().toUpperCase() || tokenId
-              if (solAssetType === 'spl-token') labels[assetKey] = displayTicker
-              else if (solAssetType === 'spl-nft') labels[assetKey] = `${displayTicker} (SPL NFT)`
-              else labels[assetKey] = `${displayTicker} (Compressed NFT)`
-              const logoUri = String(info?.logoURI || '').trim()
+              const registryName = String(info?.name || '').trim()
+              const registrySymbol = String(info?.symbol || '').trim().toUpperCase()
+              const displayName = rowName || registryName || onchainSymbol || registrySymbol || tokenId
+              if (solAssetType === 'spl-token') labels[assetKey] = displayName
+              else if (solAssetType === 'spl-nft') labels[assetKey] = `${displayName} (SPL NFT)`
+              else labels[assetKey] = `${displayName} (Compressed NFT)`
+              const logoUri = String(row.logoUri || info?.logoURI || '').trim()
               if (logoUri) logos[assetKey] = logoUri
             }
             set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
@@ -4191,26 +4200,30 @@ export const useWalletStore = create<WalletState>()(
           const explorerBase = String(net.explorerUrl || 'https://solscan.io').trim().replace(/\/+$/, '')
           const mint = extractSolanaMintFromAssetId(normalizedAssetId)
           const tokenRef = mint ? `${explorerBase}/token/${encodeURIComponent(mint)}` : undefined
+          const storedLabel = String(get().networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+          const storedLogoUri = String(get().networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 
           let symbol = ''
+          let name = ''
           let logoUri = ''
           try {
             const registry = await getSolanaTokenRegistry()
             const info = registry[mint]
             symbol = String(info?.symbol || '').trim().toUpperCase()
+            name = String(info?.name || '').trim()
             logoUri = String(info?.logoURI || '').trim()
           } catch {
             // ignore registry failures
           }
 
           return {
-            name: symbol || mint || normalizedAssetId,
+            name: storedLabel || name || symbol || mint || normalizedAssetId,
             amount: Number.isFinite(amountUi) ? amountUi : 0,
             units: 0,
             reissuable: false,
             has_ipfs: false,
             ipfs_hash: undefined,
-            preview_url: logoUri || tokenRef,
+            preview_url: storedLogoUri || logoUri || tokenRef,
             metadata_url: tokenRef,
             token_id: normalizedAssetId,
             contract_address: mint,
