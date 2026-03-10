@@ -7,7 +7,6 @@ import {
   installGlobalErrorMonitor,
   recordRuntimeError
 } from '../lib/runtimeErrorMonitor'
-import { getCoinRuntimeProfile } from '../coins'
 import {
   DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE,
   DAPP_APPROVAL_TIMEOUT_MS,
@@ -167,6 +166,8 @@ type DappMethodMatrix = {
   methods: string[]
 }
 
+type DappProtocol = 'evm-jsonrpc' | 'solana-jsonrpc' | 'cosmos-rest-bridge' | 'generic'
+
 function buildDappNetworkDescriptor(
   network: DappNetworkEntry,
   active: boolean
@@ -200,6 +201,35 @@ function getRpcParamObject(params: unknown): Record<string, unknown> | null {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') return null
   return candidate as Record<string, unknown>
+}
+
+function resolveDappProtocol(network?: DappNetworkEntry | null): DappProtocol {
+  const coinType = String(network?.coinType || '').trim().toUpperCase()
+  const runtimeModelId = String(network?.runtimeModelId || '').trim().toLowerCase()
+  const networkId = String(network?.id || '').trim().toLowerCase()
+
+  if (coinType === 'EVM') return 'evm-jsonrpc'
+  if (
+    coinType === 'SOL'
+    || runtimeModelId === 'sol'
+    || runtimeModelId === 'solana'
+    || networkId === 'sol'
+    || networkId === 'solana'
+    || networkId === 'srv--solana-testnet'
+  ) {
+    return 'solana-jsonrpc'
+  }
+  if (
+    coinType === 'COSMOS'
+    || runtimeModelId === 'cosmos'
+    || runtimeModelId === 'cro'
+    || networkId === 'cosmos'
+    || networkId === 'cro'
+  ) {
+    return 'cosmos-rest-bridge'
+  }
+
+  return 'generic'
 }
 
 function parseRequestedChainId(value: unknown): number | null {
@@ -1056,10 +1086,7 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
     'metayoshi_sendAsset',
     'rtm_sendAsset'
   ])
-  const protocol =
-    getCoinRuntimeProfile(String(network?.id || '').trim())?.protocol
-    || getCoinRuntimeProfile(String(network?.runtimeModelId || '').trim())?.protocol
-    || 'generic'
+  const protocol = resolveDappProtocol(network)
   const matrix: DappMethodMatrix = {
     signMessage: false,
     signTypedData: false,
