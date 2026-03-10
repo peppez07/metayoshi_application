@@ -38,6 +38,7 @@ const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const managedPopupWindowIds = new Set<number>()
 let managedPopupWindowId: number | null = null
 let managedPopupOpenQueue: Promise<void> = Promise.resolve()
+let walletUnlockInFlight: Promise<boolean> | null = null
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -788,6 +789,88 @@ async function enforceManagedPopupBounds(windowId: number): Promise<void> {
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
 type RequestDecision = 'executed' | 'failed' | 'rejected' | 'timeout'
 
+function stableStringifyForComparison(value: unknown): string {
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringifyForComparison(entry)).join(',')}]`
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringifyForComparison(entryValue)}`)
+    return `{${entries.join(',')}}`
+  }
+  return JSON.stringify(String(value))
+}
+
+function areRequestsEquivalent(left: unknown, right: unknown): boolean {
+  return stableStringifyForComparison(left) === stableStringifyForComparison(right)
+}
+
+function getPendingTimeoutMs(expiresAt: number, fallbackMs: number): number {
+  const remainingMs = Math.max(1000, Math.trunc(Number(expiresAt || 0) - Date.now()))
+  return Number.isFinite(remainingMs) ? remainingMs : fallbackMs
+}
+
+async function waitForWalletUnlock(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+
+    const finish = (unlocked: boolean): void => {
+      if (settled) return
+      settled = true
+      chrome.storage.onChanged.removeListener(onStorageChanged)
+      clearTimeout(timeout)
+      resolve(unlocked)
+    }
+
+    const evaluateWalletState = async (): Promise<void> => {
+      const state = await getWalletState().catch(() => null)
+      if (!state) return
+      if (!(state.isLocked ?? true) && (state.isInitialized ?? false)) {
+        finish(true)
+      }
+    }
+
+    const onStorageChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ): void => {
+      if (areaName !== 'local' || !changes[WALLET_STORAGE_KEY]) return
+      void evaluateWalletState()
+    }
+
+    const timeout = setTimeout(() => finish(false), Math.max(1000, timeoutMs))
+    chrome.storage.onChanged.addListener(onStorageChanged)
+    void evaluateWalletState()
+  })
+}
+
+async function openUnlockPopupAndWait(timeoutMs = DAPP_APPROVAL_TIMEOUT_MS): Promise<boolean> {
+  if (walletUnlockInFlight) {
+    return await walletUnlockInFlight
+  }
+
+  const runner = (async () => {
+    try {
+      await openUnlockPopup()
+    } catch {
+      // Keep waiting in case an existing popup is already open.
+    }
+    return await waitForWalletUnlock(timeoutMs)
+  })()
+
+  walletUnlockInFlight = runner
+  try {
+    return await runner
+  } finally {
+    if (walletUnlockInFlight === runner) walletUnlockInFlight = null
+  }
+}
+
 async function waitForApprovalDecision(id: string, timeoutMs: number): Promise<ApprovalDecision> {
   return new Promise((resolve) => {
     let settled = false
@@ -1267,6 +1350,39 @@ async function requestDappActionApproval(
   const now = Date.now()
   const pending = await getPendingRequest()
   if (pending && pending.status === 'pending' && pending.expiresAt > now) {
+    const sameRequest =
+      pending.origin === normalizedOrigin
+      && pending.networkId === networkId
+      && pending.accountId === accountId
+      && pending.method === method
+      && areRequestsEquivalent(pending.request, request)
+
+    if (sameRequest) {
+      const existingPopup = await findManagedPopupWindow()
+      if (!existingPopup?.id) {
+        try {
+          await openRequestPopup(pending.id)
+        } catch {
+          // Preserve the original pending request and keep waiting for it.
+        }
+      }
+      const decision = await waitForRequestDecision(
+        pending.id,
+        getPendingTimeoutMs(pending.expiresAt, DAPP_APPROVAL_TIMEOUT_MS)
+      )
+      if (decision.decision === 'executed' && decision.result) {
+        await clearPendingRequestIfMatch(pending.id)
+        return decision.result
+      }
+      await clearPendingRequestIfMatch(pending.id)
+      if (decision.decision === 'rejected' || decision.decision === 'timeout') {
+        throw { code: 4001, message: 'User rejected the request' }
+      }
+      throw {
+        code: decision.error?.code ?? -32603,
+        message: decision.error?.message ?? 'Transaction failed'
+      }
+    }
     throw { code: 4001, message: 'Another wallet request is already pending approval' }
   }
 
@@ -1332,6 +1448,11 @@ async function requestScopes(
 
   const now = Date.now()
   const pending = await getPendingApproval()
+  const reuseExistingApproval =
+    Boolean(pending)
+    && pending?.status === 'pending'
+    && pending?.origin === normalizedOrigin
+    && pending.expiresAt > now
 
   if (
     pending &&
@@ -1360,13 +1481,21 @@ async function requestScopes(
   await setPendingApproval(nextPending)
 
   try {
-    await openApprovalPopup()
+    const existingPopup = reuseExistingApproval ? await findManagedPopupWindow() : null
+    if (!existingPopup?.id) {
+      await openApprovalPopup()
+    }
   } catch {
     await clearPendingApprovalIfMatch(approvalId)
     return false
   }
 
-  const decision = await waitForApprovalDecision(approvalId, DAPP_APPROVAL_TIMEOUT_MS)
+  const decision = await waitForApprovalDecision(
+    approvalId,
+    reuseExistingApproval
+      ? getPendingTimeoutMs(nextPending.expiresAt, DAPP_APPROVAL_TIMEOUT_MS)
+      : DAPP_APPROVAL_TIMEOUT_MS
+  )
   if (decision !== 'approved') {
     await clearPendingApprovalIfMatch(approvalId)
     return false
@@ -1516,12 +1645,15 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (refreshed.state.isLocked ?? true) {
-      try {
-        await openUnlockPopup()
-      } catch {
-        // Ignore popup launch failures and return the lock error to dapp.
+      const unlockedAfterPrompt = await openUnlockPopupAndWait()
+      if (!unlockedAfterPrompt) {
+        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
       }
-      throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
+      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
+      if (!unlockedState.address) {
+        throw { code: -32603, message: 'No account available' }
+      }
+      return unlockedState.providerState
     }
     if (!refreshed.address) {
       throw { code: -32603, message: 'No account available' }
@@ -1589,12 +1721,15 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (refreshed.state.isLocked ?? true) {
-      try {
-        await openUnlockPopup()
-      } catch {
-        // Ignore popup launch failures and return the lock error to dapp.
+      const unlockedAfterPrompt = await openUnlockPopupAndWait()
+      if (!unlockedAfterPrompt) {
+        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
       }
-      throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
+      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
+      if (!unlockedState.address) {
+        throw { code: -32603, message: 'No account available' }
+      }
+      return [unlockedState.address]
     }
     if (!refreshed.address) {
       throw { code: -32603, message: 'No account available' }
@@ -1633,12 +1768,16 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (state.isLocked ?? true) {
-      try {
-        await openUnlockPopup()
-      } catch {
-        // Ignore popup launch failures and return the lock error to dapp.
+      const unlockedAfterPrompt = await openUnlockPopupAndWait()
+      if (!unlockedAfterPrompt) {
+        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
       }
-      throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
+      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
+      if (!unlockedState.network || unlockedState.network.coinType !== 'EVM') {
+        throw { code: 4900, message: 'No EVM network is available' }
+      }
+      await touchLastConnected(approvedOrigin)
+      return unlockedState.address ? [unlockedState.address] : []
     }
     if (!network || network.coinType !== 'EVM') {
       throw { code: 4900, message: 'No EVM network is available' }
