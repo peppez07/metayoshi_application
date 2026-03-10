@@ -1,0 +1,4 @@
+interface:
+  display_name: "Coin Ecosystem R&D"
+  short_description: "Fast official-source coin support research"
+  default_prompt: "Use $coin-ecosystem-r-and-d to gather official-source research for a new or partially implemented coin ecosystem before coding."

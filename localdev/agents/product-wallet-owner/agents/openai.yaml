@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Wallet Owner"
+  short_description: "Compatibility and scope decision maker"
+  default_prompt: "Use $product-wallet-owner to sequence risky wallet work and protect existing user and dapp compatibility."

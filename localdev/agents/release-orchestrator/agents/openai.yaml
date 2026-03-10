@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Orchestrator"
+  short_description: "Cross-role release sequencing and gates"
+  default_prompt: "Use $release-orchestrator to coordinate multi-area wallet changes with explicit owners, risks, and release gates."
