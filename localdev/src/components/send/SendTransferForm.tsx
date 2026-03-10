@@ -9,6 +9,7 @@ import { IoArrowBackOutline, IoInformationCircleOutline } from 'react-icons/io5'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
+import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -29,20 +30,6 @@ function clampDecimalInput(value: string, maxDecimals: number): string {
     return `${left}.${fraction}`
   }
   return whole
-}
-
-function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
-  const modelId = String((network as any)?.runtimeModelId || (network as any)?.id || '').trim().toLowerCase()
-  if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 0.0025
-  if (network.coinType === 'UTXO') {
-    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
-    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
-    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
-    return (estimatedBytes * feePerByteSats) / 1e8
-  }
-  if (network.coinType === 'XRP') return 0.000012
-  return 0.002151
 }
 
 type NftQuantityMode = 'not-nft' | 'erc721-fixed' | 'erc1155-integer' | 'nft-fixed'
@@ -92,7 +79,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
   const nativeInputDecimals = isNative && activeModelId === 'cosmos' ? 6 : 8
   const available = Number(item.rawAmount || 0) / 1e8
-  const estimatedNativeFee = useMemo(() => estimateNativeSendFee(activeNetwork), [activeNetwork])
+  const estimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const availableFiatValue = isNative
     ? accountNetworkFiatNative?.[fiatScopeKey]?.usd

@@ -9,6 +9,7 @@ import { getEnabledNetworks } from '../../lib/networkVisibility'
 import { EVM_ETHEREUM_L2_COIN_IDS } from '../../coins/coinSelection'
 import { getUnifiedLogoByName } from '../../coins/logos'
 import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import {
   IoArrowBackOutline,
   IoChevronDownOutline,
@@ -38,20 +39,6 @@ function formatRawAmountPlain(rawAmount: number): string {
 function parseCoinAmount(value: unknown): number {
   const parsed = Number(String(value ?? '').trim())
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-function estimateNativeSendFee(network: { coinType: string; feePerByte?: number }): number {
-  const modelId = String((network as any)?.runtimeModelId || (network as any)?.id || '').trim().toLowerCase()
-  if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 0.0025
-  if (network.coinType === 'UTXO') {
-    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
-    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
-    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
-    return (estimatedBytes * feePerByteSats) / 1e8
-  }
-  if (network.coinType === 'XRP') return 0.000012
-  return 0.002151
 }
 
 function shortAddress(address: string): string {
@@ -484,7 +471,7 @@ function formatDurationMs(value: number): string {
 function buildNativeSweepAmountRaw(holderRawAmount: number, network?: Pick<Network, 'coinType' | 'feePerByte'>): number {
   const raw = Math.max(0, Math.round(Number(holderRawAmount || 0)))
   if (!network) return raw
-  const estimatedFeeRaw = Math.max(0, Math.round(estimateNativeSendFee(network) * 1e8))
+  const estimatedFeeRaw = Math.max(0, Math.round(estimateNetworkFeeUi(network) * 1e8))
   return Math.max(0, raw - estimatedFeeRaw)
 }
 
@@ -635,7 +622,7 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
             const senderNativeBalance = parseCoinAmount(
               senderAccount?.networkBalances?.[plan.holder.networkId] ?? senderAccount?.balance
             )
-            const requiredFee = estimateNativeSendFee(scopedNetwork)
+            const requiredFee = estimateNetworkFeeUi(scopedNetwork)
             if (senderNativeBalance + 1e-12 < requiredFee) {
               throw new Error(
                 `Insufficient ${scopedNetwork.symbol} for network fee on ${plan.holder.accountLabel}. Required ~${formatUnits8Plain(requiredFee)} ${scopedNetwork.symbol}, available ${formatUnits8Plain(senderNativeBalance)} ${scopedNetwork.symbol}.`

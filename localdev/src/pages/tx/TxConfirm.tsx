@@ -11,6 +11,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { callBridgeMethod, type UtxoRpcConfig } from '../../lib/utxoRpc'
 import { estimateEvmTxFee } from '../../lib/evmFee'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
+import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 
 interface TxLayoutProps {
   title: string
@@ -44,20 +45,6 @@ function formatCoinAmount(v: number): string {
 function parseCoinAmount(value: unknown): number {
   const parsed = Number(String(value ?? '').trim())
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-function estimateTransferFee(network: { coinType: string; feePerByte?: number }): number {
-  const modelId = String((network as any)?.runtimeModelId || (network as any)?.id || '').trim().toLowerCase()
-  if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 0.0025
-  if (network.coinType === 'UTXO') {
-    const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
-    let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))
-    if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
-    const estimatedBytes = 10 + (148 * 2) + (34 * 3)
-    return (estimatedBytes * feePerByteSats) / 1e8
-  }
-  if (network.coinType === 'XRP') return 0.000012
-  return 0.002151
 }
 
 const EVM_ERC20_IFACE = new ethers.Interface([
@@ -179,7 +166,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const donationRequired = txState.donationRequired === true
   const spendBeforeNetworkFeeRaw = Number(txState.totalBeforeNetworkFee ?? (donationEnabled && donationMode === 'add' ? safeAmount + donationAmount : enteredAmount))
   const spendBeforeNetworkFee = Number.isFinite(spendBeforeNetworkFeeRaw) && spendBeforeNetworkFeeRaw > 0 ? spendBeforeNetworkFeeRaw : safeAmount
-  const fallbackEstimatedNetworkFee = estimateTransferFee(activeNetwork)
+  const fallbackEstimatedNetworkFee = estimateNetworkFeeUi(activeNetwork)
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
@@ -223,7 +210,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      const fallback = estimateTransferFee(activeNetwork)
+      const fallback = estimateNetworkFeeUi(activeNetwork)
       if (activeNetwork.coinType !== 'EVM' || !toAddress || !fromAddress) {
         setEstimatedNetworkFee(fallback)
         setIsEstimatingNetworkFee(false)

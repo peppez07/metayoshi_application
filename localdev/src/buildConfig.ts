@@ -1,3 +1,5 @@
+import { getCanonicalCoinId, getHardTestedCoinIds } from './coins/coinRegistry'
+
 export type BuildModelStatus = 'tested' | 'untested' | 'blocked'
 
 export type BuildConfig = {
@@ -23,39 +25,14 @@ function normalizeId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
-const HARD_TESTED_MODEL_IDS = new Set(['rtm', 'eth', 'base', 'bnb', 'bnb-testnet', 'dash', 'btcz', 'cosmos'])
+const HARD_TESTED_MODEL_IDS = new Set(getHardTestedCoinIds())
 
 function normalizeModelStatusId(value: unknown): string {
   const id = normalizeId(value)
   if (!id) return ''
 
-  // Server-backed aliases should map to runtime model ids for status display.
-  if (id === 'srv--dash') return 'dash'
-  if (id === 'srv--ethereum' || id === 'ethereum') return 'eth'
-  if (id === 'srv--base' || id === 'base-mainnet' || id === 'mainnet-base') return 'base'
-  if (
-    id === 'srv--bnb'
-    || id === 'bsc'
-    || id === 'bnb-mainnet'
-    || id === 'mainnet-bnb'
-    || id === 'bsc-mainnet'
-    || id === 'bnb-smart-chain'
-    || id === 'binance-smart-chain'
-    || id === 'bnb-smart-chain-mainnet'
-    || id === 'binance-smart-chain-mainnet'
-  ) {
-    return 'bnb'
-  }
-  if (
-    id === 'bnbt'
-    || id === 'bsc-testnet'
-    || id === 'chapel'
-    || id === 'bnb-smart-chain-testnet'
-    || id === 'binance-smart-chain-testnet'
-    || id === 'testnet-bnb'
-  ) {
-    return 'bnb-testnet'
-  }
+  const canonical = getCanonicalCoinId(id)
+  if (canonical) return canonical
   if (id.startsWith('eth--')) return 'eth'
   if (id.startsWith('base--')) return 'base'
   return id

@@ -1,26 +1,4 @@
-import { adaCoin } from './ada'
-import { arbCoin } from './arb'
-import { avaxcCoin } from './avaxc'
-import { baseCoin } from './base'
-import { bnbCoin } from './bnb'
-import { bnbTestnetCoin } from './bnbTestnet'
-import { btcCoin } from './btc'
-import { btczCoin } from './btcz'
-import { cosmosCoin } from './cosmos'
-import { croCoin } from './cro'
-import { cronosCoin } from './cronos'
-import { dashCoin } from './dash'
-import { dogeCoin } from './doge'
-import { ethCoin } from './eth'
-import { firoCoin } from './firo'
-import { opCoin } from './op'
-import { polygonCoin } from './polygon'
-import { rtmCoin } from './rtm'
-import { solCoin } from './sol'
-import { suiCoin } from './sui'
-import { tronCoin } from './tron'
-import { xlmCoin } from './xlm'
-import { zksyncCoin } from './zksync'
+import { getBundledCoinRegistryEntries } from './coinRegistry'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
@@ -76,29 +54,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 }
 
 const RAW_COIN_MODULES: CoinModule[] = [
-  rtmCoin,
-  btcCoin,
-  ethCoin,
-  bnbCoin,
-  bnbTestnetCoin,
-  arbCoin,
-  opCoin,
-  baseCoin,
-  polygonCoin,
-  avaxcCoin,
-  cronosCoin,
-  cosmosCoin,
-  croCoin,
-  tronCoin,
-  solCoin,
-  adaCoin,
-  suiCoin,
-  xlmCoin,
-  dogeCoin,
-  firoCoin,
-  dashCoin,
-  btczCoin,
-  zksyncCoin,
+  ...getBundledCoinRegistryEntries().map((entry) => entry.coin),
   ...SERVER_SCAFFOLD_COIN_MODULES
 ]
 
@@ -156,7 +112,6 @@ export function estimateNetworkFee(networkId: string, txBytes: number): number |
   return undefined
 }
 
-validateEthereumLayer2NetworkIdMapping()
 validateEthereumLayer2NetworkIdMapping()
 
 export async function loadServerRegistrySnapshot(): Promise<{
