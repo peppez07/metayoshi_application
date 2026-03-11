@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "validate:release": "node scripts/validate-release-metadata.mjs",
+    "build": "npm run validate:release && tsc && vite build",
     "build:browsers": "npm run build && node scripts/package-browser.mjs chrome && node scripts/package-browser.mjs brave && node scripts/package-browser.mjs firefox",
     "build:all-browsers": "npm run build:browsers",
     "build:chromium": "npm run build && node scripts/package-browser.mjs chromium",
@@ -28,6 +29,7 @@
   },
   "dependencies": {
     "@emurgo/cardano-serialization-lib-browser": "^15.0.3",
+    "@mysten/sui": "^2.6.0",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "1.3.2",
     "@noble/secp256k1": "^3.0.0",

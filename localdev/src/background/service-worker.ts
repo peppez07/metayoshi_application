@@ -310,6 +310,7 @@ function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?
   if (network?.coinType === 'EVM') return 18
   if (network?.coinType === 'XRP') return 6
   if (network?.coinType === 'SOL' || symbol === 'SOL' || id === 'sol' || id === 'solana' || id === 'srv--solana-testnet') return 9
+  if (symbol === 'SUI' || id === 'sui') return 9
   if (symbol === 'XLM' || id === 'xlm' || id === 'stellar') return 7
   if (symbol === 'TRX' || id === 'tron') return 6
   if (symbol === 'ADA' || id === 'ada') return 6

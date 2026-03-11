@@ -152,8 +152,19 @@ These are direct support addresses for the project. Availability of any donation
 
 - Website: `https://metayoshi.app`
 - Support: `support@metayoshi.app`
+- Security: `security@metayoshi.app`
 
 For broader project direction, see the public website, FAQ, and whitepaper pages.
+
+## Extension permissions and page access
+
+The extension package currently requests broad `http://*/*` and `https://*/*` host access so it can support wallet provider and dapp connection behavior across supported websites.
+
+Important behavior detail:
+
+- the content script can load on broad web origins because that is how browser-extension provider support is packaged
+- the injected MetaYoshi inpage provider is still gated by the wallet allowlist and is not enabled on every page by default
+- public privacy and support pages should be kept aligned with this permission model before store submission
 
 ## Configuration notes
 

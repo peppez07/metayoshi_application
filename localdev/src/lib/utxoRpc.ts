@@ -3042,6 +3042,112 @@ export async function sendBridgeEvmSignedRelay(
   throw new Error(lastError)
 }
 
+export async function sendBridgeSuiSignedRelay(
+  config: UtxoRpcConfig,
+  input: {
+    kind: 'coin' | 'asset'
+    txBytesBase64: string
+    signatures: string[]
+    coin?: string
+    chain?: string
+    wallet?: string
+  }
+): Promise<{ txid: string; relayed?: boolean; nonCustodial?: boolean }> {
+  if (!config.bridgeUrl) throw new Error('Bridge URL is required for SUI relay')
+  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  if (!apiBase) throw new Error('Bridge API base URL is not available')
+
+  const hinted = resolveBridgeCoinChainHint(config)
+  const coin = String(input.coin || hinted.coin || '').trim()
+  const chain = String(input.chain || hinted.chain || 'main').trim()
+  const wallet = String(input.wallet || '').trim()
+  const txBytesBase64 = String(input.txBytesBase64 || '').trim()
+  const signatures = Array.isArray(input.signatures)
+    ? input.signatures.map((row) => String(row || '').trim()).filter(Boolean)
+    : []
+
+  if (!coin) throw new Error('Bridge coin is required for SUI relay')
+  if (!chain) throw new Error('Bridge chain is required for SUI relay')
+  if (!txBytesBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(txBytesBase64)) {
+    throw new Error('txBytes must be base64 for SUI relay')
+  }
+  if (signatures.length === 0) throw new Error('At least one SUI signature is required')
+
+  const baseUrl = `${apiBase}/v1/bridge/send/${input.kind}/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
+  const url = wallet ? `${baseUrl}/${encodeURIComponent(wallet)}` : baseUrl
+  const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+  applyBridgeBasicAuthHeaders(baseHeaders, config, config.networkId || config.coinSymbol || `sui relay ${input.kind}`)
+
+  const txKeyCandidates = dedupeStringList([
+    ...(config.bridgeTxKeyCandidates || []),
+    config.bridgeTxKey
+  ])
+  const txKeyAttempts = txKeyCandidates.length > 0 ? txKeyCandidates : ['']
+
+  let lastError = `SUI relay ${input.kind} failed`
+  for (let i = 0; i < txKeyAttempts.length; i += 1) {
+    const txKey = txKeyAttempts[i]
+    const headers: Record<string, string> = { ...baseHeaders }
+    if (txKey) headers['X-Bridge-Tx-Key'] = txKey
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          txBytes: txBytesBase64,
+          signatures
+        }),
+        signal: controller.signal
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      lastError = `SUI relay ${input.kind} request failed: ${err instanceof Error ? err.message : String(err)}`
+      continue
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const rawText = await res.text().catch(() => '')
+    const json = (() => {
+      try { return rawText ? JSON.parse(rawText) : null } catch { return null }
+    })()
+
+    if (res.ok) {
+      if (json?.error) {
+        const errText = compactErrorText(String(json?.error?.message || json?.error || `SUI relay ${input.kind} failed`))
+        throw new Error(`SUI relay ${input.kind} failed: ${errText}`)
+      }
+      const txid = String(json?.result?.txid || json?.txid || json?.result?.digest || json?.digest || '').trim()
+      if (!txid) throw new Error(`SUI relay ${input.kind} succeeded but no txid returned`)
+      return {
+        txid,
+        relayed: Boolean(json?.result?.relayed),
+        nonCustodial: Boolean(json?.result?.nonCustodial)
+      }
+    }
+
+    const detail = compactErrorText(String(
+      json?.error?.message
+      || json?.error
+      || json?.message
+      || rawText
+      || res.statusText
+      || `HTTP ${res.status}`
+    ))
+    lastError = `SUI relay ${input.kind} failed [HTTP ${res.status}]: ${detail}`
+    const shouldRetryTxKey = txKeyAttempts.length > i + 1
+      && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
+    if (shouldRetryTxKey) continue
+    throw new Error(lastError)
+  }
+
+  throw new Error(lastError)
+}
+
 export type BridgeTokenBalanceRow = {
   tokenType?: string
   tokenId: string

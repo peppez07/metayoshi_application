@@ -63,6 +63,7 @@ const DappRequestConfirm: React.FC = () => {
     sendCardanoTransaction,
     sendMoneroTransaction,
     sendSolanaTransaction,
+    sendSuiTransaction,
     sendStellarTransaction,
     sendTronTransaction,
     sendUtxoTransaction,
@@ -483,6 +484,11 @@ const DappRequestConfirm: React.FC = () => {
           })
         : requestModelId === 'sol'
         ? await sendSolanaTransaction({
+            to: requestTo,
+            amount: requestAmount
+          })
+        : requestModelId === 'sui'
+        ? await sendSuiTransaction({
             to: requestTo,
             amount: requestAmount
           })

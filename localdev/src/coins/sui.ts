@@ -3,8 +3,8 @@ import { resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
 export const SUI_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-  ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
 }
 
 export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
@@ -20,7 +20,7 @@ export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'SUI',
     coinType: 'SUI',
     coinSymbol: 'SUI',
-    rpcUrl: String(env.VITE_SUI_RPC || 'https://sui-rpc.publicnode.com').trim() || 'https://sui-rpc.publicnode.com',
+    rpcUrl: String(env.VITE_SUI_RPC || 'https://fullnode.mainnet.sui.io:443').trim() || 'https://fullnode.mainnet.sui.io:443',
     rpcWallet: '',
     rpcUsername: String(env.VITE_SUI_RPC_USER || '').trim(),
     rpcPassword: String(env.VITE_SUI_RPC_PASSWORD || '').trim(),

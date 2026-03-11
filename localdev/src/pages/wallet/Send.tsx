@@ -494,6 +494,7 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
     sendCardanoTransaction,
     sendMoneroTransaction,
     sendSolanaTransaction,
+    sendSuiTransaction,
     sendStellarTransaction,
     sendTronTransaction,
     sendUtxoTransaction,
@@ -650,6 +651,9 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
             txHash = String(tx.hash || '').trim()
           } else if (scopedModelId === 'sol') {
             const tx = await sendSolanaTransaction({ to: toAddress, amount: amountText })
+            txHash = String(tx.hash || '').trim()
+          } else if (scopedModelId === 'sui') {
+            const tx = await sendSuiTransaction({ to: toAddress, amount: amountText })
             txHash = String(tx.hash || '').trim()
           } else if (scopedModelId === 'xlm') {
             const tx = await sendStellarTransaction({ to: toAddress, amount: amountText })

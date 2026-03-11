@@ -1,6 +1,8 @@
 // Inpage Provider Script - Injected into web pages
 // Provides window.metayoshi API for DApps
 
+import { WALLET_VERSION_NAME } from '../lib/legalMetadata'
+
 const IP_CONTENT_CHANNEL = 'metayoshi:content'
 const IP_INPAGE_CHANNEL = 'metayoshi:inpage'
 const INIT_EVENT = 'metayoshi#initialized'
@@ -491,7 +493,7 @@ const provider = {
   // Metadata
   _metayoshi: {
     hardwareWallet: String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || '').trim().toLowerCase() === 'hardware',
-    version: import.meta.env.VITE_APP_VERSION ?? 'metayoshi-0.1.8',
+    version: import.meta.env.VITE_APP_VERSION ?? WALLET_VERSION_NAME,
     multiChain: true
   }
 }

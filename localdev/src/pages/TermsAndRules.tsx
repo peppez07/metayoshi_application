@@ -1,7 +1,14 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { PageTransition } from '../components/PageTransition'
 import { Button } from '../components/Button'
+import { useWalletStore } from '../store/walletStore'
+import {
+  METAYOSHI_PRIVACY_URL,
+  METAYOSHI_SUPPORT_EMAIL,
+  WALLET_TERMS_LAST_UPDATED_LABEL,
+  WALLET_TERMS_VERSION
+} from '../lib/legalMetadata'
 
 type TermSection = {
   id: string
@@ -11,31 +18,38 @@ type TermSection = {
 
 const SECTIONS: TermSection[] = [
   {
-    id: 'acceptance',
-    title: '1. Acceptance of Terms',
+    id: 'scope',
+    title: '1. Scope of Services',
     body: (
       <p>
-        By using MetaYoshi, you agree to these Terms of Service. If you do not agree, do not use the application.
+        These terms cover the MetaYoshi wallet extension, wallet downloads, the MetaYoshi website, and related
+        bridge-backed or API-backed wallet services made available under the MetaYoshi product.
       </p>
     ),
   },
   {
     id: 'services',
-    title: '2. The Services',
+    title: '2. Wallet and Network Services',
     body: (
       <p>
-        MetaYoshi provides non-custodial wallet software and related tooling that helps you interact with multiple
-        blockchain networks. Some functionality may rely on bridge/API endpoints, third-party nodes, or RPC providers.
+        MetaYoshi provides wallet software and supporting infrastructure that helps you interact with multiple
+        blockchain networks. Network access can rely on third-party nodes, RPC providers, explorers, bridge services,
+        or relays.
       </p>
     ),
   },
   {
-    id: 'non-custodial',
-    title: '3. Non-Custodial Notice',
+    id: 'custody',
+    title: '3. Keys and Custody Model',
     body: (
       <div className="space-y-2">
-        <p>You control your private keys, seed phrase, and signing environment.</p>
-        <p>MetaYoshi cannot recover, reset, or restore your wallet if you lose your recovery data.</p>
+        <p>You are responsible for your private keys, seed phrase, password, and signing environment.</p>
+        <p>
+          MetaYoshi is designed around user-controlled signing, but some network or asset workflows can rely on
+          server-assisted, bridge-assisted, or relay infrastructure. You must review the active network and transaction
+          path before using it.
+        </p>
+        <p>MetaYoshi cannot recover a wallet if your recovery data is lost.</p>
       </div>
     ),
   },
@@ -45,23 +59,23 @@ const SECTIONS: TermSection[] = [
     body: (
       <div className="space-y-2">
         <p>
-          You are responsible for verifying addresses, amounts, network selection, and any transaction or signature
-          details before approving.
+          You are responsible for verifying addresses, amounts, network selection, fees, prompts, and transaction or
+          signature details before approving.
         </p>
         <p>
           Blockchain transactions are often irreversible. Mistakes, phishing, malware, or compromised devices can lead
-          to permanent loss of assets.
+          to permanent loss of assets or data.
         </p>
       </div>
     ),
   },
   {
     id: 'security',
-    title: '5. Security of Your Device',
+    title: '5. Device and Account Security',
     body: (
       <p>
-        You are responsible for device security (malware protection, OS/browser updates, password strength, and physical
-        access). Unauthorized access to your device or browser profile may result in loss of assets.
+        You are responsible for device security, browser profile security, password strength, software updates, and
+        controlling physical access to the device you use with MetaYoshi.
       </p>
     ),
   },
@@ -70,8 +84,8 @@ const SECTIONS: TermSection[] = [
     title: '6. Eligibility and Compliance',
     body: (
       <p>
-        You are responsible for ensuring your use is legal in your jurisdiction, including any sanctions, tax, and
-        regulatory compliance obligations.
+        You are responsible for ensuring your use is lawful in your jurisdiction, including sanctions, tax, reporting,
+        consumer, and local regulatory obligations.
       </p>
     ),
   },
@@ -80,11 +94,11 @@ const SECTIONS: TermSection[] = [
     title: '7. Acceptable Use',
     body: (
       <div className="space-y-2">
-        <p>You agree not to misuse MetaYoshi or any related endpoints, including by:</p>
+        <p>You agree not to misuse MetaYoshi or related services, including by:</p>
         <ul className="list-disc pl-5 space-y-1 text-gray-300">
           <li>attempting to bypass security, rate limits, or access controls</li>
           <li>probing, scanning, or exploiting systems, dependencies, or infrastructure</li>
-          <li>using the Services for fraud, theft, malware, or other unlawful activity</li>
+          <li>using the services for fraud, theft, malware, or other unlawful activity</li>
           <li>overloading endpoints with excessive automated requests</li>
         </ul>
       </div>
@@ -92,12 +106,12 @@ const SECTIONS: TermSection[] = [
   },
   {
     id: 'third-parties',
-    title: '8. Third-Party Networks and Services',
+    title: '8. Third-Party Services',
     body: (
       <p>
-        MetaYoshi may interact with third-party blockchain networks, validators, RPC providers, nodes, explorers, and
-        protocols. Those third parties are not controlled by MetaYoshi and may have their own terms, policies, fees,
-        and availability constraints.
+        MetaYoshi can interact with third-party blockchain networks, validators, RPC providers, nodes, explorers, and
+        protocols. Those third parties are not controlled by MetaYoshi and can have their own terms, privacy policies,
+        fees, and availability limits.
       </p>
     ),
   },
@@ -106,8 +120,8 @@ const SECTIONS: TermSection[] = [
     title: '9. No Professional Advice',
     body: (
       <p>
-        MetaYoshi does not provide financial, legal, tax, or investment advice. Any decision to use digital assets,
-        protocols, or networks is entirely your own.
+        MetaYoshi does not provide financial, legal, tax, investment, or accounting advice. Decisions to use digital
+        assets, protocols, or networks remain your own.
       </p>
     ),
   },
@@ -116,8 +130,8 @@ const SECTIONS: TermSection[] = [
     title: '10. Availability and Changes',
     body: (
       <p>
-        MetaYoshi may change, suspend, or discontinue features at any time. We do not guarantee that any chain, feature,
-        endpoint, or integration will be available or supported indefinitely.
+        MetaYoshi can change, suspend, or discontinue features, networks, endpoints, or integrations. No chain,
+        feature, bridge route, or service endpoint is guaranteed to remain available indefinitely.
       </p>
     ),
   },
@@ -126,9 +140,9 @@ const SECTIONS: TermSection[] = [
     title: '11. Disclaimers',
     body: (
       <p>
-        MetaYoshi is provided on an "as is" and "as available" basis without warranties of any kind. Blockchain
-        software involves risk, including risk of loss of digital assets due to user error, software defects, network
-        conditions, or third-party actions.
+        MetaYoshi is provided on an &quot;as is&quot; and &quot;as available&quot; basis without warranties of any kind.
+        Blockchain software and related infrastructure involve risk, including risk of loss due to user error, software
+        defects, bridge failures, network conditions, or third-party actions.
       </p>
     ),
   },
@@ -137,18 +151,19 @@ const SECTIONS: TermSection[] = [
     title: '12. Limitation of Liability',
     body: (
       <p>
-        To the maximum extent permitted by law, MetaYoshi is not liable for any indirect, incidental, special,
-        consequential, or punitive damages, or any loss of profits, data, or digital assets arising out of or related to
-        your use of MetaYoshi.
+        To the maximum extent permitted by law, MetaYoshi is not liable for indirect, incidental, special,
+        consequential, or punitive damages, or for loss of profits, data, or digital assets arising out of or related
+        to your use of MetaYoshi.
       </p>
     ),
   },
   {
     id: 'privacy',
-    title: '13. Privacy',
+    title: '13. Privacy and Data Handling',
     body: (
       <p>
-        Privacy details for MetaYoshi websites and bridge endpoints are published at <code>metayoshi.app/privacy.html</code>.
+        Privacy details for the MetaYoshi website, wallet extension, and related bridge/API services are published at{' '}
+        <code>{METAYOSHI_PRIVACY_URL}</code>.
       </p>
     ),
   },
@@ -157,27 +172,61 @@ const SECTIONS: TermSection[] = [
     title: '14. Contact',
     body: (
       <p>
-        Questions about these Terms can be sent to <code>support@metayoshi.app</code>.
+        Questions about these terms can be sent to <code>{METAYOSHI_SUPPORT_EMAIL}</code>.
       </p>
     ),
   },
 ]
 
+type TermsRouteState = {
+  returnTo?: string
+} | null
+
 const TermsAndRules: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { acceptedTermsVersion, acceptTerms, isInitialized, hasVault, isLocked } = useWalletStore()
   const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null)
+
+  const routeState = (location.state as TermsRouteState) || null
+  const returnTo = typeof routeState?.returnTo === 'string' && routeState.returnTo.startsWith('/')
+    ? routeState.returnTo
+    : null
+  const needsAcceptance = isInitialized && hasVault && !isLocked && acceptedTermsVersion !== WALLET_TERMS_VERSION
+  const currentVersionLabel = useMemo(
+    () => `Version ${WALLET_TERMS_VERSION}`,
+    []
+  )
 
   const toggleSection = (sectionId: string) => {
     setExpandedSectionId((current) => (current === sectionId ? null : sectionId))
+  }
+
+  const handleAcceptAndContinue = () => {
+    acceptTerms(WALLET_TERMS_VERSION)
+    navigate(returnTo || '/welcome', { replace: true })
+  }
+
+  const handleBack = () => {
+    if (returnTo) {
+      navigate(returnTo, { replace: true })
+      return
+    }
+    navigate(-1)
   }
 
   return (
     <PageTransition>
       <div className="flex flex-col h-full p-6 bg-dark-800 text-left overflow-y-auto hide-scrollbar">
         <div className="space-y-2 mb-5">
-          <h1 className="text-xl font-black uppercase tracking-tight text-white">Terms of Service</h1>
+          <h1 className="text-xl font-black uppercase tracking-tight text-white">MetaYoshi Wallet Terms</h1>
           <p className="text-xs text-gray-400">
-            Last updated: February 28, 2026
+            Last updated: {WALLET_TERMS_LAST_UPDATED_LABEL}
+          </p>
+          <p className="text-[11px] text-gray-500">{currentVersionLabel}</p>
+          <p className="text-xs leading-relaxed text-gray-400">
+            These terms cover the wallet extension, downloads, MetaYoshi web properties, and related bridge or API
+            services used by the wallet.
           </p>
         </div>
 
@@ -206,13 +255,14 @@ const TermsAndRules: React.FC = () => {
           })}
         </div>
 
-        <div className="mt-6">
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => navigate(-1)}
-          >
-            Back
+        <div className="mt-6 space-y-2">
+          {needsAcceptance ? (
+            <Button className="w-full btn-primary" onClick={handleAcceptAndContinue}>
+              Accept And Continue
+            </Button>
+          ) : null}
+          <Button variant="outline" className="w-full" onClick={handleBack}>
+            {needsAcceptance ? 'Review Later' : 'Back'}
           </Button>
         </div>
       </div>

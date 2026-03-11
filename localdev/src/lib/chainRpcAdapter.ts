@@ -44,6 +44,7 @@ export interface SendChainTransactionInput {
   }
   utxoSend?: () => Promise<{ hash: string }>
   xrpSend?: () => Promise<{ hash: string }>
+  suiSend?: () => Promise<{ hash: string }>
 }
 
 export type { UtxoDonationInput, SendUtxoNonCustodialInput } from './protocolRegistry'

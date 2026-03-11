@@ -50,6 +50,7 @@ export interface SendNetworkTransactionInput {
   }
   utxoSend?: () => Promise<{ hash: string }>
   xrpSend?: () => Promise<{ hash: string }>
+  suiSend?: () => Promise<{ hash: string }>
 }
 
 export interface UtxoDonationInput {
@@ -396,6 +397,11 @@ export async function sendNetworkTransaction(
     return input.xrpSend()
   }
 
+  if (context.family === 'sui') {
+    if (!input.suiSend) throw new Error('SUI sender is not configured')
+    return input.suiSend()
+  }
+
   if (context.family === 'evm') {
     const { ethers } = await loadEthersModule()
     const evmContext = input.evm
@@ -692,7 +698,7 @@ export function resolveNetworkSendCustodyMode(network: Network, options?: Resolv
   if (context.family === 'solana' || context.family === 'stellar' || context.family === 'tron') {
     return 'non-custodial'
   }
-  if (context.family === 'sui') return 'unsupported'
+  if (context.family === 'sui') return 'non-custodial'
   if (context.family === 'cardano') return 'non-custodial'
   if (context.family === 'monero') {
     const enabled = getBuildFeatureFlag('enableXmrNonCustodial', 'VITE_ENABLE_XMR_NON_CUSTODIAL', false)

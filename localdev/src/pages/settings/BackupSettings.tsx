@@ -44,6 +44,8 @@ const BackupSettings: React.FC = () => {
     donationPercent,
     backupConfirmed,
     onboardingCompleted,
+    acceptedTermsVersion,
+    acceptedTermsAt,
     networkAssets,
     sendListPreferences,
     networkModelPreferences,
@@ -108,6 +110,8 @@ const BackupSettings: React.FC = () => {
       donationPercent,
       backupConfirmed,
       onboardingCompleted,
+      acceptedTermsVersion,
+      acceptedTermsAt,
       networkAssets,
       sendListPreferences,
       networkModelPreferences

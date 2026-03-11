@@ -19,10 +19,8 @@ Security fixes are prioritized for the latest public release.
 
 Report vulnerabilities privately to:
 
-- Security contact: `security@metayoshi.example`
-- Backup contact: `admin@metayoshi.example`
-
-Replace these placeholders with your real contact addresses before publishing.
+- Security contact: `security@metayoshi.app`
+- Backup contact: `support@metayoshi.app`
 
 Include as much of the following as possible:
 

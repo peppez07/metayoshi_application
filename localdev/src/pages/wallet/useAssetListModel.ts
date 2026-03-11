@@ -56,6 +56,7 @@ export function useAssetListModel() {
     activeNetwork?.coinType === 'UTXO'
     || activeNetwork?.coinType === 'EVM'
     || activeModelId === 'sol'
+    || activeModelId === 'sui'
     || activeModelId === 'ada'
     || activeModelId === 'tron'
     || activeNetwork?.coinType === 'XRP'

@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
+import { WALLET_VERSION_NAME } from '../lib/legalMetadata'
 import { useWalletStore } from '../store/walletStore'
 
-const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? 'metayoshi-0.1.8'
+const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? WALLET_VERSION_NAME
 
 const Unlock: React.FC = () => {
   const [password, setPassword] = useState('')

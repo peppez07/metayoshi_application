@@ -47,6 +47,7 @@ import LocalRpcSettings from './pages/settings/LocalRpcSettings'
 import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
 import BlockchainVisibilitySettings from './pages/settings/BlockchainVisibilitySettings'
 import TermsAndRules from './pages/TermsAndRules'
+import { WALLET_TERMS_VERSION } from './lib/legalMetadata'
 
 const WalletIndexRedirect = () => {
   const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
@@ -122,12 +123,18 @@ function App() {
     isInitialized,
     hasVault,
     onboardingCompleted,
+    acceptedTermsVersion,
     checkAutolock,
     sessionMnemonic,
     lock,
     syncNetworksFromServer
   } = useWalletStore()
   const location = useLocation()
+  const needsTermsAcceptance = hasHydrated
+    && isInitialized
+    && hasVault
+    && !isLocked
+    && acceptedTermsVersion !== WALLET_TERMS_VERSION
 
   useEffect(() => {
     if (useWalletStore.persist.hasHydrated()) {
@@ -226,6 +233,22 @@ function App() {
       }
     }
   }, [hasHydrated])
+
+  if (
+    needsTermsAcceptance
+    && location.pathname !== '/terms'
+    && location.pathname !== '/register'
+    && location.pathname !== '/unlock'
+  ) {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`
+    return (
+      <div className="w-full h-full bg-dark-900 overflow-hidden">
+        <div className="wallet-container">
+          <Navigate to="/terms" replace state={{ returnTo }} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="w-full h-full bg-dark-900 overflow-hidden">

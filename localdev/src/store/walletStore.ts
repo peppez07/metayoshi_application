@@ -23,7 +23,7 @@ import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
-import { normalizeServerAddress } from '../lib/serverAddressApi'
+import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
@@ -113,6 +113,8 @@ export interface FullBackupV1 {
   sendListPreferences?: Record<string, SendListPreferenceBucket>
   networkModelPreferences?: Record<string, NetworkModelPreferences>
   onboardingCompleted?: boolean
+  acceptedTermsVersion?: string | null
+  acceptedTermsAt?: number | null
 }
 
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
@@ -209,6 +211,8 @@ interface WalletState {
   createdAt: number | null
   sessionMnemonic: string | null
   onboardingCompleted: boolean
+  acceptedTermsVersion: string | null
+  acceptedTermsAt: number | null
 
   // Wallet state
   accounts: Account[]
@@ -286,6 +290,7 @@ interface WalletState {
   setInitialized: (initialized: boolean) => void
   setBackupConfirmed: (confirmed: boolean) => void
   setOnboardingCompleted: (completed: boolean) => void
+  acceptTerms: (version: string, acceptedAt?: number) => void
   wipeVault: () => void
   
   setActiveAccount: (id: string) => void
@@ -348,6 +353,7 @@ interface WalletState {
   sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendMoneroTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendSolanaTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
+  sendSuiTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendStellarTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendTronTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendUtxoTransaction: (params: {
@@ -443,6 +449,7 @@ let stellarAddressModulePromise: Promise<typeof import('../lib/stellarAddress')>
 let stellarNonCustodialModulePromise: Promise<typeof import('../lib/stellarNonCustodial')> | null = null
 let tronAddressModulePromise: Promise<typeof import('../lib/tronAddress')> | null = null
 let tronNonCustodialModulePromise: Promise<typeof import('../lib/tronNonCustodial')> | null = null
+let suiNonCustodialModulePromise: Promise<typeof import('../lib/suiNonCustodial')> | null = null
 
 function loadXrpAddressModule() {
   if (!xrpAddressModulePromise) xrpAddressModulePromise = import('../lib/xrpAddress')
@@ -494,6 +501,11 @@ function loadTronNonCustodialModule() {
   return tronNonCustodialModulePromise
 }
 
+function loadSuiNonCustodialModule() {
+  if (!suiNonCustodialModulePromise) suiNonCustodialModulePromise = import('../lib/suiNonCustodial')
+  return suiNonCustodialModulePromise
+}
+
 function buildTrackedActivityStatusKey(networkId: string, txid: string): string {
   return `${String(networkId || '').trim().toLowerCase()}::${String(txid || '').trim().toLowerCase()}`
 }
@@ -536,6 +548,26 @@ async function checkOnChainTransactionStatus(
       if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') return 'confirmed'
       const confirmations = Number(row?.confirmations)
       if (Number.isFinite(confirmations) && confirmations >= 1) return 'confirmed'
+      return 'pending'
+    } catch {
+      return 'pending'
+    }
+  }
+
+  if (modelId === 'sui') {
+    try {
+      const txInfo = await callBridgeMethod(rpcConfig, 'sui_getTransactionBlock', [
+        normalizedTxid,
+        { showEffects: true }
+      ]) as any
+      const status = String(
+        txInfo?.effects?.status?.status
+        || txInfo?.result?.effects?.status?.status
+        || ''
+      ).trim().toLowerCase()
+      if (status === 'success') return 'confirmed'
+      if (status === 'failure') return 'rejected'
+      if (String(txInfo?.digest || txInfo?.result?.digest || '').trim()) return 'confirmed'
       return 'pending'
     } catch {
       return 'pending'
@@ -805,11 +837,15 @@ type EvmTrackedNft = {
 }
 
 type EvmNftHolding = {
-  address: string
-  tokenId: string
-  standard: EvmNftStandard
   label: string
   quantityRaw: string
+  address?: string
+  tokenId?: string
+  standard?: EvmNftStandard
+  objectId?: string
+  objectType?: string
+  imageUrl?: string
+  metadataUrl?: string
 }
 
 type ScopedAssetBuckets = {
@@ -823,6 +859,32 @@ type PortfolioAssetFiatBuckets = {
   totals: FiatValueMap
   native: FiatValueMap
   assets: Record<string, FiatValueMap>
+}
+
+const SUPPORTED_FIAT_CURRENCIES: FiatCurrency[] = ['usd', 'eur']
+
+const COINGECKO_NATIVE_PRICE_ID_BY_COIN_ID: Record<string, string> = {
+  bitcoin: 'bitcoin',
+  ethereum: 'ethereum',
+  'arbitrum-one': 'ethereum',
+  optimism: 'ethereum',
+  base: 'ethereum',
+  bsc: 'binancecoin',
+  'polygon-bor': 'matic-network',
+  'avalanche-c-chain': 'avalanche-2',
+  cronos: 'crypto-com-chain',
+  cosmos: 'cosmos',
+  'cronos-pos': 'crypto-com-chain',
+  tron: 'tron',
+  solana: 'solana',
+  cardano: 'cardano',
+  sui: 'sui',
+  stellar: 'stellar',
+  dogecoin: 'dogecoin',
+  firo: 'firo',
+  dash: 'dash',
+  raptoreum: 'raptoreum',
+  bitcoinz: 'bitcoinz'
 }
 
 function buildAssetStateScopeKey(accountId: string, networkId: string): string {
@@ -856,19 +918,33 @@ function normalizeFiatValueMap(input: unknown): FiatValueMap {
   return out
 }
 
+function hasUsableFiatValue(value: number | null | undefined): boolean {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0
+}
+
+function parsePositiveCoinAmount(value: unknown): number | null {
+  const numeric = Number(String(value ?? '').trim())
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null
+}
+
 export function formatFiatValue(value: number | null | undefined, currency: FiatCurrency = 'usd'): string {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return ''
-  const absolute = Math.abs(numeric)
-  const maximumFractionDigits =
-    absolute > 0 && absolute < 0.01
-      ? 8
-      : 2
+  if (numeric > 0 && numeric < 0.01) {
+    const threshold = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(0.01)
+    return `<${threshold}`
+  }
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: currency.toUpperCase(),
     minimumFractionDigits: 2,
-    maximumFractionDigits
+    maximumFractionDigits: 2
   }).format(numeric)
 }
 
@@ -1611,6 +1687,23 @@ function resolvePortfolioAssetId(
     return candidates.find((candidate) => assetIds.includes(candidate)) || ''
   }
 
+  if (String(resolveNetworkModelId(network) || network.id || '').trim().toLowerCase() === 'sui') {
+    if (lowerType.includes('nft') || lowerType.includes('object')) {
+      const nftCandidates = [
+        buildSuiNftAssetKey(tokenId),
+        buildSuiNftAssetKey(String(row.objectId || '').trim()),
+        buildSuiNftAssetKey(String(row.issuer || '').trim())
+      ].filter(Boolean)
+      return nftCandidates.find((candidate) => assetIds.includes(candidate)) || ''
+    }
+    const candidates = [
+      tokenId,
+      String(row.issuer || '').trim(),
+      String(row.objectId || '').trim()
+    ].filter(Boolean)
+    return candidates.find((candidate) => assetIds.includes(candidate)) || ''
+  }
+
   return assetIds.includes(tokenId) ? tokenId : ''
 }
 
@@ -1924,6 +2017,10 @@ const networkFiatCache = createRequestCache<PortfolioAssetFiatBuckets>({
   defaultTtlMs: 60_000,
   maxEntries: 180
 })
+const nativeFiatSpotPriceCache = createRequestCache<FiatValueMap>({
+  defaultTtlMs: 60_000,
+  maxEntries: 64
+})
 const networkFiatInFlightByKey = new Map<string, Promise<void>>()
 const networkFiatFailureUntilByKey = new Map<string, number>()
 const NETWORK_FIAT_FAILURE_TTL_MS = 3 * 60_000
@@ -1943,6 +2040,178 @@ function setNetworkFiatFailureCooldown(cacheKey: string, ttlMs = NETWORK_FIAT_FA
 
 function clearNetworkFiatFailureCooldown(cacheKey: string): void {
   networkFiatFailureUntilByKey.delete(cacheKey)
+}
+
+async function fetchCoinGeckoNativeSpotPrice(coinId: string): Promise<FiatValueMap> {
+  const normalizedCoinId = String(coinId || '').trim().toLowerCase()
+  const coingeckoId = COINGECKO_NATIVE_PRICE_ID_BY_COIN_ID[normalizedCoinId]
+  if (!coingeckoId) return {}
+
+  const cacheKey = `${coingeckoId}|${SUPPORTED_FIAT_CURRENCIES.join(',')}`
+  return await nativeFiatSpotPriceCache.get(cacheKey, async () => {
+    const params = new URLSearchParams({
+      ids: coingeckoId,
+      vs_currencies: SUPPORTED_FIAT_CURRENCIES.join(',')
+    })
+    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?${params.toString()}`, {
+      method: 'GET'
+    })
+    if (!response.ok) {
+      throw new Error(`CoinGecko native price query failed [HTTP ${response.status}] for ${coingeckoId}`)
+    }
+    const json = await response.json().catch(() => null) as Record<string, unknown> | null
+    return normalizeFiatValueMap(json?.[coingeckoId])
+  })
+}
+
+async function buildNativeFiatFallback(params: {
+  balanceText: string
+  chain: string
+  coinId: string
+  existingNative: FiatValueMap
+  existingTotals: FiatValueMap
+  assets: Record<string, FiatValueMap>
+}): Promise<PortfolioAssetFiatBuckets | null> {
+  if (String(params.chain || '').trim().toLowerCase() !== 'main') return null
+
+  const balance = parsePositiveCoinAmount(params.balanceText)
+  if (!balance) return null
+
+  const needsNativeFallback = SUPPORTED_FIAT_CURRENCIES.some((currency) => !hasUsableFiatValue(params.existingNative[currency]))
+  const needsTotalsFallback = SUPPORTED_FIAT_CURRENCIES.some((currency) => !hasUsableFiatValue(params.existingTotals[currency]))
+  if (!needsNativeFallback && !needsTotalsFallback) return null
+
+  const spot = await fetchCoinGeckoNativeSpotPrice(params.coinId)
+  if (Object.keys(spot).length === 0) return null
+
+  const native: FiatValueMap = { ...params.existingNative }
+  for (const currency of SUPPORTED_FIAT_CURRENCIES) {
+    if (hasUsableFiatValue(native[currency])) continue
+    const spotPrice = Number(spot[currency])
+    if (!Number.isFinite(spotPrice) || spotPrice <= 0) continue
+    native[currency] = balance * spotPrice
+  }
+
+  const totals: FiatValueMap = { ...params.existingTotals }
+  for (const currency of SUPPORTED_FIAT_CURRENCIES) {
+    if (hasUsableFiatValue(totals[currency])) continue
+    let sum = 0
+    let foundAny = false
+    const nativeValue = Number(native[currency])
+    if (Number.isFinite(nativeValue) && nativeValue > 0) {
+      sum += nativeValue
+      foundAny = true
+    }
+    for (const valueMap of Object.values(params.assets)) {
+      const assetValue = Number(valueMap?.[currency])
+      if (!Number.isFinite(assetValue) || assetValue <= 0) continue
+      sum += assetValue
+      foundAny = true
+    }
+    if (foundAny) totals[currency] = sum
+  }
+
+  return {
+    totals,
+    native,
+    assets: params.assets
+  }
+}
+
+const SUI_NFT_ASSET_PREFIX = 'SUINFT:'
+
+function normalizeSuiHexId(value: string): string {
+  const raw = String(value || '').trim().toLowerCase()
+  const body = raw.replace(/^0x/, '')
+  if (!/^[0-9a-f]{1,64}$/.test(body)) return ''
+  return `0x${body.padStart(64, '0')}`
+}
+
+function buildSuiNftAssetKey(objectId: string): string {
+  const normalized = normalizeSuiHexId(objectId)
+  return normalized ? `${SUI_NFT_ASSET_PREFIX}${normalized}` : ''
+}
+
+function parseSuiNftAssetKey(assetId: string): { objectId: string } | null {
+  const raw = String(assetId || '').trim()
+  if (!raw.toUpperCase().startsWith(SUI_NFT_ASSET_PREFIX)) return null
+  const normalized = normalizeSuiHexId(raw.slice(SUI_NFT_ASSET_PREFIX.length))
+  return normalized ? { objectId: normalized } : null
+}
+
+function isSuiCoinObjectType(typeTag: string): boolean {
+  return /^0x2::coin::Coin<.+>$/i.test(String(typeTag || '').trim())
+}
+
+function extractSuiTypeDisplayLabel(typeTag: string): string {
+  const raw = String(typeTag || '').trim()
+  if (!raw) return 'Sui Object'
+  const coinMatch = raw.match(/^0x2::coin::Coin<(.+)>$/i)
+  const effective = coinMatch ? String(coinMatch[1] || '').trim() : raw
+  const parts = effective.split('::').map((part) => String(part || '').trim()).filter(Boolean)
+  return parts[parts.length - 1] || effective
+}
+
+function shortSuiObjectId(value: string): string {
+  const normalized = normalizeSuiHexId(value)
+  if (!normalized) return String(value || '').trim()
+  return `${normalized.slice(0, 10)}...${normalized.slice(-6)}`
+}
+
+function extractSuiDisplayData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const direct = (value as any)?.display?.data
+  if (direct && typeof direct === 'object') return direct as Record<string, unknown>
+  return {}
+}
+
+function extractSuiObjectOwnerAddress(value: unknown): string {
+  const owner = (value as any)?.owner
+  if (owner && typeof owner === 'object') {
+    const addressOwner = String((owner as any)?.AddressOwner || '').trim()
+    if (addressOwner) return addressOwner
+    const objectOwner = String((owner as any)?.ObjectOwner || '').trim()
+    if (objectOwner) return objectOwner
+  }
+  return String(owner || '').trim()
+}
+
+function extractSuiDisplayImageUrl(display: Record<string, unknown>): string {
+  const candidates = [
+    display.image_url,
+    display.imageUrl,
+    display.image,
+    display.icon_url,
+    display.iconUrl
+  ]
+  for (const candidate of candidates) {
+    const normalized = normalizeAssetUri(String(candidate || '').trim())
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function extractSuiDisplayLinkUrl(display: Record<string, unknown>): string {
+  const candidates = [
+    display.link,
+    display.project_url,
+    display.projectUrl,
+    display.url,
+    display.website
+  ]
+  for (const candidate of candidates) {
+    const normalized = normalizeAssetUri(String(candidate || '').trim())
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function shouldIncludeSuiOwnedObject(typeTag: string, display: Record<string, unknown>): boolean {
+  if (isSuiCoinObjectType(typeTag)) return false
+  if (/^package$/i.test(String(typeTag || '').trim())) return false
+  const displayKeys = Object.keys(display)
+  if (displayKeys.length > 0) return true
+  return /(^|::)(nft|NFT|Nft|position|Position|badge|Badge)/.test(String(typeTag || '').trim())
 }
 
 function parseTrackedTronTokensEnv(raw: string | undefined): TrackedTronToken[] {
@@ -2480,6 +2749,8 @@ export const useWalletStore = create<WalletState>()(
       createdAt: null,
       sessionMnemonic: null,
       onboardingCompleted: false,
+      acceptedTermsVersion: null,
+      acceptedTermsAt: null,
       
       accounts: [],
       nextAccountIndex: 1,
@@ -2571,6 +2842,8 @@ export const useWalletStore = create<WalletState>()(
           createdAt: Date.now(),
           sessionMnemonic: normalizedMnemonic,
           onboardingCompleted: false,
+          acceptedTermsVersion: null,
+          acceptedTermsAt: null,
           accounts: [initialAccount],
           nextAccountIndex: 1,
           activeAccountId: 'acc-1',
@@ -2691,6 +2964,10 @@ export const useWalletStore = create<WalletState>()(
       setInitialized: (initialized) => set({ isInitialized: initialized }),
       setBackupConfirmed: (confirmed) => set({ backupConfirmed: confirmed }),
       setOnboardingCompleted: (completed) => set({ onboardingCompleted: completed }),
+      acceptTerms: (version, acceptedAt) => set({
+        acceptedTermsVersion: String(version || '').trim() || null,
+        acceptedTermsAt: typeof acceptedAt === 'number' ? acceptedAt : Date.now()
+      }),
       wipeVault: () =>
         set({
           isInitialized: false,
@@ -2701,6 +2978,8 @@ export const useWalletStore = create<WalletState>()(
           createdAt: null,
           sessionMnemonic: null,
           onboardingCompleted: false,
+          acceptedTermsVersion: null,
+          acceptedTermsAt: null,
           accounts: [],
           nextAccountIndex: 1,
           activeAccountId: null,
@@ -2911,17 +3190,26 @@ export const useWalletStore = create<WalletState>()(
           }
 
           const buckets = buildPortfolioFiatBuckets(get(), requestAccountId, network, portfolio)
+          const nativeFiatFallback = await buildNativeFiatFallback({
+            balanceText: getCachedBalanceForNetwork(account, requestNetworkId, true),
+            chain: requestMeta.chain,
+            coinId: requestMeta.coin,
+            existingNative: buckets.native,
+            existingTotals: buckets.totals,
+            assets: buckets.assets
+          }).catch(() => null)
+          const hydratedBuckets = nativeFiatFallback || buckets
           const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
           set((state) => ({
-            accountNetworkFiatTotals: { ...state.accountNetworkFiatTotals, [scopeKey]: buckets.totals },
-            accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: buckets.native },
-            accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: buckets.assets }
+            accountNetworkFiatTotals: { ...state.accountNetworkFiatTotals, [scopeKey]: hydratedBuckets.totals },
+            accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: hydratedBuckets.native },
+            accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: hydratedBuckets.assets }
           }))
           clearNetworkFiatFailureCooldown(cacheKey)
 
           networkFiatCache.get(
             cacheKey,
-            async () => buckets,
+            async () => hydratedBuckets,
             undefined,
             { force: true }
           ).catch(() => {})
@@ -3460,6 +3748,152 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
+        if (activeModelId === 'sui') {
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          try {
+            const response = await fetchServerAddressJson(
+              net,
+              address,
+              'assets',
+              {},
+              { timeoutMs: Math.max(Number(rpcConfig.timeoutMs ?? 15000), 30000) }
+            )
+            if (!response.ok || !response.json) {
+              throw new Error(`Sui assets endpoint failed [HTTP ${response.status}]: ${response.text || response.url}`)
+            }
+
+            const payload = (((response.json as any)?.assets) || {}) as Record<string, unknown>
+            const balanceRows = Array.isArray(payload.balances) ? payload.balances : []
+            const ownedObjectPages: any[] = []
+            const ownedObjects = (payload.ownedObjects && typeof payload.ownedObjects === 'object')
+              ? payload.ownedObjects as Record<string, unknown>
+              : {}
+            const firstPageData = Array.isArray(ownedObjects.data) ? ownedObjects.data : []
+            if (firstPageData.length > 0) ownedObjectPages.push(...firstPageData)
+
+            let nextCursor = String(ownedObjects.nextCursor || '').trim()
+            let hasNextPage = Boolean(ownedObjects.hasNextPage) && Boolean(nextCursor)
+            let fetchedExtraPages = 0
+            while (hasNextPage && nextCursor && fetchedExtraPages < 4) {
+              const page = await callBridgeMethod(rpcConfig, 'suix_getOwnedObjects', [
+                address,
+                {
+                  options: {
+                    showType: true,
+                    showDisplay: true,
+                    showContent: false,
+                    showOwner: true
+                  }
+                },
+                nextCursor,
+                50
+              ]) as any
+              const pageRows = Array.isArray(page?.data)
+                ? page.data
+                : (Array.isArray(page?.result?.data) ? page.result.data : [])
+              if (pageRows.length > 0) ownedObjectPages.push(...pageRows)
+              nextCursor = String(page?.nextCursor || page?.result?.nextCursor || '').trim()
+              hasNextPage = Boolean(page?.hasNextPage ?? page?.result?.hasNextPage) && Boolean(nextCursor)
+              fetchedExtraPages += 1
+            }
+
+            const assets: Record<string, number> = {}
+            const logos: Record<string, string> = {}
+            const labels: Record<string, string> = {}
+            const nftLookup: Record<string, EvmNftHolding> = {}
+            const symbolUsage = new Map<string, number>()
+
+            const resolvedCoinRows = await mapWithConcurrency(balanceRows as Record<string, unknown>[], 4, async (row) => {
+              const coinType = String(row?.coinType || '').trim()
+              if (!coinType) return null
+              const metadata = await callBridgeMethod(rpcConfig, 'suix_getCoinMetadata', [coinType]).catch(() => null) as any
+              return { row, metadata }
+            })
+
+            for (const resolved of resolvedCoinRows) {
+              if (!resolved) continue
+              const coinType = String(resolved.row?.coinType || '').trim()
+              const balanceRawText = String(resolved.row?.totalBalance || '').trim()
+              if (!coinType || !/^\d+$/.test(balanceRawText)) continue
+              if (coinType === '0x2::sui::SUI') continue
+
+              const balanceRaw = BigInt(balanceRawText)
+              if (balanceRaw <= 0n) continue
+
+              const decimalsRaw = Number(resolved.metadata?.decimals)
+              const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 9
+              const displaySats = toAssetDisplaySats(balanceRaw, decimals)
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+              const baseLabel = String(
+                resolved.metadata?.symbol
+                || resolved.metadata?.name
+                || extractSuiTypeDisplayLabel(coinType)
+              ).trim() || extractSuiTypeDisplayLabel(coinType)
+              const seen = (symbolUsage.get(baseLabel) || 0) + 1
+              symbolUsage.set(baseLabel, seen)
+              const packageId = String(coinType.split('::')[0] || '').trim()
+              const displayLabel = seen > 1 && packageId
+                ? `${baseLabel} (${shortSuiObjectId(packageId)})`
+                : baseLabel
+
+              assets[coinType] = displaySats
+              labels[coinType] = displayLabel
+              const iconUrl = normalizeAssetUri(String(resolved.metadata?.iconUrl || '').trim())
+              if (iconUrl) logos[coinType] = iconUrl
+            }
+
+            for (const rawObject of ownedObjectPages) {
+              const data = rawObject && typeof rawObject === 'object' && (rawObject as any).data && typeof (rawObject as any).data === 'object'
+                ? (rawObject as any).data
+                : rawObject
+              const objectId = normalizeSuiHexId(String((data as any)?.objectId || '').trim())
+              const objectType = String((data as any)?.type || '').trim()
+              const display = extractSuiDisplayData(data)
+              if (!objectId || !objectType || !shouldIncludeSuiOwnedObject(objectType, display)) continue
+
+              const assetKey = buildSuiNftAssetKey(objectId)
+              if (!assetKey) continue
+
+              const name = String(display.name || display.title || '').trim()
+                || `${extractSuiTypeDisplayLabel(objectType)} - ${shortSuiObjectId(objectId)}`
+              const imageUrl = extractSuiDisplayImageUrl(display)
+              const metadataUrl = extractSuiDisplayLinkUrl(display)
+
+              assets[assetKey] = 1e8
+              labels[assetKey] = name
+              if (imageUrl) logos[assetKey] = imageUrl
+              nftLookup[assetKey] = {
+                label: name,
+                quantityRaw: '1',
+                objectId,
+                objectType,
+                imageUrl: imageUrl || undefined,
+                metadataUrl: metadataUrl || undefined
+              }
+            }
+
+            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+              assets,
+              logos,
+              labels,
+              evmNfts: nftLookup
+            }))
+
+            networkAssetsCache.get(
+              cacheKey,
+              async () => ({ assets, logos, labels, evmNfts: nftLookup }),
+              undefined,
+              { force: true }
+            ).catch(() => {})
+          } catch (err) {
+            console.warn(`[${net.symbol}] fetchNetworkAssets (Sui) failed:`, err)
+          }
+          return
+        }
+
         if (activeModelId === 'xlm') {
           const rpcConfig = await createUtxoRpcConfig(net, {
             useLocalRpc: ulr,
@@ -3843,11 +4277,14 @@ export const useWalletStore = create<WalletState>()(
         const {
           networks,
           activeNetworkId,
+          activeAccountId,
+          accounts,
           useLocalRpc: ulr,
           localRpcOverrides: lro,
           evmNftAssets,
           networkAssets,
           networkAssetLogos,
+          accountNetworkEvmNftAssets,
           serverCoinCatalog
         } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
@@ -3966,6 +4403,17 @@ export const useWalletStore = create<WalletState>()(
             }
           }
 
+          const evmNft = {
+            address: String(nft.address || '').trim(),
+            tokenId: String(nft.tokenId || '').trim(),
+            standard: nft.standard,
+            label: String(nft.label || '').trim(),
+            quantityRaw: String(nft.quantityRaw || '0').trim() || '0'
+          }
+          if (!evmNft.address || !evmNft.tokenId || !evmNft.standard) {
+            throw new Error(`NFT metadata is incomplete for "${normalizedAssetId}"`)
+          }
+
           const rpcConfig = await createUtxoRpcConfig(net, {
             secureBridgeSigner: get().signBackendAuthMessage
           })
@@ -4001,10 +4449,10 @@ export const useWalletStore = create<WalletState>()(
           }
 
           const readUriFromContract = async (): Promise<string> => {
-            if (nft.standard === 'erc721') {
+            if (evmNft.standard === 'erc721') {
               try {
-                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(nft.tokenId)])
-                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(evmNft.tokenId)])
+                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: evmNft.address, data }, 'latest'])
                 const [uri] = EVM_ERC721_IFACE.decodeFunctionResult('tokenURI', String(raw || '0x'))
                 return normalizeAssetUri(String(uri || ''))
               } catch {
@@ -4012,17 +4460,17 @@ export const useWalletStore = create<WalletState>()(
               }
             }
             try {
-              const data = EVM_ERC1155_IFACE.encodeFunctionData('uri', [tokenIdToBigInt(nft.tokenId)])
-              const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+              const data = EVM_ERC1155_IFACE.encodeFunctionData('uri', [tokenIdToBigInt(evmNft.tokenId)])
+              const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: evmNft.address, data }, 'latest'])
               const [uri] = EVM_ERC1155_IFACE.decodeFunctionResult('uri', String(raw || '0x'))
-              return renderEip1155Template(String(uri || ''), nft.tokenId)
+              return renderEip1155Template(String(uri || ''), evmNft.tokenId)
             } catch {
               // fallback below
             }
-            if (nft.standard === 'erc1155') {
+            if (evmNft.standard === 'erc1155') {
               try {
-                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(nft.tokenId)])
-                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: nft.address, data }, 'latest'])
+                const data = EVM_ERC721_IFACE.encodeFunctionData('tokenURI', [tokenIdToBigInt(evmNft.tokenId)])
+                const raw = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: evmNft.address, data }, 'latest'])
                 const [uri] = EVM_ERC721_IFACE.decodeFunctionResult('tokenURI', String(raw || '0x'))
                 return normalizeAssetUri(String(uri || ''))
               } catch {
@@ -4059,23 +4507,92 @@ export const useWalletStore = create<WalletState>()(
             || metadata?.imageUrl
             || ''
           ).trim()
-          const previewUrl = renderEip1155Template(imageUriRaw, nft.tokenId) || metadataUri
+          const previewUrl = renderEip1155Template(imageUriRaw, evmNft.tokenId) || metadataUri
           const nameFromMetadata = String(metadata?.name || '').trim()
           const metadataIpfs = /^ipfs:\/\//i.test(metadataUri) ? metadataUri : ''
           const previewIpfs = /^ipfs:\/\//i.test(previewUrl) ? previewUrl : ''
 
           return {
-            name: nameFromMetadata || nft.label,
-            amount: Number(nft.quantityRaw || '0'),
+            name: nameFromMetadata || evmNft.label,
+            amount: Number(evmNft.quantityRaw || '0'),
             units: 0,
             reissuable: false,
             has_ipfs: Boolean(previewIpfs || metadataIpfs),
             ipfs_hash: previewIpfs || metadataIpfs || undefined,
             preview_url: previewUrl || undefined,
             metadata_url: metadataUri || undefined,
-            token_id: nft.tokenId,
-            contract_address: nft.address,
-            token_standard: nft.standard,
+            token_id: evmNft.tokenId,
+            contract_address: evmNft.address,
+            token_standard: evmNft.standard,
+            txid_or_longname: normalizedAssetId,
+            ownership_address: ''
+          }
+        }
+
+        if (modelId === 'sui') {
+          const activeAcc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+          const scopeKey = buildAssetStateScopeKey(String(activeAcc?.id || '').trim(), activeNetworkId)
+          const nftLookup = accountNetworkEvmNftAssets?.[scopeKey] || evmNftAssets?.[activeNetworkId] || {}
+          const suiObject = parseSuiNftAssetKey(normalizedAssetId)
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr,
+            localRpcOverride: lro[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+
+          if (suiObject) {
+            const cached = nftLookup[normalizedAssetId]
+            const objectResponse = await callBridgeMethod(rpcConfig, 'sui_getObject', [
+              suiObject.objectId,
+              {
+                showType: true,
+                showDisplay: true,
+                showContent: false,
+                showOwner: true
+              }
+            ]).catch(() => null) as any
+            const objectData = objectResponse?.data || objectResponse?.result?.data || objectResponse?.result || null
+            const display = extractSuiDisplayData(objectData)
+            const imageUrl = extractSuiDisplayImageUrl(display) || String(cached?.imageUrl || '').trim()
+            const metadataUrl = extractSuiDisplayLinkUrl(display) || String(cached?.metadataUrl || '').trim()
+            const objectType = String(objectData?.type || cached?.objectType || '').trim()
+            const ownerAddress = extractSuiObjectOwnerAddress(objectData)
+            const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
+            const explorerRef = explorerBase ? `${explorerBase}/object/${encodeURIComponent(suiObject.objectId)}` : undefined
+
+            return {
+              name: String(display.name || display.title || cached?.label || '').trim()
+                || `${extractSuiTypeDisplayLabel(objectType)} - ${shortSuiObjectId(suiObject.objectId)}`,
+              amount: 1,
+              units: 0,
+              reissuable: false,
+              has_ipfs: false,
+              ipfs_hash: undefined,
+              preview_url: imageUrl || explorerRef,
+              metadata_url: metadataUrl || explorerRef,
+              token_id: suiObject.objectId,
+              contract_address: '',
+              txid_or_longname: normalizedAssetId,
+              ownership_address: ownerAddress || ''
+            }
+          }
+
+          const metadata = await callBridgeMethod(rpcConfig, 'suix_getCoinMetadata', [normalizedAssetId]).catch(() => null) as any
+          const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+          const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
+          const tokenRef = explorerBase ? `${explorerBase}/coin/${encodeURIComponent(normalizedAssetId)}` : undefined
+          return {
+            name: String(metadata?.name || metadata?.symbol || extractSuiTypeDisplayLabel(normalizedAssetId)).trim(),
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: Number.isInteger(Number(metadata?.decimals)) ? Number(metadata?.decimals) : 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: String(metadata?.iconUrl || '').trim() || tokenRef || undefined,
+            metadata_url: tokenRef || undefined,
+            token_id: normalizedAssetId,
+            contract_address: '',
             txid_or_longname: normalizedAssetId,
             ownership_address: ''
           }
@@ -4389,7 +4906,8 @@ export const useWalletStore = create<WalletState>()(
 
           const evmNft = parseEvmNftAssetKey(assetId)
           const solNftLike = /^SOLNFT:/i.test(assetId)
-          const kind: SendableItemKind = (evmNft || solNftLike) ? 'nft' : 'fungible'
+          const suiNftLike = /^SUINFT:/i.test(assetId)
+          const kind: SendableItemKind = (evmNft || solNftLike || suiNftLike) ? 'nft' : 'fungible'
           const label = String(nftLookup?.[assetId]?.label || rawLabels?.[assetId] || assetId).trim() || assetId
           const symbol = kind === 'nft'
             ? 'NFT'
@@ -4543,7 +5061,7 @@ export const useWalletStore = create<WalletState>()(
         await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
 
         const net = networks.find(n => n.id === activeNetworkId)
@@ -4845,6 +5363,62 @@ export const useWalletStore = create<WalletState>()(
           return { txid: sentHash }
         }
 
+        if (modelId === 'sui') {
+          const normalizedAssetId = String(assetId || '').trim()
+          const recipient = String(toAddress || '').trim()
+          if (!normalizedAssetId) throw new Error('Sui asset id is required')
+          if (!recipient) throw new Error('Sui recipient address is required')
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const { sendSuiCoinAssetNonCustodial, sendSuiObjectAssetNonCustodial } = await loadSuiNonCustodialModule()
+          const nft = parseSuiNftAssetKey(normalizedAssetId)
+
+          if (nft) {
+            const qtyText = String(qty || '').trim()
+            if (qtyText && qtyText !== '1') {
+              throw new Error('Sui object transfer quantity must be exactly 1')
+            }
+            const sent = await sendSuiObjectAssetNonCustodial({
+              rpcUrl: net.rpcUrl,
+              rpcConfig,
+              mnemonic: sessionMnemonic!,
+              accountIndex,
+              fromAddress: senderAddress,
+              toAddress: recipient,
+              objectId: nft.objectId
+            })
+            await get().fetchNetworkAssets()
+            return { txid: sent.hash }
+          }
+
+          const metadata = await callBridgeMethod(rpcConfig, 'suix_getCoinMetadata', [normalizedAssetId]).catch(() => null) as any
+          const decimalsRaw = Number(metadata?.decimals)
+          const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 9
+          const assetLabel = String(
+            networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId]
+            || metadata?.symbol
+            || metadata?.name
+            || extractSuiTypeDisplayLabel(normalizedAssetId)
+          ).trim() || 'Sui token'
+          const amountRaw = parseDecimalToAtomicUnits(String(qty || '').trim(), decimals, assetLabel)
+          const sent = await sendSuiCoinAssetNonCustodial({
+            rpcUrl: net.rpcUrl,
+            rpcConfig,
+            mnemonic: sessionMnemonic!,
+            accountIndex,
+            fromAddress: senderAddress,
+            toAddress: recipient,
+            coinType: normalizedAssetId,
+            amountRaw: amountRaw.toString()
+          })
+          await get().fetchNetworkAssets()
+          return { txid: sent.hash }
+        }
+
         if (modelId === 'sol') {
           const tokenId = String(assetId || '').trim()
           const recipient = String(toAddress || '').trim()
@@ -5082,6 +5656,10 @@ export const useWalletStore = create<WalletState>()(
           createdAt:        backup.createdAt ?? Date.now(),
           sessionMnemonic:  normalizedMnemonic,
           onboardingCompleted: backup.onboardingCompleted ?? false,
+          acceptedTermsVersion: typeof backup.acceptedTermsVersion === 'string'
+            ? (backup.acceptedTermsVersion.trim() || null)
+            : null,
+          acceptedTermsAt: typeof backup.acceptedTermsAt === 'number' ? backup.acceptedTermsAt : null,
           accounts:         reHydratedAccounts,
           nextAccountIndex: backup.nextAccountIndex ?? reHydratedAccounts.length,
           activeAccountId:  safeActiveAccountId,
@@ -6242,6 +6820,40 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
+      sendSuiTransaction: async ({ to, amount }) => {
+        await waitForSendOperationSlot()
+        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+        const net = networks.find((n) => n.id === activeNetworkId)
+        const modelId = resolveNetworkModelId(net)
+        if (!net || modelId !== 'sui') throw new Error('Active network is not Sui')
+        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        if (!acc) throw new Error('No active account')
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
+        const fromAddress = String(acc.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)).trim()
+        if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const amountMist = parseDecimalToAtomicUnits(String(amount || '').trim(), 9, 'SUI')
+        const { sendSuiNativeNonCustodial } = await loadSuiNonCustodialModule()
+        return await sendChainTransaction({
+          network: net,
+          to,
+          amount,
+          rpcConfig,
+          suiSend: () => sendSuiNativeNonCustodial({
+            rpcUrl: net.rpcUrl,
+            rpcConfig,
+            mnemonic: sessionMnemonic,
+            accountIndex,
+            fromAddress,
+            toAddress: to,
+            amountMist: amountMist.toString()
+          })
+        })
+      },
+
       sendStellarTransaction: async ({ to, amount }) => {
         await waitForSendOperationSlot()
         const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
@@ -6389,6 +7001,8 @@ export const useWalletStore = create<WalletState>()(
         createdAt: state.createdAt,
         accounts: state.accounts,
         onboardingCompleted: state.onboardingCompleted,
+        acceptedTermsVersion: state.acceptedTermsVersion,
+        acceptedTermsAt: state.acceptedTermsAt,
         nextAccountIndex: state.nextAccountIndex,
         activeAccountId: state.activeAccountId,
         activeNetworkId: state.activeNetworkId,
@@ -6451,6 +7065,12 @@ export const useWalletStore = create<WalletState>()(
           typeof (persisted as any).onboardingCompleted === 'boolean'
             ? Boolean((persisted as any).onboardingCompleted)
             : Boolean(merged.isInitialized || merged.hasVault)
+        const acceptedTermsVersion = typeof (persisted as any).acceptedTermsVersion === 'string'
+          ? (((persisted as any).acceptedTermsVersion as string).trim() || null)
+          : null
+        const acceptedTermsAt = typeof (persisted as any).acceptedTermsAt === 'number'
+          ? Number((persisted as any).acceptedTermsAt)
+          : null
         const autolockMinutes = Math.max(1, Number(merged.autolockMinutes ?? 5))
         const lastActiveTimestamp = Number(merged.lastActiveTimestamp ?? Date.now())
         const shouldAutolockOnHydration = Boolean(
@@ -6464,6 +7084,8 @@ export const useWalletStore = create<WalletState>()(
           isLocked: shouldAutolockOnHydration ? true : merged.isLocked,
           accounts: accountsWithActiveNetworkBalance,
           onboardingCompleted,
+          acceptedTermsVersion,
+          acceptedTermsAt,
           nextAccountIndex,
           activeAccountId,
           networks: normalizedNetworks,

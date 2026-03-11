@@ -17,6 +17,7 @@ import { Input } from '../components/Input'
 import { useWalletStore, type FullBackupV1 } from '../store/walletStore'
 import { PageTransition } from '../components/PageTransition'
 import * as bip39 from 'bip39'
+import { WALLET_TERMS_LAST_UPDATED_LABEL, WALLET_TERMS_VERSION } from '../lib/legalMetadata'
 
 type ImportMethod = 'phrase' | 'backup'
 
@@ -37,7 +38,7 @@ function readFileAsText(file: File): Promise<string> {
 
 const Register: React.FC = () => {
   const navigate = useNavigate()
-  const { initialize, fullRestore, hasVault, isInitialized } = useWalletStore()
+  const { initialize, fullRestore, acceptTerms, hasVault, isInitialized } = useWalletStore()
 
   const [mode, setMode] = useState<'create' | 'import'>('create')
   const [importMethod, setImportMethod] = useState<ImportMethod>('phrase')
@@ -160,6 +161,7 @@ const Register: React.FC = () => {
     setBusy(true)
     try {
       await initialize(password, normalizedMnemonic)
+      acceptTerms(WALLET_TERMS_VERSION)
       navigate('/connecting')
     } catch (e: any) {
       setError(String(e?.message ?? 'Failed to create vault'))
@@ -184,6 +186,7 @@ const Register: React.FC = () => {
         backupPassword: backupPassword.trim(),
         newPassword: password
       })
+      acceptTerms(WALLET_TERMS_VERSION)
       navigate('/connecting')
     } catch (e: any) {
       setError(String(e?.message ?? 'Failed to import backup file'))
@@ -639,7 +642,7 @@ const Register: React.FC = () => {
                   className="mt-0.5 h-4 w-4 accent-primary"
                 />
                 <span className="text-[11px] font-bold leading-relaxed text-gray-300">
-                  I accept the MetaYoshi Terms of Service.
+                  I accept the MetaYoshi Terms of Service, version {WALLET_TERMS_VERSION} (last updated {WALLET_TERMS_LAST_UPDATED_LABEL}).
                 </span>
               </label>
 

@@ -65,7 +65,7 @@ const LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'cronos',
   'cosmos'
 ]
-const DEFAULT_VISIBLE_NETWORK_IDS = [
+const PREVIOUS_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
   'eth',
@@ -75,6 +75,18 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'sol',
   'dash',
   'btcz',
+  'cosmos'
+]
+const DEFAULT_VISIBLE_NETWORK_IDS = [
+  'rtm',
+  'srv--bitcoin',
+  'eth',
+  'base',
+  'bnb',
+  'op',
+  'sol',
+  'dash',
+  'cro',
   'cosmos'
 ]
 
@@ -234,7 +246,12 @@ export function migrateLegacyDefaultDisabledNetworkIds(disabledNetworkIds: unkno
   if (networks.length <= MAX_ACTIVE_REFRESH_NETWORKS) return normalizedDisabled
 
   const legacyDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(networks, LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS)
-  if (!areSameNetworkIdSet(normalizedDisabled, legacyDefaultDisabled)) return normalizedDisabled
+  if (areSameNetworkIdSet(normalizedDisabled, legacyDefaultDisabled)) {
+    return resolvePreferredDefaultDisabledNetworkIds(networks, DEFAULT_VISIBLE_NETWORK_IDS)
+  }
+
+  const previousDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(networks, PREVIOUS_DEFAULT_VISIBLE_NETWORK_IDS)
+  if (!areSameNetworkIdSet(normalizedDisabled, previousDefaultDisabled)) return normalizedDisabled
 
   return resolvePreferredDefaultDisabledNetworkIds(networks, DEFAULT_VISIBLE_NETWORK_IDS)
 }

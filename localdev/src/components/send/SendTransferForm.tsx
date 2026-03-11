@@ -11,6 +11,7 @@ import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewSource } from '../../lib/transactionFeePreview'
+import { resolveSendCustodyDisclosure } from '../../lib/sendCustodyDisclosure'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -77,6 +78,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = resolveRuntimeModelId(activeNetwork)
+  const sendCustodyDisclosure = resolveSendCustodyDisclosure(activeNetwork)
   const supportsMemo = isCosmosLikeModelId(activeModelId)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -84,7 +86,9 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const isNative = item.requestType === 'native'
   const isIntegerMode = nftMode === 'erc1155-integer'
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
-  const nativeInputDecimals = isNative && activeModelId === 'cosmos' ? 6 : 8
+  const nativeInputDecimals = isNative
+    ? (activeModelId === 'cosmos' ? 6 : (activeModelId === 'sui' ? 9 : 8))
+    : 8
   const available = Number(item.rawAmount || 0) / 1e8
   const fallbackEstimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
   const modelPreferences = getNetworkModelPreferences(activeNetworkId)
@@ -362,6 +366,16 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           )}
         </div>
 
+        {sendCustodyDisclosure && (
+          <div className="flex gap-2.5 p-3 bg-yellow-900/20 rounded-xl border border-yellow-500/30">
+            <IoInformationCircleOutline className="w-4 h-4 text-yellow-300 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-200">{sendCustodyDisclosure.label}</p>
+              <p className="text-[10px] leading-relaxed text-yellow-100/90">{sendCustodyDisclosure.body}</p>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Recipient Address</label>
           <Input
@@ -379,7 +393,13 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <div className="relative">
             <Input
               type="number"
-              step={isIntegerMode || isFixedOneMode ? '1' : (nativeInputDecimals === 6 ? '0.000001' : '0.00000001')}
+              step={
+                isIntegerMode || isFixedOneMode
+                  ? '1'
+                  : (nativeInputDecimals === 6
+                    ? '0.000001'
+                    : (nativeInputDecimals === 9 ? '0.000000001' : '0.00000001'))
+              }
               min={isIntegerMode || isFixedOneMode ? '1' : '0'}
               value={isFixedOneMode ? '1' : amount}
               onChange={(e) => {
