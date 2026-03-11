@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ActivityRow } from '../../components/ListItems'
-import { useWalletStore, type Activity as WalletActivity } from '../../store/walletStore'
+import { useWalletStore } from '../../store/walletStore'
 import { IoClose, IoCopyOutline, IoOpenOutline, IoCheckmark, IoSearchOutline } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 
@@ -42,9 +42,22 @@ function normalizeActivityNetworkId(value: string): string {
   return raw
 }
 
+function buildActivitySelectionKey(txid: string, networkId: string): string {
+  const normalizedTxid = String(txid || '').trim().toLowerCase()
+  const normalizedNetworkId = normalizeActivityNetworkId(networkId).toLowerCase()
+  return `${normalizedNetworkId}::${normalizedTxid}`
+}
+
 const Activity: React.FC = () => {
-  const { activity, activeNetworkId, networks, accounts, activeAccountId } = useWalletStore()
-  const [selectedTx, setSelectedTx] = useState<WalletActivity | null>(null)
+  const {
+    activity,
+    activeNetworkId,
+    networks,
+    accounts,
+    activeAccountId,
+    trackActivityTransactionStatus
+  } = useWalletStore()
+  const [selectedTxKey, setSelectedTxKey] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'sent' | 'received' | 'swap'>('all')
@@ -84,23 +97,45 @@ const Activity: React.FC = () => {
     return set
   }, [activeAccount, activeNetwork, activeNetworkId])
 
-  const baseActivity = activity
-    .filter((a) => {
-      if (normalizeActivityNetworkId(a.networkId) !== normalizeActivityNetworkId(activeNetworkId)) return false
-      if (a.accountId) return a.accountId === activeAccount?.id
+  const baseActivity = useMemo(() => (
+    activity
+      .filter((a) => {
+        if (normalizeActivityNetworkId(a.networkId) !== normalizeActivityNetworkId(activeNetworkId)) return false
+        if (a.accountId) return a.accountId === activeAccount?.id
 
-      // Legacy fallback for entries saved before accountId tagging.
-      const from = String(a.from || '').trim()
-      const to = String(a.to || '').trim()
-      if (!from && !to) return false
-      return (
-        activeNetworkAccountAddressSet.has(from)
-        || activeNetworkAccountAddressSet.has(from.toLowerCase())
-        || activeNetworkAccountAddressSet.has(to)
-        || activeNetworkAccountAddressSet.has(to.toLowerCase())
-      )
-    })
-    .sort((a, b) => b.timestamp - a.timestamp)
+        // Legacy fallback for entries saved before accountId tagging.
+        const from = String(a.from || '').trim()
+        const to = String(a.to || '').trim()
+        if (!from && !to) return false
+        return (
+          activeNetworkAccountAddressSet.has(from)
+          || activeNetworkAccountAddressSet.has(from.toLowerCase())
+          || activeNetworkAccountAddressSet.has(to)
+          || activeNetworkAccountAddressSet.has(to.toLowerCase())
+        )
+      })
+      .sort((a, b) => b.timestamp - a.timestamp)
+  ), [activity, activeAccount?.id, activeNetworkAccountAddressSet, activeNetworkId])
+
+  useEffect(() => {
+    for (const tx of baseActivity) {
+      if (tx.status !== 'pending') continue
+      trackActivityTransactionStatus({ txid: tx.id, networkId: tx.networkId })
+    }
+  }, [baseActivity, trackActivityTransactionStatus])
+
+  const selectedTx = useMemo(() => {
+    if (!selectedTxKey) return null
+    return baseActivity.find((tx) => (
+      buildActivitySelectionKey(tx.id, tx.networkId) === selectedTxKey
+    )) || null
+  }, [baseActivity, selectedTxKey])
+
+  useEffect(() => {
+    if (!selectedTxKey) return
+    if (selectedTx) return
+    setSelectedTxKey(null)
+  }, [selectedTx, selectedTxKey])
 
   const filteredActivity = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -149,13 +184,15 @@ const Activity: React.FC = () => {
     }
   }
 
-  const selectedNetwork = selectedTx
-    ? (
-      networks.find((n) => (
-        normalizeActivityNetworkId(n.id) === normalizeActivityNetworkId(selectedTx.networkId)
-      )) || activeNetwork
-    )
-    : activeNetwork
+  const selectedNetwork = useMemo(() => (
+    selectedTx
+      ? (
+        networks.find((n) => (
+          normalizeActivityNetworkId(n.id) === normalizeActivityNetworkId(selectedTx.networkId)
+        )) || activeNetwork
+      )
+      : activeNetwork
+  ), [activeNetwork, networks, selectedTx])
 
   const txExplorerUrl = (() => {
     if (!selectedTx?.id) return ''
@@ -236,7 +273,7 @@ const Activity: React.FC = () => {
               address={item.to || item.from}
               status={item.status}
               timestamp={item.timestamp}
-              onClick={() => setSelectedTx(item)}
+              onClick={() => setSelectedTxKey(buildActivitySelectionKey(item.id, item.networkId))}
             />
           ))
         ) : (
@@ -251,7 +288,7 @@ const Activity: React.FC = () => {
       {selectedTx && createPortal(
         <div
           className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end"
-          onClick={() => setSelectedTx(null)}
+          onClick={() => setSelectedTxKey(null)}
         >
           <div
             className="w-full max-w-[380px] max-h-[92vh] bg-dark-800 rounded-t-3xl border-t border-dark-600 animate-in slide-in-from-bottom duration-200 flex flex-col overflow-hidden"
@@ -264,7 +301,7 @@ const Activity: React.FC = () => {
                   {new Date(selectedTx.timestamp).toLocaleString()}
                 </span>
               </div>
-              <button onClick={() => setSelectedTx(null)}>
+              <button onClick={() => setSelectedTxKey(null)}>
                 <IoClose className="w-5 h-5 text-gray-400 hover:text-white" />
               </button>
             </div>
