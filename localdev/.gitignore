@@ -43,4 +43,9 @@ Thumbs.db
 dist
 dist-firefox
 dist-chromium
+
+# Guard against accidental build output under source asset folders
+src/coins/logos/*.js
+src/coins/logos/*.css
+src/coins/logos/*.wasm
 dist
