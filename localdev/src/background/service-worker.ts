@@ -8,6 +8,11 @@ import {
   recordRuntimeError
 } from '../lib/runtimeErrorMonitor'
 import {
+  clearBridgeTraceLog,
+  getBridgeTraceLog,
+  recordBridgeTrace
+} from '../lib/bridgeTrace'
+import {
   DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE,
   DAPP_APPROVAL_TIMEOUT_MS,
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
@@ -38,7 +43,6 @@ const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const managedPopupWindowIds = new Set<number>()
 let managedPopupWindowId: number | null = null
 let managedPopupOpenQueue: Promise<void> = Promise.resolve()
-let walletUnlockInFlight: Promise<boolean> | null = null
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -67,6 +71,8 @@ type DappRequest = {
 type MonitorRequest =
   | { type: 'METAYOSHI_MONITOR_GET_ERRORS' }
   | { type: 'METAYOSHI_MONITOR_CLEAR_ERRORS' }
+  | { type: 'METAYOSHI_MONITOR_GET_BRIDGE_TRACE' }
+  | { type: 'METAYOSHI_MONITOR_CLEAR_BRIDGE_TRACE' }
 
 type SendTransactionParams =
   | {
@@ -556,12 +562,27 @@ function buildApprovalPopupUrl(): string {
   return buildPopupRouteUrl('/dapp/connect/1')
 }
 
-function buildRequestPopupUrl(requestId: string): string {
-  return buildPopupRouteUrl(`/dapp/request/confirm?id=${encodeURIComponent(requestId)}`)
+function isWalletTxConfirmRequest(
+  method: DappRequestMethod,
+  request: unknown
+): boolean {
+  if (method === 'wallet_sendAsset') return true
+  if (method !== 'wallet_sendTransaction' || !request || typeof request !== 'object') return false
+
+  const candidate = request as Record<string, unknown>
+  const data = String(candidate.data || '').trim()
+  if (data) return false
+
+  const to = String(candidate.to || '').trim()
+  const amount = String(candidate.amount || candidate.value || '').trim()
+  return Boolean(to && amount)
 }
 
-function buildUnlockPopupUrl(): string {
-  return buildPopupRouteUrl('/unlock')
+function buildRequestPopupUrl(requestId: string, method: DappRequestMethod, request: unknown): string {
+  if (isWalletTxConfirmRequest(method, request)) {
+    return buildPopupRouteUrl(`/tx/confirm?dappRequest=1&id=${encodeURIComponent(requestId)}`)
+  }
+  return buildPopupRouteUrl(`/dapp/request/confirm?id=${encodeURIComponent(requestId)}`)
 }
 
 function buildPopupRouteUrl(route: string): string {
@@ -582,12 +603,8 @@ async function openApprovalPopup(): Promise<void> {
   await openManagedPopup(buildApprovalPopupUrl())
 }
 
-async function openRequestPopup(requestId: string): Promise<void> {
-  await openManagedPopup(buildRequestPopupUrl(requestId))
-}
-
-async function openUnlockPopup(): Promise<void> {
-  await openManagedPopup(buildUnlockPopupUrl())
+async function openRequestPopup(requestId: string, method: DappRequestMethod, request: unknown): Promise<void> {
+  await openManagedPopup(buildRequestPopupUrl(requestId, method, request))
 }
 
 async function openManagedPopup(url: string): Promise<void> {
@@ -815,59 +832,15 @@ function getPendingTimeoutMs(expiresAt: number, fallbackMs: number): number {
   return Number.isFinite(remainingMs) ? remainingMs : fallbackMs
 }
 
-async function waitForWalletUnlock(timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false
-
-    const finish = (unlocked: boolean): void => {
-      if (settled) return
-      settled = true
-      chrome.storage.onChanged.removeListener(onStorageChanged)
-      clearTimeout(timeout)
-      resolve(unlocked)
-    }
-
-    const evaluateWalletState = async (): Promise<void> => {
-      const state = await getWalletState().catch(() => null)
-      if (!state) return
-      if (!(state.isLocked ?? true) && (state.isInitialized ?? false)) {
-        finish(true)
-      }
-    }
-
-    const onStorageChanged = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      areaName: string
-    ): void => {
-      if (areaName !== 'local' || !changes[WALLET_STORAGE_KEY]) return
-      void evaluateWalletState()
-    }
-
-    const timeout = setTimeout(() => finish(false), Math.max(1000, timeoutMs))
-    chrome.storage.onChanged.addListener(onStorageChanged)
-    void evaluateWalletState()
-  })
-}
-
-async function openUnlockPopupAndWait(timeoutMs = DAPP_APPROVAL_TIMEOUT_MS): Promise<boolean> {
-  if (walletUnlockInFlight) {
-    return await walletUnlockInFlight
-  }
-
-  const runner = (async () => {
-    try {
-      await openUnlockPopup()
-    } catch {
-      // Keep waiting in case an existing popup is already open.
-    }
-    return await waitForWalletUnlock(timeoutMs)
-  })()
-
-  walletUnlockInFlight = runner
+function summarizeTraceValue(value: unknown, maxLength = 180): string | undefined {
+  if (value === undefined) return undefined
   try {
-    return await runner
-  } finally {
-    if (walletUnlockInFlight === runner) walletUnlockInFlight = null
+    const text = typeof value === 'string' ? value : JSON.stringify(value)
+    if (!text) return undefined
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+  } catch {
+    const text = String(value)
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
   }
 }
 
@@ -1349,7 +1322,12 @@ async function requestDappActionApproval(
 
   const now = Date.now()
   const pending = await getPendingRequest()
-  if (pending && pending.status === 'pending' && pending.expiresAt > now) {
+  const pendingRequestActive =
+    Boolean(pending)
+    && (pending?.status === 'pending' || pending?.status === 'approved')
+    && pending.expiresAt > now
+
+  if (pending && pendingRequestActive) {
     const sameRequest =
       pending.origin === normalizedOrigin
       && pending.networkId === networkId
@@ -1358,10 +1336,16 @@ async function requestDappActionApproval(
       && areRequestsEquivalent(pending.request, request)
 
     if (sameRequest) {
-      const existingPopup = await findManagedPopupWindow()
-      if (!existingPopup?.id) {
+      void recordBridgeTrace('background-sw', 'request-approval-reuse', {
+        requestId: pending.id,
+        origin: normalizedOrigin,
+        method,
+        status: pending.status
+      })
+      const existingPopup = pending.status === 'pending' ? await findManagedPopupWindow() : null
+      if (pending.status === 'pending' && !existingPopup?.id) {
         try {
-          await openRequestPopup(pending.id)
+          await openRequestPopup(pending.id, pending.method, pending.request)
         } catch {
           // Preserve the original pending request and keep waiting for it.
         }
@@ -1401,15 +1385,29 @@ async function requestDappActionApproval(
   }
 
   await setPendingRequest(nextPending)
+  void recordBridgeTrace('background-sw', 'request-approval-created', {
+    requestId,
+    origin: normalizedOrigin,
+    method,
+    networkId,
+    accountId,
+    request: summarizeTraceValue(request)
+  })
 
   try {
-    await openRequestPopup(requestId)
+    await openRequestPopup(requestId, method, request)
   } catch {
     await clearPendingRequestIfMatch(requestId)
     throw { code: 4001, message: 'Unable to open wallet approval popup' }
   }
 
   const decision = await waitForRequestDecision(requestId, DAPP_APPROVAL_TIMEOUT_MS)
+  void recordBridgeTrace('background-sw', 'request-approval-decision', {
+    requestId,
+    decision: decision.decision,
+    errorCode: decision.error?.code,
+    errorMessage: decision.error?.message
+  })
   if (decision.decision === 'executed' && decision.result) {
     await clearPendingRequestIfMatch(requestId)
     return decision.result
@@ -1479,6 +1477,13 @@ async function requestScopes(
   }
 
   await setPendingApproval(nextPending)
+  void recordBridgeTrace('background-sw', 'scope-approval-upsert', {
+    approvalId,
+    origin: normalizedOrigin,
+    scopes: nextPending.scopes,
+    networkId: nextPending.networkId,
+    reused: reuseExistingApproval
+  })
 
   try {
     const existingPopup = reuseExistingApproval ? await findManagedPopupWindow() : null
@@ -1496,6 +1501,11 @@ async function requestScopes(
       ? getPendingTimeoutMs(nextPending.expiresAt, DAPP_APPROVAL_TIMEOUT_MS)
       : DAPP_APPROVAL_TIMEOUT_MS
   )
+  void recordBridgeTrace('background-sw', 'scope-approval-decision', {
+    approvalId,
+    origin: normalizedOrigin,
+    decision
+  })
   if (decision !== 'approved') {
     await clearPendingApprovalIfMatch(approvalId)
     return false
@@ -1644,17 +1654,6 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
-    if (refreshed.state.isLocked ?? true) {
-      const unlockedAfterPrompt = await openUnlockPopupAndWait()
-      if (!unlockedAfterPrompt) {
-        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
-      }
-      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
-      if (!unlockedState.address) {
-        throw { code: -32603, message: 'No account available' }
-      }
-      return unlockedState.providerState
-    }
     if (!refreshed.address) {
       throw { code: -32603, message: 'No account available' }
     }
@@ -1720,17 +1719,6 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
-    if (refreshed.state.isLocked ?? true) {
-      const unlockedAfterPrompt = await openUnlockPopupAndWait()
-      if (!unlockedAfterPrompt) {
-        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
-      }
-      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
-      if (!unlockedState.address) {
-        throw { code: -32603, message: 'No account available' }
-      }
-      return [unlockedState.address]
-    }
     if (!refreshed.address) {
       throw { code: -32603, message: 'No account available' }
     }
@@ -1767,23 +1755,12 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
-    if (state.isLocked ?? true) {
-      const unlockedAfterPrompt = await openUnlockPopupAndWait()
-      if (!unlockedAfterPrompt) {
-        throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
-      }
-      const unlockedState = buildDappRuntimeContext(await getWalletState(), network?.id)
-      if (!unlockedState.network || unlockedState.network.coinType !== 'EVM') {
-        throw { code: 4900, message: 'No EVM network is available' }
-      }
-      await touchLastConnected(approvedOrigin)
-      return unlockedState.address ? [unlockedState.address] : []
-    }
-    if (!network || network.coinType !== 'EVM') {
+    const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
+    if (!refreshed.network || refreshed.network.coinType !== 'EVM') {
       throw { code: 4900, message: 'No EVM network is available' }
     }
     await touchLastConnected(approvedOrigin)
-    return address ? [address] : []
+    return refreshed.address ? [refreshed.address] : []
   }
 
   if (ETHEREUM_SWITCH_CHAIN_METHODS.has(method)) {
@@ -2273,12 +2250,45 @@ chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sen
     return true
   }
 
+  if (message?.type === 'METAYOSHI_MONITOR_GET_BRIDGE_TRACE') {
+    void getBridgeTraceLog()
+      .then((entries) => sendResponse({ ok: true, entries }))
+      .catch((err) => {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      })
+    return true
+  }
+
+  if (message?.type === 'METAYOSHI_MONITOR_CLEAR_BRIDGE_TRACE') {
+    void clearBridgeTraceLog()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      })
+    return true
+  }
+
   if (message.type === 'DAPP_INTERNAL_RPC') {
     const { request, origin } = message
     const originUrl = origin || sender?.origin || sender?.url || 'unknown'
+
+    void recordBridgeTrace('background-sw', 'rpc-received', {
+      method: request?.method,
+      origin: originUrl,
+      requestId: request?.id ?? null,
+      params: summarizeTraceValue(request?.params),
+      senderOrigin: sender?.origin || null,
+      senderUrl: sender?.url || null
+    })
     
     handleRpcMethod(request.method, request.params, originUrl)
       .then((result) => {
+        void recordBridgeTrace('background-sw', 'rpc-result', {
+          method: request?.method,
+          origin: originUrl,
+          requestId: request?.id ?? null,
+          result: summarizeTraceValue(result)
+        })
         const response: JsonRpcResponse = {
           jsonrpc: '2.0',
           id: request.id ?? null,
@@ -2291,6 +2301,14 @@ chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sen
           kind: 'dapp-rpc',
           method: request.method,
           origin: originUrl
+        })
+        void recordBridgeTrace('background-sw', 'rpc-error', {
+          method: request?.method,
+          origin: originUrl,
+          requestId: request?.id ?? null,
+          code: err?.code ?? null,
+          message: err?.message ?? String(err ?? 'Unknown error'),
+          data: summarizeTraceValue(err?.data)
         })
         const response: JsonRpcResponse = {
           jsonrpc: '2.0',

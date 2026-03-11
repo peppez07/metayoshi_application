@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ethers } from 'ethers'
 import { Button } from '../../components/Button'
+import { PasswordGate } from '../../components/PasswordGate'
 import { Tabs } from '../../components/Tabs'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInformationCircle } from 'react-icons/io5'
@@ -12,6 +13,12 @@ import { callBridgeMethod, type UtxoRpcConfig } from '../../lib/utxoRpc'
 import { estimateEvmTxFee } from '../../lib/evmFee'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
+import {
+  DAPP_PENDING_REQUEST_STORAGE_KEY,
+  parseDappPendingRequest,
+  type DappPendingRequest,
+  type DappSendEvmTransactionPayload
+} from '../../lib/dappPermissions'
 
 interface TxLayoutProps {
   title: string
@@ -36,6 +43,15 @@ interface TxState {
   donationAddress?: string
   donationRequired?: boolean
   totalBeforeNetworkFee?: string
+  dataHex?: string
+}
+
+function canUseChromeStorage(): boolean {
+  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
+}
+
+function isDappEvmTransactionRequest(request: DappPendingRequest['request'] | null | undefined): request is DappSendEvmTransactionPayload {
+  return Boolean(request && typeof request === 'object' && 'data' in request)
 }
 
 function formatCoinAmount(v: number): string {
@@ -109,6 +125,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     activeAccountId,
     networks,
     activeNetworkId,
+    setActiveAccount,
+    setActiveNetwork,
     addActivity,
     trackActivityTransactionStatus,
     sendEvmTransaction,
@@ -126,6 +144,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     accountNetworkFiatNative,
     accountNetworkFiatAssets,
     isConnected,
+    isLocked,
     isSyncing,
     syncPercent,
     lowSyncStreak
@@ -133,31 +152,139 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const [activeTab, setActiveTab] = useState('details')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [pendingDappRequest, setPendingDappRequest] = useState<DappPendingRequest | null>(null)
+  const [loadingDappRequest, setLoadingDappRequest] = useState(false)
 
   const txState = (location.state as TxState | null) ?? {}
-  const isAssetTransfer = txState.requestType === 'asset' || Boolean(String(txState.assetId || '').trim())
-  const assetId = String(txState.assetId || '').trim()
+  const dappRequestId = useMemo(() => new URLSearchParams(location.search).get('id') || '', [location.search])
+  const isDappTxRoute = useMemo(() => new URLSearchParams(location.search).get('dappRequest') === '1', [location.search])
+
+  useEffect(() => {
+    if (!isDappTxRoute || !canUseChromeStorage()) {
+      setPendingDappRequest(null)
+      setLoadingDappRequest(false)
+      return
+    }
+
+    let mounted = true
+    setLoadingDappRequest(true)
+
+    const applyPendingValue = (rawValue: unknown): void => {
+      const parsed = parseDappPendingRequest(rawValue)
+      if (!mounted) return
+      if (!parsed || (dappRequestId && parsed.id !== dappRequestId)) {
+        setPendingDappRequest(null)
+        setLoadingDappRequest(false)
+        return
+      }
+      if (
+        (parsed.method !== 'wallet_sendTransaction' && parsed.method !== 'wallet_sendAsset')
+        || (parsed.status !== 'pending' && parsed.status !== 'approved')
+      ) {
+        setPendingDappRequest(null)
+        setLoadingDappRequest(false)
+        return
+      }
+      setPendingDappRequest(parsed)
+      setLoadingDappRequest(false)
+    }
+
+    void chrome.storage.local
+      .get(DAPP_PENDING_REQUEST_STORAGE_KEY)
+      .then((result) => {
+        applyPendingValue(result[DAPP_PENDING_REQUEST_STORAGE_KEY])
+      })
+      .catch(() => {
+        if (!mounted) return
+        setPendingDappRequest(null)
+        setLoadingDappRequest(false)
+      })
+
+    const onStorageChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ): void => {
+      if (areaName !== 'local' || !changes[DAPP_PENDING_REQUEST_STORAGE_KEY]) return
+      applyPendingValue(changes[DAPP_PENDING_REQUEST_STORAGE_KEY].newValue)
+    }
+
+    chrome.storage.onChanged.addListener(onStorageChanged)
+    return () => {
+      mounted = false
+      chrome.storage.onChanged.removeListener(onStorageChanged)
+    }
+  }, [dappRequestId, isDappTxRoute])
+
+  const dappRequestPayload = pendingDappRequest?.request as Record<string, unknown> | undefined
+  const dappIsAssetTransfer = pendingDappRequest?.method === 'wallet_sendAsset'
+  const dappIsEvmTx = !dappIsAssetTransfer && isDappEvmTransactionRequest(pendingDappRequest?.request)
+  const dappAssetId = dappIsAssetTransfer ? String(dappRequestPayload?.assetId || '').trim() : ''
+  const dappToAddress = dappIsAssetTransfer
+    ? String(dappRequestPayload?.toAddress || '').trim()
+    : String(dappRequestPayload?.to || '').trim()
+  const dappAmount = dappIsAssetTransfer
+    ? String(dappRequestPayload?.qty || '').trim()
+    : String(dappRequestPayload?.amount || dappRequestPayload?.value || '').trim()
+  const dappMemo = dappIsAssetTransfer
+    ? String(dappRequestPayload?.memo || '').trim()
+    : String(dappRequestPayload?.memo || '').trim()
+  const dappDataHex = dappIsEvmTx
+    ? String((pendingDappRequest?.request as DappSendEvmTransactionPayload | undefined)?.data || '').trim()
+    : ''
+  const dappHasSimpleWalletTx = Boolean(
+    pendingDappRequest
+    && (dappIsAssetTransfer || (!dappDataHex && dappToAddress && dappAmount))
+  )
+
+  const isAssetTransfer = isDappTxRoute && dappHasSimpleWalletTx
+    ? dappIsAssetTransfer
+    : (txState.requestType === 'asset' || Boolean(String(txState.assetId || '').trim()))
+  const assetId = isDappTxRoute && dappHasSimpleWalletTx
+    ? dappAssetId
+    : String(txState.assetId || '').trim()
   const assetLabel = String(txState.assetLabel || assetId || '').trim()
-  const toAddress = txState.to?.trim() ?? ''
-  const amount = txState.amount?.trim() ?? ''
-  const memo = String(txState.memo || '').trim()
-  const fromAddress = txState.from?.trim() ?? ''
-  const requestOrigin = String(txState.origin ?? '').trim() || 'metayoshi provider'
+  const toAddress = isDappTxRoute && dappHasSimpleWalletTx
+    ? dappToAddress
+    : (txState.to?.trim() ?? '')
+  const amount = isDappTxRoute && dappHasSimpleWalletTx
+    ? dappAmount
+    : (txState.amount?.trim() ?? '')
+  const memo = isDappTxRoute && dappHasSimpleWalletTx
+    ? dappMemo
+    : String(txState.memo || '').trim()
+  const displayNetworkId = isDappTxRoute && pendingDappRequest
+    ? pendingDappRequest.networkId
+    : activeNetworkId
+  const displayAccountId = isDappTxRoute && pendingDappRequest
+    ? pendingDappRequest.accountId
+    : activeAccountId
+  const activeAccount = accounts.find(a => a.id === displayAccountId) || accounts[0]
+  const activeNetwork = networks.find(n => n.id === displayNetworkId) || networks[0]
+  const fromAddress = isDappTxRoute && pendingDappRequest
+    ? String(
+        activeAccount?.networkAddresses?.[displayNetworkId]
+        || (activeNetwork?.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
+        || (activeNetwork?.coinType === 'XRP' ? activeAccount?.addresses?.XRP : '')
+        || txState.from
+        || ''
+      ).trim()
+    : (txState.from?.trim() ?? '')
+  const requestOrigin = isDappTxRoute && pendingDappRequest
+    ? pendingDappRequest.origin
+    : (String(txState.origin ?? '').trim() || 'metayoshi provider')
   const hasTxState = Boolean(toAddress && amount)
   const numericAmount = Number(amount)
   const safeAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
-  const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
-  const activeNetwork = networks.find(n => n.id === activeNetworkId) || networks[0]
   const activeModelId = resolveRuntimeModelId(activeNetwork)
-  const activeAccountName = getAccountDisplayName(activeAccount, activeNetworkId, 'Account 1')
+  const activeAccountName = getAccountDisplayName(activeAccount, displayNetworkId, 'Account 1')
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
-  const enteredAmountNumRaw = Number(txState.enteredAmount ?? amount)
+  const enteredAmountNumRaw = Number((isDappTxRoute ? amount : txState.enteredAmount) ?? amount)
   const enteredAmount = Number.isFinite(enteredAmountNumRaw) && enteredAmountNumRaw > 0 ? enteredAmountNumRaw : safeAmount
-  const donationEnabled = txState.donationEnabled === true
-  const donationPercentRaw = Number(txState.donationPercent ?? 0)
+  const donationEnabled = !isDappTxRoute && txState.donationEnabled === true
+  const donationPercentRaw = Number(!isDappTxRoute ? txState.donationPercent ?? 0 : 0)
   const donationPercent = Number.isFinite(donationPercentRaw) && donationPercentRaw > 0 ? donationPercentRaw : 0
   const donationMode = txState.donationMode === 'deduct' ? 'deduct' : 'add'
   const donationAmountRaw = Number(txState.donationAmount ?? (donationEnabled ? (enteredAmount * donationPercent) / 100 : 0))
@@ -170,7 +297,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
-  const activeNetworkLogos = networkAssetLogos?.[activeNetworkId] || {}
+  const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
   const evmNativeValueWei = useMemo(() => {
     if (activeNetwork.coinType !== 'EVM' || isAssetTransfer) return 0n
     try {
@@ -180,11 +307,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     }
   }, [activeNetwork.coinType, isAssetTransfer, safeAmount])
   const availableNativeBalance = useMemo(() => {
-    const scoped = parseCoinAmount(activeAccount?.networkBalances?.[activeNetworkId])
+    const scoped = parseCoinAmount(activeAccount?.networkBalances?.[displayNetworkId])
     if (scoped > 0) return scoped
     return parseCoinAmount(activeAccount?.balance)
-  }, [activeAccount?.balance, activeAccount?.networkBalances, activeNetworkId])
-  const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  }, [activeAccount?.balance, activeAccount?.networkBalances, displayNetworkId])
+  const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(displayNetworkId || '').trim().toLowerCase()}`
   const scopedNativeFiatUsd = Number(accountNetworkFiatNative?.[fiatScopeKey]?.usd)
   const scopedAssetFiatUsd = Number(accountNetworkFiatAssets?.[fiatScopeKey]?.[assetId]?.usd)
   const scopedAssetRaw = Number(accountNetworkAssets?.[fiatScopeKey]?.[assetId] ?? 0)
@@ -290,7 +417,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   }, [
     activeNetwork,
     activeNetworkLogos,
-    activeNetworkId,
+    displayNetworkId,
     amount,
     assetId,
     evmNativeValueWei,
@@ -304,6 +431,53 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     { id: 'data', label: 'DATA' },
     { id: 'hex', label: 'HEX' }
   ]
+  const dataTabText = useMemo(() => {
+    const payload = isDappTxRoute && pendingDappRequest
+      ? {
+          origin: pendingDappRequest.origin,
+          method: pendingDappRequest.method,
+          networkId: pendingDappRequest.networkId,
+          accountId: pendingDappRequest.accountId,
+          request: pendingDappRequest.request
+        }
+      : {
+          method: isAssetTransfer ? 'send_asset' : 'send',
+          params: isAssetTransfer ? [assetId, toAddress || 'N/A', amount || '0'] : [toAddress || 'N/A', amount || '0'],
+          ...(memo ? { memo } : {}),
+          ...(donationEnabled && !isAssetTransfer
+            ? {
+                donation: {
+                  enabled: true,
+                  percent: donationPercent,
+                  mode: donationMode,
+                  amount: formatCoinAmount(donationAmount),
+                  address: donationAddress || 'N/A',
+                  required: donationRequired
+                }
+              }
+            : {})
+        }
+    try {
+      return JSON.stringify(payload, null, 2)
+    } catch {
+      return String(payload)
+    }
+  }, [
+    amount,
+    assetId,
+    donationAddress,
+    donationAmount,
+    donationEnabled,
+    donationMode,
+    donationPercent,
+    donationRequired,
+    isAssetTransfer,
+    isDappTxRoute,
+    memo,
+    pendingDappRequest,
+    toAddress
+  ])
+  const hexTabText = dappDataHex || String(txState.dataHex || '').trim() || 'No hex data for this transfer'
 
   const handleBack = () => {
     if (window.history.length > 1) {
@@ -320,6 +494,14 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const handleConfirm = async () => {
     if (isRejectMode) return
     setSubmitError('')
+    if (isDappTxRoute && loadingDappRequest) {
+      setSubmitError('Loading transaction request')
+      return
+    }
+    if (isDappTxRoute && !pendingDappRequest) {
+      setSubmitError('No pending dapp transaction to confirm')
+      return
+    }
     if (!hasTxState) {
       setSubmitError('No pending transaction to confirm')
       return
@@ -353,9 +535,35 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       return
     }
     setIsSubmitting(true)
+    const previousNetworkId = String(activeNetworkId || '').trim()
+    const previousAccountId = String(activeAccountId || '').trim()
+    const shouldRestoreNetwork = Boolean(isDappTxRoute && pendingDappRequest && previousNetworkId && previousNetworkId !== pendingDappRequest.networkId)
+    const shouldRestoreAccount = Boolean(isDappTxRoute && pendingDappRequest && previousAccountId && previousAccountId !== pendingDappRequest.accountId)
 
     try {
+      if (isDappTxRoute && pendingDappRequest) {
+        if (!canUseChromeStorage()) {
+          throw new Error('Extension storage is unavailable')
+        }
+
+        await chrome.storage.local.set({
+          [DAPP_PENDING_REQUEST_STORAGE_KEY]: {
+            ...pendingDappRequest,
+            status: 'approved',
+            updatedAt: Date.now()
+          }
+        })
+
+        if (activeNetworkId !== pendingDappRequest.networkId) {
+          await setActiveNetwork(pendingDappRequest.networkId)
+        }
+        if (activeAccountId !== pendingDappRequest.accountId) {
+          setActiveAccount(pendingDappRequest.accountId)
+        }
+      }
+
       let txHash = ''
+      let txResult: { hash?: string; txid?: string } | null = null
       if (isAssetTransfer) {
         if (!assetId) throw new Error('Asset id missing from transaction request')
         const sent = await sendAssetTransfer({
@@ -364,30 +572,55 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           toAddress: toAddress,
           memo
         })
+        txResult = sent
         txHash = String(sent.txid || '').trim()
       } else if (activeNetwork.coinType === 'EVM') {
-        const res = await sendEvmTransaction({ to: toAddress, amount })
+        const evmRequest = isDappTxRoute && isDappEvmTransactionRequest(pendingDappRequest?.request)
+          ? pendingDappRequest.request
+          : null
+        const res = await sendEvmTransaction(
+          evmRequest
+            ? {
+                to: toAddress || undefined,
+                value: amount,
+                data: String(evmRequest.data || '').trim() || undefined,
+                gasLimit: String(evmRequest.gasLimit || '').trim() || undefined,
+                gasPrice: String(evmRequest.gasPrice || '').trim() || undefined,
+                maxFeePerGas: String(evmRequest.maxFeePerGas || '').trim() || undefined,
+                maxPriorityFeePerGas: String(evmRequest.maxPriorityFeePerGas || '').trim() || undefined,
+                type: evmRequest.type
+              }
+            : { to: toAddress, amount }
+        )
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'XRP') {
         const res = await sendXrpTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeModelId === 'ada') {
         const res = await sendCardanoTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeModelId === 'xmr') {
         const res = await sendMoneroTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeModelId === 'sol') {
         const res = await sendSolanaTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeModelId === 'xlm') {
         const res = await sendStellarTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeModelId === 'tron') {
         const res = await sendTronTransaction({ to: toAddress, amount })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (isCosmosLikeModelId(activeModelId)) {
         const res = await sendUtxoTransaction({ to: toAddress, amount, memo })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else if (activeNetwork.coinType === 'UTXO') {
         const res = await sendUtxoTransaction({
@@ -402,6 +635,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
               }
             : undefined
         })
+        txResult = res
         txHash = String(res.hash || '').trim()
       } else {
         throw new Error(`Unsupported coin type: ${activeNetwork.coinType}`)
@@ -424,15 +658,70 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((err) => {
         console.warn('Post-send fast balance refresh failed:', err)
       })
+
+      if (isDappTxRoute && pendingDappRequest) {
+        await chrome.storage.local.set({
+          [DAPP_PENDING_REQUEST_STORAGE_KEY]: {
+            ...pendingDappRequest,
+            status: 'executed',
+            result: txResult,
+            updatedAt: Date.now()
+          }
+        })
+      }
+
+      if (isDappTxRoute) {
+        navigate('/wallet/assets')
+        window.close()
+        return
+      }
       navigate('/connecting')
     } catch (e: any) {
-      setSubmitError(String(e?.message ?? 'Transaction failed'))
+      const message = String(e?.message ?? 'Transaction failed')
+      setSubmitError(message)
+      if (isDappTxRoute && pendingDappRequest && canUseChromeStorage()) {
+        await chrome.storage.local.set({
+          [DAPP_PENDING_REQUEST_STORAGE_KEY]: {
+            ...pendingDappRequest,
+            status: 'failed',
+            error: { code: -32603, message },
+            updatedAt: Date.now()
+          }
+        })
+        navigate('/wallet/assets')
+        window.close()
+      }
     } finally {
+      if (isDappTxRoute && pendingDappRequest) {
+        try {
+          if (shouldRestoreAccount) {
+            setActiveAccount(previousAccountId)
+          }
+          if (shouldRestoreNetwork) {
+            await setActiveNetwork(previousNetworkId, { skipRefresh: true })
+          }
+        } catch {
+          // Keep the dapp request outcome authoritative even if UI restoration fails.
+        }
+      }
       setIsSubmitting(false)
     }
   }
 
-  const handleReject = () => {
+  const handleReject = async () => {
+    if (isDappTxRoute && pendingDappRequest && canUseChromeStorage()) {
+      await chrome.storage.local.set({
+        [DAPP_PENDING_REQUEST_STORAGE_KEY]: {
+          ...pendingDappRequest,
+          status: 'rejected',
+          error: { code: 4001, message: 'User rejected the request' },
+          updatedAt: Date.now()
+        }
+      })
+      navigate('/wallet/assets')
+      window.close()
+      return
+    }
     if (!hasTxState) {
       navigate('/wallet/activity')
       return
@@ -452,7 +741,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     navigate('/wallet/activity')
   }
 
-  return (
+  const content = (
     <div className="flex flex-col h-full bg-dark-800">
       <header className="px-4 py-2 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
         <button
@@ -477,6 +766,18 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       </header>
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
+        {isDappTxRoute && loadingDappRequest && (
+          <div className="p-3 bg-dark-900/60 border border-dark-600 rounded-xl text-xs text-gray-300">
+            Loading dapp transaction request...
+          </div>
+        )}
+
+        {isDappTxRoute && !loadingDappRequest && !pendingDappRequest && (
+          <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-xs text-red-300">
+            No pending dapp transaction request was found.
+          </div>
+        )}
+
         <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/30 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -646,30 +947,12 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           )}
 
           {activeTab === 'data' && (
-            <div className="bg-dark-900 p-4 rounded-xl border border-dark-600 font-mono text-[10px] text-gray-500">
-              <p>{"{"}</p>
-              <p className="ml-4">"method": "{isAssetTransfer ? 'send_asset' : 'send'}",</p>
-              <p className="ml-4">"params": [{isAssetTransfer ? `"${assetId}", ` : ''}"{toAddress || 'N/A'}", "{amount || '0'}"]</p>
-              {memo && <p className="ml-4">"memo": "{memo}",</p>}
-              {donationEnabled && !isAssetTransfer && (
-                <>
-                  <p className="ml-4">"donation": {"{"}</p>
-                  <p className="ml-8">"enabled": true,</p>
-                  <p className="ml-8">"percent": {donationPercent},</p>
-                  <p className="ml-8">"mode": "{donationMode}",</p>
-                  <p className="ml-8">"amount": "{formatCoinAmount(donationAmount)}",</p>
-                  <p className="ml-8">"address": "{donationAddress || 'N/A'}",</p>
-                  <p className="ml-8">"required": {donationRequired ? 'true' : 'false'}</p>
-                  <p className="ml-4">{"}"}</p>
-                </>
-              )}
-              <p>{"}"}</p>
-            </div>
+            <pre className="bg-dark-900 p-4 rounded-xl border border-dark-600 font-mono text-[10px] text-gray-400 whitespace-pre-wrap break-all">{dataTabText}</pre>
           )}
 
           {activeTab === 'hex' && (
             <div className="bg-dark-900 p-4 rounded-xl border border-dark-600 font-mono text-[10px] text-gray-500 break-all leading-tight">
-              0x095ea7b3000000000000000000000000010e...202e0000000000000000000000000000000000000000000000000000000001438a00
+              {hexTabText}
             </div>
           )}
         </div>
@@ -700,14 +983,14 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         <Button 
           variant="outline" 
           className="flex-1 btn-outline"
-          onClick={handleReject}
+          onClick={() => { void handleReject() }}
         >
           Reject
         </Button>
         <Button
           className="flex-1 btn-primary"
           onClick={handleConfirm}
-          disabled={isRejectMode || isSubmitting || !(isAssetTransfer ? caps.features.assetSend : caps.features.nativeSend) || !hasTxState || sendBlockedBySync}
+          disabled={isRejectMode || isSubmitting || loadingDappRequest || !(isAssetTransfer ? caps.features.assetSend : caps.features.nativeSend) || !hasTxState || sendBlockedBySync}
           isLoading={isSubmitting}
         >
           Confirm
@@ -715,6 +998,19 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       </footer>
     </div>
   )
+
+  if (isDappTxRoute && isLocked) {
+    return (
+      <PasswordGate
+        title="Unlock to confirm transfer"
+        description="Unlock your wallet to review this website transfer and press Confirm."
+      >
+        {content}
+      </PasswordGate>
+    )
+  }
+
+  return content
 }
 
 export const TxConfirm: React.FC = () => <TxLayout title="CONFIRM TRANSFER" />

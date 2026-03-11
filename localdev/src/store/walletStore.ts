@@ -3798,11 +3798,17 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
-        const rpcConfig = await createUtxoRpcConfig(net, {
+        const baseRpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr,
           localRpcOverride: lro[net.id],
           secureBridgeSigner: get().signBackendAuthMessage
         })
+        const rpcConfig: UtxoRpcConfig = {
+          ...baseRpcConfig,
+          // UTXO asset-layer reads can be slow on shared bridge wallets.
+          // Give the bridge more headroom before surfacing a timeout.
+          timeoutMs: Math.max(Number(baseRpcConfig.timeoutMs ?? 10000), 30000)
+        }
 
         try {
           const assets = await listAssetBalancesByAddress(rpcConfig, address)

@@ -25,6 +25,7 @@ import { estimateEvmTxFee } from './evmFee'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { isCosmosAddressForHrp } from './cosmosAddress'
+import { isAddressForCoinSymbol } from './utxoAddress'
 import { fetchCosmosBalanceAndSync, resolveCosmosNetworkConfig } from './protocolAdapters/cosmos'
 import { validateProtocolAddress } from './protocolAdapters/addressValidation'
 import { fetchProtocolBalance } from './protocolAdapters/balances'
@@ -350,6 +351,9 @@ export async function validateNetworkAddress(
   options?: ResolveProtocolOptions
 ): Promise<boolean | null> {
   const context = resolveProtocolContext(network, options)
+  if (context.family === 'utxo' && network.coinSymbol) {
+    return isAddressForCoinSymbol(value, network.coinSymbol)
+  }
   return validateProtocolAddress(network, context.modelId, context.runtimeProtocol, value)
 }
 

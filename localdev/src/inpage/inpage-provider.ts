@@ -4,8 +4,23 @@
 const IP_CONTENT_CHANNEL = 'metayoshi:content'
 const IP_INPAGE_CHANNEL = 'metayoshi:inpage'
 const INIT_EVENT = 'metayoshi#initialized'
-const PROVIDER_STATE_METHOD = 'wallet_getProviderState'
-const PROVIDER_ENABLE_METHOD = 'wallet_requestAccounts'
+const PROVIDER_STATE_METHOD = 'metayoshi_getProviderState'
+const PROVIDER_ENABLE_METHOD = 'metayoshi_requestAccounts'
+const CONNECT_METHOD = 'metayoshi_connect'
+const GET_NETWORKS_METHOD = 'metayoshi_getNetworks'
+const GET_CAPABILITIES_METHOD = 'metayoshi_getCapabilities'
+const SIGN_MESSAGE_METHOD = 'metayoshi_signMessage'
+const SIGN_TYPED_DATA_METHOD = 'metayoshi_signTypedData'
+const SIGN_TRANSACTION_METHOD = 'metayoshi_signTransaction'
+const SIGN_ALL_TRANSACTIONS_METHOD = 'wallet_signAllTransactions'
+const SIGN_AND_SEND_TRANSACTION_METHOD = 'wallet_signAndSendTransaction'
+const SEND_TRANSACTION_METHOD = 'metayoshi_sendTransaction'
+const SEND_ASSET_METHOD = 'metayoshi_sendAsset'
+const SWITCH_NETWORK_METHOD = 'metayoshi_switchNetwork'
+const COSMOS_GET_KEY_METHOD = 'wallet_cosmosGetKey'
+const COSMOS_SIGN_DIRECT_METHOD = 'wallet_cosmosSignDirect'
+const COSMOS_SIGN_AMINO_METHOD = 'wallet_cosmosSignAmino'
+const COSMOS_SEND_TX_METHOD = 'wallet_cosmosSendTx'
 
 const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
 const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
@@ -434,25 +449,25 @@ const provider = {
   request,
   send: request,
   enable: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_ENABLE_METHOD, params }),
-  connect: (params?: ProviderNetworkRequest) => request({ method: 'wallet_connect', params }),
+  connect: (params?: ProviderNetworkRequest) => request({ method: CONNECT_METHOD, params }),
   getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
-  getNetworks: (): Promise<ProviderNetwork[]> => request({ method: 'wallet_getNetworks' }),
-  getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: 'wallet_getCapabilities', params }),
+  getNetworks: (): Promise<ProviderNetwork[]> => request({ method: GET_NETWORKS_METHOD }),
+  getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: GET_CAPABILITIES_METHOD, params }),
   signMessage: (params: { message: string; encoding?: 'utf8' | 'hex' } & ProviderNetworkRequest) =>
-    request({ method: 'wallet_signMessage', params }),
+    request({ method: SIGN_MESSAGE_METHOD, params }),
   signTypedData: (params: { typedData: unknown } & ProviderNetworkRequest) =>
-    request({ method: 'wallet_signTypedData', params }),
+    request({ method: SIGN_TYPED_DATA_METHOD, params }),
   signTransaction: (params: { ecosystem?: 'evm' | 'solana'; tx?: Record<string, unknown>; serializedTxBase64?: string } & ProviderNetworkRequest) =>
-    request({ method: 'wallet_signTransaction', params }),
+    request({ method: SIGN_TRANSACTION_METHOD, params }),
   sendTransaction: (params: (ProviderSendCoinParams | ProviderSendEvmTransactionParams) & ProviderNetworkRequest) =>
-    request({ method: 'wallet_sendTransaction', params }),
+    request({ method: SEND_TRANSACTION_METHOD, params }),
   sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string } & ProviderNetworkRequest) =>
-    request({ method: 'wallet_sendAsset', params }),
+    request({ method: SEND_ASSET_METHOD, params }),
   sdkInfo: async (params?: ProviderNetworkRequest) => {
     const [stateSnapshot, capabilities, networks] = await Promise.all([
       request({ method: PROVIDER_STATE_METHOD, params }),
-      request({ method: 'wallet_getCapabilities', params }),
-      request({ method: 'wallet_getNetworks' })
+      request({ method: GET_CAPABILITIES_METHOD, params }),
+      request({ method: GET_NETWORKS_METHOD })
     ])
     return {
       provider: 'metayoshi',
@@ -470,7 +485,7 @@ const provider = {
   
   // Multi-chain methods
   switchNetwork: (networkId: string) => {
-    return request({ method: 'wallet_switchNetwork', params: { networkId } })
+    return request({ method: SWITCH_NETWORK_METHOD, params: { networkId } })
   },
   
   // Metadata
@@ -510,7 +525,7 @@ const solanaProvider = {
     return state.connected
   },
   connect: async () => {
-    const accounts = await request({ method: 'wallet_requestAccounts', params: { networkId: 'sol' } })
+    const accounts = await request({ method: PROVIDER_ENABLE_METHOD, params: { networkId: 'sol' } })
     const address = Array.isArray(accounts) ? String(accounts[0] || '').trim() : String(state.selectedAddress || '').trim()
     const payload = { publicKey: createPublicKeyLike(address) }
     emit('connect', payload)
@@ -524,7 +539,7 @@ const solanaProvider = {
   },
   signMessage: async (message: Uint8Array | ArrayBuffer | number[]) => {
     const result = await request({
-      method: 'wallet_signMessage',
+      method: SIGN_MESSAGE_METHOD,
       params: {
         ecosystem: 'solana',
         messageBase64: toBase64(normalizeBytesLike(message))
@@ -537,7 +552,7 @@ const solanaProvider = {
   },
   signTransaction: async (transaction: any) => {
     const result = await request({
-      method: 'wallet_signTransaction',
+      method: SIGN_TRANSACTION_METHOD,
       params: {
         ecosystem: 'solana',
         serializedTxBase64: serializeSolanaTransactionLike(transaction)
@@ -547,7 +562,7 @@ const solanaProvider = {
   },
   signAllTransactions: async (transactions: any[]) => {
     const result = await request({
-      method: 'wallet_signAllTransactions',
+      method: SIGN_ALL_TRANSACTIONS_METHOD,
       params: {
         serializedTxsBase64: Array.isArray(transactions) ? transactions.map((tx) => serializeSolanaTransactionLike(tx)) : []
       }
@@ -557,7 +572,7 @@ const solanaProvider = {
   },
   signAndSendTransaction: async (transaction: any) => {
     const result = await request({
-      method: 'wallet_signAndSendTransaction',
+      method: SIGN_AND_SEND_TRANSACTION_METHOD,
       params: {
         ecosystem: 'solana',
         serializedTxBase64: serializeSolanaTransactionLike(transaction)
@@ -575,10 +590,10 @@ const solanaProvider = {
 const keplrProvider = {
   isMetaYoshi: true,
   enable: async (_chainId: string | string[]) => {
-    await request({ method: 'wallet_requestAccounts', params: { networkId: 'cosmos' } })
+    await request({ method: PROVIDER_ENABLE_METHOD, params: { networkId: 'cosmos' } })
   },
   getKey: async (_chainId: string) => {
-    const key = await request({ method: 'wallet_cosmosGetKey', params: { networkId: 'cosmos' } })
+    const key = await request({ method: COSMOS_GET_KEY_METHOD, params: { networkId: 'cosmos' } })
     const bech32Address = String(key?.bech32Address || key?.address || '')
     return {
       name: 'MetaYoshi',
@@ -590,12 +605,12 @@ const keplrProvider = {
   },
   signDirect: async (_chainId: string, signer: string, signDoc: any) =>
     request({
-      method: 'wallet_cosmosSignDirect',
+      method: COSMOS_SIGN_DIRECT_METHOD,
       params: { networkId: 'cosmos', signerAddress: signer, signDoc }
     }),
   signAmino: async (_chainId: string, signer: string, signDoc: any) =>
     request({
-      method: 'wallet_cosmosSignAmino',
+      method: COSMOS_SIGN_AMINO_METHOD,
       params: { networkId: 'cosmos', signerAddress: signer, signDoc }
     }),
   sendTx: async (_chainId: string, tx: Uint8Array | ArrayBuffer | number[], mode: 'sync' | 'async' | 'block' = 'sync') => {
@@ -603,7 +618,7 @@ const keplrProvider = {
       ? 'BROADCAST_MODE_BLOCK'
       : (mode === 'async' ? 'BROADCAST_MODE_ASYNC' : 'BROADCAST_MODE_SYNC')
     const result = await request({
-      method: 'wallet_cosmosSendTx',
+      method: COSMOS_SEND_TX_METHOD,
       params: {
         networkId: 'cosmos',
         txBytesBase64: toBase64(normalizeBytesLike(tx)),
@@ -622,7 +637,7 @@ const keplrProvider = {
   },
   getOfflineSigner: (_chainId: string) => ({
     getAccounts: async () => {
-      const key = await request({ method: 'wallet_cosmosGetKey', params: { networkId: 'cosmos' } })
+      const key = await request({ method: COSMOS_GET_KEY_METHOD, params: { networkId: 'cosmos' } })
       return [{
         address: String(key?.bech32Address || key?.address || ''),
         algo: String(key?.algo || 'secp256k1'),
@@ -641,7 +656,35 @@ const keplrProvider = {
   })
 }
 
-// Inject provider into window
+Object.defineProperties(provider, {
+  evm: {
+    value: ethereumProvider,
+    writable: false,
+    configurable: false
+  },
+  ethereum: {
+    value: ethereumProvider,
+    writable: false,
+    configurable: false
+  },
+  solana: {
+    value: solanaProvider,
+    writable: false,
+    configurable: false
+  },
+  keplr: {
+    value: keplrProvider,
+    writable: false,
+    configurable: false
+  },
+  cosmos: {
+    value: keplrProvider,
+    writable: false,
+    configurable: false
+  }
+})
+
+// Inject only proprietary globals to avoid colliding with other extension wallets.
 if (!(window as any).metayoshi) {
   Object.defineProperty(window, 'metayoshi', {
     value: provider,
@@ -653,30 +696,6 @@ if (!(window as any).metayoshi) {
 if (!(window as any).rtm) {
   Object.defineProperty(window, 'rtm', {
     value: provider,
-    writable: false,
-    configurable: false
-  })
-}
-
-if (!(window as any).ethereum) {
-  Object.defineProperty(window, 'ethereum', {
-    value: ethereumProvider,
-    writable: false,
-    configurable: false
-  })
-}
-
-if (!(window as any).solana) {
-  Object.defineProperty(window, 'solana', {
-    value: solanaProvider,
-    writable: false,
-    configurable: false
-  })
-}
-
-if (!(window as any).keplr) {
-  Object.defineProperty(window, 'keplr', {
-    value: keplrProvider,
     writable: false,
     configurable: false
   })

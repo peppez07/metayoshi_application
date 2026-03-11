@@ -89,6 +89,18 @@
   <h1>🦖 MetaYoshi Wallet DApp Example</h1>
   
   <div class="container">
+    <h2>Provider Model</h2>
+    <div class="status info">
+      MetaYoshi injects only <code>window.metayoshi</code> and <code>window.rtm</code>.
+      Chain adapters remain available under <code>window.metayoshi.evm</code>,
+      <code>window.metayoshi.solana</code>, and <code>window.metayoshi.cosmos</code>.
+      Compatibility aliases such as <code>window.metayoshi.ethereum</code> and
+      <code>window.metayoshi.keplr</code> stay inside the MetaYoshi namespace to avoid
+      conflicts with other browser wallets.
+    </div>
+  </div>
+
+  <div class="container">
     <h2>Connection</h2>
     <div id="connectionStatus" class="status info">Checking MetaYoshi Wallet...</div>
     <button id="connectBtn" disabled>Connect Wallet</button>

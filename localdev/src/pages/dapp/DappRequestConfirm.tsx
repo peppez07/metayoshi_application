@@ -259,6 +259,15 @@ const DappRequestConfirm: React.FC = () => {
     }
   }, [requestedId])
 
+  useEffect(() => {
+    if (!pendingRequest) return
+    const isWalletSendRoute =
+      pendingRequest.method === 'wallet_sendAsset'
+      || (pendingRequest.method === 'wallet_sendTransaction' && !requestIsEvmTx)
+    if (!isWalletSendRoute) return
+    navigate(`/tx/confirm?dappRequest=1&id=${encodeURIComponent(pendingRequest.id)}`, { replace: true })
+  }, [navigate, pendingRequest, requestIsEvmTx])
+
   const rejectRequest = async (): Promise<void> => {
     if (canUseChromeStorage() && pendingRequest) {
       await chrome.storage.local.set({

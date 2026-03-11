@@ -103,10 +103,13 @@ const WalletShellGate = () => {
 }
 
 const TxRouteGate = ({ element }: { element: ReactElement }) => {
+  const location = useLocation()
   const { isLocked, networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
+  const isDappTxRoute = new URLSearchParams(location.search).get('dappRequest') === '1'
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
   const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
+  if (isDappTxRoute) return element
   if (isLocked) return <Navigate to="/unlock" replace />
   if (!caps.features.nativeSend && !caps.features.assetSend) return <Navigate to="/wallet/activity" replace />
   return element
