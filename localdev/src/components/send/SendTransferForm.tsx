@@ -10,6 +10,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
+import { estimateTransactionFeePreview, type TransactionFeePreviewSource } from '../../lib/transactionFeePreview'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -30,6 +31,11 @@ function clampDecimalInput(value: string, maxDecimals: number): string {
     return `${left}.${fraction}`
   }
   return whole
+}
+
+function parseCoinAmount(value: unknown): number {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 type NftQuantityMode = 'not-nft' | 'erc721-fixed' | 'erc1155-integer' | 'nft-fixed'
@@ -58,6 +64,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     donationPercent,
     fetchNetworkAssets,
     fetchNetworkFiat,
+    getNetworkModelPreferences,
     accountNetworkFiatNative,
     accountNetworkFiatAssets,
     isConnected,
@@ -79,7 +86,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
   const nativeInputDecimals = isNative && activeModelId === 'cosmos' ? 6 : 8
   const available = Number(item.rawAmount || 0) / 1e8
-  const estimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
+  const fallbackEstimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
+  const modelPreferences = getNetworkModelPreferences(activeNetworkId)
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const availableFiatValue = isNative
     ? accountNetworkFiatNative?.[fiatScopeKey]?.usd
@@ -90,6 +98,17 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const [amount, setAmount] = useState('')
   const [memo, setMemo] = useState('')
   const [error, setError] = useState('')
+  const [estimatedNativeFee, setEstimatedNativeFee] = useState(fallbackEstimatedNativeFee)
+  const [estimatedNativeFeeSource, setEstimatedNativeFeeSource] = useState<TransactionFeePreviewSource>('fallback')
+  const [isEstimatingFee, setIsEstimatingFee] = useState(false)
+
+  const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
+    || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
+    || ''
+  const nativeBalance = parseCoinAmount(
+    activeAccount?.networkBalances?.[activeNetworkId]
+    ?? activeAccount?.balance
+  )
 
   useEffect(() => {
     setToAddress('')
@@ -111,6 +130,44 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     void hydrateFiat()
     return () => { cancelled = true }
   }, [item.id, item.requestType, fetchNetworkAssets, fetchNetworkFiat])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      const previewAmount = isFixedOneMode ? '1' : amount
+      const fallback = estimateNetworkFeeUi(activeNetwork)
+      setIsEstimatingFee(activeNetwork.coinType === 'EVM')
+
+      const preview = await estimateTransactionFeePreview({
+        network: activeNetwork,
+        fromAddress,
+        toAddress,
+        amount: previewAmount,
+        assetId: String(item.assetId || '').trim() || undefined,
+        assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
+        isAssetTransfer: !isNative,
+        gasLane: modelPreferences.evmGasLane
+      })
+
+      if (cancelled) return
+      setEstimatedNativeFee(preview.fee || fallback)
+      setEstimatedNativeFeeSource(preview.source)
+      setIsEstimatingFee(false)
+    }
+
+    void run()
+    return () => { cancelled = true }
+  }, [
+    activeNetwork,
+    amount,
+    fromAddress,
+    isFixedOneMode,
+    isNative,
+    item.assetId,
+    modelPreferences.evmGasLane,
+    toAddress
+  ])
 
   const validateAmount = (): string | null => {
     if (isFixedOneMode) {
@@ -176,6 +233,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
       setAmount(String(Math.max(0, Math.floor(available))))
       return
     }
+    if (isNative) {
+      setAmount(formatUnits(Math.max(0, available - estimatedNativeFee), nativeInputDecimals))
+      return
+    }
     setAmount(formatUnits(available, nativeInputDecimals))
   }
 
@@ -203,11 +264,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     const normalizedAmount = validateAmount()
     if (!normalizedAmount) return
 
-    const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
-      || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
-      || ''
-
     if (isNative) {
+      const normalizedAmountValue = Number(normalizedAmount)
+      if (Number.isFinite(normalizedAmountValue) && normalizedAmountValue + estimatedNativeFee > available + 1e-12) {
+        setError(`Insufficient ${activeNetwork.symbol} after reserving the estimated network fee.`)
+        return
+      }
       const txState: Record<string, unknown> = {
         requestType: 'native',
         to: toAddress.trim(),
@@ -254,6 +316,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     const assetId = String(item.assetId || '').trim()
     if (!assetId) {
       setError('Asset id missing from selected send item')
+      return
+    }
+    if (nativeBalance + 1e-12 < estimatedNativeFee) {
+      setError(`Insufficient ${activeNetwork.symbol} for the estimated network fee.`)
       return
     }
 
@@ -371,7 +437,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <p className="text-[10px] text-gray-600 leading-relaxed">
             {isNative
               ? `Estimated required fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}.`
-              : `Asset transfer fee is paid in native ${activeNetwork.symbol}. Keep native balance for fees.`}
+              : `Estimated network fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}. Asset transfer fee is paid in native ${activeNetwork.symbol}.`}
+            <span className="block mt-1">
+              {isEstimatingFee
+                ? 'Updating from network...'
+                : (estimatedNativeFeeSource === 'live' ? 'Live network quote.' : 'Fallback estimate.')}
+            </span>
           </p>
         </div>
 

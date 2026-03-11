@@ -88,6 +88,71 @@ function withGlobalBridgeCredentials(network: Network): Network {
 export const ALL_NETWORKS: Network[] = ALL_COIN_MODULES
   .map((coin) => coin.createNetwork(runtimeContext))
   .map(withGlobalBridgeCredentials)
+
+function validateEnabledNetworkIds(enabledIds: Set<string>, knownIds: Set<string>): void {
+  if (enabledIds.size <= 0) {
+    throw new Error('No enabled networks were resolved from the bundled coin registry.')
+  }
+  for (const id of enabledIds) {
+    if (!knownIds.has(id)) {
+      throw new Error(`Enabled network id has no matching coin module: ${id}`)
+    }
+  }
+}
+
+function validateConfiguredNetworks(networks: Network[]): void {
+  const seenIds = new Set<string>()
+
+  for (const network of networks) {
+    const id = String(network?.id || '').trim()
+    const name = String(network?.name || '').trim()
+    const symbol = String(network?.symbol || '').trim()
+    const rpcUrl = String(network?.rpcUrl || '').trim()
+    const registeredCoinModule = MODULE_BY_NETWORK_ID.get(id)
+
+    if (!id) throw new Error('Configured network is missing `id`')
+    if (seenIds.has(id)) throw new Error(`Duplicate configured network id: ${id}`)
+    seenIds.add(id)
+
+    if (!registeredCoinModule) {
+      throw new Error(`Configured network ${id} has no registered coin module`)
+    }
+    if (!name) throw new Error(`Configured network ${id} is missing \`name\``)
+    if (!symbol) throw new Error(`Configured network ${id} is missing \`symbol\``)
+    if (!rpcUrl) throw new Error(`Configured network ${id} is missing \`rpcUrl\``)
+    if (!network.capabilities) throw new Error(`Configured network ${id} is missing \`capabilities\``)
+
+    if (network.coinType === 'UTXO') {
+      const coinSymbol = String(network.coinSymbol || '').trim().toUpperCase()
+      const feePerByte = Number(network.feePerByte)
+      if (!coinSymbol) throw new Error(`UTXO network ${id} is missing \`coinSymbol\``)
+      if (!UTXO_ADDRESS_SPECS[coinSymbol]) {
+        throw new Error(`UTXO network ${id} has no registered address spec for ${coinSymbol}`)
+      }
+      if (!Number.isFinite(feePerByte) || feePerByte <= 0) {
+        throw new Error(`UTXO network ${id} is missing a valid \`feePerByte\``)
+      }
+    }
+
+    if (network.coinType === 'EVM') {
+      if (!Number.isInteger(network.chainId) || Number(network.chainId) <= 0) {
+        throw new Error(`EVM network ${id} is missing a valid numeric \`chainId\``)
+      }
+      if (!String(network.serverCoinId || '').trim()) {
+        throw new Error(`EVM network ${id} is missing \`serverCoinId\``)
+      }
+    }
+
+    if (network.coinType === 'COSMOS') {
+      if (!String(network.runtimeModelId || '').trim()) {
+        throw new Error(`Cosmos network ${id} is missing \`runtimeModelId\``)
+      }
+    }
+  }
+}
+
+validateEnabledNetworkIds(ENABLED_NETWORK_IDS, ALL_COIN_IDS)
+validateConfiguredNetworks(ALL_NETWORKS)
 export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => ENABLED_NETWORK_IDS.has(network.id))
 
 export const DEFAULT_ACTIVE_NETWORK_ID =
