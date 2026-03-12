@@ -1,21 +1,32 @@
 import { ethers } from 'ethers'
 import type { Network } from '../coins'
-import type { EvmGasLane } from './coinFeatureModel'
+import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
-import { callBridgeMethod, type UtxoRpcConfig } from './utxoRpc'
+import {
+  callBridgeMethod,
+  getAddressUtxos,
+  listUtxoUnspent,
+  scanAddressUnspent,
+  type UtxoRpcConfig,
+  type UtxoUnspent
+} from './utxoRpc'
+import { resolveRuntimeModelId } from './runtimeModel'
 
 export type TransactionFeePreviewSource = 'live' | 'fallback'
 
 export interface TransactionFeePreviewResult {
   fee: number
   source: TransactionFeePreviewSource
+  debugLabel: string
+  debugDetails?: string
 }
 
 type PreviewNetwork = Pick<
   Network,
   | 'id'
   | 'symbol'
+  | 'coinSymbol'
   | 'rpcUrl'
   | 'rpcWallet'
   | 'rpcUsername'
@@ -43,6 +54,8 @@ export interface EstimateTransactionFeePreviewInput {
   maxPriorityFeePerGas?: string
   type?: 2
   gasLane?: EvmGasLane
+  utxoFeePreset?: UtxoFeePreset
+  utxoInputStrategy?: UtxoInputStrategy
 }
 
 const EVM_ERC20_IFACE = new ethers.Interface([
@@ -55,11 +68,24 @@ const EVM_ERC721_IFACE = new ethers.Interface([
 const EVM_ERC1155_IFACE = new ethers.Interface([
   'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)'
 ])
+const UTXO_FEE_RATE_CACHE_TTL_MS = 15_000
+const utxoFeeRateCache = new Map<string, { checkedAt: number; feePerByteSats: number }>()
+
+interface UtxoFeeRateResolution {
+  feePerByteSats: number
+  source: 'cache' | 'estimatesmartfee' | 'getmempoolinfo' | 'getnetworkinfo' | 'configured-fee'
+}
+
+interface UtxoFeePreviewResult {
+  fee: number
+  debugLabel: string
+  debugDetails: string
+}
 
 function buildRpcPreviewConfig(network: PreviewNetwork): UtxoRpcConfig {
   return {
     networkId: network.id,
-    coinSymbol: network.symbol,
+    coinSymbol: network.coinSymbol || network.symbol,
     rpcUrl: network.rpcUrl,
     rpcWallet: network.rpcWallet,
     rpcUsername: network.rpcUsername,
@@ -95,6 +121,205 @@ function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
   const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
   if (!m) return ''
   return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
+}
+
+function supportsAddressIndex(coinSymbol?: string): boolean {
+  const symbol = String(coinSymbol || '').trim().toUpperCase()
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function compactPreviewError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
+  const compact = message.replace(/\s+/g, ' ').trim()
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact
+}
+
+function resolveCachedUtxoFeeRate(cacheKey: string): number | null {
+  const cached = utxoFeeRateCache.get(cacheKey)
+  if (!cached) return null
+  if (cached.checkedAt + UTXO_FEE_RATE_CACHE_TTL_MS <= Date.now()) {
+    utxoFeeRateCache.delete(cacheKey)
+    return null
+  }
+  return cached.feePerByteSats
+}
+
+function writeCachedUtxoFeeRate(cacheKey: string, feePerByteSats: number): number {
+  const normalized = Math.max(1, Math.round(Number(feePerByteSats) || 0))
+  utxoFeeRateCache.set(cacheKey, {
+    checkedAt: Date.now(),
+    feePerByteSats: normalized
+  })
+  return normalized
+}
+
+async function resolveUtxoFeeRateSats(rpcConfig: UtxoRpcConfig, network: PreviewNetwork): Promise<UtxoFeeRateResolution> {
+  const cacheKey = `${String(network.id || '').trim().toLowerCase()}::${String(rpcConfig.bridgeUrl || rpcConfig.rpcUrl || '').trim().toLowerCase()}`
+  const cached = resolveCachedUtxoFeeRate(cacheKey)
+  if (cached !== null) {
+    return { feePerByteSats: cached, source: 'cache' }
+  }
+
+  try {
+    const smartFee = await callBridgeMethod(rpcConfig, 'estimatesmartfee', [6])
+    const feeRatePerKb = parseFiniteNumber(
+      (smartFee as any)?.feerate
+      ?? (smartFee as any)?.result?.feerate
+      ?? (smartFee as any)?.result?.result?.feerate
+    )
+    if (feeRatePerKb && feeRatePerKb > 0) {
+      return {
+        feePerByteSats: writeCachedUtxoFeeRate(cacheKey, Math.max(1, Math.round((feeRatePerKb * 1e8) / 1000))),
+        source: 'estimatesmartfee'
+      }
+    }
+  } catch {
+    // Some bridges/nodes do not expose estimatesmartfee.
+  }
+
+  for (const method of ['getmempoolinfo', 'getnetworkinfo']) {
+    try {
+      const raw = await callBridgeMethod(rpcConfig, method, [])
+      const feeRatePerKb = parseFiniteNumber(
+        (raw as any)?.mempoolminfee
+        ?? (raw as any)?.minrelaytxfee
+        ?? (raw as any)?.relayfee
+        ?? (raw as any)?.paytxfee
+        ?? (raw as any)?.result?.mempoolminfee
+        ?? (raw as any)?.result?.minrelaytxfee
+        ?? (raw as any)?.result?.relayfee
+        ?? (raw as any)?.result?.paytxfee
+        ?? (raw as any)?.result?.result?.mempoolminfee
+        ?? (raw as any)?.result?.result?.minrelaytxfee
+        ?? (raw as any)?.result?.result?.relayfee
+        ?? (raw as any)?.result?.result?.paytxfee
+      )
+      if (feeRatePerKb && feeRatePerKb > 0) {
+        return {
+          feePerByteSats: writeCachedUtxoFeeRate(cacheKey, Math.max(1, Math.round((feeRatePerKb * 1e8) / 1000))),
+          source: method as 'getmempoolinfo' | 'getnetworkinfo'
+        }
+      }
+    } catch {
+      // Keep falling back until one endpoint works.
+    }
+  }
+
+  const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
+  return {
+    feePerByteSats: writeCachedUtxoFeeRate(cacheKey, Math.max(1, Math.round(rawFeePerByteCoins * 1e8))),
+    source: 'configured-fee'
+  }
+}
+
+async function estimateUtxoNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcConfig = buildRpcPreviewConfig(input.network)
+  const senderAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const amountText = String(input.amount || '').trim()
+  const amountCoins = Number(amountText)
+  const coinSymbol = String(input.network.coinSymbol || input.network.symbol || '').trim().toUpperCase()
+
+  if (!senderAddress || !toAddress) throw new Error('Sender and recipient are required for UTXO fee estimation')
+  if (!Number.isFinite(amountCoins) || amountCoins <= 0) throw new Error('Amount must be greater than 0')
+
+  let unspent: UtxoUnspent[] = []
+  if (supportsAddressIndex(coinSymbol)) {
+    try {
+      const byIndex = await getAddressUtxos(rpcConfig, senderAddress, 1)
+      if (byIndex.length > 0) unspent = byIndex
+    } catch {
+      // Address index may be unavailable on some nodes.
+    }
+  }
+  if (unspent.length === 0) {
+    try {
+      const byWallet = await listUtxoUnspent(rpcConfig, senderAddress, 1)
+      if (byWallet.length > 0) unspent = byWallet
+    } catch {
+      // Watch-only wallet coverage may be unavailable.
+    }
+  }
+  if (unspent.length === 0) {
+    const scanned = await scanAddressUnspent(rpcConfig, senderAddress)
+    if (scanned.length > 0) unspent = scanned
+  }
+  if (unspent.length === 0) {
+    throw new Error(`No confirmed spendable UTXOs found for address ${senderAddress}`)
+  }
+
+  if (unspent.length > 0) {
+    const normalizedSender = senderAddress
+    unspent = unspent.filter((utxo) => String(utxo.address || normalizedSender).trim() === normalizedSender)
+  }
+  if (unspent.length === 0) {
+    throw new Error(`No confirmed spendable UTXOs remain for address ${senderAddress}`)
+  }
+
+  const sat = (coins: number): number => Math.round(Number(coins) * 1e8)
+  const coins8 = (sats: number): number => Number((sats / 1e8).toFixed(8))
+  const feeRateResolution = await resolveUtxoFeeRateSats(rpcConfig, input.network)
+  let feePerByteSats = feeRateResolution.feePerByteSats
+  if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+
+  const feePreset = String(input.utxoFeePreset || 'fast').trim().toLowerCase()
+  if (feePreset === 'cheap') feePerByteSats = Math.max(1, Math.floor((feePerByteSats * 80) / 100))
+  if (feePreset === 'premium') feePerByteSats = Math.max(1, Math.ceil((feePerByteSats * 145) / 100))
+
+  const inputStrategy = String(input.utxoInputStrategy || 'minimize-inputs').trim().toLowerCase()
+  const sorted = [...unspent].sort((a, b) => (
+    inputStrategy === 'consolidate-fragments'
+      ? a.amount - b.amount
+      : b.amount - a.amount
+  ))
+
+  const OVERHEAD_BYTES = 10
+  const INPUT_BYTES = 148
+  const OUTPUT_BYTES = 34
+  const outputsWithoutChange = 1
+  const selectedUtxos: UtxoUnspent[] = []
+  let accumulatedSats = 0
+  let amountToSendSats = sat(amountCoins)
+  const totalAvailableSats = sorted.reduce((sum, utxo) => sum + sat(utxo.amount), 0)
+  const isRtmSelfSend = resolveRuntimeModelId(input.network as Network) === 'rtm' && toAddress === senderAddress
+
+  for (const utxo of sorted) {
+    selectedUtxos.push(utxo)
+    accumulatedSats += sat(utxo.amount)
+    const txBytesTry = OVERHEAD_BYTES + INPUT_BYTES * selectedUtxos.length + OUTPUT_BYTES * (outputsWithoutChange + 1)
+    const estimatedFeeTry = txBytesTry * feePerByteSats
+    if (accumulatedSats >= amountToSendSats + estimatedFeeTry) break
+    if (selectedUtxos.length >= 25) break
+  }
+
+  if (selectedUtxos.length === 0) {
+    throw new Error('Unable to select spendable UTXOs for fee estimation')
+  }
+
+  const txBytes = OVERHEAD_BYTES + INPUT_BYTES * selectedUtxos.length + OUTPUT_BYTES * (outputsWithoutChange + 1)
+  const estimatedFeeSats = txBytes * feePerByteSats
+
+  if (isRtmSelfSend && amountToSendSats + estimatedFeeSats > totalAvailableSats) {
+    amountToSendSats = Math.max(0, totalAvailableSats - estimatedFeeSats)
+  }
+  if (amountToSendSats <= 0) {
+    throw new Error(`Amount is too low after network fee for ${coinSymbol || input.network.symbol}`)
+  }
+
+  return {
+    fee: coins8(estimatedFeeSats),
+    debugLabel: `UTXO live quote via ${feeRateResolution.source}`,
+    debugDetails: `${input.network.symbol} | utxos=${selectedUtxos.length} | feeRate=${feePerByteSats} sat/B | preset=${feePreset} | strategy=${inputStrategy}`
+  }
 }
 
 function estimateFeeFromResolvedEvmQuote(
@@ -220,19 +445,45 @@ export async function estimateTransactionFeePreview(
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
 
-  if (input.network.coinType !== 'EVM' || !fromAddress || (!toAddress && !String(input.dataHex || '').trim())) {
-    return { fee: fallback, source: 'fallback' }
+  if (!fromAddress) {
+    return {
+      fee: fallback,
+      source: 'fallback',
+      debugLabel: 'Fallback estimate',
+      debugDetails: 'Missing sender address for fee preview.'
+    }
   }
 
   try {
-    const estimatedFeeWei = input.isAssetTransfer
-      ? await estimateEvmAssetTransferFee(input)
-      : await estimateEvmNativeTransferFee(input)
-    return {
-      fee: Number(ethers.formatEther(estimatedFeeWei)),
-      source: 'live'
+    if (input.network.coinType === 'EVM' && (toAddress || String(input.dataHex || '').trim())) {
+      const estimatedFeeWei = input.isAssetTransfer
+        ? await estimateEvmAssetTransferFee(input)
+        : await estimateEvmNativeTransferFee(input)
+      return {
+        fee: Number(ethers.formatEther(estimatedFeeWei)),
+        source: 'live',
+        debugLabel: input.isAssetTransfer ? 'EVM live asset quote' : 'EVM live native quote',
+        debugDetails: `${input.network.symbol} | lane=${String(input.gasLane || 'balanced')}`
+      }
     }
-  } catch {
-    return { fee: fallback, source: 'fallback' }
+
+    if (input.network.coinType === 'UTXO' && !input.isAssetTransfer && toAddress) {
+      const preview = await estimateUtxoNativeTransferFee(input)
+      return { fee: preview.fee, source: 'live', debugLabel: preview.debugLabel, debugDetails: preview.debugDetails }
+    }
+
+    return {
+      fee: fallback,
+      source: 'fallback',
+      debugLabel: 'Fallback estimate',
+      debugDetails: `No live preview path for ${input.network.coinType}${input.isAssetTransfer ? ' asset send' : ' native send'}.`
+    }
+  } catch (error) {
+    return {
+      fee: fallback,
+      source: 'fallback',
+      debugLabel: 'Fallback estimate',
+      debugDetails: compactPreviewError(error)
+    }
   }
 }

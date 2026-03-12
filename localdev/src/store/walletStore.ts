@@ -30,6 +30,19 @@ import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, re
 import { MIN_SYNC_PERCENT_FOR_SEND } from '../lib/sendSyncPolicy'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import {
+  cacheMetayoshiServerCatalogSnapshot,
+  initializeCatalogRepository,
+  readActivityHistoryRecords,
+  readCachedAssetSnapshot,
+  readCachedFiatSnapshot,
+  readCatalogTrackedEvmNfts,
+  readCatalogTrackedEvmTokens,
+  readCachedMetayoshiServerCatalogSnapshot,
+  upsertActivityHistoryRecord,
+  writeCachedAssetSnapshot,
+  writeCachedFiatSnapshot
+} from '../lib/catalogDb/repository'
+import {
   normalizeNetworkModelPreferences,
   normalizeNetworkModelPreferencesRecord,
   type NetworkModelPreferences
@@ -255,7 +268,8 @@ interface WalletState {
   /** Account+network scoped token/NFT fiat values keyed by asset id. */
   accountNetworkFiatAssets: Record<string, Record<string, FiatValueMap>>
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
-  serverCoinCatalog: ServerCoinCatalogItem[]
+  /** Monotonic token to refresh async catalog queries after server sync. */
+  catalogQueryNonce: number
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
   sendListPreferences: Record<string, SendListPreferenceBucket>
   /** Per-network execution preferences for model-specific send controls. */
@@ -307,6 +321,8 @@ interface WalletState {
   setDonationPercent: (percent: number) => void
   updateLastActive: () => void
   checkAutolock: () => void
+  hydrateCatalogRepository: () => Promise<void>
+  hydrateActivityFromRepository: () => Promise<void>
   
   addActivity: (item: Activity) => void
   trackActivityTransactionStatus: (params: { txid: string; networkId?: string }) => void
@@ -1379,29 +1395,6 @@ async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeMod
   return merged
 }
 
-function resolveCatalogEvmTrackedTokens(
-  catalog: ServerCoinCatalogItem[],
-  modelId: string
-): EvmTrackedToken[] {
-  const normalizedModel = String(modelId || '').trim().toLowerCase()
-  if (!normalizedModel) return []
-  const byAddress = new Map<string, EvmTrackedToken>()
-  for (const item of catalog) {
-    if (item.kind !== 'asset') continue
-    if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
-    const candidate = String(item.contractAddress || '').trim()
-    const address = normalizeEvmAddressLoose(candidate)
-    if (!address) continue
-    if (byAddress.has(address)) continue
-    byAddress.set(address, {
-      address,
-      symbol: String(item.symbol || '').trim().toUpperCase() || address.slice(0, 6),
-      decimals: 18
-    })
-  }
-  return [...byAddress.values()]
-}
-
 function parseTrackedEvmNfts(raw: string): EvmTrackedNft[] {
   const entries = String(raw || '')
     .split(',')
@@ -1439,46 +1432,6 @@ function resolveTrackedEvmNfts(network: Pick<Network, 'id' | 'runtimeModelId'>):
   const byModel = parseTrackedEvmNfts(String((import.meta as any)?.env?.[`VITE_${modelId.toUpperCase()}_TRACKED_NFTS`] || ''))
   if (byModel.length > 0) return byModel
   return []
-}
-
-function resolveCatalogEvmTrackedNfts(
-  catalog: ServerCoinCatalogItem[],
-  modelId: string
-): EvmTrackedNft[] {
-  const normalizedModel = String(modelId || '').trim().toLowerCase()
-  if (!normalizedModel) return []
-  const out: EvmTrackedNft[] = []
-  const seen = new Set<string>()
-
-  for (const item of catalog) {
-    if (item.kind !== 'asset') continue
-    if (String(item.runtimeModelId || '').trim().toLowerCase() !== normalizedModel) continue
-    const address = String(item.contractAddress || '').trim()
-    const checksum = normalizeEvmAddressLoose(address)
-    if (!checksum) continue
-
-    const source = `${String(item.coinId || '')} ${String(item.name || '')}`
-    const tokenIdMatch = source.match(/(?:tokenid|token|id)\D*(0x[0-9a-f]+|\d+)/i) || source.match(/[#:/](0x[0-9a-f]+|\d+)/i)
-    const tokenId = String(tokenIdMatch?.[1] || '').trim()
-    if (!tokenId) continue
-
-    const standardHint: EvmNftStandard | 'auto' = /1155/i.test(source)
-      ? 'erc1155'
-      : /721/i.test(source)
-        ? 'erc721'
-        : 'auto'
-    const key = `${checksum}:${tokenId.toLowerCase()}`
-    if (seen.has(key)) continue
-    out.push({
-      address: checksum,
-      tokenId,
-      standard: standardHint,
-      label: String(item.symbol || item.name || '').trim() || undefined
-    })
-    seen.add(key)
-  }
-
-  return out
 }
 
 function tokenIdToBigInt(tokenId: string): bigint {
@@ -2554,6 +2507,23 @@ function normalizeServerCatalogSymbols(catalog: ServerCoinCatalogItem[]): Server
   })
 }
 
+function mergeActivityListsPreferLatest(...lists: Activity[][]): Activity[] {
+  const byKey = new Map<string, Activity>()
+  for (const list of lists) {
+    for (const item of list || []) {
+      const txid = String(item?.id || '').trim().toLowerCase()
+      const networkId = normalizeNetworkIdAlias(String(item?.networkId || '').trim()).toLowerCase()
+      if (!txid || !networkId) continue
+      const key = `${networkId}::${txid}`
+      const existing = byKey.get(key)
+      if (!existing || Number(item.timestamp || 0) >= Number(existing.timestamp || 0)) {
+        byKey.set(key, item)
+      }
+    }
+  }
+  return [...byKey.values()].sort((left, right) => right.timestamp - left.timestamp)
+}
+
 const TIDE_LEGACY_ADDRESS_SPEC = {
   bip44CoinType: 200,
   p2pkhVersion: 0x21
@@ -2683,6 +2653,34 @@ function removeLocalStorageSafe(name: string): void {
   }
 }
 
+async function readLegacyPersistedCatalogSnapshot(): Promise<{
+  networks: Network[] | null
+  catalog: ServerCoinCatalogItem[]
+} | null> {
+  try {
+    const raw = await extensionStateStorage.getItem(WALLET_STORAGE_KEY)
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw) as unknown
+    const envelope = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    const state = envelope && envelope.state && typeof envelope.state === 'object'
+      ? envelope.state as Record<string, unknown>
+      : envelope
+    if (!state || typeof state !== 'object') return null
+
+    const rawNetworks = Array.isArray(state.networks) ? state.networks as Network[] : []
+    const rawCatalog = Array.isArray(state.serverCoinCatalog) ? state.serverCoinCatalog as ServerCoinCatalogItem[] : []
+    if (rawNetworks.length === 0 && rawCatalog.length === 0) return null
+
+    return {
+      networks: rawNetworks.length > 0 ? normalizeNetworkListSymbols(rawNetworks) : null,
+      catalog: normalizeServerCatalogSymbols(rawCatalog)
+    }
+  } catch {
+    return null
+  }
+}
+
 const extensionStateStorage: StateStorage = {
   getItem: async (name) => {
     if (hasChromeStorageLocal()) {
@@ -2775,7 +2773,7 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkFiatTotals: {},
       accountNetworkFiatNative: {},
       accountNetworkFiatAssets: {},
-      serverCoinCatalog: [],
+      catalogQueryNonce: 0,
       sendListPreferences: {},
       networkModelPreferences: {},
       authorizedSites: [],
@@ -3163,6 +3161,30 @@ export const useWalletStore = create<WalletState>()(
               }))
               return
             }
+            const repositoryCached = await readCachedFiatSnapshot({
+              accountId: requestAccountId,
+              networkId: requestNetworkId,
+              address
+            }).catch(() => null)
+            if (repositoryCached) {
+              const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
+              set((state) => ({
+                accountNetworkFiatTotals: { ...state.accountNetworkFiatTotals, [scopeKey]: repositoryCached.totals },
+                accountNetworkFiatNative: { ...state.accountNetworkFiatNative, [scopeKey]: repositoryCached.native },
+                accountNetworkFiatAssets: { ...state.accountNetworkFiatAssets, [scopeKey]: repositoryCached.assets }
+              }))
+              networkFiatCache.get(
+                cacheKey,
+                async () => ({
+                  totals: repositoryCached.totals,
+                  native: repositoryCached.native,
+                  assets: repositoryCached.assets
+                }),
+                undefined,
+                { force: true }
+              ).catch(() => {})
+              return
+            }
           }
 
           const requestAddress = await normalizeServerAddress(network, address)
@@ -3213,6 +3235,15 @@ export const useWalletStore = create<WalletState>()(
             undefined,
             { force: true }
           ).catch(() => {})
+          void writeCachedFiatSnapshot({
+            accountId: requestAccountId,
+            networkId: requestNetworkId,
+            address,
+            fetchedAt: Date.now(),
+            totals: hydratedBuckets.totals,
+            native: hydratedBuckets.native,
+            assets: hydratedBuckets.assets
+          }).catch(() => {})
         } catch (error) {
           setNetworkFiatFailureCooldown(cacheKey)
           console.warn(`[${network.symbol}] fetchNetworkFiat failed for ${requestNetworkId} (${address}).`, error)
@@ -3230,7 +3261,6 @@ export const useWalletStore = create<WalletState>()(
           activeNetworkId,
           accounts,
           activeAccountId,
-          serverCoinCatalog,
           activity,
           useLocalRpc: ulr,
           localRpcOverrides: lro
@@ -3261,25 +3291,63 @@ export const useWalletStore = create<WalletState>()(
         let resolveInFlight: (() => void) | null = null
         const inFlightSignal = new Promise<void>((resolve) => { resolveInFlight = resolve })
         networkAssetsInFlightByKey.set(cacheKey, inFlightSignal)
+        const applyAssetSnapshot = (payload: ScopedAssetBuckets): void => {
+          set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, payload))
+          networkAssetsCache.get(
+            cacheKey,
+            async () => ({
+              assets: payload.assets,
+              logos: payload.logos,
+              labels: payload.labels,
+              evmNfts: payload.evmNfts
+            }),
+            undefined,
+            { force: true }
+          ).catch(() => {})
+          void writeCachedAssetSnapshot({
+            accountId: requestAccountId,
+            networkId: requestNetworkId,
+            address,
+            fetchedAt: Date.now(),
+            assets: payload.assets,
+            logos: payload.logos,
+            labels: payload.labels,
+            evmNfts: payload.evmNfts
+          }).catch(() => {})
+        }
         try {
           const force = options?.force === true
           if (!force) {
             const cached = networkAssetsCache.peek(cacheKey)
              if (cached) {
-               set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+               applyAssetSnapshot({
                  assets: cached.assets,
                  logos: cached.logos,
                  labels: cached.labels,
                  evmNfts: cached.evmNfts || {}
-               }))
+               })
                return
              }
+            const repositoryCached = await readCachedAssetSnapshot({
+              accountId: requestAccountId,
+              networkId: requestNetworkId,
+              address
+            }).catch(() => null)
+            if (repositoryCached) {
+              applyAssetSnapshot({
+                assets: repositoryCached.assets,
+                logos: repositoryCached.logos,
+                labels: repositoryCached.labels,
+                evmNfts: repositoryCached.evmNfts as Record<string, EvmNftHolding>
+              })
+              return
+            }
           }
 
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
-          const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+          const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
           const chainId = resolveEvmChainId(net)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
           for (const token of mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)) {
@@ -3472,7 +3540,7 @@ export const useWalletStore = create<WalletState>()(
               assetKeyByContract.set(row.token.address, assetKey)
             }
 
-            const trackedNfts = [...resolveTrackedEvmNfts(net), ...resolveCatalogEvmTrackedNfts(serverCoinCatalog, modelId)]
+            const trackedNfts = [...resolveTrackedEvmNfts(net), ...await readCatalogTrackedEvmNfts(modelId).catch(() => [])]
             const nftByKey = new Map<string, EvmTrackedNft>()
             for (const nft of trackedNfts.slice(0, MAX_TRACKED_EVM_NFTS)) {
               if (!ethers.isAddress(nft.address)) continue
@@ -3658,19 +3726,12 @@ export const useWalletStore = create<WalletState>()(
               return
             }
 
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: fungibleAssetLogos,
               labels: fungibleAssetLabels,
               evmNfts: nftLookup
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: fungibleAssetLogos, labels: fungibleAssetLabels, evmNfts: nftLookup }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             if (isTransientBridgeFailure(err)) setTransientBridgeCooldown(activeNetworkId)
             console.warn(
@@ -3724,26 +3785,19 @@ export const useWalletStore = create<WalletState>()(
               labels[key] = baseSymbol
             }
 
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: {},
               labels,
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: {}, labels }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch {
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets: {},
               logos: {},
               labels: {},
               evmNfts: {}
-            }))
+            })
           }
           return
         }
@@ -3875,19 +3929,12 @@ export const useWalletStore = create<WalletState>()(
               }
             }
 
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos,
               labels,
               evmNfts: nftLookup
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos, labels, evmNfts: nftLookup }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Sui) failed:`, err)
           }
@@ -3933,19 +3980,12 @@ export const useWalletStore = create<WalletState>()(
               labels[tokenId] = String(row.symbol || row.name || tokenId).trim() || tokenId
             }
 
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: {},
               labels,
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: {}, labels }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Stellar) failed:`, err)
           }
@@ -3979,19 +4019,12 @@ export const useWalletStore = create<WalletState>()(
               if (!Number.isFinite(balNum) || balNum === 0) continue
               assets[`${currency}|${issuer}`] = Math.round(Math.abs(balNum) * 1e8)
             }
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: {},
               labels: {},
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: {}, labels: {} }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (XRP) failed:`, err)
           }
@@ -4022,19 +4055,12 @@ export const useWalletStore = create<WalletState>()(
               // UI asset renderer expects sat-like integer scale.
               assets[tokenId] = Math.round(qty * 1e8)
             }
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: {},
               labels: {},
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: {}, labels: {} }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cardano) failed:`, err)
           }
@@ -4083,19 +4109,12 @@ export const useWalletStore = create<WalletState>()(
               const label = String(row.symbol || row.name || tokenId).trim()
               if (label) labels[tokenId] = label
             }
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos: {},
               labels,
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos: {}, labels }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cosmos) failed:`, err)
           }
@@ -4213,19 +4232,12 @@ export const useWalletStore = create<WalletState>()(
               const logoUri = String(row.logoUri || info?.logoURI || '').trim()
               if (logoUri) logos[assetKey] = logoUri
             }
-            set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+            applyAssetSnapshot({
               assets,
               logos,
               labels,
               evmNfts: {}
-            }))
-
-            networkAssetsCache.get(
-              cacheKey,
-              async () => ({ assets, logos, labels }),
-              undefined,
-              { force: true }
-            ).catch(() => {})
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Solana) failed:`, err)
           }
@@ -4246,19 +4258,12 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           const assets = await listAssetBalancesByAddress(rpcConfig, address)
-          set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, {
+          applyAssetSnapshot({
             assets: assets ?? {},
             logos: {},
             labels: {},
             evmNfts: {}
-          }))
-
-          networkAssetsCache.get(
-            cacheKey,
-            async () => ({ assets: assets ?? {}, logos: {}, labels: {} }),
-            undefined,
-            { force: true }
-          ).catch(() => {})
+          })
         } catch (err) {
           console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
         }
@@ -4285,7 +4290,6 @@ export const useWalletStore = create<WalletState>()(
           networkAssets,
           networkAssetLogos,
           accountNetworkEvmNftAssets,
-          serverCoinCatalog
         } = get()
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net) throw new Error('Active network not found')
@@ -4362,7 +4366,7 @@ export const useWalletStore = create<WalletState>()(
           if (!nft) {
             const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
             const trackedDefaults = await resolveTrackedEvmTokens(net)
-            const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+            const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
             const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
             const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
             const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
@@ -5061,7 +5065,7 @@ export const useWalletStore = create<WalletState>()(
         await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, serverCoinCatalog, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts, activeAccountId, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
 
         const net = networks.find(n => n.id === activeNetworkId)
@@ -5269,7 +5273,7 @@ export const useWalletStore = create<WalletState>()(
           const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
-          const trackedFromCatalog = resolveCatalogEvmTrackedTokens(serverCoinCatalog, modelId)
+          const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
           const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 
@@ -5714,20 +5718,68 @@ export const useWalletStore = create<WalletState>()(
         }
       },
 
-      addActivity: (item) => set((state) => {
-        const normalized = normalizeActivityRecord(
-          item,
-          {
+      hydrateCatalogRepository: async () => {
+        const legacySnapshot = await readLegacyPersistedCatalogSnapshot()
+        await initializeCatalogRepository({
+          bundledNetworks: normalizeNetworkListSymbols(INITIAL_NETWORKS),
+          legacyServerSnapshot: legacySnapshot
+        })
+        if (legacySnapshot && ((legacySnapshot.catalog?.length || 0) > 0 || (legacySnapshot.networks?.length || 0) > 0)) {
+          set((prev) => ({
+            catalogQueryNonce: prev.catalogQueryNonce + 1
+          }))
+        }
+      },
+
+      hydrateActivityFromRepository: async () => {
+        const repositoryActivity = await readActivityHistoryRecords().catch(() => [])
+        const stateBefore = get()
+        const normalizedRepoActivity = normalizeActivityList(repositoryActivity, {
+          networks: stateBefore.networks,
+          accounts: stateBefore.accounts,
+          activeNetworkId: stateBefore.activeNetworkId,
+          activeAccountId: stateBefore.activeAccountId
+        })
+        const mergedActivity = mergeActivityListsPreferLatest(normalizedRepoActivity, stateBefore.activity)
+        if (mergedActivity.length === 0) return
+
+        set((state) => {
+          const normalizedMergedActivity = normalizeActivityList(mergedActivity, {
             networks: state.networks,
             accounts: state.accounts,
             activeNetworkId: state.activeNetworkId,
             activeAccountId: state.activeAccountId
-          },
-          state.activity.length
-        )
-        if (!normalized) return state
-        return { activity: [normalized, ...state.activity] }
-      }),
+          })
+          if (normalizedMergedActivity.length === 0) return state
+          return {
+            activity: normalizedMergedActivity
+          }
+        })
+        for (const item of mergedActivity) {
+          void upsertActivityHistoryRecord(item).catch(() => {})
+        }
+      },
+
+      addActivity: (item) => {
+        let normalizedActivity: Activity | null = null
+        set((state) => {
+          normalizedActivity = normalizeActivityRecord(
+            item,
+            {
+              networks: state.networks,
+              accounts: state.accounts,
+              activeNetworkId: state.activeNetworkId,
+              activeAccountId: state.activeAccountId
+            },
+            state.activity.length
+          )
+          if (!normalizedActivity) return state
+          return { activity: [normalizedActivity, ...state.activity] }
+        })
+        if (normalizedActivity) {
+          void upsertActivityHistoryRecord(normalizedActivity).catch(() => {})
+        }
+      },
 
       trackActivityTransactionStatus: ({ txid, networkId }) => {
         const normalizedTxid = String(txid || '').trim()
@@ -5765,13 +5817,19 @@ export const useWalletStore = create<WalletState>()(
               if (rpcConfig) {
                 const status = await checkOnChainTransactionStatus(net, rpcConfig, normalizedTxid)
                 if (status === 'confirmed' || status === 'rejected') {
+                  let updatedEntry: Activity | null = null
                   set((prev) => ({
                     activity: prev.activity.map((entry) => {
                       const sameTx = String(entry.id || '').trim().toLowerCase() === normalizedTxid.toLowerCase()
                       const sameNetwork = normalizeNetworkIdAlias(String(entry.networkId || '').trim()) === requestedNetworkId
-                      return sameTx && sameNetwork ? { ...entry, status } : entry
+                      if (!sameTx || !sameNetwork) return entry
+                      updatedEntry = { ...entry, status }
+                      return updatedEntry
                     })
                   }))
+                  if (updatedEntry) {
+                    void upsertActivityHistoryRecord(updatedEntry).catch(() => {})
+                  }
                   return
                 }
               }
@@ -6015,6 +6073,10 @@ export const useWalletStore = create<WalletState>()(
         }),
 
       syncNetworksFromServer: async () => {
+        await initializeCatalogRepository({
+          bundledNetworks: normalizeNetworkListSymbols(INITIAL_NETWORKS)
+        })
+
         let serverNetworks: Network[] | null = null
         let serverCatalog: ServerCoinCatalogItem[] = []
         try {
@@ -6023,9 +6085,25 @@ export const useWalletStore = create<WalletState>()(
           serverCatalog = normalizeServerCatalogSymbols(
             Array.isArray(snapshot.catalog) ? snapshot.catalog : []
           )
+          await cacheMetayoshiServerCatalogSnapshot({
+            networks: serverNetworks,
+            catalog: serverCatalog
+          })
+          const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
+          if (cachedSnapshot) {
+            serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : serverNetworks
+            serverCatalog = normalizeServerCatalogSymbols(
+              Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : serverCatalog
+            )
+          }
         } catch (error) {
           console.warn('Failed to sync networks from /v1/coins:', error)
-          return
+          const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
+          if (!cachedSnapshot) return
+          serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : null
+          serverCatalog = normalizeServerCatalogSymbols(
+            Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : []
+          )
         }
         if ((!serverNetworks || serverNetworks.length === 0) && serverCatalog.length === 0) return
         const syncedNetworks = serverNetworks || []
@@ -6036,10 +6114,6 @@ export const useWalletStore = create<WalletState>()(
           const filteredServerNetworks = syncedNetworks.filter((network) => {
             const id = String(network.id || '').trim()
             return allowedNetworkIds.has(id)
-          })
-          const filteredServerCatalog = serverCatalog.filter((item) => {
-            const appNetworkId = String(item.appNetworkId || '').trim()
-            return Boolean(appNetworkId) && allowedNetworkIds.has(appNetworkId)
           })
           const serverById = new Map(filteredServerNetworks.map((network) => [network.id, network]))
           const mergedLocal = localBaseline.map((localNetwork) => {
@@ -6068,7 +6142,7 @@ export const useWalletStore = create<WalletState>()(
             networks,
             activeNetworkId,
             disabledNetworkIds: normalizedDisabled,
-            serverCoinCatalog: filteredServerCatalog
+            catalogQueryNonce: state.catalogQueryNonce + 1
           }
         })
       },
@@ -7011,7 +7085,6 @@ export const useWalletStore = create<WalletState>()(
         isConnected: state.isConnected,
         isSyncing: state.isSyncing,
         syncPercent: state.syncPercent,
-        serverCoinCatalog: state.serverCoinCatalog,
         sendListPreferences: state.sendListPreferences,
         networkModelPreferences: state.networkModelPreferences,
         authorizedSites: state.authorizedSites,
@@ -7092,11 +7165,7 @@ export const useWalletStore = create<WalletState>()(
           disabledNetworkIds: normalizedDisabledNetworkIds,
           activeNetworkId,
           activity: normalizedActivity,
-          serverCoinCatalog: normalizeServerCatalogSymbols(
-            Array.isArray((persisted as any).serverCoinCatalog)
-              ? ((persisted as any).serverCoinCatalog as ServerCoinCatalogItem[])
-              : []
-          ),
+          catalogQueryNonce: 0,
           localRpcOverrides: remapNetworkIdKeyedRecord(
             ((persisted as any).localRpcOverrides ?? merged.localRpcOverrides ?? {}) as Record<string, {
               rpcUrl: string

@@ -49,7 +49,6 @@ export async function loadServerRegistrySnapshotFromApi(input: {
   if (coins.length === 0) return { networks: null, catalog: [] }
 
   const catalog = buildServerCoinCatalog(coins)
-  const spendableMainCoinIds = new Set<string>()
   const moduleById = new Map<string, Network>(input.allNetworks.map((n) => [n.id, n]))
   const candidatesByAppNetworkId = new Map<string, NetworkCandidate[]>()
 
@@ -122,7 +121,6 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         isPublicnode: selectedNetwork ? isPublicnodeNetworkRow(selectedNetwork) : false
       })
       candidatesByAppNetworkId.set(appNetworkId, row)
-      spendableMainCoinIds.add(coinId)
       continue
     }
 
@@ -147,10 +145,9 @@ export async function loadServerRegistrySnapshotFromApi(input: {
   }
 
   if (candidatesByAppNetworkId.size === 0) {
-    const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
     return {
       networks: null,
-      catalog: filteredCatalog
+      catalog
     }
   }
 
@@ -181,9 +178,8 @@ export async function loadServerRegistrySnapshotFromApi(input: {
     if (fallback) withRequired.push(fallback)
   }
 
-  const filteredCatalog = catalog.filter((item) => item.kind !== 'main' || spendableMainCoinIds.has(item.coinId))
   return {
     networks: withRequired.length > 0 ? withRequired : null,
-    catalog: filteredCatalog
+    catalog
   }
 }

@@ -125,6 +125,8 @@ function App() {
     onboardingCompleted,
     acceptedTermsVersion,
     checkAutolock,
+    hydrateCatalogRepository,
+    hydrateActivityFromRepository,
     sessionMnemonic,
     lock,
     syncNetworksFromServer
@@ -168,8 +170,19 @@ function App() {
   }, [location.pathname])
 
   useEffect(() => {
+    if (!hasHydrated) return
+    void hydrateCatalogRepository()
+  }, [hasHydrated, hydrateCatalogRepository])
+
+  useEffect(() => {
+    if (!hasHydrated) return
     void syncNetworksFromServer()
-  }, [syncNetworksFromServer])
+  }, [hasHydrated, syncNetworksFromServer])
+
+  useEffect(() => {
+    if (!hasHydrated) return
+    void hydrateActivityFromRepository()
+  }, [hasHydrated, hydrateActivityFromRepository])
 
   // Persisted state hydrates asynchronously from extension storage.
   // Re-check after hydration so the wallet never renders as unlocked without

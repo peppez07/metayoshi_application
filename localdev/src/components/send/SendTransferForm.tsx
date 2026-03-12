@@ -102,6 +102,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const [error, setError] = useState('')
   const [estimatedNativeFee, setEstimatedNativeFee] = useState(fallbackEstimatedNativeFee)
   const [estimatedNativeFeeSource, setEstimatedNativeFeeSource] = useState<TransactionFeePreviewSource>('fallback')
+  const [estimatedNativeFeeDebugLabel, setEstimatedNativeFeeDebugLabel] = useState('Fallback estimate')
+  const [estimatedNativeFeeDebugDetails, setEstimatedNativeFeeDebugDetails] = useState('Waiting for preview inputs.')
   const [isEstimatingFee, setIsEstimatingFee] = useState(false)
 
   const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
@@ -135,31 +137,58 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
 
   useEffect(() => {
     let cancelled = false
+    const timer = window.setTimeout(() => {
+      const run = async () => {
+        const previewAmount = isFixedOneMode ? '1' : amount
+        const fallback = estimateNetworkFeeUi(activeNetwork)
+        const canFetchLivePreview = Boolean(
+          fromAddress
+          && (
+            (activeNetwork.coinType === 'EVM' && toAddress)
+            || (activeNetwork.coinType === 'UTXO' && isNative && toAddress && Number(previewAmount) > 0)
+          )
+        )
 
-    const run = async () => {
-      const previewAmount = isFixedOneMode ? '1' : amount
-      const fallback = estimateNetworkFeeUi(activeNetwork)
-      setIsEstimatingFee(activeNetwork.coinType === 'EVM')
+        if (!canFetchLivePreview) {
+          if (!cancelled) {
+            setEstimatedNativeFee(fallback)
+            setEstimatedNativeFeeSource('fallback')
+            setEstimatedNativeFeeDebugLabel('Fallback estimate')
+            setEstimatedNativeFeeDebugDetails('Need sender, recipient, and a valid amount before live fee preview can run.')
+            setIsEstimatingFee(false)
+          }
+          return
+        }
 
-      const preview = await estimateTransactionFeePreview({
-        network: activeNetwork,
-        fromAddress,
-        toAddress,
-        amount: previewAmount,
-        assetId: String(item.assetId || '').trim() || undefined,
-        assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
-        isAssetTransfer: !isNative,
-        gasLane: modelPreferences.evmGasLane
-      })
+        setIsEstimatingFee(true)
 
-      if (cancelled) return
-      setEstimatedNativeFee(preview.fee || fallback)
-      setEstimatedNativeFeeSource(preview.source)
-      setIsEstimatingFee(false)
+        const preview = await estimateTransactionFeePreview({
+          network: activeNetwork,
+          fromAddress,
+          toAddress,
+          amount: previewAmount,
+          assetId: String(item.assetId || '').trim() || undefined,
+          assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
+          isAssetTransfer: !isNative,
+          gasLane: modelPreferences.evmGasLane,
+          utxoFeePreset: modelPreferences.utxoFeePreset,
+          utxoInputStrategy: modelPreferences.utxoInputStrategy
+        })
+
+        if (cancelled) return
+        setEstimatedNativeFee(preview.fee || fallback)
+        setEstimatedNativeFeeSource(preview.source)
+        setEstimatedNativeFeeDebugLabel(preview.debugLabel)
+        setEstimatedNativeFeeDebugDetails(preview.debugDetails || '')
+        setIsEstimatingFee(false)
+      }
+
+      void run()
+    }, 450)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
     }
-
-    void run()
-    return () => { cancelled = true }
   }, [
     activeNetwork,
     amount,
@@ -168,6 +197,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     isNative,
     item.assetId,
     modelPreferences.evmGasLane,
+    modelPreferences.utxoFeePreset,
+    modelPreferences.utxoInputStrategy,
     toAddress
   ])
 
@@ -451,6 +482,14 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
                 ? 'Updating from network...'
                 : (estimatedNativeFeeSource === 'live' ? 'Live network quote.' : 'Fallback estimate.')}
             </span>
+            <span className="block mt-1 text-[9px] text-gray-500">
+              Fee debug: {estimatedNativeFeeDebugLabel}
+            </span>
+            {estimatedNativeFeeDebugDetails && (
+              <span className="block mt-0.5 text-[9px] text-gray-500 break-all">
+                {estimatedNativeFeeDebugDetails}
+              </span>
+            )}
           </p>
         </div>
 

@@ -12,6 +12,16 @@ export type ServerCoinNetworkRow = {
   }
 }
 
+export type ServerCoinCapabilities = {
+  rpcBridge?: boolean
+  sync?: boolean
+  balance?: boolean
+  assets?: boolean
+  history?: boolean
+  send?: boolean
+  broadcast?: boolean
+}
+
 export type ServerCoinRow = {
   coinId?: string
   id?: string
@@ -20,21 +30,42 @@ export type ServerCoinRow = {
   chain?: string
   enabled?: boolean
   bridgeImplemented?: boolean
-  capabilities?: {
-    rpcBridge?: boolean
-    sync?: boolean
-    balance?: boolean
-    assets?: boolean
-    history?: boolean
-    send?: boolean
-    broadcast?: boolean
-  }
+  capabilities?: ServerCoinCapabilities
   features?: { bridge?: boolean }
   methodGroups?: Record<string, string[]>
   networks?: ServerCoinNetworkRow[]
+  policy?: string
+  description?: string
+  type?: string
+  connection?: string
+  api?: string
+  tokens?: string
+  nfts?: string
+  erc?: string
+  algorithmModel?: string
 }
 
 export type ServerCoinCatalogKind = 'main' | 'asset'
+export type ServerCoinCatalogWalletState = 'active' | 'blocked' | 'catalog-only'
+
+export type ServerCoinCatalogProfile = {
+  policy: string
+  transport: 'wallet-bridge' | 'rpc-passthrough' | 'registry-only'
+  capabilitySummary: string
+  description: string
+  operationalModel: string
+  connectionProviders: string[]
+  rpcUrls: string[]
+  rpcWallets: string[]
+  apiRoutes: {
+    bridge?: string
+    sendCoin?: string
+    sendAsset?: string
+  }
+  tokenStandards: string[]
+  nftStandards: string[]
+  assetStandards: string[]
+}
 
 export type ServerCoinCatalogItem = {
   coinId: string
@@ -45,6 +76,18 @@ export type ServerCoinCatalogItem = {
   runtimeModelId: string | null
   appNetworkId: string | null
   chain: 'main' | 'test'
+  enabled: boolean
+  bridgeImplemented: boolean
+  capabilities: Required<ServerCoinCapabilities>
+  walletCatalogState: ServerCoinCatalogWalletState
+  catalogProfile: ServerCoinCatalogProfile
+  source?: 'metayoshi-server' | 'bundled-registry' | 'research-top100'
+  logoUrl?: string
+  hostRuntime?: string | null
+  walletRuntimeHint?: string | null
+  algorithm?: string | null
+  proofType?: string | null
+  metadata?: Record<string, unknown>
 }
 
 export type NetworkCandidate = {

@@ -1,6 +1,5 @@
 import { getBundledCoinRegistryEntries } from './coinRegistry'
 import { resolveEnabledNetworkIds } from './coinSelection'
-import { SERVER_SCAFFOLD_COIN_MODULES } from './serverScaffoldCoins'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
 import { validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
 import { normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
@@ -54,8 +53,7 @@ function uniqCoinModulesById(modules: CoinModule[]): CoinModule[] {
 }
 
 const RAW_COIN_MODULES: CoinModule[] = [
-  ...getBundledCoinRegistryEntries().map((entry) => entry.coin),
-  ...SERVER_SCAFFOLD_COIN_MODULES
+  ...getBundledCoinRegistryEntries().map((entry) => entry.coin)
 ]
 
 export const ALL_COIN_MODULES: CoinModule[] = uniqCoinModulesById(RAW_COIN_MODULES)

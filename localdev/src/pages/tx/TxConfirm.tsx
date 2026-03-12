@@ -242,6 +242,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const fallbackEstimatedNetworkFee = estimateNetworkFeeUi(activeNetwork)
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
+  const [estimatedNetworkFeeDebugLabel, setEstimatedNetworkFeeDebugLabel] = useState('Fallback estimate')
+  const [estimatedNetworkFeeDebugDetails, setEstimatedNetworkFeeDebugDetails] = useState('Waiting for preview inputs.')
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
   const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
   const dappEvmRequest = isDappTxRoute && isDappEvmTransactionRequest(pendingDappRequest?.request)
@@ -278,37 +280,57 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
 
   useEffect(() => {
     let cancelled = false
-    const run = async () => {
-      const fallback = estimateNetworkFeeUi(activeNetwork)
-      if (activeNetwork.coinType !== 'EVM' || !toAddress || !fromAddress) {
-        setEstimatedNetworkFee(fallback)
-        setIsEstimatingNetworkFee(false)
-        return
+    const timer = window.setTimeout(() => {
+      const run = async () => {
+        const fallback = estimateNetworkFeeUi(activeNetwork)
+        const canFetchLivePreview = Boolean(
+          fromAddress
+          && (
+            (activeNetwork.coinType === 'EVM' && (toAddress || String(dappEvmRequest?.data || '').trim()))
+            || (activeNetwork.coinType === 'UTXO' && !isAssetTransfer && toAddress && Number(amount) > 0)
+          )
+        )
+        if (!canFetchLivePreview) {
+          if (!cancelled) {
+            setEstimatedNetworkFee(fallback)
+            setEstimatedNetworkFeeDebugLabel('Fallback estimate')
+            setEstimatedNetworkFeeDebugDetails('Need sender, recipient, and a valid amount before live fee preview can run.')
+            setIsEstimatingNetworkFee(false)
+          }
+          return
+        }
+        setIsEstimatingNetworkFee(true)
+        const preview = await estimateTransactionFeePreview({
+          network: activeNetwork,
+          fromAddress,
+          toAddress,
+          amount,
+          assetId: assetId || undefined,
+          assetLogos: activeNetworkLogos,
+          isAssetTransfer,
+          dataHex: dappEvmRequest?.data,
+          gasLimit: dappEvmRequest?.gasLimit,
+          gasPrice: dappEvmRequest?.gasPrice,
+          maxFeePerGas: dappEvmRequest?.maxFeePerGas,
+          maxPriorityFeePerGas: dappEvmRequest?.maxPriorityFeePerGas,
+          type: dappEvmRequest?.type,
+          gasLane: modelPreferences.evmGasLane,
+          utxoFeePreset: modelPreferences.utxoFeePreset,
+          utxoInputStrategy: modelPreferences.utxoInputStrategy
+        })
+        if (!cancelled) {
+          setEstimatedNetworkFee(preview.fee || fallback)
+          setEstimatedNetworkFeeDebugLabel(preview.debugLabel)
+          setEstimatedNetworkFeeDebugDetails(preview.debugDetails || '')
+          setIsEstimatingNetworkFee(false)
+        }
       }
-      setIsEstimatingNetworkFee(true)
-      const preview = await estimateTransactionFeePreview({
-        network: activeNetwork,
-        fromAddress,
-        toAddress,
-        amount,
-        assetId: assetId || undefined,
-        assetLogos: activeNetworkLogos,
-        isAssetTransfer,
-        dataHex: dappEvmRequest?.data,
-        gasLimit: dappEvmRequest?.gasLimit,
-        gasPrice: dappEvmRequest?.gasPrice,
-        maxFeePerGas: dappEvmRequest?.maxFeePerGas,
-        maxPriorityFeePerGas: dappEvmRequest?.maxPriorityFeePerGas,
-        type: dappEvmRequest?.type,
-        gasLane: modelPreferences.evmGasLane
-      })
-      if (!cancelled) {
-        setEstimatedNetworkFee(preview.fee || fallback)
-        setIsEstimatingNetworkFee(false)
-      }
+      void run()
+    }, 300)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
     }
-    void run()
-    return () => { cancelled = true }
   }, [
     activeNetwork,
     activeNetworkLogos,
@@ -319,6 +341,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     fromAddress,
     isAssetTransfer,
     modelPreferences.evmGasLane,
+    modelPreferences.utxoFeePreset,
+    modelPreferences.utxoInputStrategy,
     toAddress
   ])
 
@@ -753,6 +777,14 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                     <p className="text-[9px] text-gray-500">
                       {isEstimatingNetworkFee ? 'Updating from network...' : 'Live quote when available'}
                     </p>
+                    <p className="text-[9px] text-gray-500">
+                      Fee debug: {estimatedNetworkFeeDebugLabel}
+                    </p>
+                    {estimatedNetworkFeeDebugDetails && (
+                      <p className="text-[9px] text-gray-500 break-all max-w-[220px]">
+                        {estimatedNetworkFeeDebugDetails}
+                      </p>
+                    )}
                  </div>
               </div>
 

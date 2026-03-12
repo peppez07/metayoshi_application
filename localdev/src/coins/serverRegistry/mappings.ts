@@ -1,5 +1,3 @@
-import { SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID } from '../serverScaffoldCoins'
-
 const TOKEN_MARKERS = new Set([
   'token',
   'erc20',
@@ -11,9 +9,11 @@ const TOKEN_MARKERS = new Set([
   'dai'
 ])
 
-const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze)/i
+const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze|chiado|agung)/i
 const BLOCKED_SERVER_COIN_IDS = new Set<string>([
+  'defichain',
   'manta-atlantic',
+  'pivx',
   'syscoin',
   'syscoin-evm',
   'syscoin-tanenbaum-evm'
@@ -22,13 +22,16 @@ const BLOCKED_SERVER_COIN_IDS = new Set<string>([
 const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   raptoreum: 'rtm',
   atomone: 'cosmos',
+  aurora: 'eth',
   axelar: 'cosmos',
   babylon: 'cosmos',
+  bahamut: 'eth',
   bitcanna: 'cosmos',
   dogecoin: 'doge',
   dash: 'dash',
   bitcoin: 'srv--bitcoin',
   bitcoinz: 'btcz',
+  avalanche: 'avaxc',
   celestia: 'cosmos',
   chihuahua: 'cosmos',
   comdex: 'cosmos',
@@ -50,6 +53,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   'terra-classic': 'cosmos',
   tidecoin: 'tide',
   firo: 'firo',
+  gnosis: 'eth',
   xrp: 'xrp',
   arr: 'arr',
   cardano: 'ada',
@@ -91,6 +95,11 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   taiko: 'eth',
   unichain: 'eth',
   'tron-evm': 'eth'
+}
+
+const SERVER_ID_ALIAS_TO_NETWORK_ID: Record<string, string> = {
+  dash: 'dash',
+  sdash: 'dash'
 }
 
 const SERVER_SYMBOL_OVERRIDES: Record<string, string> = {
@@ -221,7 +230,7 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'btc') return 'srv--bitcoin'
   const direct = SERVER_COIN_TO_NETWORK_ID[normalized]
   if (direct) return direct
-  const scaffoldMapped = SERVER_SCAFFOLD_SERVER_ID_TO_NETWORK_ID[normalized]
+  const scaffoldMapped = SERVER_ID_ALIAS_TO_NETWORK_ID[normalized]
   if (scaffoldMapped) return scaffoldMapped
   if (normalized === 'ethereum-holesky') return 'eth'
   if (normalized === 'opbnb' || normalized.startsWith('opbnb-')) return 'bnb'

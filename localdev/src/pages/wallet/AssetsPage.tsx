@@ -10,6 +10,7 @@ import {
 import { Input } from '../../components/Input'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { useCatalogModelSummary } from '../../lib/catalogDb/useCatalogQueries'
 import AssetListRow from './AssetListRow'
 import { useAssetListModel } from './useAssetListModel'
 
@@ -17,7 +18,7 @@ const AssetsPage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const {
-    serverCoinCatalog,
+    catalogQueryNonce,
     activeAccountId,
     activeNetworkId,
     getSendableItems,
@@ -48,13 +49,9 @@ const AssetsPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const deepLinkHandledRef = useRef<string | null>(null)
-
-  const catalogForModel = useMemo(
-    () => serverCoinCatalog.filter((item) => String(item.runtimeModelId || '').trim().toLowerCase() === activeModelId),
-    [serverCoinCatalog, activeModelId]
-  )
-  const catalogMainCount = catalogForModel.filter((item) => item.kind === 'main').length
-  const catalogAssetRows = catalogForModel.filter((item) => item.kind === 'asset')
+  const catalogSummary = useCatalogModelSummary(activeModelId, catalogQueryNonce)
+  const catalogMainCount = catalogSummary.mainCount
+  const catalogAssetRows = catalogSummary.assetRows
 
   const isSearching = search.trim().length > 0
   const filtered = useMemo(() => {
