@@ -45,9 +45,9 @@ const SECTIONS: TermSection[] = [
       <div className="space-y-2">
         <p>You are responsible for your private keys, seed phrase, password, and signing environment.</p>
         <p>
-          MetaYoshi is designed around user-controlled signing, but some network or asset workflows can rely on
-          server-assisted, bridge-assisted, or relay infrastructure. You must review the active network and transaction
-          path before using it.
+          MetaYoshi is designed around user-controlled signing. Some workflows can still depend on bridge, relay, or
+          RPC infrastructure for transport, simulation, or broadcast, but signing remains under user-controlled key
+          material in this wallet.
         </p>
         <p>MetaYoshi cannot recover a wallet if your recovery data is lost.</p>
       </div>

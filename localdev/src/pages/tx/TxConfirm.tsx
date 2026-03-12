@@ -11,7 +11,6 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
-import { resolveSendCustodyDisclosure } from '../../lib/sendCustodyDisclosure'
 import {
   DAPP_PENDING_REQUEST_STORAGE_KEY,
   parseDappPendingRequest,
@@ -225,7 +224,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activeModelId = resolveRuntimeModelId(activeNetwork)
   const activeAccountName = getAccountDisplayName(activeAccount, displayNetworkId, 'Account 1')
   const caps = resolveNetworkCapabilities(activeNetwork)
-  const sendCustodyDisclosure = resolveSendCustodyDisclosure(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
 
@@ -880,15 +878,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           </div>
         )}
 
-        {sendCustodyDisclosure && (
-          <div className="mx-2 p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl flex items-start gap-2">
-            <IoInformationCircle className="text-yellow-300 w-4 h-4 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-200">{sendCustodyDisclosure.label}</p>
-              <p className="text-xs leading-relaxed text-yellow-100/90">{sendCustodyDisclosure.body}</p>
-            </div>
-          </div>
-        )}
       </div>
 
       <footer className="p-4 border-t border-dark-600 flex gap-4 mt-auto">

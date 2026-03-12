@@ -17,7 +17,7 @@ import {
   listUtxoUnspent,
   scanAddressUnspent,
   sendRawTransaction,
-  sendToAddress,
+  sendBridgeTokenTransfer,
   type UtxoUnspent
 } from './utxoRpc'
 import { getXrpAccountBalance } from './xrpRpc'
@@ -26,9 +26,11 @@ import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeature
 import { signBtczTransparentTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { isCosmosAddressForHrp } from './cosmosAddress'
 import { isAddressForCoinSymbol } from './utxoAddress'
+import { signCosmosTokenTransferTxBase64 } from './cosmosNonCustodial'
 import { fetchCosmosBalanceAndSync, resolveCosmosNetworkConfig } from './protocolAdapters/cosmos'
 import { validateProtocolAddress } from './protocolAdapters/addressValidation'
 import { fetchProtocolBalance } from './protocolAdapters/balances'
+import { parseDecimalToAtomicUnits } from '../store/walletStoreStateUtils'
 
 export type ChainSendCustodyMode = 'non-custodial' | 'custodial-server' | 'unsupported'
 
@@ -74,6 +76,17 @@ export interface SendUtxoNonCustodialInput {
 interface ResolveProtocolOptions {
   modelId?: string
   runtimeProtocol?: string
+}
+
+function resolveCosmosBridgeCoinId(network: Network): string {
+  const modelId = resolveRuntimeModelId(network)
+  const runtimeCoinId = getCoinRuntimeProfile(modelId)?.coinId
+  const resolved = String(
+    network.serverCoinId
+    || runtimeCoinId
+    || (isCroCosmosModelId(modelId) ? 'cronos-pos' : 'cosmos')
+  ).trim().toLowerCase()
+  return resolved || 'cosmos'
 }
 
 interface ProtocolResolutionContext {
@@ -482,17 +495,41 @@ export async function sendUtxoNonCustodialNetworkTransaction(input: SendUtxoNonC
   }
 
   if (context.family === 'cosmos' && isCroCosmosModelId(context.modelId)) {
-    const { hrp, decimals } = resolveCosmosNetworkConfig(net)
+    const cosmosCfg = resolveCosmosAddressConfig({
+      runtimeModelId: net.runtimeModelId,
+      serverCoinId: net.serverCoinId,
+      id: net.id
+    })
     const to = String(input.to || '').trim()
-    if (!isCosmosAddressForHrp(to, hrp)) {
-      throw new Error(`Destination address must be a valid ${hrp}1... address`)
+    if (!isCosmosAddressForHrp(to, cosmosCfg.hrp)) {
+      throw new Error(`Destination address must be a valid ${cosmosCfg.hrp}1... address`)
     }
-    const amount = Number(String(input.amount || '').trim())
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error('Amount must be greater than 0')
-    }
-    const txid = await sendToAddress(rpcConfig, to, Number(amount.toFixed(decimals)))
-    return { hash: String(txid) }
+    const senderAddress = String(input.senderAddress || '').trim()
+    if (!senderAddress) throw new Error(`No address derived for ${net.name}`)
+    const derived = await input.deriveSigningKey(senderAddress)
+    const amountRaw = parseDecimalToAtomicUnits(String(input.amount || '').trim(), cosmosCfg.decimals, net.symbol)
+    const signedTxBase64 = await signCosmosTokenTransferTxBase64({
+      rpcUrl: net.rpcUrl,
+      fromAddress: senderAddress,
+      toAddress: to,
+      denom: cosmosCfg.nativeDenom,
+      amountRaw: amountRaw.toString(),
+      privateKeyHex: derived.privHex,
+      feeDenom: cosmosCfg.feeDenom,
+      feeAmountRaw: cosmosCfg.feeAmountRaw,
+      gasLimit: cosmosCfg.gasLimit
+    })
+    const sent = await sendBridgeTokenTransfer(rpcConfig, {
+      coin: resolveCosmosBridgeCoinId(net),
+      chain: String(net.serverChain || 'main').trim() || 'main',
+      tokenId: cosmosCfg.nativeDenom,
+      toAddress: to,
+      fromAddress: senderAddress,
+      amount: amountRaw.toString(),
+      signedTxHex: signedTxBase64,
+      signedFormat: 'cosmos-tx-base64'
+    })
+    return { hash: String(sent.txid) }
   }
 
   if (context.family !== 'utxo') {
@@ -693,7 +730,7 @@ export function resolveNetworkSendCustodyMode(network: Network, options?: Resolv
   const context = resolveProtocolContext(network, options)
 
   if (context.family === 'cosmos') {
-    return isCroCosmosModelId(context.modelId) ? 'custodial-server' : 'non-custodial'
+    return 'non-custodial'
   }
   if (context.family === 'solana' || context.family === 'stellar' || context.family === 'tron') {
     return 'non-custodial'

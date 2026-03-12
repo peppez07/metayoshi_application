@@ -6935,7 +6935,7 @@ export const useWalletStore = create<WalletState>()(
           secureBridgeSigner: get().signBackendAuthMessage
         })
 
-        if (modelId === 'cosmos') {
+        if (isCosmosLikeModelId(modelId)) {
           const cosmosCfg = resolveCosmosNetworkConfig(net)
           const txMemo = String(memo || '').trim()
           const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), cosmosCfg.decimals, net.symbol)
