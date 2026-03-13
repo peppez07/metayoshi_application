@@ -20,6 +20,14 @@ export type CatalogModelSummary = {
   assetRows: CatalogModelAssetRow[]
 }
 
+export type CatalogServerAssetSearchInput = {
+  query?: string
+  networkId?: string
+  runtimeModelId?: string | null
+  includeMain?: boolean
+  maxResults?: number
+}
+
 export type CatalogTrackedEvmToken = {
   address: string
   symbol: string
@@ -868,6 +876,80 @@ export async function readCatalogTrackedEvmNfts(modelId: string): Promise<Catalo
       standard,
       label: normalizeText(item.symbol || item.name) || undefined
     })
+  }
+
+  return out
+}
+
+export async function searchMetayoshiServerCatalogAssets(
+  input: CatalogServerAssetSearchInput
+): Promise<ServerCoinCatalogItem[]> {
+  const db = await openCatalogDb()
+  if (!db) return []
+
+  const normalizedQuery = normalizeLower(input.query)
+  const normalizedNetworkId = normalizeLower(input.networkId)
+  const normalizedRuntimeModelId = normalizeLower(input.runtimeModelId)
+  const includeMain = input.includeMain === true
+  const maxResults = Math.max(1, Math.min(50, Math.trunc(Number(input.maxResults) || 12)))
+
+  const transaction = db.transaction(SERVER_CATALOG_STORE, 'readonly')
+  const rows = await readAllFromStore<CatalogServerItemRecord>(transaction.objectStore(SERVER_CATALOG_STORE))
+  const seen = new Set<string>()
+
+  const scored = rows
+    .map((row) => row.item)
+    .filter((item) => normalizeLower(item.walletCatalogState) !== 'blocked')
+    .filter((item) => includeMain || item.kind === 'asset')
+    .filter((item) => {
+      if (!normalizedNetworkId && !normalizedRuntimeModelId) return true
+      if (normalizedNetworkId && normalizeLower(item.appNetworkId) === normalizedNetworkId) return true
+      if (normalizedRuntimeModelId && normalizeLower(item.runtimeModelId) === normalizedRuntimeModelId) return true
+      return false
+    })
+    .map((item) => {
+      const symbol = normalizeUpper(item.symbol)
+      const name = normalizeText(item.name)
+      const coinId = normalizeLower(item.coinId)
+      const contractAddress = normalizeContract(item.contractAddress)
+      const label = `${symbol} ${name} ${coinId} ${contractAddress}`.trim().toLowerCase()
+      if (normalizedQuery && !label.includes(normalizedQuery)) return null
+
+      let score = 0
+      if (normalizeLower(item.walletCatalogState) === 'active') score += 40
+      if (normalizeLower(item.kind) === 'main') score += 12
+      if (normalizedQuery) {
+        if (symbol.toLowerCase() === normalizedQuery) score += 80
+        else if (symbol.toLowerCase().startsWith(normalizedQuery)) score += 55
+        if (name.toLowerCase() === normalizedQuery) score += 45
+        else if (name.toLowerCase().startsWith(normalizedQuery)) score += 28
+        if (coinId === normalizedQuery) score += 30
+        if (contractAddress && contractAddress === normalizedQuery) score += 90
+      }
+
+      return { item, score }
+    })
+    .filter((row): row is { item: ServerCoinCatalogItem, score: number } => Boolean(row))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score
+      if (left.item.kind !== right.item.kind) return left.item.kind === 'main' ? -1 : 1
+      return `${left.item.symbol}|${left.item.name}|${left.item.coinId}`.localeCompare(
+        `${right.item.symbol}|${right.item.name}|${right.item.coinId}`
+      )
+    })
+
+  const out: ServerCoinCatalogItem[] = []
+  for (const row of scored) {
+    const dedupeKey = [
+      normalizeLower(row.item.appNetworkId),
+      normalizeLower(row.item.coinId),
+      normalizeContract(row.item.contractAddress),
+      normalizeLower(row.item.kind)
+    ].join('::')
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    out.push(row.item)
+    if (out.length >= maxResults) break
   }
 
   return out

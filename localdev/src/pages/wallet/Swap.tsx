@@ -4,6 +4,8 @@ import { IoArrowBack, IoSwapHorizontal, IoTimeOutline, IoFlashOutline } from 're
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
 import { useToast } from '../../components/Toast'
+import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
+import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
 import {
   buildServerSwapApprovalMessage,
   createServerExecutionRpcConfig,
@@ -37,9 +39,51 @@ function isSwapEligibleItem(item: SendableItem): boolean {
   return item.kind !== 'nft'
 }
 
-function formatAssetOption(item: SendableItem): string {
-  if (!item.label || item.label === item.symbol) return item.symbol
-  return `${item.symbol} - ${item.label}`
+type SwapAssetOption = {
+  id: string
+  source: 'wallet' | 'catalog'
+  assetId: string
+  kind: 'native' | 'fungible' | 'nft'
+  symbol: string
+  label: string
+  contractAddress?: string
+  amount?: string
+}
+
+function createWalletAssetOption(item: SendableItem): SwapAssetOption {
+  return {
+    id: item.id,
+    source: 'wallet',
+    assetId: String(item.assetId || item.id || '').trim() || item.id,
+    kind: item.kind,
+    symbol: item.symbol,
+    label: item.label,
+    contractAddress: inferAssetContractAddress(item),
+    amount: item.amount
+  }
+}
+
+function createCatalogAssetOption(item: ServerCoinCatalogItem, networkId: string): SwapAssetOption {
+  const contractAddress = String(item.contractAddress || '').trim() || undefined
+  const assetId = item.kind === 'main'
+    ? `native:${networkId}`
+    : (contractAddress || String(item.coinId || '').trim() || `catalog:${networkId}:${item.symbol}`)
+  return {
+    id: `catalog:${networkId}:${String(item.coinId || item.symbol || assetId).trim()}:${contractAddress || item.kind}`,
+    source: 'catalog',
+    assetId,
+    kind: item.kind === 'main' ? 'native' : 'fungible',
+    symbol: item.symbol,
+    label: item.name,
+    contractAddress
+  }
+}
+
+function formatAssetOption(item: SwapAssetOption): string {
+  const label = !item.label || item.label === item.symbol
+    ? item.symbol
+    : `${item.symbol} - ${item.label}`
+  return item.source === 'catalog' ? `${label} (Catalog)` : label
 }
 
 function inferAssetContractAddress(item: SendableItem): string | undefined {
@@ -49,14 +93,38 @@ function inferAssetContractAddress(item: SendableItem): string | undefined {
   return match ? match[0] : undefined
 }
 
-function toServerSwapAsset(item: SendableItem | null): ServerSwapAssetRef | undefined {
+function resolveSwapAssetIdentity(item: SwapAssetOption | null, networkId: string): string {
+  if (!item) return ''
+  if (item.kind === 'native') return `native:${networkId}`
+  const contractAddress = String(item.contractAddress || '').trim().toLowerCase()
+  if (contractAddress) return contractAddress
+  return String(item.assetId || item.id || '').trim().toLowerCase()
+}
+
+function mergeAssetOptions(primary: SwapAssetOption[], extra: SwapAssetOption[]): SwapAssetOption[] {
+  const out: SwapAssetOption[] = []
+  const seen = new Set<string>()
+  for (const item of [...primary, ...extra]) {
+    const contractAddress = String(item.contractAddress || '').trim().toLowerCase()
+    const key = item.kind === 'native'
+      ? `native::${item.symbol.toLowerCase()}`
+      : (contractAddress || String(item.assetId || '').trim().toLowerCase() || item.id.toLowerCase())
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function toServerSwapAsset(item: SwapAssetOption | null, networkId: string): ServerSwapAssetRef | undefined {
   if (!item) return undefined
+  const assetId = String(item.assetId || '').trim() || (item.kind === 'native' ? `native:${networkId}` : item.id)
   return {
-    assetId: String(item.assetId || item.id || '').trim() || item.id,
+    assetId,
     kind: item.kind === 'native' ? 'native' : 'fungible',
     symbol: item.symbol,
     label: item.label,
-    contractAddress: inferAssetContractAddress(item)
+    contractAddress: item.kind === 'native' ? undefined : (String(item.contractAddress || '').trim() || undefined)
   }
 }
 
@@ -87,6 +155,8 @@ const Swap: React.FC = () => {
   const [toNetworkId, setToNetworkId] = useState(initialNetworkId)
   const [fromAssetId, setFromAssetId] = useState('')
   const [toAssetId, setToAssetId] = useState('')
+  const [destinationQuery, setDestinationQuery] = useState('')
+  const [catalogDestinationItems, setCatalogDestinationItems] = useState<SwapAssetOption[]>([])
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
   const [quote, setQuote] = useState<ServerSwapQuote | null>(null)
@@ -108,7 +178,7 @@ const Swap: React.FC = () => {
     }).filter(isSwapEligibleItem)
   }, [activeAccount?.id, fromNetwork?.id, getSendableItems])
 
-  const toItems = useMemo(() => {
+  const walletToItems = useMemo(() => {
     if (!activeAccount?.id || !toNetwork?.id) return []
     return getSendableItems({
       accountId: activeAccount.id,
@@ -118,16 +188,22 @@ const Swap: React.FC = () => {
     }).filter(isSwapEligibleItem)
   }, [activeAccount?.id, toNetwork?.id, getSendableItems])
 
-  const fromItem = fromItems.find((item) => item.id === fromAssetId) || fromItems[0] || null
-  const toItem = toItems.find((item) => item.id === toAssetId) || toItems[0] || null
+  const fromOptions = useMemo(() => fromItems.map(createWalletAssetOption), [fromItems])
+  const toOptions = useMemo(
+    () => mergeAssetOptions(walletToItems.map(createWalletAssetOption), catalogDestinationItems),
+    [walletToItems, catalogDestinationItems]
+  )
+
+  const fromItem = fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
+  const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
     fromNetwork?.id
     && toNetwork?.id
-    && fromItem?.id
-    && toItem?.id
+    && fromItem
+    && toItem
     && fromNetwork.id === toNetwork.id
-    && fromItem.id === toItem.id
+    && resolveSwapAssetIdentity(fromItem, fromNetwork.id) === resolveSwapAssetIdentity(toItem, toNetwork.id)
   )
 
   useEffect(() => {
@@ -136,25 +212,54 @@ const Swap: React.FC = () => {
   }, [enabledNetworks, fromNetworkId, toNetworkId])
 
   useEffect(() => {
-    if (fromItems.length === 0) {
+    if (fromOptions.length === 0) {
       setFromAssetId('')
       return
     }
-    if (!fromItems.some((item) => item.id === fromAssetId)) {
-      setFromAssetId(fromItems[0].id)
+    if (!fromOptions.some((item) => item.id === fromAssetId)) {
+      setFromAssetId(fromOptions[0].id)
     }
-  }, [fromItems, fromAssetId])
+  }, [fromOptions, fromAssetId])
 
   useEffect(() => {
-    if (toItems.length === 0) {
+    if (toOptions.length === 0) {
       setToAssetId('')
       return
     }
-    if (!toItems.some((item) => item.id === toAssetId)) {
-      const fallback = toItems.find((item) => item.id !== fromAssetId) || toItems[0]
+    if (!toOptions.some((item) => item.id === toAssetId)) {
+      const fallback = toOptions.find((item) => item.id !== fromAssetId) || toOptions[0]
       setToAssetId(fallback.id)
     }
-  }, [toItems, toAssetId, fromAssetId])
+  }, [toOptions, toAssetId, fromAssetId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!toNetwork?.id) {
+      setCatalogDestinationItems([])
+      return
+    }
+
+    void (async () => {
+      try {
+        const runtimeModelId = String(toNetwork.runtimeModelId || '').trim() || null
+        const rows = await searchMetayoshiServerCatalogAssets({
+          query: destinationQuery,
+          networkId: toNetwork.id,
+          runtimeModelId,
+          includeMain: true,
+          maxResults: destinationQuery ? 24 : 12
+        })
+        if (cancelled) return
+        setCatalogDestinationItems(rows.map((item) => createCatalogAssetOption(item, toNetwork.id)))
+      } catch (error) {
+        if (cancelled) return
+        console.warn('Failed to load destination catalog assets', error)
+        setCatalogDestinationItems([])
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [destinationQuery, toNetwork?.id, toNetwork?.runtimeModelId])
 
   useEffect(() => {
     setQuote(null)
@@ -277,8 +382,8 @@ const Swap: React.FC = () => {
       rpcConfig: createServerExecutionRpcConfig(fromNetwork, signBackendAuthMessage),
       sourceAddress,
       destinationAddress,
-      sourceAsset: toServerSwapAsset(fromItem),
-      destinationAsset: toServerSwapAsset(toItem)
+      sourceAsset: toServerSwapAsset(fromItem, fromNetwork.id),
+      destinationAsset: toServerSwapAsset(toItem, toNetwork.id)
     }
   }
 
@@ -444,7 +549,7 @@ const Swap: React.FC = () => {
                 onChange={(event) => setFromAssetId(event.target.value)}
                 className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
               >
-                {fromItems.map((item) => (
+                {fromOptions.map((item) => (
                   <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
                 ))}
               </select>
@@ -487,11 +592,18 @@ const Swap: React.FC = () => {
                 onChange={(event) => setToAssetId(event.target.value)}
                 className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
               >
-                {toItems.map((item) => (
+                {toOptions.map((item) => (
                   <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
                 ))}
               </select>
             </div>
+            <Input
+              type="text"
+              placeholder="Search destination assets from server catalog"
+              value={destinationQuery}
+              onChange={(event) => setDestinationQuery(event.target.value)}
+              className="w-full bg-dark-800 border-dark-600"
+            />
             <Input
               type="number"
               placeholder="0.0"
