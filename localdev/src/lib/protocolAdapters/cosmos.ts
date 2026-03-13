@@ -49,12 +49,27 @@ function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { ap
   return { apiBase, coin, chain }
 }
 
+function buildCosmosServerHeaders(network: Network, rpcConfig?: UtxoRpcConfig): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+  if (apiKey) headers['X-API-Key'] = apiKey
+  const username = String(rpcConfig?.bridgeUsername || network.bridgeUsername || '').trim()
+  const password = String(rpcConfig?.bridgePassword || network.bridgePassword || '').trim()
+  if (username && password) {
+    headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+  }
+  return headers
+}
+
 async function fetchCosmosStatus(network: Network, rpcConfig?: UtxoRpcConfig): Promise<{ syncPercent: number | null; isSyncing: boolean }> {
   const meta = resolveCosmosApiMeta(network, rpcConfig)
   if (!meta) return { syncPercent: null, isSyncing: false }
   try {
     const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
-    const response = await fetch(`${meta.apiBase}/v1/status?${params.toString()}`, { method: 'GET' })
+    const response = await fetch(`${meta.apiBase}/v1/status?${params.toString()}`, {
+      method: 'GET',
+      headers: buildCosmosServerHeaders(network, rpcConfig)
+    })
     if (!response.ok) return { syncPercent: null, isSyncing: false }
     const json = await response.json().catch(() => null) as Record<string, unknown> | null
     const syncCandidates = [
@@ -86,7 +101,10 @@ async function fetchCosmosAddressBalance(network: Network, address: string, rpcC
   const meta = resolveCosmosApiMeta(network, rpcConfig)
   if (!meta) throw new Error('Cosmos API base URL is not available')
   const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
-  const response = await fetch(`${meta.apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`, { method: 'GET' })
+  const response = await fetch(`${meta.apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`, {
+    method: 'GET',
+    headers: buildCosmosServerHeaders(network, rpcConfig)
+  })
   if (!response.ok) {
     throw new Error(`Cosmos balance endpoint failed: HTTP ${response.status}`)
   }

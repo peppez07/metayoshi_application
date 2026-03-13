@@ -180,6 +180,16 @@ function compactErrorText(value: string, maxLen = 220): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
+function appendOptionalBridgeBasicAuthHeaders(
+  headers: Record<string, string>,
+  config: UtxoRpcConfig
+): void {
+  const username = readString(config.bridgeUsername)
+  const password = readString(config.bridgePassword)
+  if (!username || !password) return
+  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+}
+
 function deriveServerExecutionApiBase(config: UtxoRpcConfig): string {
   const explicit = readString(config.secureBridgeApiBaseUrl).replace(/\/+$/, '')
   if (explicit) return explicit
@@ -295,7 +305,12 @@ async function executeSecureJsonRequest(
       headers: {
         'Content-Type': 'application/json',
         ...(init.headers || {}),
-        Authorization: `Bearer ${session.token}`
+        Authorization: `Bearer ${session.token}`,
+        ...(() => {
+          const headers: Record<string, string> = {}
+          appendOptionalBridgeBasicAuthHeaders(headers, config)
+          return headers
+        })()
       }
     })
 
@@ -327,7 +342,12 @@ async function tryDirectServerSwapQuote(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {})
+        ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {}),
+        ...(() => {
+          const headers: Record<string, string> = {}
+          appendOptionalBridgeBasicAuthHeaders(headers, config)
+          return headers
+        })()
       },
       body: JSON.stringify(request)
     }).catch(() => null)

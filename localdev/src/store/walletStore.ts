@@ -2304,6 +2304,11 @@ async function fetchEvmTokensFromAddressAssets(
   const headers: Record<string, string> = {}
   const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
   if (apiKey) headers['X-API-Key'] = apiKey
+  const bridgeUsername = String(rpcConfig.bridgeUsername || '').trim()
+  const bridgePassword = String(rpcConfig.bridgePassword || '').trim()
+  if (bridgeUsername && bridgePassword) {
+    headers.Authorization = `Basic ${btoa(`${bridgeUsername}:${bridgePassword}`)}`
+  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? 10000))
@@ -3197,6 +3202,11 @@ export const useWalletStore = create<WalletState>()(
           const url = `${requestMeta.apiBase}/v1/address/${encodeURIComponent(requestAddress)}/portfolio?${params.toString()}`
           const headers: Record<string, string> = {}
           if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+          const bridgeUsername = String(network.bridgeUsername || '').trim()
+          const bridgePassword = String(network.bridgePassword || '').trim()
+          if (bridgeUsername && bridgePassword) {
+            headers.Authorization = `Basic ${btoa(`${bridgeUsername}:${bridgePassword}`)}`
+          }
           const response = await fetch(url, { method: 'GET', headers })
           if (!response.ok) {
             setNetworkFiatFailureCooldown(cacheKey)

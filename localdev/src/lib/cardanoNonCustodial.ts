@@ -66,6 +66,22 @@ function resolveApiHeaders(): Record<string, string> {
   return headers
 }
 
+function appendOptionalBridgeBasicAuth(
+  headers: Record<string, string>,
+  network: Network
+): void {
+  const username = String(network.bridgeUsername || '').trim()
+  const password = String(network.bridgePassword || '').trim()
+  if (!username || !password) return
+  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+}
+
+function resolveAuthorizedApiHeaders(network: Network): Record<string, string> {
+  const headers = resolveApiHeaders()
+  appendOptionalBridgeBasicAuth(headers, network)
+  return headers
+}
+
 function ensureHex(value: unknown, label: string): string {
   const hex = String(value || '').trim().replace(/^0x/i, '')
   if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) throw new Error(`${label} is not valid hex`)
@@ -110,7 +126,7 @@ async function requestCardanoConstruct(
   const chain = /testnet|preprod|preview/i.test(String(network.rpcUrl || '')) ? 'test' : 'main'
   const res = await fetch(`${apiBase}/v1/cardano/${chain}/tx/construct`, {
     method: 'POST',
-    headers: resolveApiHeaders(),
+    headers: resolveAuthorizedApiHeaders(network),
     body: JSON.stringify(payload)
   })
   const json = await res.json().catch(() => ({}))
@@ -143,7 +159,7 @@ async function submitCardanoSignedTx(
   const chain = /testnet|preprod|preview/i.test(String(network.rpcUrl || '')) ? 'test' : 'main'
   const res = await fetch(`${apiBase}/v1/cardano/${chain}/tx/submit`, {
     method: 'POST',
-    headers: resolveApiHeaders(),
+    headers: resolveAuthorizedApiHeaders(network),
     body: JSON.stringify(payload)
   })
   const json = await res.json().catch(() => ({}))

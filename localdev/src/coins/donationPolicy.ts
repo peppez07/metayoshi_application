@@ -28,10 +28,13 @@ function clampPercent(value: number): number {
 }
 
 function buildAuthHeader(network: Network): Record<string, string> {
-  if (!network.bridgeUsername || !network.bridgePassword) return {}
-  return {
-    Authorization: `Basic ${btoa(`${network.bridgeUsername}:${network.bridgePassword}`)}`
+  const headers: Record<string, string> = {}
+  const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+  if (apiKey) headers['X-API-Key'] = apiKey
+  if (network.bridgeUsername && network.bridgePassword) {
+    headers.Authorization = `Basic ${btoa(`${network.bridgeUsername}:${network.bridgePassword}`)}`
   }
+  return headers
 }
 
 function extractApiBase(network: Network): string {
@@ -141,11 +144,9 @@ export async function fetchCoinDonationPolicy(network: Network): Promise<CoinDon
   const base = extractApiBase(network)
   const bridgeUrl = String(network.bridgeUrl || '').trim().replace(/\/+$/, '')
   const candidates = [
-    base ? `${base}/donation` : '',
     base ? `${base}/v1/bridge/donation/${coinId}/main` : '',
     base ? `${base}/v1/bridge/config/donation/${coinId}/main` : '',
     base ? `${base}/v1/bridge/policy/${coinId}/main` : '',
-    bridgeUrl ? `${bridgeUrl}/donation` : '',
     base ? `${base}/v1/bridge/methods/${coinId}` : ''
   ].filter(Boolean)
 

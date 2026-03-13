@@ -40,6 +40,11 @@ export async function loadServerRegistrySnapshotFromApi(input: {
 }> {
   const headers: Record<string, string> = {}
   if (input.appApiKey) headers['X-API-Key'] = input.appApiKey
+  const username = String(input.defaultBridgeUser || '').trim()
+  const password = String(input.defaultBridgePassword || '').trim()
+  if (username && password) {
+    headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+  }
   const response = await fetch(`${input.apiBaseUrl}/v1/coins`, { method: 'GET', headers })
   if (!response.ok) {
     throw new Error(`Server coin registry fetch failed: HTTP ${response.status}`)

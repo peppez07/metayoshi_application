@@ -57,6 +57,22 @@ function resolveApiHeaders(): Record<string, string> {
   return headers
 }
 
+function appendOptionalBridgeBasicAuth(
+  headers: Record<string, string>,
+  network: Network
+): void {
+  const username = String(network.bridgeUsername || '').trim()
+  const password = String(network.bridgePassword || '').trim()
+  if (!username || !password) return
+  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+}
+
+function resolveAuthorizedApiHeaders(network: Network): Record<string, string> {
+  const headers = resolveApiHeaders()
+  appendOptionalBridgeBasicAuth(headers, network)
+  return headers
+}
+
 function resolveMoneroChain(rpcUrl?: string): 'main' | 'test' | 'stage' {
   const env = String((import.meta as any)?.env?.VITE_XMR_NETWORK || '').trim().toLowerCase()
   if (env === 'testnet') return 'test'
@@ -124,7 +140,7 @@ async function submitSignedMoneroTx(params: {
   const apiBase = resolveApiBaseUrl(params.network)
   const res = await fetch(`${apiBase}/v1/monero/${chain}/tx/submit`, {
     method: 'POST',
-    headers: resolveApiHeaders(),
+    headers: resolveAuthorizedApiHeaders(params.network),
     body: JSON.stringify({
       signedTxBlobHex: params.signedTxBlobHex,
       txHash: params.txHash || ''

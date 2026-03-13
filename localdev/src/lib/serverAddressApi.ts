@@ -3,6 +3,15 @@ import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
+function appendOptionalServerAuthHeaders(headers: Record<string, string>, network: Network): void {
+  if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+
+  const username = String(network.bridgeUsername || '').trim()
+  const password = String(network.bridgePassword || '').trim()
+  if (!username || !password) return
+  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+}
+
 let tronWebModulePromise: Promise<typeof import('tronweb')> | null = null
 
 function loadTronWebModule() {
@@ -90,7 +99,7 @@ export async function fetchServerAddressJson(
 
   const url = `${apiBase}/v1/address/${encodeURIComponent(requestAddress)}/${route}?${params.toString()}`
   const headers: Record<string, string> = {}
-  if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+  appendOptionalServerAuthHeaders(headers, network)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? 15000))

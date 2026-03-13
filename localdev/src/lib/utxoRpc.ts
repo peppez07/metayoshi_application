@@ -6,6 +6,8 @@ import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { assertBridgeCredentialsConfigured } from './bridgeCredentials'
 
+const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+
 // UTXO JSON-RPC client — all production connections go through the public bridge gateway.
 //
 // Bridge mode (mandatory when bridgeUrl is set):
@@ -105,6 +107,21 @@ function applyBridgeBasicAuthHeaders(
     name: label
   })
   headers['Authorization'] = `Basic ${btoa(`${config.bridgeUsername!}:${config.bridgePassword!}`)}`
+}
+
+function applyOptionalBridgeBasicAuthHeaders(
+  headers: Record<string, string>,
+  config: UtxoRpcConfig
+): void {
+  const username = String(config.bridgeUsername || '').trim()
+  const password = String(config.bridgePassword || '').trim()
+  if (!username || !password) return
+  headers['Authorization'] = `Basic ${btoa(`${username}:${password}`)}`
+}
+
+function applyOptionalServerApiKey(headers: Record<string, string>): void {
+  if (!APP_API_KEY) return
+  headers['X-API-Key'] = APP_API_KEY
 }
 
 function asError(error: unknown): Error {
@@ -360,7 +377,12 @@ async function getSecureBridgeSession(
 
   const challengeRes = await fetchJsonWithStatus(`${apiBase}/v1/auth/challenge`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: (() => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      applyOptionalServerApiKey(headers)
+      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      return headers
+    })(),
     body: JSON.stringify({ address })
   }).catch((error) => {
     throw asSecureUnavailable(`Auth challenge request failed: ${asError(error).message}`)
@@ -395,7 +417,12 @@ async function getSecureBridgeSession(
 
   const verifyRes = await fetchJsonWithStatus(`${apiBase}/v1/auth/verify`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: (() => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      applyOptionalServerApiKey(headers)
+      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      return headers
+    })(),
     body: JSON.stringify({
       address,
       nonce,
@@ -457,10 +484,15 @@ async function executeSecureBridgeWriteRpc(
 
   const opTokenRes = await fetchJsonWithStatus(`${session.apiBase}/v1/auth/op-token`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.token}`
-    },
+    headers: (() => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`
+      }
+      applyOptionalServerApiKey(headers)
+      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      return headers
+    })(),
     body: JSON.stringify({ operation })
   }).catch((error) => {
     throw asSecureUnavailable(`Operation token request failed: ${asError(error).message}`)
@@ -482,10 +514,15 @@ async function executeSecureBridgeWriteRpc(
 
   const rpcRes = await fetchJsonWithStatus(`${session.apiBase}/v1/secure/bridge/rpc`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.token}`
-    },
+    headers: (() => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`
+      }
+      applyOptionalServerApiKey(headers)
+      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      return headers
+    })(),
     body: JSON.stringify({ operation, opToken })
   }).catch((error) => {
     throw asSecureUnavailable(`Secure bridge execute request failed: ${asError(error).message}`)
@@ -789,6 +826,16 @@ async function jsonRpcCall(
     } catch (error) {
       if (!isSecureBridgeUnavailableError(error)) {
         failAndThrow('http', error, 502)
+      }
+      if (bridgeTxKeyCandidates.length === 0) {
+        failAndThrow(
+          'http',
+          new Error(
+            'MetaYoshi secure bridge write is unavailable and no legacy bridge transaction key is configured. ' +
+            'Writes should work automatically on the MetaYoshi server once secure bridge auth is enabled.'
+          ),
+          503
+        )
       }
       // Fallback: if secure endpoint is unavailable on this server,
       // continue with legacy bridge path and tx-auth headers.
