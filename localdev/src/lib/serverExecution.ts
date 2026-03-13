@@ -1,9 +1,15 @@
+import { ethers } from 'ethers'
 import type { Network } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
-import { getSecureBridgeSessionInfo } from './utxoRpc'
+import { callBridgeMethod } from './utxoRpc'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+const DEFAULT_UNISWAP_API_BASE = 'https://trade-api.gateway.uniswap.org/v1'
+const UNISWAP_NATIVE_ADDRESS = '0x0000000000000000000000000000000000000000'
+const ERC20_METADATA_IFACE = new ethers.Interface(['function decimals() view returns (uint8)'])
+const TX_RECEIPT_POLL_MS = 4_000
+const TX_RECEIPT_MAX_POLLS = 30
 
 export type ServerExecutionMode = 'standard' | 'sponsored' | 'intent'
 export type ServerSponsorPreference = 'required' | 'preferred' | 'never'
@@ -23,11 +29,13 @@ export interface ServerSwapAssetRef {
   symbol?: string
   label?: string
   contractAddress?: string
+  decimals?: number
 }
 
 export interface ServerSwapQuoteRequest {
   source: {
     networkId: string
+    chainId?: number
     symbol: string
     address: string
     amount: string
@@ -35,6 +43,7 @@ export interface ServerSwapQuoteRequest {
   }
   destination: {
     networkId: string
+    chainId?: number
     symbol: string
     address: string
     asset?: ServerSwapAssetRef
@@ -60,28 +69,6 @@ export interface ServerSwapQuote {
   metadata?: Record<string, unknown>
 }
 
-export interface ServerSwapApprovalPayload {
-  quoteId: string
-  sourceNetworkId: string
-  sourceSymbol: string
-  sourceAssetId?: string
-  sourceAssetKind?: string
-  sourceContractAddress?: string
-  sourceAddress: string
-  sourceAmount: string
-  destinationNetworkId: string
-  destinationSymbol: string
-  destinationAssetId?: string
-  destinationAssetKind?: string
-  destinationContractAddress?: string
-  destinationAddress: string
-  minDestinationAmount: string
-  sponsorPreference: ServerSponsorPreference
-  executionMode: ServerExecutionMode
-  expiresAt: number
-  nonce: string
-}
-
 export interface ServerSwapSubmitRequest {
   quoteId: string
   source: ServerSwapQuoteRequest['source']
@@ -89,13 +76,7 @@ export interface ServerSwapSubmitRequest {
   minDestinationAmount: string
   sponsorPreference: ServerSponsorPreference
   executionMode: ServerExecutionMode
-  approval: {
-    nonce: string
-    address: string
-    message: string
-    signature: string
-    signedAt: number
-  }
+  quoteMetadata?: Record<string, unknown>
 }
 
 export interface ServerExecutionReceipt {
@@ -114,6 +95,22 @@ export interface ServerExecutionStatus {
   warnings: string[]
 }
 
+export type ServerExecutionRpcConfig = UtxoRpcConfig & {
+  chainId?: number
+  explorerUrl?: string
+  sendTransaction?: (tx: {
+    to?: string
+    from?: string
+    data?: string
+    value?: string
+    gasLimit?: string
+    gasPrice?: string
+    maxFeePerGas?: string
+    maxPriorityFeePerGas?: string
+    chainId?: string | number
+  }) => Promise<{ hash: string }>
+}
+
 type JsonResponse = {
   ok: boolean
   status: number
@@ -121,11 +118,11 @@ type JsonResponse = {
   text: string
 }
 
-type ServerExecutionAction = 'quote' | 'submit' | 'status'
+type ServerExecutionAction = 'quote' | 'submit' | 'status' | 'approval'
 
 type BridgeNetworkInput = Pick<
   Network,
-  'id' | 'symbol' | 'rpcUrl' | 'bridgeUrl' | 'bridgeUsername' | 'bridgePassword'
+  'id' | 'symbol' | 'chainId' | 'rpcUrl' | 'bridgeUrl' | 'bridgeUsername' | 'bridgePassword' | 'explorerUrl'
 >
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -146,32 +143,7 @@ function readNumber(value: unknown): number | undefined {
 
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value
-    .map((item) => readString(item))
-    .filter(Boolean)
-}
-
-function normalizeExecutionMode(value: unknown): ServerExecutionMode {
-  const raw = readString(value).toLowerCase()
-  if (raw === 'sponsored' || raw === 'intent') return raw
-  return 'standard'
-}
-
-function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
-  const raw = readString(value).toLowerCase()
-  switch (raw) {
-    case 'submitted':
-    case 'broadcasted':
-    case 'pending':
-    case 'confirmed':
-    case 'failed':
-    case 'expired':
-    case 'rejected':
-    case 'quoted':
-      return raw
-    default:
-      return 'pending'
-  }
+  return value.map((item) => readString(item)).filter(Boolean)
 }
 
 function compactErrorText(value: string, maxLen = 220): string {
@@ -180,70 +152,71 @@ function compactErrorText(value: string, maxLen = 220): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
-function appendOptionalBridgeBasicAuthHeaders(
-  headers: Record<string, string>,
-  config: UtxoRpcConfig
-): void {
-  const username = readString(config.bridgeUsername)
-  const password = readString(config.bridgePassword)
-  if (!username || !password) return
-  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
+function formatDisplayAmount(value: string): string {
+  const normalized = String(value || '').trim()
+  if (!normalized) return '0'
+  if (!normalized.includes('.')) return normalized
+  return normalized.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
 }
 
-function deriveServerExecutionApiBase(config: UtxoRpcConfig): string {
-  const explicit = readString(config.secureBridgeApiBaseUrl).replace(/\/+$/, '')
+function formatRawTokenAmount(amountRaw: string, decimals: number): string {
+  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
+  return formatDisplayAmount(ethers.formatUnits(BigInt(readString(amountRaw) || '0'), safeDecimals))
+}
+
+function uiAmountToRaw(amount: string, decimals: number): string {
+  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
+  return ethers.parseUnits(readString(amount) || '0', safeDecimals).toString()
+}
+
+function computeMinOutputRaw(amountRaw: string, slippageBps: number): string {
+  const raw = BigInt(readString(amountRaw) || '0')
+  const safeBps = Math.max(0, Math.min(10_000, Math.trunc(slippageBps)))
+  return ((raw * BigInt(10_000 - safeBps)) / 10_000n).toString()
+}
+
+function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
+  switch (readString(value).toUpperCase()) {
+    case 'SUCCESS':
+      return 'confirmed'
+    case 'FAILED':
+      return 'failed'
+    case 'EXPIRED':
+      return 'expired'
+    case 'NOT_FOUND':
+      return 'pending'
+    case 'PENDING':
+      return 'pending'
+    default:
+      return 'pending'
+  }
+}
+
+function getUniswapApiBase(): string {
+  const explicit = readString((import.meta as any)?.env?.VITE_UNISWAP_API_BASE_URL).replace(/\/+$/, '')
   if (explicit) return explicit
-
-  const bridgeUrl = readString(config.bridgeUrl).replace(/\/+$/, '')
-  if (!bridgeUrl) return ''
-
-  const lower = bridgeUrl.toLowerCase()
-  const idxV1Bridge = lower.indexOf('/v1/bridge/')
-  if (idxV1Bridge >= 0) return bridgeUrl.slice(0, idxV1Bridge)
-  const idxBridge = lower.indexOf('/bridge/')
-  if (idxBridge >= 0) return bridgeUrl.slice(0, idxBridge)
-  if (/\/v1$/i.test(bridgeUrl)) return bridgeUrl.replace(/\/v1$/i, '')
-  return bridgeUrl
-}
-
-function isServerExecutionAuthDetail(detail: string): boolean {
-  const normalized = readString(detail).toLowerCase()
-  if (!normalized) return false
-  return (
-    normalized.includes('api key')
-    || normalized.includes('x-api-key')
-    || normalized.includes('unauthorized')
-    || normalized.includes('auth challenge')
-    || normalized.includes('auth verify')
-    || normalized.includes('secure bridge signer')
-    || normalized.includes('bridge credentials')
-  )
-}
-
-function makeServerExecutionAuthError(action: 'quote' | 'submit' | 'status'): Error {
-  const label = action === 'quote'
-    ? 'Swap quote'
-    : action === 'submit'
-      ? 'Swap submission'
-      : 'Swap status'
-  return new Error(`${label} is not available because server authentication is misconfigured. This should happen automatically.`)
+  const legacy = readString((import.meta as any)?.env?.VITE_SECURE_BRIDGE_API_BASE_URL).replace(/\/+$/, '')
+  if (legacy) return legacy
+  return DEFAULT_UNISWAP_API_BASE
 }
 
 function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {
   switch (action) {
     case 'quote':
-      return 'server.swap.quote'
+      return 'uniswap.quote'
+    case 'approval':
+      return 'uniswap.check_approval'
     case 'submit':
-      return 'server.swap.submit'
+      return 'uniswap.swap'
     case 'status':
-      return 'server.swap.status'
+      return 'uniswap.swaps'
     default:
-      return 'server.swap'
+      return 'uniswap'
   }
 }
 
 function beginServerExecutionMonitor(
-  config: UtxoRpcConfig,
+  config: ServerExecutionRpcConfig,
   action: ServerExecutionAction,
   url: string
 ): string {
@@ -283,37 +256,44 @@ async function fetchJsonWithStatus(url: string, init: RequestInit): Promise<Json
   }
 }
 
-async function executeSecureJsonRequest(
-  config: UtxoRpcConfig,
+async function executeUniswapJsonRequest(
+  config: ServerExecutionRpcConfig,
   path: string,
   init: RequestInit,
-  action: 'quote' | 'submit' | 'status'
+  action: ServerExecutionAction
 ): Promise<any> {
-  let session: Awaited<ReturnType<typeof getSecureBridgeSessionInfo>>
-  try {
-    session = await getSecureBridgeSessionInfo(config)
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error || '')
-    if (isServerExecutionAuthDetail(detail)) throw makeServerExecutionAuthError(action)
-    throw error
+  if (!APP_API_KEY) {
+    throw new Error('VITE_APP_API_KEY is required for Uniswap swap execution')
   }
-  const url = `${session.apiBase}${path}`
+
+  const url = `${getUniswapApiBase()}${path}`
   const monitorRequestId = beginServerExecutionMonitor(config, action, url)
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(init.headers as Record<string, string> | undefined),
-      Authorization: `Bearer ${session.token}`
+      'X-API-Key': APP_API_KEY,
+      ...(init.headers as Record<string, string> | undefined)
     }
-    if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+    if (action === 'quote' || action === 'submit' || action === 'approval') {
+      headers['x-permit2-enabled'] = 'false'
+    }
+
     const response = await fetchJsonWithStatus(url, {
       ...init,
       headers
     })
 
     if (!response.ok) {
-      const detail = readString(response.json?.error || response.json?.message || response.text || `HTTP ${response.status}`)
-      if (isServerExecutionAuthDetail(detail)) throw makeServerExecutionAuthError(action)
+      const detail = readString(
+        response.json?.detail
+        || response.json?.error
+        || response.json?.message
+        || response.text
+        || `HTTP ${response.status}`
+      )
+      if (action === 'quote' && response.status === 404) {
+        throw new Error('No route is available for the selected swap')
+      }
       throw new Error(`Server execution request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
     }
 
@@ -325,58 +305,143 @@ async function executeSecureJsonRequest(
   }
 }
 
-function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
-  const source = asRecord(raw)
-  const quoteId = readString(source.quoteId || source.id)
-  if (!quoteId) throw new Error('Swap quote response is missing quoteId')
+function resolveUniswapTokenAddress(asset: ServerSwapAssetRef | undefined, networkId: string, label: string): string {
+  if (!asset || asset.kind === 'native') return UNISWAP_NATIVE_ADDRESS
+  const contractAddress = readString(asset.contractAddress)
+  if (!ethers.isAddress(contractAddress)) {
+    throw new Error(`${label} requires a valid token contract address`)
+  }
+  return contractAddress
+}
 
-  const warnings = readStringArray(source.warnings)
-  const destinationAmount = readString(source.destinationAmount || source.toAmount || source.amountOut)
-  const minDestinationAmount = readString(source.minDestinationAmount || source.minToAmount || source.amountOutMin)
-  const expiresAt = readNumber(source.expiresAt || source.deadline)
+function buildExplorerTxUrl(baseUrl: string | undefined, txid: string): string | undefined {
+  const base = readString(baseUrl).replace(/\/+$/, '')
+  const hash = readString(txid)
+  if (!base || !hash) return undefined
+  return `${base}/tx/${hash}`
+}
+
+function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
+  const response = asRecord(raw)
+  const quote = asRecord(response.quote)
+  const input = asRecord(quote.input)
+  const output = asRecord(quote.output)
+  const routing = readString(response.routing).toUpperCase()
+  const quoteId = readString(quote.quoteId || response.requestId)
+  if (!quoteId) throw new Error('Swap quote response is missing quoteId')
+  if (!['CLASSIC', 'WRAP', 'UNWRAP', 'BRIDGE'].includes(routing)) {
+    throw new Error(`Uniswap routing "${routing || 'unknown'}" is not supported by this swap flow`)
+  }
+
+  const sourceDecimals = request.source.asset?.decimals ?? 18
+  const destinationDecimals = request.destination.asset?.decimals ?? 18
+  const destinationAmountRaw = readString(output.amount)
+  const minDestinationAmountRaw = computeMinOutputRaw(destinationAmountRaw, request.slippageBps)
+  const portionAmountRaw = readString(quote.portionAmount)
+  const warnings = readStringArray(quote.txFailureReasons)
+  const expiresAt = (() => {
+    const fillDeadline = readNumber(quote.fillDeadline)
+    if (fillDeadline) return fillDeadline * 1000
+    const exclusivityDeadline = readNumber(quote.exclusivityDeadline)
+    if (exclusivityDeadline) return exclusivityDeadline * 1000
+    return Date.now() + 60_000
+  })()
 
   return {
     quoteId,
-    mode: normalizeExecutionMode(source.mode || source.executionMode),
-    sourceAmount: readString(source.sourceAmount || request.source.amount),
-    destinationAmount,
-    minDestinationAmount: minDestinationAmount || destinationAmount,
-    expiresAt: expiresAt ?? (Date.now() + 60_000),
-    routeSummary: readString(source.routeSummary || source.route || source.summary) || 'Server-routed execution',
-    sponsorCoversNetworkFee: Boolean(source.sponsorCoversNetworkFee ?? source.sponsored ?? source.gasless),
-    estimatedNetworkFee: readString(source.estimatedNetworkFee || source.networkFee),
-    estimatedNetworkFeeSymbol: readString(source.estimatedNetworkFeeSymbol || source.networkFeeSymbol),
-    estimatedServerFee: readString(source.estimatedServerFee || source.serverFee),
-    priceImpactPct: readNumber(source.priceImpactPct ?? source.priceImpact) ?? null,
+    mode: 'standard',
+    sourceAmount: request.source.amount,
+    destinationAmount: formatRawTokenAmount(destinationAmountRaw, destinationDecimals),
+    minDestinationAmount: formatRawTokenAmount(minDestinationAmountRaw, destinationDecimals),
+    expiresAt,
+    routeSummary: readString(quote.routeString) || `${routing} via Uniswap`,
+    sponsorCoversNetworkFee: false,
+    estimatedNetworkFee: readString(quote.gasFee)
+      ? formatRawTokenAmount(readString(quote.gasFee), sourceDecimals)
+      : undefined,
+    estimatedNetworkFeeSymbol: request.source.symbol,
+    estimatedServerFee: portionAmountRaw
+      ? `${formatRawTokenAmount(portionAmountRaw, destinationDecimals)} ${request.destination.symbol}`.trim()
+      : undefined,
+    priceImpactPct: readNumber(quote.priceImpact) ?? null,
     warnings,
-    metadata: asRecord(source.metadata)
+    metadata: {
+      provider: 'uniswap',
+      routing,
+      requestId: readString(response.requestId),
+      quote,
+      permitData: response.permitData ?? null,
+      permitTransaction: response.permitTransaction ?? null,
+      sourceChainId: request.source.chainId,
+      destinationChainId: request.destination.chainId
+    }
   }
 }
 
-function normalizeStatus(raw: unknown): ServerExecutionStatus {
-  const source = asRecord(raw)
-  const executionId = readString(source.executionId || source.id)
-  if (!executionId) throw new Error('Execution status response is missing executionId')
+function hasTransactionRequest(value: unknown): boolean {
+  const tx = asRecord(value)
+  return Boolean(readString(tx.to) && readString(tx.data))
+}
 
-  return {
-    executionId,
-    quoteId: readString(source.quoteId),
-    status: normalizeExecutionStatus(source.status || source.state),
-    detail: readString(source.detail || source.message || source.reason) || undefined,
-    updatedAt: readNumber(source.updatedAt || source.timestamp || source.checkedAt),
-    receipt: {
-      txid: readString(source.txid || source.hash || source.receiptTxid) || undefined,
-      explorerUrl: readString(source.explorerUrl || source.receiptExplorerUrl) || undefined,
-      networkId: readString(source.networkId || source.receiptNetworkId) || undefined
-    },
-    warnings: readStringArray(source.warnings)
+async function waitForTransactionReceipt(
+  config: ServerExecutionRpcConfig,
+  txid: string,
+  label: string
+): Promise<void> {
+  const normalizedTxid = readString(txid)
+  if (!normalizedTxid) throw new Error(`${label} transaction hash is missing`)
+
+  for (let attempt = 0; attempt < TX_RECEIPT_MAX_POLLS; attempt += 1) {
+    const receipt = await callBridgeMethod(config, 'eth_getTransactionReceipt', [normalizedTxid]).catch(() => null)
+    const body = asRecord(receipt)
+    if (Object.keys(body).length > 0) {
+      const status = readString(body.status).toLowerCase()
+      if (status === '0x1' || status === '1') return
+      if (status === '0x0' || status === '0') {
+        throw new Error(`${label} transaction failed on-chain`)
+      }
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, TX_RECEIPT_POLL_MS))
   }
+
+  throw new Error(`${label} transaction is still pending after waiting for confirmation`)
+}
+
+async function broadcastTransaction(
+  config: ServerExecutionRpcConfig,
+  tx: Record<string, unknown>,
+  label: string,
+  waitForConfirmation = false
+): Promise<string> {
+  if (typeof config.sendTransaction !== 'function') {
+    throw new Error('Swap execution transport is not configured for EVM transaction broadcast')
+  }
+
+  const sent = await config.sendTransaction({
+    to: readString(tx.to) || undefined,
+    from: readString(tx.from) || undefined,
+    data: readString(tx.data) || undefined,
+    value: readString(tx.value) || undefined,
+    gasLimit: readString(tx.gasLimit) || undefined,
+    gasPrice: readString(tx.gasPrice) || undefined,
+    maxFeePerGas: readString(tx.maxFeePerGas) || undefined,
+    maxPriorityFeePerGas: readString(tx.maxPriorityFeePerGas) || undefined,
+    chainId: readString(tx.chainId) || config.chainId
+  })
+  const txid = readString((sent as any)?.hash)
+  if (!txid) throw new Error(`${label} transaction broadcast did not return a hash`)
+  if (waitForConfirmation) {
+    await waitForTransactionReceipt(config, txid, label)
+  }
+  return txid
 }
 
 export function createServerExecutionRpcConfig(
   network: BridgeNetworkInput,
-  secureBridgeSigner: UtxoRpcConfig['secureBridgeSigner']
-): UtxoRpcConfig {
+  options?: {
+    sendTransaction?: ServerExecutionRpcConfig['sendTransaction']
+  }
+): ServerExecutionRpcConfig {
   return {
     networkId: network.id,
     coinSymbol: network.symbol,
@@ -384,37 +449,32 @@ export function createServerExecutionRpcConfig(
     bridgeUrl: network.bridgeUrl,
     bridgeUsername: network.bridgeUsername,
     bridgePassword: network.bridgePassword,
-    secureBridgeApiBaseUrl: readString(import.meta.env.VITE_SECURE_BRIDGE_API_BASE_URL) || undefined,
-    secureBridgeWritesEnabled: true,
-    secureBridgeSigner
+    chainId: network.chainId,
+    explorerUrl: network.explorerUrl,
+    sendTransaction: options?.sendTransaction,
+    useLocalRpc: false
   }
 }
 
-export function buildServerSwapApprovalMessage(payload: ServerSwapApprovalPayload): string {
-  return [
-    'MetaYoshi server execution approval',
-    'version=1',
-    'action=swap',
-    `quoteId=${payload.quoteId}`,
-    `executionMode=${payload.executionMode}`,
-    `sourceNetworkId=${payload.sourceNetworkId}`,
-    `sourceSymbol=${payload.sourceSymbol}`,
-    `sourceAssetId=${readString(payload.sourceAssetId)}`,
-    `sourceAssetKind=${readString(payload.sourceAssetKind)}`,
-    `sourceContractAddress=${readString(payload.sourceContractAddress)}`,
-    `sourceAddress=${payload.sourceAddress}`,
-    `sourceAmount=${payload.sourceAmount}`,
-    `destinationNetworkId=${payload.destinationNetworkId}`,
-    `destinationSymbol=${payload.destinationSymbol}`,
-    `destinationAssetId=${readString(payload.destinationAssetId)}`,
-    `destinationAssetKind=${readString(payload.destinationAssetKind)}`,
-    `destinationContractAddress=${readString(payload.destinationContractAddress)}`,
-    `destinationAddress=${payload.destinationAddress}`,
-    `minDestinationAmount=${payload.minDestinationAmount}`,
-    `sponsorPreference=${payload.sponsorPreference}`,
-    `expiresAt=${payload.expiresAt}`,
-    `nonce=${payload.nonce}`
-  ].join('\n')
+export async function resolveServerSwapAssetDecimals(
+  config: ServerExecutionRpcConfig,
+  asset?: ServerSwapAssetRef
+): Promise<number> {
+  if (!asset || asset.kind === 'native') return 18
+  const declared = readNumber(asset.decimals)
+  if (declared !== undefined && Number.isInteger(declared) && declared >= 0 && declared <= 30) {
+    return declared
+  }
+
+  const contractAddress = readString(asset.contractAddress)
+  if (!ethers.isAddress(contractAddress)) return 18
+  const raw = await callBridgeMethod(config, 'eth_call', [{
+    to: contractAddress,
+    data: ERC20_METADATA_IFACE.encodeFunctionData('decimals', [])
+  }, 'latest'])
+  const [value] = ERC20_METADATA_IFACE.decodeFunctionResult('decimals', String(raw || '0x'))
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 30 ? parsed : 18
 }
 
 export function isTerminalServerExecutionStatus(status: ServerExecutionStatusState): boolean {
@@ -422,35 +482,151 @@ export function isTerminalServerExecutionStatus(status: ServerExecutionStatusSta
 }
 
 export async function requestServerSwapQuote(
-  config: UtxoRpcConfig,
+  config: ServerExecutionRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
-  const raw = await executeSecureJsonRequest(config, '/v1/swap/quote', {
+  const sourceChainId = Number(request.source.chainId || config.chainId || 0)
+  const destinationChainId = Number(request.destination.chainId || 0)
+  if (!sourceChainId || !destinationChainId) {
+    throw new Error('EVM chainId is required for Uniswap swap quoting')
+  }
+
+  const sourceDecimals = request.source.asset?.decimals ?? 18
+  const sourceAmountRaw = uiAmountToRaw(request.source.amount, sourceDecimals)
+  const body: Record<string, unknown> = {
+    type: 'EXACT_INPUT',
+    amount: sourceAmountRaw,
+    tokenInChainId: sourceChainId,
+    tokenOutChainId: destinationChainId,
+    tokenIn: resolveUniswapTokenAddress(request.source.asset, request.source.networkId, 'Source asset'),
+    tokenOut: resolveUniswapTokenAddress(request.destination.asset, request.destination.networkId, 'Destination asset'),
+    swapper: request.source.address,
+    slippageTolerance: Number((Math.max(1, request.slippageBps) / 100).toFixed(2)),
+    routingPreference: 'BEST_PRICE'
+  }
+
+  if (sourceChainId === destinationChainId) {
+    body.protocols = ['V2', 'V3', 'V4']
+  }
+
+  const raw = await executeUniswapJsonRequest(config, '/quote', {
     method: 'POST',
-    body: JSON.stringify(request)
+    body: JSON.stringify(body)
   }, 'quote')
   return normalizeQuote(raw, request)
 }
 
 export async function submitServerSwap(
-  config: UtxoRpcConfig,
+  config: ServerExecutionRpcConfig,
   request: ServerSwapSubmitRequest
 ): Promise<ServerExecutionStatus> {
-  const raw = await executeSecureJsonRequest(config, '/v1/swap/submit', {
+  const sourceChainId = Number(request.source.chainId || config.chainId || 0)
+  const destinationChainId = Number(request.destination.chainId || 0)
+  if (!sourceChainId || !destinationChainId) {
+    throw new Error('EVM chainId is required for Uniswap swap execution')
+  }
+
+  const metadata = asRecord(request.quoteMetadata)
+  const rawQuote = asRecord(metadata.quote)
+  if (Object.keys(rawQuote).length === 0) {
+    throw new Error('Swap quote metadata is missing the Uniswap quote payload')
+  }
+
+  const sourceAmountRaw = readString(asRecord(rawQuote.input).amount)
+    || uiAmountToRaw(request.source.amount, request.source.asset?.decimals ?? 18)
+  const tokenIn = resolveUniswapTokenAddress(request.source.asset, request.source.networkId, 'Source asset')
+  const tokenOut = resolveUniswapTokenAddress(request.destination.asset, request.destination.networkId, 'Destination asset')
+
+  if (tokenIn !== UNISWAP_NATIVE_ADDRESS) {
+    const approvalResponse = await executeUniswapJsonRequest(config, '/check_approval', {
+      method: 'POST',
+      body: JSON.stringify({
+        walletAddress: request.source.address,
+        token: tokenIn,
+        amount: sourceAmountRaw,
+        chainId: sourceChainId,
+        tokenOut,
+        tokenOutChainId: destinationChainId,
+        includeGasInfo: true,
+        urgency: 'normal'
+      })
+    }, 'approval')
+    const cancelTx = asRecord(approvalResponse?.cancel)
+    const approvalTx = asRecord(approvalResponse?.approval)
+
+    if (hasTransactionRequest(cancelTx)) {
+      await broadcastTransaction(config, cancelTx, 'Approval reset', true)
+    }
+    if (hasTransactionRequest(approvalTx)) {
+      await broadcastTransaction(config, approvalTx, 'Approval', true)
+    }
+  }
+
+  const swapResponse = await executeUniswapJsonRequest(config, '/swap', {
     method: 'POST',
-    body: JSON.stringify(request)
+    body: JSON.stringify({
+      quote: rawQuote,
+      refreshGasPrice: true,
+      simulateTransaction: false,
+      urgency: 'normal'
+    })
   }, 'submit')
-  return normalizeStatus(raw)
+  const swapTx = asRecord(swapResponse?.swap)
+  if (!hasTransactionRequest(swapTx)) {
+    throw new Error('Swap execution response is missing a transaction payload')
+  }
+
+  const txid = await broadcastTransaction(config, swapTx, 'Swap', false)
+  return {
+    executionId: txid,
+    quoteId: request.quoteId,
+    status: 'submitted',
+    detail: 'Uniswap swap submitted',
+    updatedAt: Date.now(),
+    receipt: {
+      txid,
+      explorerUrl: buildExplorerTxUrl(config.explorerUrl, txid),
+      networkId: request.source.networkId
+    },
+    warnings: []
+  }
 }
 
 export async function fetchServerExecutionStatus(
-  config: UtxoRpcConfig,
+  config: ServerExecutionRpcConfig,
   executionId: string
 ): Promise<ServerExecutionStatus> {
-  const normalizedExecutionId = encodeURIComponent(readString(executionId))
-  if (!normalizedExecutionId) throw new Error('Execution id is required')
-  const raw = await executeSecureJsonRequest(config, `/v1/execute/${normalizedExecutionId}`, {
-    method: 'GET'
-  }, 'status')
-  return normalizeStatus(raw)
+  const txid = encodeURIComponent(readString(executionId))
+  if (!txid) throw new Error('Execution id is required')
+  const chainId = Number(config.chainId || 0)
+  if (!chainId) throw new Error('Source chainId is required to fetch Uniswap swap status')
+
+  const raw = await executeUniswapJsonRequest(
+    config,
+    `/swaps?txHashes=${txid}&chainId=${encodeURIComponent(String(chainId))}`,
+    { method: 'GET' },
+    'status'
+  )
+  const row = Array.isArray(raw?.swaps) ? asRecord(raw.swaps[0]) : {}
+  const resolvedTxid = readString(row.txHash || executionId)
+  const status = normalizeExecutionStatus(row.status)
+  const swapType = readString(row.swapType)
+  return {
+    executionId: resolvedTxid || readString(executionId),
+    status,
+    detail: status === 'confirmed'
+      ? `Uniswap ${swapType || 'swap'} confirmed`
+      : status === 'failed'
+        ? `Uniswap ${swapType || 'swap'} failed`
+        : status === 'expired'
+          ? `Uniswap ${swapType || 'swap'} expired`
+          : `Uniswap ${swapType || 'swap'} pending`,
+    updatedAt: Date.now(),
+    receipt: {
+      txid: resolvedTxid || undefined,
+      explorerUrl: buildExplorerTxUrl(config.explorerUrl, resolvedTxid),
+      networkId: config.networkId
+    },
+    warnings: []
+  }
 }

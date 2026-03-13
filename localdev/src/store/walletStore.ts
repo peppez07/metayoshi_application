@@ -374,6 +374,20 @@ interface WalletState {
     maxPriorityFeePerGas?: string
     type?: 2
   }) => Promise<{ hash: string }>
+  sendPreparedEvmTransaction: (params: {
+    networkId: string
+    tx: {
+      to?: string
+      value?: string
+      data?: string
+      gasLimit?: string
+      gasPrice?: string
+      maxFeePerGas?: string
+      maxPriorityFeePerGas?: string
+      chainId?: string | number
+      type?: 2
+    }
+  }) => Promise<{ hash: string }>
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendMoneroTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
@@ -6905,6 +6919,138 @@ export const useWalletStore = create<WalletState>()(
           gasLimit: manualGasLimit ?? feeQuote.gasLimit,
           chainId: resolvedChainId,
           data: txData
+        }
+        if (recipient) txToSign.to = recipient
+        if (resolvedType === 2) {
+          txToSign.type = 2
+          txToSign.maxFeePerGas = effectiveMaxFeePerGas
+          txToSign.maxPriorityFeePerGas = effectiveMaxPriorityFeePerGas
+        } else {
+          txToSign.gasPrice = manualGasPrice ?? feeQuote.gasPrice ?? 1_000_000_000n
+        }
+
+        const signedTx = await wallet.signTransaction(txToSign)
+        const relayed = await sendBridgeEvmSignedRelay(rpcConfig, {
+          kind: 'coin',
+          signedTxHex: signedTx
+        })
+        return { hash: String(relayed.txid) }
+      },
+
+      sendPreparedEvmTransaction: async ({ networkId, tx }) => {
+        await waitForSendOperationSlot()
+        const {
+          networks,
+          accounts,
+          activeAccountId,
+          sessionMnemonic,
+          isLocked
+        } = get()
+
+        const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim())
+        const net = networks.find((candidate) => candidate.id === normalizedNetworkId)
+        const acc = accounts.find((account) => account.id === activeAccountId) || accounts[0]
+        const modelPreferences = get().getNetworkModelPreferences(normalizedNetworkId)
+        if (!net || net.coinType !== 'EVM') throw new Error('Selected network is not EVM')
+        if (!acc?.addresses?.EVM && !isExternalEvmSignerEnabled()) throw new Error('No active account')
+
+        const recipient = String(tx?.to || '').trim()
+        const txData = String(tx?.data || '').trim()
+        if (recipient && !ethers.isAddress(recipient)) throw new Error('Invalid EVM recipient address')
+        if (txData && !/^0x([0-9a-f]{2})*$/i.test(txData)) {
+          throw new Error('EVM transaction data must be a 0x-prefixed hex string')
+        }
+
+        const manualValue = parseOptionalRpcQuantity(
+          tx?.value === undefined ? undefined : String(tx.value),
+          'value'
+        ) ?? 0n
+        const manualGasLimit = parseOptionalRpcQuantity(tx?.gasLimit, 'gasLimit')
+        const manualGasPrice = parseOptionalRpcQuantity(tx?.gasPrice, 'gasPrice')
+        const manualMaxFeePerGas = parseOptionalRpcQuantity(tx?.maxFeePerGas, 'maxFeePerGas')
+        const manualMaxPriorityFeePerGas = parseOptionalRpcQuantity(tx?.maxPriorityFeePerGas, 'maxPriorityFeePerGas')
+        if (manualGasPrice !== undefined && (manualMaxFeePerGas !== undefined || manualMaxPriorityFeePerGas !== undefined)) {
+          throw new Error('Use either gasPrice or EIP-1559 fee fields, not both')
+        }
+
+        if (isExternalEvmSignerEnabled()) {
+          const signer = await resolveEvmExternalSigner()
+          if (!signer) throw new Error('External EVM signer is not available')
+          const rpcConfig = await createUtxoRpcConfig(net)
+          const fromAddress = await signer.getAddress()
+          const feeQuote = await estimateEvmTxFee({
+            rpcConfig,
+            from: fromAddress,
+            to: recipient || undefined,
+            valueWei: manualValue,
+            data: txData || undefined,
+            fallbackGasLimitHex: recipient ? '0x30d40' : '0x2dc6c0',
+            lane: modelPreferences.evmGasLane
+          })
+          const resolvedType = manualGasPrice !== undefined
+            ? undefined
+            : ((tx?.type === 2 || manualMaxFeePerGas !== undefined || manualMaxPriorityFeePerGas !== undefined || feeQuote.type === 2) ? 2 : undefined)
+          const effectiveMaxFeePerGas = manualMaxFeePerGas ?? feeQuote.maxFeePerGas
+          const effectiveMaxPriorityFeePerGas = manualMaxPriorityFeePerGas ?? feeQuote.maxPriorityFeePerGas
+          if (resolvedType === 2 && (effectiveMaxFeePerGas === undefined || effectiveMaxPriorityFeePerGas === undefined)) {
+            throw new Error('Missing EIP-1559 fee quote for type 2 transaction')
+          }
+          const sent = await signer.sendTransaction({
+            chainId: Number(tx?.chainId ?? net.chainId),
+            to: recipient || undefined,
+            valueWei: manualValue,
+            data: txData || undefined,
+            gasLimit: manualGasLimit ?? feeQuote.gasLimit,
+            gasPrice: resolvedType === 2 ? undefined : (manualGasPrice ?? feeQuote.gasPrice),
+            maxFeePerGas: resolvedType === 2 ? effectiveMaxFeePerGas : undefined,
+            maxPriorityFeePerGas: resolvedType === 2 ? effectiveMaxPriorityFeePerGas : undefined,
+            type: resolvedType
+          })
+          return { hash: sent.hash }
+        }
+
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((account) => account.id === acc.id))
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const wallet = deriveEvmWallet(sessionMnemonic, accountIndex)
+        const fromAddress = String(wallet.address || '').trim()
+        const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
+        const resolvedChainId = Number(BigInt(String(chainIdHex || tx?.chainId || net.chainId || 1)))
+        const expectedChainId = Number(tx?.chainId ?? net.chainId ?? 0)
+        if (Number.isFinite(expectedChainId) && expectedChainId > 0 && resolvedChainId !== expectedChainId) {
+          throw new Error(
+            `Bridge/RPC chain mismatch: selected ${net.name} expects chainId ${expectedChainId}, got ${resolvedChainId}. ` +
+            'Stop and verify bridge coin/chain routing before sending.'
+          )
+        }
+
+        const nonceHex = await callBridgeMethod(rpcConfig, 'eth_getTransactionCount', [fromAddress, 'pending'])
+        const feeQuote = await estimateEvmTxFee({
+          rpcConfig,
+          from: fromAddress,
+          to: recipient || undefined,
+          valueWei: manualValue,
+          data: txData || undefined,
+          fallbackGasLimitHex: recipient ? '0x30d40' : '0x2dc6c0',
+          lane: modelPreferences.evmGasLane
+        })
+        const resolvedType = manualGasPrice !== undefined
+          ? undefined
+          : ((tx?.type === 2 || manualMaxFeePerGas !== undefined || manualMaxPriorityFeePerGas !== undefined || feeQuote.type === 2) ? 2 : undefined)
+        const effectiveMaxFeePerGas = manualMaxFeePerGas ?? feeQuote.maxFeePerGas
+        const effectiveMaxPriorityFeePerGas = manualMaxPriorityFeePerGas ?? feeQuote.maxPriorityFeePerGas
+        if (resolvedType === 2 && (effectiveMaxFeePerGas === undefined || effectiveMaxPriorityFeePerGas === undefined)) {
+          throw new Error('Missing EIP-1559 fee quote for type 2 transaction')
+        }
+
+        const txToSign: any = {
+          value: manualValue,
+          nonce: Number(BigInt(String(nonceHex || '0x0'))),
+          gasLimit: manualGasLimit ?? feeQuote.gasLimit,
+          chainId: resolvedChainId,
+          data: txData || undefined
         }
         if (recipient) txToSign.to = recipient
         if (resolvedType === 2) {

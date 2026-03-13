@@ -8,11 +8,11 @@ import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
 import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
 import { findSwapAssetAliasOptions } from '../../lib/swapAssetAliases'
 import {
-  buildServerSwapApprovalMessage,
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
   requestServerSwapQuote,
+  resolveServerSwapAssetDecimals,
   submitServerSwap,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
@@ -31,8 +31,12 @@ function formatSwapUiError(error: unknown): string {
   const message = compactError(error)
   const normalized = message.toLowerCase()
 
-  if (normalized.includes('server authentication is misconfigured')) {
-    return 'MetaYoshi swap service is not configured correctly on the server yet. Quotes and execution should work automatically once server auth is fixed.'
+  if (normalized.includes('vite_app_api_key is required')) {
+    return 'Swap is not configured yet. Set VITE_APP_API_KEY for the Uniswap API and reload the wallet.'
+  }
+
+  if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
+    return 'Uniswap swaps are currently available only for EVM networks in this wallet.'
   }
 
   if (
@@ -40,26 +44,22 @@ function formatSwapUiError(error: unknown): string {
     || normalized.includes('requested asset pair')
     || normalized.includes('selected swap')
   ) {
-    return 'MetaYoshi swap does not have a configured route for this network and asset pair yet.'
+    return 'No Uniswap route is available for this network and asset pair.'
   }
 
   if (
-    normalized.includes('swap quote backend is unavailable')
-    || normalized.includes('backend is unavailable')
+    normalized.includes('routing "')
+    || normalized.includes('not supported by this swap flow')
   ) {
-    return 'MetaYoshi swap quote backend is not available on the server right now.'
+    return 'This quote returned an unsupported Uniswap routing mode for the current wallet flow.'
   }
 
   if (normalized.includes('swap quote request failed')) {
-    return 'MetaYoshi swap quote service is unavailable right now. Please try again in a moment.'
+    return 'Uniswap quote service is unavailable right now. Please try again in a moment.'
   }
 
   if (normalized.includes('server execution request failed')) {
-    return 'MetaYoshi swap service is temporarily unavailable. Please try again in a moment.'
-  }
-
-  if (normalized.includes('secure bridge signer is unavailable')) {
-    return 'Unlock the wallet and try again.'
+    return 'Uniswap swap service is temporarily unavailable. Please try again in a moment.'
   }
 
   return message
@@ -191,10 +191,10 @@ const Swap: React.FC = () => {
     disabledNetworkIds,
     activeNetworkId,
     ensureNetworkAddress,
-    signBackendAuthMessage,
     addActivity,
     refreshActiveBalance,
-    getSendableItems
+    getSendableItems,
+    sendPreparedEvmTransaction
   } = useWalletStore()
 
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
@@ -335,7 +335,7 @@ const Swap: React.FC = () => {
     if (!execution || !fromNetwork || isTerminalServerExecutionStatus(execution.status)) return
 
     let cancelled = false
-    const rpcConfig = createServerExecutionRpcConfig(fromNetwork, signBackendAuthMessage)
+    const rpcConfig = createServerExecutionRpcConfig(fromNetwork)
     const executionId = execution.executionId
 
     const poll = async () => {
@@ -358,7 +358,7 @@ const Swap: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [execution, fromNetwork, signBackendAuthMessage])
+  }, [execution, fromNetwork])
 
   useEffect(() => {
     if (!execution || !isTerminalServerExecutionStatus(execution.status)) return
@@ -421,6 +421,12 @@ const Swap: React.FC = () => {
     if (!toItem) throw new Error('Select a destination asset')
     if (!fromAmount || Number(fromAmount) <= 0) throw new Error('Enter a valid amount')
     if (isSameAssetPair) throw new Error('Choose a different destination asset')
+    if (fromNetwork.coinType !== 'EVM' || toNetwork.coinType !== 'EVM') {
+      throw new Error('Selected network is not EVM')
+    }
+    if (!fromNetwork.chainId || !toNetwork.chainId) {
+      throw new Error('EVM chainId is required for Uniswap swaps')
+    }
 
     const sourceAddress = String(await ensureNetworkAddress(fromNetwork.id) || '').trim()
     if (!sourceAddress) throw new Error(`Could not derive a ${fromNetwork.symbol} source address`)
@@ -428,12 +434,26 @@ const Swap: React.FC = () => {
     const destinationAddress = String(await ensureNetworkAddress(toNetwork.id) || '').trim()
     if (!destinationAddress) throw new Error(`Could not derive a ${toNetwork.symbol} destination address`)
 
+    const sourceRpcConfig = createServerExecutionRpcConfig(fromNetwork)
+    const destinationRpcConfig = createServerExecutionRpcConfig(toNetwork)
+    const sourceAssetBase = toServerSwapAsset(fromItem, fromNetwork.id)
+    const destinationAssetBase = toServerSwapAsset(toItem, toNetwork.id)
+    const [sourceDecimals, destinationDecimals] = await Promise.all([
+      resolveServerSwapAssetDecimals(sourceRpcConfig, sourceAssetBase),
+      resolveServerSwapAssetDecimals(destinationRpcConfig, destinationAssetBase)
+    ])
+
     return {
-      rpcConfig: createServerExecutionRpcConfig(fromNetwork, signBackendAuthMessage),
+      rpcConfig: createServerExecutionRpcConfig(fromNetwork, {
+        sendTransaction: async (tx) => await sendPreparedEvmTransaction({
+          networkId: fromNetwork.id,
+          tx
+        })
+      }),
       sourceAddress,
       destinationAddress,
-      sourceAsset: toServerSwapAsset(fromItem, fromNetwork.id),
-      destinationAsset: toServerSwapAsset(toItem, toNetwork.id)
+      sourceAsset: sourceAssetBase ? { ...sourceAssetBase, decimals: sourceDecimals } : undefined,
+      destinationAsset: destinationAssetBase ? { ...destinationAssetBase, decimals: destinationDecimals } : undefined
     }
   }
 
@@ -453,6 +473,7 @@ const Swap: React.FC = () => {
           nextQuote = await requestServerSwapQuote(rpcConfig, {
             source: {
               networkId: fromNetwork!.id,
+              chainId: fromNetwork!.chainId,
               symbol: fromItem?.symbol || fromNetwork!.symbol,
               address: sourceAddress,
               amount: fromAmount,
@@ -460,9 +481,16 @@ const Swap: React.FC = () => {
             },
             destination: {
               networkId: toNetwork!.id,
+              chainId: toNetwork!.chainId,
               symbol: candidate.symbol || toNetwork!.symbol,
               address: destinationAddress,
-              asset: toServerSwapAsset(candidate, toNetwork!.id)
+              asset: {
+                ...(toServerSwapAsset(candidate, toNetwork!.id) as ServerSwapAssetRef),
+                decimals: await resolveServerSwapAssetDecimals(
+                  createServerExecutionRpcConfig(toNetwork!),
+                  toServerSwapAsset(candidate, toNetwork!.id)
+                )
+              }
             },
             slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
             sponsorPreference
@@ -490,7 +518,7 @@ const Swap: React.FC = () => {
 
       setQuote(nextQuote)
       setToAmount(nextQuote.destinationAmount)
-      showToast(`Server quote ready: ${nextQuote.mode}`, 'success')
+      showToast(`Uniswap quote ready: ${nextQuote.mode}`, 'success')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)
@@ -512,36 +540,11 @@ const Swap: React.FC = () => {
     setErrorText('')
     try {
       const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
-      const nonce = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `swap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-
-      const approvalMessage = buildServerSwapApprovalMessage({
-        quoteId: quote.quoteId,
-        sourceNetworkId: fromNetwork.id,
-        sourceSymbol: fromItem.symbol || fromNetwork.symbol,
-        sourceAssetId: sourceAsset?.assetId,
-        sourceAssetKind: sourceAsset?.kind,
-        sourceContractAddress: sourceAsset?.contractAddress,
-        sourceAddress,
-        sourceAmount: fromAmount,
-        destinationNetworkId: toNetwork.id,
-        destinationSymbol: toItem.symbol || toNetwork.symbol,
-        destinationAssetId: destinationAsset?.assetId,
-        destinationAssetKind: destinationAsset?.kind,
-        destinationContractAddress: destinationAsset?.contractAddress,
-        destinationAddress,
-        minDestinationAmount: quote.minDestinationAmount,
-        sponsorPreference,
-        executionMode: quote.mode,
-        expiresAt: quote.expiresAt,
-        nonce
-      })
-      const approval = await signBackendAuthMessage(approvalMessage)
       const submitted = await submitServerSwap(rpcConfig, {
         quoteId: quote.quoteId,
         source: {
           networkId: fromNetwork.id,
+          chainId: fromNetwork.chainId,
           symbol: fromItem.symbol || fromNetwork.symbol,
           address: sourceAddress,
           amount: fromAmount,
@@ -549,6 +552,7 @@ const Swap: React.FC = () => {
         },
         destination: {
           networkId: toNetwork.id,
+          chainId: toNetwork.chainId,
           symbol: toItem.symbol || toNetwork.symbol,
           address: destinationAddress,
           asset: destinationAsset
@@ -556,16 +560,10 @@ const Swap: React.FC = () => {
         minDestinationAmount: quote.minDestinationAmount,
         sponsorPreference,
         executionMode: quote.mode,
-        approval: {
-          nonce,
-          address: approval.address,
-          message: approvalMessage,
-          signature: approval.signature,
-          signedAt: Date.now()
-        }
+        quoteMetadata: quote.metadata
       })
       setExecution(submitted)
-      showToast('Swap submitted to server execution', 'info')
+      showToast('Swap submitted to Uniswap', 'info')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)
@@ -592,9 +590,9 @@ const Swap: React.FC = () => {
           <div className="flex items-start gap-2">
             <IoInformationCircleOutline className="w-4 h-4 text-red-300 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="text-xs font-bold text-red-200">Swap not implemented</p>
+              <p className="text-xs font-bold text-red-200">Uniswap-powered swap</p>
               <p className="text-[11px] text-red-100/90">
-                Swap is not implemented yet. Do not rely on quotes, routing, or execution from this screen.
+                This flow uses the Uniswap Trade API for EVM swaps. Non-EVM networks and unsupported routing modes will be rejected.
               </p>
             </div>
           </div>
