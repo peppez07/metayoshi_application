@@ -141,6 +141,13 @@ export interface SendListPreferenceBucket {
   hidden: string[]
 }
 
+export interface RememberedSendSelectionBucket {
+  /** Stable send entry id, scoped to one account+network pair. */
+  entryId: string | null
+  /** Raw asset id fallback when an entry id needs to be rematched. */
+  assetId: string | null
+}
+
 export interface SendableItem {
   /** Stable preference id. For EVM tokens we normalize to contract-based ids. */
   id: string
@@ -272,6 +279,8 @@ interface WalletState {
   catalogQueryNonce: number
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
   sendListPreferences: Record<string, SendListPreferenceBucket>
+  /** Per account+network last-opened send target for quick-send restore. */
+  rememberedSendSelection: Record<string, RememberedSendSelectionBucket>
   /** Per-network execution preferences for model-specific send controls. */
   networkModelPreferences: Record<string, NetworkModelPreferences>
   authorizedSites: string[]
@@ -406,6 +415,20 @@ interface WalletState {
     order?: string[]
     pinned?: string[]
     hidden?: string[]
+  }) => void
+  getRememberedSendSelection: (params?: {
+    accountId?: string
+    networkId?: string
+  }) => RememberedSendSelectionBucket | null
+  rememberSendSelection: (params: {
+    accountId?: string
+    networkId?: string
+    entryId?: string | null
+    assetId?: string | null
+  }) => void
+  clearRememberedSendSelection: (params?: {
+    accountId?: string
+    networkId?: string
   }) => void
   getNetworkModelPreferences: (networkId?: string) => NetworkModelPreferences
   setNetworkModelPreferences: (params: {
@@ -1823,6 +1846,32 @@ function normalizeSendListPreferencesRecord(
   return out
 }
 
+function normalizeRememberedSendSelectionBucket(
+  raw: Partial<RememberedSendSelectionBucket> | undefined | null
+): RememberedSendSelectionBucket {
+  const entryId = normalizeSendListEntryId(String(raw?.entryId || '').trim())
+  const assetId = String(raw?.assetId || '').trim()
+  return {
+    entryId: entryId || null,
+    assetId: assetId || null
+  }
+}
+
+function normalizeRememberedSendSelectionRecord(
+  raw: Record<string, Partial<RememberedSendSelectionBucket>> | undefined | null
+): Record<string, RememberedSendSelectionBucket> {
+  const out: Record<string, RememberedSendSelectionBucket> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [scopeKeyRaw, value] of Object.entries(raw)) {
+    const scopeKey = String(scopeKeyRaw || '').trim().toLowerCase()
+    if (!scopeKey || !scopeKey.includes('::')) continue
+    const normalized = normalizeRememberedSendSelectionBucket(value)
+    if (!normalized.entryId && !normalized.assetId) continue
+    out[scopeKey] = normalized
+  }
+  return out
+}
+
 function normalizeNetworkModelPreferencesState(
   raw: Record<string, NetworkModelPreferences> | undefined | null,
   networks: Network[]
@@ -2780,6 +2829,7 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkFiatAssets: {},
       catalogQueryNonce: 0,
       sendListPreferences: {},
+      rememberedSendSelection: {},
       networkModelPreferences: {},
       authorizedSites: [],
       autolockMinutes: 5,
@@ -3002,6 +3052,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
           sendListPreferences: {},
+          rememberedSendSelection: {},
           networkModelPreferences: {},
           activity: []
         }),
@@ -5020,6 +5071,82 @@ export const useWalletStore = create<WalletState>()(
         })
       },
 
+      getRememberedSendSelection: (params) => {
+        const {
+          accounts,
+          activeAccountId,
+          networks,
+          activeNetworkId,
+          rememberedSendSelection
+        } = get()
+
+        const accountId = String(params?.accountId || activeAccountId || accounts[0]?.id || '').trim()
+        const networkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!accountId || !networkId) return null
+        if (!accounts.some((account) => account.id === accountId)) return null
+        if (!networks.some((network) => network.id === networkId)) return null
+
+        const scopeKey = buildSendListPreferenceScopeKey(accountId, networkId)
+        const normalized = normalizeRememberedSendSelectionBucket(rememberedSendSelection?.[scopeKey])
+        return (normalized.entryId || normalized.assetId) ? normalized : null
+      },
+
+      rememberSendSelection: (params) => {
+        const {
+          accounts,
+          activeAccountId,
+          networks,
+          activeNetworkId
+        } = get()
+
+        const accountId = String(params?.accountId || activeAccountId || accounts[0]?.id || '').trim()
+        const networkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!accountId || !networkId) return
+        if (!accounts.some((account) => account.id === accountId)) return
+        if (!networks.some((network) => network.id === networkId)) return
+
+        const scopeKey = buildSendListPreferenceScopeKey(accountId, networkId)
+        const next = normalizeRememberedSendSelectionBucket({
+          entryId: params?.entryId,
+          assetId: params?.assetId
+        })
+
+        set((state) => {
+          const current = normalizeRememberedSendSelectionBucket(state.rememberedSendSelection?.[scopeKey])
+          if (current.entryId === next.entryId && current.assetId === next.assetId) return state
+          const updated = { ...state.rememberedSendSelection }
+          if (!next.entryId && !next.assetId) {
+            delete updated[scopeKey]
+          } else {
+            updated[scopeKey] = next
+          }
+          return { rememberedSendSelection: updated }
+        })
+      },
+
+      clearRememberedSendSelection: (params) => {
+        const {
+          accounts,
+          activeAccountId,
+          networks,
+          activeNetworkId
+        } = get()
+
+        const accountId = String(params?.accountId || activeAccountId || accounts[0]?.id || '').trim()
+        const networkId = normalizeNetworkIdAlias(String(params?.networkId || activeNetworkId || '').trim())
+        if (!accountId || !networkId) return
+        if (!accounts.some((account) => account.id === accountId)) return
+        if (!networks.some((network) => network.id === networkId)) return
+
+        const scopeKey = buildSendListPreferenceScopeKey(accountId, networkId)
+        set((state) => {
+          if (!(scopeKey in state.rememberedSendSelection)) return state
+          const updated = { ...state.rememberedSendSelection }
+          delete updated[scopeKey]
+          return { rememberedSendSelection: updated }
+        })
+      },
+
       getNetworkModelPreferences: (networkId) => {
         const { networks, activeNetworkId, networkModelPreferences } = get()
         const resolvedNetworkId = normalizeNetworkIdAlias(String(networkId || activeNetworkId || '').trim())
@@ -5685,6 +5812,7 @@ export const useWalletStore = create<WalletState>()(
           networkAssets:    {},
           accountNetworkAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord(backup.sendListPreferences ?? {}),
+          rememberedSendSelection: {},
           networkModelPreferences: normalizeNetworkModelPreferencesState(backup.networkModelPreferences ?? {}, networks),
           networkAssetLogos: {},
           accountNetworkAssetLogos: {},
@@ -7096,6 +7224,7 @@ export const useWalletStore = create<WalletState>()(
         isSyncing: state.isSyncing,
         syncPercent: state.syncPercent,
         sendListPreferences: state.sendListPreferences,
+        rememberedSendSelection: state.rememberedSendSelection,
         networkModelPreferences: state.networkModelPreferences,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
@@ -7196,6 +7325,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
+          rememberedSendSelection: normalizeRememberedSendSelectionRecord((persisted as any).rememberedSendSelection),
           networkModelPreferences: normalizeNetworkModelPreferencesState((persisted as any).networkModelPreferences, normalizedNetworks),
           donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
         }

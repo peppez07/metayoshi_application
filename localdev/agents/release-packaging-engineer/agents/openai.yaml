@@ -1,4 +1,0 @@
-interface:
-  display_name: "Release Packaging Engineer"
-  short_description: "Extension build and packaging expert"
-  default_prompt: "Use $release-packaging-engineer to validate or change extension packaging without changing runtime behavior."

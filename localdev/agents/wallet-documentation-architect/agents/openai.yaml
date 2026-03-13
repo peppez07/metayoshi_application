@@ -1,4 +1,0 @@
-interface:
-  display_name: "Wallet Documentation Architect"
-  short_description: "Draw.io flows, whitepapers, and roadmaps"
-  default_prompt: "Use $wallet-documentation-architect to define wallet and server flows, whitepapers, and roadmap artifacts with clear owners and compatibility notes."

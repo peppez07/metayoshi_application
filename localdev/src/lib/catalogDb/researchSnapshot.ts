@@ -1,5 +1,3 @@
-import top100CoinCatalogSnapshot from '../../../docs/research/top100-coin-catalog-snapshot.json'
-
 export type ResearchCatalogAssetPlatform = {
   platformId: string
   contractAddress: string
@@ -33,5 +31,10 @@ export type ResearchCatalogSnapshot = {
   assets: ResearchCatalogAsset[]
 }
 
-export const RESEARCH_TOP100_CATALOG_SNAPSHOT =
-  top100CoinCatalogSnapshot as ResearchCatalogSnapshot
+export const RESEARCH_TOP100_CATALOG_SNAPSHOT: ResearchCatalogSnapshot = {
+  generatedAt: '1970-01-01T00:00:00.000Z',
+  source: 'bundled-empty',
+  selectionRule: 'none',
+  notes: ['Research snapshot removed from the public app bundle.'],
+  assets: []
+}

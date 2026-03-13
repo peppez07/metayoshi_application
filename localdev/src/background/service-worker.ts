@@ -563,24 +563,12 @@ function buildApprovalPopupUrl(): string {
   return buildPopupRouteUrl('/dapp/connect/1')
 }
 
-function isWalletTxConfirmRequest(
-  method: DappRequestMethod,
-  request: unknown
-): boolean {
-  if (method === 'wallet_sendAsset') return true
-  if (method !== 'wallet_sendTransaction' || !request || typeof request !== 'object') return false
-
-  const candidate = request as Record<string, unknown>
-  const data = String(candidate.data || '').trim()
-  if (data) return false
-
-  const to = String(candidate.to || '').trim()
-  const amount = String(candidate.amount || candidate.value || '').trim()
-  return Boolean(to && amount)
+function isWalletTxConfirmRequest(method: DappRequestMethod): boolean {
+  return method === 'wallet_sendAsset' || method === 'wallet_sendTransaction'
 }
 
-function buildRequestPopupUrl(requestId: string, method: DappRequestMethod, request: unknown): string {
-  if (isWalletTxConfirmRequest(method, request)) {
+function buildRequestPopupUrl(requestId: string, method: DappRequestMethod): string {
+  if (isWalletTxConfirmRequest(method)) {
     return buildPopupRouteUrl(`/tx/confirm?dappRequest=1&id=${encodeURIComponent(requestId)}`)
   }
   return buildPopupRouteUrl(`/dapp/request/confirm?id=${encodeURIComponent(requestId)}`)
@@ -604,8 +592,8 @@ async function openApprovalPopup(): Promise<void> {
   await openManagedPopup(buildApprovalPopupUrl())
 }
 
-async function openRequestPopup(requestId: string, method: DappRequestMethod, request: unknown): Promise<void> {
-  await openManagedPopup(buildRequestPopupUrl(requestId, method, request))
+async function openRequestPopup(requestId: string, method: DappRequestMethod): Promise<void> {
+  await openManagedPopup(buildRequestPopupUrl(requestId, method))
 }
 
 async function openManagedPopup(url: string): Promise<void> {
@@ -843,6 +831,25 @@ function summarizeTraceValue(value: unknown, maxLength = 180): string | undefine
     const text = String(value)
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
   }
+}
+
+async function focusManagedPopupWindow(): Promise<boolean> {
+  const existingWindow = await findManagedPopupWindow()
+  if (existingWindow?.id === undefined) return false
+
+  const left = await resolvePopupLeft()
+  const top = await resolvePopupTop()
+  managedPopupWindowId = existingWindow.id
+  managedPopupWindowIds.add(existingWindow.id)
+  await chrome.windows.update(existingWindow.id, {
+    width: APP_POPUP_WIDTH,
+    height: APP_POPUP_HEIGHT,
+    state: 'normal',
+    left,
+    top,
+    focused: true
+  })
+  return true
 }
 
 async function waitForApprovalDecision(id: string, timeoutMs: number): Promise<ApprovalDecision> {
@@ -1346,7 +1353,7 @@ async function requestDappActionApproval(
       const existingPopup = pending.status === 'pending' ? await findManagedPopupWindow() : null
       if (pending.status === 'pending' && !existingPopup?.id) {
         try {
-          await openRequestPopup(pending.id, pending.method, pending.request)
+          await openRequestPopup(pending.id, pending.method)
         } catch {
           // Preserve the original pending request and keep waiting for it.
         }
@@ -1396,7 +1403,7 @@ async function requestDappActionApproval(
   })
 
   try {
-    await openRequestPopup(requestId, method, request)
+    await openRequestPopup(requestId, method)
   } catch {
     await clearPendingRequestIfMatch(requestId)
     throw { code: 4001, message: 'Unable to open wallet approval popup' }
@@ -2368,10 +2375,17 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 if (chrome.action?.onClicked) {
   chrome.action.onClicked.addListener(() => {
-    void enforceSingleManagedPopupWindow()
-    void openWalletHomePopup().catch((err) => {
-      void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })
-    })
+    void (async () => {
+      try {
+        await enforceSingleManagedPopupWindow()
+        const focused = await focusManagedPopupWindow()
+        if (!focused) {
+          await openWalletHomePopup()
+        }
+      } catch (err) {
+        void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })
+      }
+    })()
   })
 }
 

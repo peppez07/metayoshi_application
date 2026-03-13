@@ -1,4 +1,0 @@
-interface:
-  display_name: "Coin Ecosystem Researcher"
-  short_description: "Official-source coin ecosystem scouting"
-  default_prompt: "Use $coin-ecosystem-researcher to verify a new or partial coin integration from official docs and trusted GitHub sources before implementation."

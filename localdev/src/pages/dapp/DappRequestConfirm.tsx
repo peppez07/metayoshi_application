@@ -48,6 +48,19 @@ function previewJson(value: unknown, maxLength = 240): string {
   }
 }
 
+interface TxResultState {
+  txid: string
+  networkId: string
+  accountId?: string
+  asset: string
+  amount: string
+  from?: string
+  to?: string
+  status?: string
+  origin?: string
+  requestMethod?: string
+}
+
 const DappRequestConfirm: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -562,6 +575,23 @@ const DappRequestConfirm: React.FC = () => {
           updatedAt: Date.now()
         }
       })
+
+      if (txHash) {
+        const resultState: TxResultState = {
+          txid: txHash,
+          networkId: pendingRequest.networkId,
+          accountId: pendingRequest.accountId,
+          asset: requestIsAssetSend ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX'),
+          amount: requestAmount || '0',
+          from: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : undefined,
+          to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : (requestTo || undefined),
+          status: 'pending',
+          origin: pendingRequest.origin,
+          requestMethod: requestMethod
+        }
+        navigate('/tx/result', { replace: true, state: resultState })
+        return
+      }
 
       navigate('/wallet/assets')
       window.close()

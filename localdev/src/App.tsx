@@ -32,6 +32,7 @@ import DappConnectStep2 from './pages/dapp/DappConnectStep2'
 import DappRequestConfirm from './pages/dapp/DappRequestConfirm'
 import TxConfirm from './pages/tx/TxConfirm'
 import TxReject from './pages/tx/TxReject'
+import TxResult from './pages/tx/TxResult'
 import SettingsLayout from './pages/settings/SettingsLayout'
 import MainSettings from './pages/settings/MainSettings'
 import PasswordSettings from './pages/settings/PasswordSettings'
@@ -308,6 +309,7 @@ function App() {
           {/* Transaction Flow */}
           <Route path="/tx/confirm" element={<TxRouteGate element={<TxConfirm />} />} />
           <Route path="/tx/reject" element={<TxRouteGate element={<TxReject />} />} />
+          <Route path="/tx/result" element={<TxRouteGate element={<TxResult />} />} />
 
           {/* Settings Flow */}
           <Route path="/settings" element={isLocked ? <Navigate to="/unlock" replace /> : (!onboardingCompleted ? <Navigate to="/welcome" replace /> : <SettingsLayout />)}>

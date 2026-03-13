@@ -35,6 +35,21 @@ function formatSwapUiError(error: unknown): string {
     return 'MetaYoshi swap service is not configured correctly on the server yet. Quotes and execution should work automatically once server auth is fixed.'
   }
 
+  if (
+    normalized.includes('no route')
+    || normalized.includes('requested asset pair')
+    || normalized.includes('selected swap')
+  ) {
+    return 'MetaYoshi swap does not have a configured route for this network and asset pair yet.'
+  }
+
+  if (
+    normalized.includes('swap quote backend is unavailable')
+    || normalized.includes('backend is unavailable')
+  ) {
+    return 'MetaYoshi swap quote backend is not available on the server right now.'
+  }
+
   if (normalized.includes('swap quote request failed')) {
     return 'MetaYoshi swap quote service is unavailable right now. Please try again in a moment.'
   }
@@ -573,13 +588,13 @@ const Swap: React.FC = () => {
       </header>
 
       <div className="p-4 border-b border-dark-600/60 space-y-3">
-        <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5">
           <div className="flex items-start gap-2">
-            <IoFlashOutline className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <IoInformationCircleOutline className="w-4 h-4 text-red-300 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="text-xs font-bold text-gray-200">Non-custodial server route</p>
-              <p className="text-[11px] text-gray-400">
-                Choose what to swap, review the quote, then sign once. The server handles routing and can sponsor network fees when allowed.
+              <p className="text-xs font-bold text-red-200">Swap not implemented</p>
+              <p className="text-[11px] text-red-100/90">
+                Swap is not implemented yet. Do not rely on quotes, routing, or execution from this screen.
               </p>
             </div>
           </div>

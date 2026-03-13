@@ -2,7 +2,7 @@
 
 Public GitHub snapshot of the MetaYoshi browser-extension wallet.
 
-This workspace keeps the existing project ignore rules and exposes the current wallet source in a GitHub-friendly layout. The actual extension app lives in `localdev/`. Supporting docs and examples are kept at the repository root.
+This workspace keeps the current wallet source in a GitHub-friendly layout. The actual extension app lives in `localdev/`.
 
 ## Current wallet status
 
@@ -15,7 +15,7 @@ MetaYoshi is currently a non-custodial multi-chain browser wallet with:
 - backup and restore flows for full backup, recovery phrase, and encrypted vault JSON
 - browser packaging for Chrome, Brave, Chromium, and Firefox
 
-Current public source version: `0.1.8`
+Current public source version: `0.1.9`
 
 ## Configured network coverage
 
@@ -44,9 +44,7 @@ Actual availability in a given build can still vary based on environment configu
 
 ## Repository layout
 
-- `localdev/`: main extension app, source code, browser packaging scripts, and the runnable Vite project
-- `docs/`: root-level reference docs and pointers into the maintained app docs under `localdev/docs/`
-- `examples/`: example dapp/test files
+- `localdev/`: main extension app and the runnable Vite project
 
 Key extension code inside `localdev/`:
 
@@ -58,15 +56,6 @@ Key extension code inside `localdev/`:
 - `src/components/**`
 - `src/store/**`
 - `src/coins/**`
-
-## Documentation
-
-- Active implementation roadmap for swap and service work:
-  - `localdev/docs/metayoshi-wallet-swap-services-roadmap.md`
-- Broader fusion architecture and protocol runbook:
-  - `localdev/docs/metayoshi-wallet-fusion-master-runbook.md`
-- Root docs index:
-  - `docs/README.md`
 
 ## Local setup
 
@@ -90,23 +79,12 @@ cd localdev
 npm run build
 ```
 
-Build browser packages:
-
-```bash
-cd localdev
-npm run build:browsers
-```
-
 Useful scripts in `localdev/`:
 
+- `npm run dev`
 - `npm run lint`
 - `npm run build`
-- `npm run build:chrome`
-- `npm run build:brave`
-- `npm run build:firefox`
-- `npm run build:browsers`
-- `npm run zip:browsers`
-- `npm run test:api:firo-eth`
+- `npm run preview`
 
 ## Public repo constraints
 

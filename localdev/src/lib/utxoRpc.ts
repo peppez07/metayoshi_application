@@ -490,7 +490,6 @@ async function executeSecureBridgeWriteRpc(
         Authorization: `Bearer ${session.token}`
       }
       applyOptionalServerApiKey(headers)
-      applyOptionalBridgeBasicAuthHeaders(headers, config)
       return headers
     })(),
     body: JSON.stringify({ operation })
@@ -520,7 +519,6 @@ async function executeSecureBridgeWriteRpc(
         Authorization: `Bearer ${session.token}`
       }
       applyOptionalServerApiKey(headers)
-      applyOptionalBridgeBasicAuthHeaders(headers, config)
       return headers
     })(),
     body: JSON.stringify({ operation, opToken })

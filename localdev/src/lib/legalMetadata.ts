@@ -1,4 +1,4 @@
-export const WALLET_VERSION = '0.1.8'
+export const WALLET_VERSION = '0.1.9'
 export const WALLET_VERSION_NAME = `metayoshi-${WALLET_VERSION}`
 
 export const METAYOSHI_SUPPORT_EMAIL = 'support@metayoshi.app'

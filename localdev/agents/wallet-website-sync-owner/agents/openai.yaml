@@ -1,4 +1,0 @@
-interface:
-  display_name: "Wallet Website Sync Owner"
-  short_description: "Wallet release and website sync owner"
-  default_prompt: "Use $wallet-website-sync-owner to coordinate wallet release changes that also require website metadata, SDK, or public support updates."

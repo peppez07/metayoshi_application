@@ -855,6 +855,9 @@ const Send: React.FC = () => {
     sendListPreferences,
     getNetworkModelPreferences,
     getSendableItems,
+    getRememberedSendSelection,
+    rememberSendSelection,
+    clearRememberedSendSelection,
     setActiveAccount,
     setActiveNetwork,
     fetchNetworkAssets
@@ -898,6 +901,13 @@ const Send: React.FC = () => {
   const initialAutoScanTriggeredRef = useRef(false)
 
   const allItems = getSendableItems({ includeHidden: true })
+  const rememberedSelection = useMemo(
+    () => getRememberedSendSelection({
+      accountId: activeAccountId || undefined,
+      networkId: activeNetworkId || undefined
+    }),
+    [getRememberedSendSelection, activeAccountId, activeNetworkId]
+  )
   const activePairItems = useMemo(() => {
     if (!activeAccountId || !activeNetworkId) return [] as SendableItem[]
     return getSendableItems({
@@ -992,6 +1002,27 @@ const Send: React.FC = () => {
     () => visibleScanRows.find((row) => row.key === selectedBatchKey) || null,
     [visibleScanRows, selectedBatchKey]
   )
+
+  useEffect(() => {
+    if (!selectedItem) return
+    rememberSendSelection({
+      accountId: selectedItem.accountId,
+      networkId: selectedItem.networkId,
+      entryId: selectedItem.id,
+      assetId: selectedItem.assetId || null
+    })
+  }, [
+    selectedItem?.accountId,
+    selectedItem?.networkId,
+    selectedItem?.id,
+    selectedItem?.assetId,
+    rememberSendSelection
+  ])
+
+  useEffect(() => {
+    if (!selectedId || selectedItem) return
+    setSelectedId(null)
+  }, [selectedId, selectedItem])
 
   useEffect(() => {
     setHubPreferences((current) => {
@@ -1110,11 +1141,32 @@ const Send: React.FC = () => {
       }
     }
 
-    const match = allItems.find((item) => (
-      (requestedEntryId && item.id === requestedEntryId)
-      || (requestedAssetId && item.assetId === requestedAssetId)
-      || (requestedQuickNative && item.requestType === 'native')
-    ))
+    const rememberedEntryId = String(rememberedSelection?.entryId || '').trim()
+    const rememberedAssetId = String(rememberedSelection?.assetId || '').trim()
+    let match: SendableItem | undefined
+
+    if (requestedEntryId) {
+      match = allItems.find((item) => item.id === requestedEntryId)
+    } else if (requestedAssetId) {
+      match = allItems.find((item) => item.assetId === requestedAssetId)
+    } else if (requestedQuickNative) {
+      if (rememberedEntryId) {
+        match = allItems.find((item) => item.id === rememberedEntryId)
+      }
+      if (!match && rememberedAssetId) {
+        match = allItems.find((item) => item.assetId === rememberedAssetId)
+      }
+      if (!match && (rememberedEntryId || rememberedAssetId)) {
+        clearRememberedSendSelection({
+          accountId: activeAccountId || undefined,
+          networkId: activeNetworkId || undefined
+        })
+      }
+      if (!match) {
+        match = allItems.find((item) => item.requestType === 'native')
+      }
+    }
+
     if (match) {
       handledDeepLinkRef.current = dedupeKey
       setSelectedId(match.id)
@@ -1123,7 +1175,17 @@ const Send: React.FC = () => {
 
     if (!match) handledDeepLinkRef.current = dedupeKey
     navigate('/wallet/send', { replace: true, state: null })
-  }, [location.state, allItems, navigate, activeNetworkId, getNetworkModelPreferences, visibleScanRows])
+  }, [
+    location.state,
+    allItems,
+    navigate,
+    activeAccountId,
+    activeNetworkId,
+    clearRememberedSendSelection,
+    getNetworkModelPreferences,
+    rememberedSelection,
+    visibleScanRows
+  ])
 
   const runGlobalScan = useCallback(async (options?: GlobalScanOptions) => {
     if (isScanningRef.current) return

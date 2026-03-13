@@ -7,7 +7,6 @@ import {
   callBridgeMethod,
   getAddressUtxos,
   listUtxoUnspent,
-  scanAddressUnspent,
   type UtxoRpcConfig,
   type UtxoUnspent
 } from './utxoRpc'
@@ -68,6 +67,7 @@ const EVM_ERC721_IFACE = new ethers.Interface([
 const EVM_ERC1155_IFACE = new ethers.Interface([
   'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)'
 ])
+const PREVIEW_RPC_TIMEOUT_MS = 4_000
 const UTXO_FEE_RATE_CACHE_TTL_MS = 15_000
 const utxoFeeRateCache = new Map<string, { checkedAt: number; feePerByteSats: number }>()
 
@@ -93,6 +93,7 @@ function buildRpcPreviewConfig(network: PreviewNetwork): UtxoRpcConfig {
     bridgeUrl: network.bridgeUrl,
     bridgeUsername: network.bridgeUsername,
     bridgePassword: network.bridgePassword,
+    timeoutMs: PREVIEW_RPC_TIMEOUT_MS,
     useLocalRpc: false
   }
 }
@@ -250,11 +251,7 @@ async function estimateUtxoNativeTransferFee(input: EstimateTransactionFeePrevie
     }
   }
   if (unspent.length === 0) {
-    const scanned = await scanAddressUnspent(rpcConfig, senderAddress)
-    if (scanned.length > 0) unspent = scanned
-  }
-  if (unspent.length === 0) {
-    throw new Error(`No confirmed spendable UTXOs found for address ${senderAddress}`)
+    throw new Error(`No confirmed spendable UTXOs found for quick fee preview on address ${senderAddress}`)
   }
 
   if (unspent.length > 0) {

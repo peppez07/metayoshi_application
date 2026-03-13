@@ -300,18 +300,15 @@ async function executeSecureJsonRequest(
   const url = `${session.apiBase}${path}`
   const monitorRequestId = beginServerExecutionMonitor(config, action, url)
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+      Authorization: `Bearer ${session.token}`
+    }
+    if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
     const response = await fetchJsonWithStatus(url, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init.headers || {}),
-        Authorization: `Bearer ${session.token}`,
-        ...(() => {
-          const headers: Record<string, string> = {}
-          appendOptionalBridgeBasicAuthHeaders(headers, config)
-          return headers
-        })()
-      }
+      headers
     })
 
     if (!response.ok) {
@@ -322,60 +319,6 @@ async function executeSecureJsonRequest(
 
     completeServerExecutionMonitor(monitorRequestId, response.status)
     return response.json ?? {}
-  } catch (error) {
-    failServerExecutionMonitor(monitorRequestId, error)
-    throw error
-  }
-}
-
-async function tryDirectServerSwapQuote(
-  config: UtxoRpcConfig,
-  request: ServerSwapQuoteRequest
-): Promise<{ kind: 'ok'; json: any } | { kind: 'fallback' }> {
-  const apiBase = deriveServerExecutionApiBase(config)
-  if (!apiBase) return { kind: 'fallback' }
-  const url = `${apiBase}/v1/swap/quote`
-  const monitorRequestId = beginServerExecutionMonitor(config, 'quote', url)
-
-  try {
-    const response = await fetchJsonWithStatus(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {}),
-        ...(() => {
-          const headers: Record<string, string> = {}
-          appendOptionalBridgeBasicAuthHeaders(headers, config)
-          return headers
-        })()
-      },
-      body: JSON.stringify(request)
-    }).catch(() => null)
-
-    if (!response) {
-      completeServerExecutionMonitor(monitorRequestId)
-      return { kind: 'fallback' }
-    }
-    if (response.ok) {
-      completeServerExecutionMonitor(monitorRequestId, response.status)
-      return { kind: 'ok', json: response.json ?? {} }
-    }
-
-    const detail = readString(response.json?.error || response.json?.message || response.text || `HTTP ${response.status}`)
-    const needsAuthenticatedFallback = (
-      response.status === 401
-      || response.status === 403
-      || response.status === 404
-      || response.status === 405
-      || response.status === 501
-      || isServerExecutionAuthDetail(detail)
-    )
-    if (needsAuthenticatedFallback) {
-      completeServerExecutionMonitor(monitorRequestId)
-      return { kind: 'fallback' }
-    }
-
-    throw new Error(`Swap quote request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
   } catch (error) {
     failServerExecutionMonitor(monitorRequestId, error)
     throw error
@@ -482,9 +425,6 @@ export async function requestServerSwapQuote(
   config: UtxoRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
-  const direct = await tryDirectServerSwapQuote(config, request)
-  if (direct.kind === 'ok') return normalizeQuote(direct.json, request)
-
   const raw = await executeSecureJsonRequest(config, '/v1/swap/quote', {
     method: 'POST',
     body: JSON.stringify(request)

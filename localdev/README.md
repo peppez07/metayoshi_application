@@ -4,7 +4,7 @@ MetaYoshi Wallet is the public browser-extension wallet for the MetaYoshi projec
 
 **Control beats trust.**
 
-This repository is the source for MetaYoshi Wallet `0.1.8`.
+This repository is the source for MetaYoshi Wallet `0.1.9`.
 
 ## Why MetaYoshi
 
@@ -17,7 +17,7 @@ MetaYoshi is aimed at practical daily usage: connect, review, approve, and manag
 
 ## Current focus
 
-MetaYoshi `0.1.8` is focused on:
+MetaYoshi `0.1.9` is focused on:
 
 - browser-extension wallet UX
 - multi-chain runtime support
@@ -29,7 +29,7 @@ The public startup flow now prefers a bridge-free network when possible, so open
 
 ## Configured network coverage
 
-The project metadata for `0.1.8` currently includes these configured networks:
+The project metadata for `0.1.9` currently includes these configured networks:
 
 - Raptoreum
 - Bitcoin
@@ -77,12 +77,6 @@ Create a production build:
 npm run build
 ```
 
-Build browser packages:
-
-```bash
-npm run build:browsers
-```
-
 To use local environment values, copy `.env.example` to `.env.local` and fill in your own settings.
 
 Important:
@@ -95,25 +89,8 @@ Important:
 
 - `npm run dev`
 - `npm run build`
-- `npm run build:browsers`
-- `npm run build:chrome`
-- `npm run build:brave`
-- `npm run build:firefox`
-- `npm run zip:browsers`
 - `npm run lint`
-- `npm run test:api:firo-eth`
-
-## Documentation
-
-The maintained implementation docs for the extension app live under `docs/`.
-
-- Ranked swap and service execution roadmap:
-  - `docs/metayoshi-wallet-swap-services-roadmap.md`
-- Broader fusion architecture and protocol runbook:
-  - `docs/metayoshi-wallet-fusion-master-runbook.md`
-
-The roadmap is the active delivery board.
-The fusion runbook stays as the broader protocol and architecture reference.
+- `npm run preview`
 
 ## Using the public repo
 

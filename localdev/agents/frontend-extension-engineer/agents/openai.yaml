@@ -1,4 +1,0 @@
-interface:
-  display_name: "Frontend Extension Engineer"
-  short_description: "Popup UI and route flow expert"
-  default_prompt: "Use $frontend-extension-engineer to improve popup UI flows without changing the established MetaYoshi style."

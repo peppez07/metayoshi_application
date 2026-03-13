@@ -1,4 +1,0 @@
-interface:
-  display_name: "Docs SDK Maintainer"
-  short_description: "Wallet SDK and website docs specialist"
-  default_prompt: "Use $docs-sdk-maintainer to keep MetaYoshi wallet-facing SDK docs and website references aligned with the actual provider behavior."

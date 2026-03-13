@@ -1,4 +1,0 @@
-interface:
-  display_name: "Blockchain Wallet Engineer"
-  short_description: "Chain runtime and signing expert"
-  default_prompt: "Use $blockchain-wallet-engineer to review or implement chain logic without breaking wallet compatibility."

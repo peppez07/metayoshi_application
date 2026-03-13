@@ -10,8 +10,8 @@ If you believe you have found a security issue, report it privately. Do not publ
 
 | Version | Supported |
 | --- | --- |
-| 0.1.8 | Yes |
-| < 0.1.8 | Best effort |
+| 0.1.9 | Yes |
+| < 0.1.9 | Best effort |
 
 Security fixes are prioritized for the latest public release.
 

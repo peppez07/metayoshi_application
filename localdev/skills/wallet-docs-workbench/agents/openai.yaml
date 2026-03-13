@@ -1,4 +1,0 @@
-interface:
-  display_name: "Wallet Docs Workbench"
-  short_description: "Reusable wallet architecture doc templates"
-  default_prompt: "Use $wallet-docs-workbench to draft draw.io-ready flow specs, wallet/server whitepapers, and delivery roadmaps from the current codebase."
