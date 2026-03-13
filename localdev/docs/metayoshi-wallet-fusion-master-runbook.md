@@ -1,5 +1,15 @@
 # MetaYoshi Wallet Fusion Master Runbook
 
+> Status note
+>
+> This file remains the broader architecture and protocol runbook.
+>
+> The active implementation board for swap and service hardening now lives in:
+> `localdev/docs/metayoshi-wallet-swap-services-roadmap.md`
+>
+> Use this runbook for architecture boundaries, protocol-module scope, and long-horizon fusion planning.
+> Use the swap/services roadmap for ranked execution order, ticket slicing, and sprint sequencing.
+
 ## 1. Execution Summary
 
 - Classification: `cross-repo`

@@ -45,7 +45,7 @@ Actual availability in a given build can still vary based on environment configu
 ## Repository layout
 
 - `localdev/`: main extension app, source code, browser packaging scripts, and the runnable Vite project
-- `docs/`: project notes and architecture-oriented documentation
+- `docs/`: root-level reference docs and pointers into the maintained app docs under `localdev/docs/`
 - `examples/`: example dapp/test files
 
 Key extension code inside `localdev/`:
@@ -58,6 +58,15 @@ Key extension code inside `localdev/`:
 - `src/components/**`
 - `src/store/**`
 - `src/coins/**`
+
+## Documentation
+
+- Active implementation roadmap for swap and service work:
+  - `localdev/docs/metayoshi-wallet-swap-services-roadmap.md`
+- Broader fusion architecture and protocol runbook:
+  - `localdev/docs/metayoshi-wallet-fusion-master-runbook.md`
+- Root docs index:
+  - `docs/README.md`
 
 ## Local setup
 

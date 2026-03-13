@@ -12,6 +12,7 @@ import {
   IoCheckmark,
   IoLayersOutline,
   IoSearchOutline,
+  IoSettingsOutline,
   IoSwapHorizontalOutline
 } from 'react-icons/io5'
 import { Tabs } from '../../components/Tabs'
@@ -177,15 +178,27 @@ const WalletLayout: React.FC = () => {
       {!isFocusedFlowRoute && (
         <div className="flex flex-col items-center pt-3 pb-4 shrink-0">
         {/* Coin logo */}
-        <div className={clsx(
-          'w-14 h-14 rounded-full bg-primary/10 border-2 flex items-center justify-center overflow-hidden mb-3',
-          getModelIconFrameClass(activeNetwork.id)
-        )}>
+        <button
+          type="button"
+          onClick={() => setShowNetworkSheet(true)}
+          className={clsx(
+            'w-14 h-14 rounded-full bg-primary/10 border-2 flex items-center justify-center overflow-hidden mb-2 transition-transform hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-primary/70 focus:ring-offset-2 focus:ring-offset-dark-800',
+            getModelIconFrameClass(activeNetwork.id)
+          )}
+          title="Change network"
+        >
           {activeNetwork.logo
             ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover rounded-full" />
             : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.05] translate-y-[1px]" />
           }
-        </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowNetworkSheet(true)}
+          className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 transition-colors hover:text-gray-300"
+        >
+          Tap logo to change network
+        </button>
 
         {/* Balance */}
         <div className="mb-3 w-full px-4">
@@ -205,7 +218,7 @@ const WalletLayout: React.FC = () => {
         </div>
 
         {/* Quick-action buttons */}
-        <div className="flex justify-center gap-6 w-full px-6 mb-3">
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-4 w-full px-6 mb-3">
           {caps.ui.showAssetsAction && (
             <QuickAction
               icon={<IoLayersOutline className="w-5 h-5" />}
@@ -229,6 +242,11 @@ const WalletLayout: React.FC = () => {
             icon={<IoSearchOutline className="w-5 h-5" />}
             label="Model"
             onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
+          />
+          <QuickAction
+            icon={<IoSettingsOutline className="w-5 h-5" />}
+            label="Settings"
+            onClick={() => navigate('/settings')}
           />
         </div>
         </div>
@@ -320,7 +338,7 @@ const WalletLayout: React.FC = () => {
           onClick={() => { setShowNetworkSheet(false); setNetworkSearch('') }}
         >
           <div
-            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-5 space-y-3 animate-in slide-in-from-bottom duration-200"
+            className="w-full max-w-[460px] min-h-[68vh] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-4 animate-in slide-in-from-bottom duration-200"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -344,7 +362,26 @@ const WalletLayout: React.FC = () => {
             </div>
 
             {/* List */}
-            <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+            <div className="space-y-2 max-h-[52vh] overflow-y-auto custom-scrollbar pr-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNetworkSheet(false)
+                  setNetworkSearch('')
+                  navigate('/wallet/send', { state: { hubMode: 'global', autoScan: true } })
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-xl border border-dark-600 bg-dark-700/50 hover:bg-dark-700 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center">
+                    <IoLayersOutline className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-bold text-gray-100">Global Send Hub</span>
+                    <span className="text-[10px] text-gray-500">Open the all-networks send hub view</span>
+                  </div>
+                </div>
+              </button>
               {visibleNetworks
                 .map(net => (
                   <button

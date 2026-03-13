@@ -1,6 +1,9 @@
 import type { Network } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { getSecureBridgeSessionInfo } from './utxoRpc'
+import { useApiMonitorStore } from '../store/apiMonitorStore'
+
+const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
 export type ServerExecutionMode = 'standard' | 'sponsored' | 'intent'
 export type ServerSponsorPreference = 'required' | 'preferred' | 'never'
@@ -118,6 +121,8 @@ type JsonResponse = {
   text: string
 }
 
+type ServerExecutionAction = 'quote' | 'submit' | 'status'
+
 type BridgeNetworkInput = Pick<
   Network,
   'id' | 'symbol' | 'rpcUrl' | 'bridgeUrl' | 'bridgeUsername' | 'bridgePassword'
@@ -175,6 +180,82 @@ function compactErrorText(value: string, maxLen = 220): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
+function deriveServerExecutionApiBase(config: UtxoRpcConfig): string {
+  const explicit = readString(config.secureBridgeApiBaseUrl).replace(/\/+$/, '')
+  if (explicit) return explicit
+
+  const bridgeUrl = readString(config.bridgeUrl).replace(/\/+$/, '')
+  if (!bridgeUrl) return ''
+
+  const lower = bridgeUrl.toLowerCase()
+  const idxV1Bridge = lower.indexOf('/v1/bridge/')
+  if (idxV1Bridge >= 0) return bridgeUrl.slice(0, idxV1Bridge)
+  const idxBridge = lower.indexOf('/bridge/')
+  if (idxBridge >= 0) return bridgeUrl.slice(0, idxBridge)
+  if (/\/v1$/i.test(bridgeUrl)) return bridgeUrl.replace(/\/v1$/i, '')
+  return bridgeUrl
+}
+
+function isServerExecutionAuthDetail(detail: string): boolean {
+  const normalized = readString(detail).toLowerCase()
+  if (!normalized) return false
+  return (
+    normalized.includes('api key')
+    || normalized.includes('x-api-key')
+    || normalized.includes('unauthorized')
+    || normalized.includes('auth challenge')
+    || normalized.includes('auth verify')
+    || normalized.includes('secure bridge signer')
+    || normalized.includes('bridge credentials')
+  )
+}
+
+function makeServerExecutionAuthError(action: 'quote' | 'submit' | 'status'): Error {
+  const label = action === 'quote'
+    ? 'Swap quote'
+    : action === 'submit'
+      ? 'Swap submission'
+      : 'Swap status'
+  return new Error(`${label} is not available because server authentication is misconfigured. This should happen automatically.`)
+}
+
+function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {
+  switch (action) {
+    case 'quote':
+      return 'server.swap.quote'
+    case 'submit':
+      return 'server.swap.submit'
+    case 'status':
+      return 'server.swap.status'
+    default:
+      return 'server.swap'
+  }
+}
+
+function beginServerExecutionMonitor(
+  config: UtxoRpcConfig,
+  action: ServerExecutionAction,
+  url: string
+): string {
+  return useApiMonitorStore.getState().beginRequest({
+    networkId: config.networkId,
+    rpcMethod: getServerExecutionMonitorMethod(action),
+    url
+  })
+}
+
+function completeServerExecutionMonitor(requestId: string, httpStatus?: number): void {
+  useApiMonitorStore.getState().completeRequest(requestId, { httpStatus })
+}
+
+function failServerExecutionMonitor(requestId: string, error: unknown, httpStatus?: number): void {
+  const message = error instanceof Error ? error.message : String(error || 'Unknown API error')
+  useApiMonitorStore.getState().failRequest(requestId, {
+    errorMessage: compactErrorText(message) || 'Unknown API error',
+    httpStatus
+  })
+}
+
 async function fetchJsonWithStatus(url: string, init: RequestInit): Promise<JsonResponse> {
   const response = await fetch(url, init)
   const text = await response.text().catch(() => '')
@@ -195,25 +276,90 @@ async function fetchJsonWithStatus(url: string, init: RequestInit): Promise<Json
 async function executeSecureJsonRequest(
   config: UtxoRpcConfig,
   path: string,
-  init: RequestInit
+  init: RequestInit,
+  action: 'quote' | 'submit' | 'status'
 ): Promise<any> {
-  const session = await getSecureBridgeSessionInfo(config)
-  const url = `${session.apiBase}${path}`
-  const response = await fetchJsonWithStatus(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-      Authorization: `Bearer ${session.token}`
-    }
-  })
-
-  if (!response.ok) {
-    const detail = readString(response.json?.error || response.json?.message || response.text || `HTTP ${response.status}`)
-    throw new Error(`Server execution request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
+  let session: Awaited<ReturnType<typeof getSecureBridgeSessionInfo>>
+  try {
+    session = await getSecureBridgeSessionInfo(config)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || '')
+    if (isServerExecutionAuthDetail(detail)) throw makeServerExecutionAuthError(action)
+    throw error
   }
+  const url = `${session.apiBase}${path}`
+  const monitorRequestId = beginServerExecutionMonitor(config, action, url)
+  try {
+    const response = await fetchJsonWithStatus(url, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+        Authorization: `Bearer ${session.token}`
+      }
+    })
 
-  return response.json ?? {}
+    if (!response.ok) {
+      const detail = readString(response.json?.error || response.json?.message || response.text || `HTTP ${response.status}`)
+      if (isServerExecutionAuthDetail(detail)) throw makeServerExecutionAuthError(action)
+      throw new Error(`Server execution request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
+    }
+
+    completeServerExecutionMonitor(monitorRequestId, response.status)
+    return response.json ?? {}
+  } catch (error) {
+    failServerExecutionMonitor(monitorRequestId, error)
+    throw error
+  }
+}
+
+async function tryDirectServerSwapQuote(
+  config: UtxoRpcConfig,
+  request: ServerSwapQuoteRequest
+): Promise<{ kind: 'ok'; json: any } | { kind: 'fallback' }> {
+  const apiBase = deriveServerExecutionApiBase(config)
+  if (!apiBase) return { kind: 'fallback' }
+  const url = `${apiBase}/v1/swap/quote`
+  const monitorRequestId = beginServerExecutionMonitor(config, 'quote', url)
+
+  try {
+    const response = await fetchJsonWithStatus(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {})
+      },
+      body: JSON.stringify(request)
+    }).catch(() => null)
+
+    if (!response) {
+      completeServerExecutionMonitor(monitorRequestId)
+      return { kind: 'fallback' }
+    }
+    if (response.ok) {
+      completeServerExecutionMonitor(monitorRequestId, response.status)
+      return { kind: 'ok', json: response.json ?? {} }
+    }
+
+    const detail = readString(response.json?.error || response.json?.message || response.text || `HTTP ${response.status}`)
+    const needsAuthenticatedFallback = (
+      response.status === 401
+      || response.status === 403
+      || response.status === 404
+      || response.status === 405
+      || response.status === 501
+      || isServerExecutionAuthDetail(detail)
+    )
+    if (needsAuthenticatedFallback) {
+      completeServerExecutionMonitor(monitorRequestId)
+      return { kind: 'fallback' }
+    }
+
+    throw new Error(`Swap quote request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
+  } catch (error) {
+    failServerExecutionMonitor(monitorRequestId, error)
+    throw error
+  }
 }
 
 function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
@@ -316,10 +462,13 @@ export async function requestServerSwapQuote(
   config: UtxoRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
+  const direct = await tryDirectServerSwapQuote(config, request)
+  if (direct.kind === 'ok') return normalizeQuote(direct.json, request)
+
   const raw = await executeSecureJsonRequest(config, '/v1/swap/quote', {
     method: 'POST',
     body: JSON.stringify(request)
-  })
+  }, 'quote')
   return normalizeQuote(raw, request)
 }
 
@@ -330,7 +479,7 @@ export async function submitServerSwap(
   const raw = await executeSecureJsonRequest(config, '/v1/swap/submit', {
     method: 'POST',
     body: JSON.stringify(request)
-  })
+  }, 'submit')
   return normalizeStatus(raw)
 }
 
@@ -342,6 +491,6 @@ export async function fetchServerExecutionStatus(
   if (!normalizedExecutionId) throw new Error('Execution id is required')
   const raw = await executeSecureJsonRequest(config, `/v1/execute/${normalizedExecutionId}`, {
     method: 'GET'
-  })
+  }, 'status')
   return normalizeStatus(raw)
 }

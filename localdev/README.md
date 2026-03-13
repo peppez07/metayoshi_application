@@ -103,6 +103,18 @@ Important:
 - `npm run lint`
 - `npm run test:api:firo-eth`
 
+## Documentation
+
+The maintained implementation docs for the extension app live under `docs/`.
+
+- Ranked swap and service execution roadmap:
+  - `docs/metayoshi-wallet-swap-services-roadmap.md`
+- Broader fusion architecture and protocol runbook:
+  - `docs/metayoshi-wallet-fusion-master-runbook.md`
+
+The roadmap is the active delivery board.
+The fusion runbook stays as the broader protocol and architecture reference.
+
 ## Using the public repo
 
 This repository is intended for users, testers, and contributors who want to run the wallet locally, inspect how it works, or build their own test setup.

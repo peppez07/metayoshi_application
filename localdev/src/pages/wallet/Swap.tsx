@@ -27,6 +27,29 @@ function compactError(error: unknown): string {
   return message.replace(/\s+/g, ' ').trim()
 }
 
+function formatSwapUiError(error: unknown): string {
+  const message = compactError(error)
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('server authentication is misconfigured')) {
+    return 'MetaYoshi swap service is not configured correctly on the server yet. Quotes and execution should work automatically once server auth is fixed.'
+  }
+
+  if (normalized.includes('swap quote request failed')) {
+    return 'MetaYoshi swap quote service is unavailable right now. Please try again in a moment.'
+  }
+
+  if (normalized.includes('server execution request failed')) {
+    return 'MetaYoshi swap service is temporarily unavailable. Please try again in a moment.'
+  }
+
+  if (normalized.includes('secure bridge signer is unavailable')) {
+    return 'Unlock the wallet and try again.'
+  }
+
+  return message
+}
+
 function isQuoteRouteAvailabilityError(error: unknown): boolean {
   const message = compactError(error).toLowerCase()
   return message.includes('no route')
@@ -454,7 +477,7 @@ const Swap: React.FC = () => {
       setToAmount(nextQuote.destinationAmount)
       showToast(`Server quote ready: ${nextQuote.mode}`, 'success')
     } catch (error) {
-      const message = compactError(error)
+      const message = formatSwapUiError(error)
       setErrorText(message)
       setQuote(null)
       setToAmount('')
@@ -529,7 +552,7 @@ const Swap: React.FC = () => {
       setExecution(submitted)
       showToast('Swap submitted to server execution', 'info')
     } catch (error) {
-      const message = compactError(error)
+      const message = formatSwapUiError(error)
       setErrorText(message)
       showToast(message, 'error')
     } finally {
@@ -597,7 +620,7 @@ const Swap: React.FC = () => {
           <section className="rounded-2xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Receive</span>
-              <span className="text-[10px] text-gray-500">{quote ? 'Quote ready' : 'Choose destination'}</span>
+              <span className="text-[10px] text-gray-500">{quote ? 'Quote ready' : 'Choose network and asset'}</span>
             </div>
             <label className="space-y-1.5 block">
               <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Network</span>
@@ -613,7 +636,7 @@ const Swap: React.FC = () => {
             </label>
             <Input
               type="text"
-              placeholder="Search destination asset"
+              placeholder="Search asset to receive"
               value={destinationQuery}
               onChange={(event) => setDestinationQuery(event.target.value)}
               className="w-full bg-dark-800 border-dark-600"
@@ -627,6 +650,11 @@ const Swap: React.FC = () => {
                 <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
               ))}
             </select>
+            <div className="rounded-xl border border-dark-600 bg-dark-800/60 px-3 py-2">
+              <p className="text-[11px] text-gray-400">
+                Funds are sent to your active MetaYoshi wallet address on the selected network. No manual destination address is needed here.
+              </p>
+            </div>
             <div className="rounded-xl border border-dark-600 bg-dark-800/80 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500 mb-1">Estimated You Receive</p>
               <p className="text-sm font-bold text-gray-200">
