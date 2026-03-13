@@ -242,8 +242,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const fallbackEstimatedNetworkFee = estimateNetworkFeeUi(activeNetwork)
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
-  const [estimatedNetworkFeeDebugLabel, setEstimatedNetworkFeeDebugLabel] = useState('Fallback estimate')
-  const [estimatedNetworkFeeDebugDetails, setEstimatedNetworkFeeDebugDetails] = useState('Waiting for preview inputs.')
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
   const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
   const dappEvmRequest = isDappTxRoute && isDappEvmTransactionRequest(pendingDappRequest?.request)
@@ -293,8 +291,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         if (!canFetchLivePreview) {
           if (!cancelled) {
             setEstimatedNetworkFee(fallback)
-            setEstimatedNetworkFeeDebugLabel('Fallback estimate')
-            setEstimatedNetworkFeeDebugDetails('Need sender, recipient, and a valid amount before live fee preview can run.')
             setIsEstimatingNetworkFee(false)
           }
           return
@@ -320,8 +316,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         })
         if (!cancelled) {
           setEstimatedNetworkFee(preview.fee || fallback)
-          setEstimatedNetworkFeeDebugLabel(preview.debugLabel)
-          setEstimatedNetworkFeeDebugDetails(preview.debugDetails || '')
           setIsEstimatingNetworkFee(false)
         }
       }
@@ -777,14 +771,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                     <p className="text-[9px] text-gray-500">
                       {isEstimatingNetworkFee ? 'Updating from network...' : 'Live quote when available'}
                     </p>
-                    <p className="text-[9px] text-gray-500">
-                      Fee debug: {estimatedNetworkFeeDebugLabel}
-                    </p>
-                    {estimatedNetworkFeeDebugDetails && (
-                      <p className="text-[9px] text-gray-500 break-all max-w-[220px]">
-                        {estimatedNetworkFeeDebugDetails}
-                      </p>
-                    )}
                  </div>
               </div>
 

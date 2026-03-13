@@ -10,7 +10,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
-import { estimateTransactionFeePreview, type TransactionFeePreviewSource } from '../../lib/transactionFeePreview'
+import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -101,9 +101,6 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
   const [memo, setMemo] = useState('')
   const [error, setError] = useState('')
   const [estimatedNativeFee, setEstimatedNativeFee] = useState(fallbackEstimatedNativeFee)
-  const [estimatedNativeFeeSource, setEstimatedNativeFeeSource] = useState<TransactionFeePreviewSource>('fallback')
-  const [estimatedNativeFeeDebugLabel, setEstimatedNativeFeeDebugLabel] = useState('Fallback estimate')
-  const [estimatedNativeFeeDebugDetails, setEstimatedNativeFeeDebugDetails] = useState('Waiting for preview inputs.')
   const [isEstimatingFee, setIsEstimatingFee] = useState(false)
 
   const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
@@ -113,6 +110,11 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     activeAccount?.networkBalances?.[activeNetworkId]
     ?? activeAccount?.balance
   )
+  const nativeNetworkFiatUsd = Number(accountNetworkFiatNative?.[fiatScopeKey]?.usd)
+  const estimatedNativeFeeFiat = nativeBalance > 0 && Number.isFinite(nativeNetworkFiatUsd) && nativeNetworkFiatUsd > 0
+    ? estimatedNativeFee * (nativeNetworkFiatUsd / nativeBalance)
+    : null
+  const displayEstimatedNativeFeeFiat = formatFiatValue(estimatedNativeFeeFiat)
 
   useEffect(() => {
     setToAddress('')
@@ -152,9 +154,6 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         if (!canFetchLivePreview) {
           if (!cancelled) {
             setEstimatedNativeFee(fallback)
-            setEstimatedNativeFeeSource('fallback')
-            setEstimatedNativeFeeDebugLabel('Fallback estimate')
-            setEstimatedNativeFeeDebugDetails('Need sender, recipient, and a valid amount before live fee preview can run.')
             setIsEstimatingFee(false)
           }
           return
@@ -177,9 +176,6 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
 
         if (cancelled) return
         setEstimatedNativeFee(preview.fee || fallback)
-        setEstimatedNativeFeeSource(preview.source)
-        setEstimatedNativeFeeDebugLabel(preview.debugLabel)
-        setEstimatedNativeFeeDebugDetails(preview.debugDetails || '')
         setIsEstimatingFee(false)
       }
 
@@ -475,20 +471,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
           <IoInformationCircleOutline className="w-4 h-4 text-gray-600 shrink-0 mt-0.5" />
           <p className="text-[10px] text-gray-600 leading-relaxed">
             {isNative
-              ? `Estimated required fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}.`
-              : `Estimated network fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}. Asset transfer fee is paid in native ${activeNetwork.symbol}.`}
-            <span className="block mt-1">
-              {isEstimatingFee
-                ? 'Updating from network...'
-                : (estimatedNativeFeeSource === 'live' ? 'Live network quote.' : 'Fallback estimate.')}
-            </span>
-            <span className="block mt-1 text-[9px] text-gray-500">
-              Fee debug: {estimatedNativeFeeDebugLabel}
-            </span>
-            {estimatedNativeFeeDebugDetails && (
-              <span className="block mt-0.5 text-[9px] text-gray-500 break-all">
-                {estimatedNativeFeeDebugDetails}
-              </span>
+              ? `Estimated required fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}${displayEstimatedNativeFeeFiat ? ` (${displayEstimatedNativeFeeFiat})` : ''}.`
+              : `Estimated network fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}${displayEstimatedNativeFeeFiat ? ` (${displayEstimatedNativeFeeFiat})` : ''}. Asset transfer fee is paid in native ${activeNetwork.symbol}.`}
+            {isEstimatingFee && (
+              <span className="block mt-1">Updating from network...</span>
             )}
           </p>
         </div>

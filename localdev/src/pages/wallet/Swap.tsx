@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IoArrowBack, IoSwapHorizontal, IoTimeOutline, IoFlashOutline } from 'react-icons/io5'
+import { IoArrowBackOutline, IoChevronDownOutline, IoFlashOutline, IoInformationCircleOutline, IoTimeOutline } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
 import { useToast } from '../../components/Toast'
 import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
 import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
+import { findSwapAssetAliasOptions } from '../../lib/swapAssetAliases'
 import {
   buildServerSwapApprovalMessage,
   createServerExecutionRpcConfig,
@@ -26,6 +27,13 @@ function compactError(error: unknown): string {
   return message.replace(/\s+/g, ' ').trim()
 }
 
+function isQuoteRouteAvailabilityError(error: unknown): boolean {
+  const message = compactError(error).toLowerCase()
+  return message.includes('no route')
+    || message.includes('not available for the requested asset pair')
+    || message.includes('route is available')
+}
+
 function formatExpiry(expiresAt: number): string {
   const deltaMs = Math.max(0, expiresAt - Date.now())
   const seconds = Math.max(0, Math.round(deltaMs / 1000))
@@ -33,6 +41,12 @@ function formatExpiry(expiresAt: number): string {
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
   return `${minutes}m ${remainder}s`
+}
+
+function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string): string {
+  if (!item) return fallbackSymbol || 'Select asset'
+  if (!item.label || item.label === item.symbol) return item.symbol
+  return `${item.symbol} - ${item.label}`
 }
 
 function isSwapEligibleItem(item: SendableItem): boolean {
@@ -148,17 +162,20 @@ const Swap: React.FC = () => {
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
   const activeAccount = accounts.find((account) => account.id === activeAccountId) || accounts[0]
   const initialNetworkId = activeNetworkId || enabledNetworks[0]?.id || ''
+  const defaultDestinationNetworkId = enabledNetworks.find((network) => network.id !== initialNetworkId)?.id || initialNetworkId
 
   const [fromAmount, setFromAmount] = useState('')
   const [toAmount, setToAmount] = useState('')
   const [fromNetworkId, setFromNetworkId] = useState(initialNetworkId)
-  const [toNetworkId, setToNetworkId] = useState(initialNetworkId)
+  const [toNetworkId, setToNetworkId] = useState(defaultDestinationNetworkId)
   const [fromAssetId, setFromAssetId] = useState('')
   const [toAssetId, setToAssetId] = useState('')
   const [destinationQuery, setDestinationQuery] = useState('')
   const [catalogDestinationItems, setCatalogDestinationItems] = useState<SwapAssetOption[]>([])
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [selectionHint, setSelectionHint] = useState('')
   const [quote, setQuote] = useState<ServerSwapQuote | null>(null)
   const [execution, setExecution] = useState<ServerExecutionStatus | null>(null)
   const [isQuoting, setIsQuoting] = useState(false)
@@ -207,9 +224,16 @@ const Swap: React.FC = () => {
   )
 
   useEffect(() => {
-    if (!fromNetworkId && enabledNetworks[0]?.id) setFromNetworkId(enabledNetworks[0].id)
-    if (!toNetworkId && enabledNetworks[0]?.id) setToNetworkId(enabledNetworks[0].id)
-  }, [enabledNetworks, fromNetworkId, toNetworkId])
+    if (!enabledNetworks.length) return
+    const activeOrFallback = activeNetworkId || enabledNetworks[0]?.id || ''
+    if (activeOrFallback && fromNetworkId !== activeOrFallback) {
+      setFromNetworkId(activeOrFallback)
+    }
+    if (!toNetworkId) {
+      const destinationFallback = enabledNetworks.find((network) => network.id !== activeOrFallback)?.id || activeOrFallback
+      setToNetworkId(destinationFallback)
+    }
+  }, [enabledNetworks, activeNetworkId, fromNetworkId, toNetworkId])
 
   useEffect(() => {
     if (fromOptions.length === 0) {
@@ -266,6 +290,7 @@ const Swap: React.FC = () => {
     setExecution(null)
     setToAmount('')
     setErrorText('')
+    setSelectionHint('')
   }, [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference])
 
   useEffect(() => {
@@ -351,19 +376,6 @@ const Swap: React.FC = () => {
     refreshActiveBalance
   ])
 
-  const swapAssets = () => {
-    const nextFromNetworkId = toNetworkId || fromNetworkId
-    const nextToNetworkId = fromNetworkId
-    const nextFromAssetId = toAssetId || fromAssetId
-    const nextToAssetId = fromAssetId
-    setFromNetworkId(nextFromNetworkId)
-    setToNetworkId(nextToNetworkId)
-    setFromAssetId(nextFromAssetId)
-    setToAssetId(nextToAssetId)
-    setFromAmount(toAmount)
-    setToAmount(fromAmount)
-  }
-
   const buildSwapContext = async () => {
     if (!fromNetwork) throw new Error('Select a source network')
     if (!toNetwork) throw new Error('Select a destination network')
@@ -393,23 +405,51 @@ const Swap: React.FC = () => {
     try {
       const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
       const slippage = Number(slippagePct)
-      const nextQuote = await requestServerSwapQuote(rpcConfig, {
-        source: {
-          networkId: fromNetwork!.id,
-          symbol: fromItem?.symbol || fromNetwork!.symbol,
-          address: sourceAddress,
-          amount: fromAmount,
-          asset: sourceAsset
-        },
-        destination: {
-          networkId: toNetwork!.id,
-          symbol: toItem?.symbol || toNetwork!.symbol,
-          address: destinationAddress,
-          asset: destinationAsset
-        },
-        slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
-        sponsorPreference
-      })
+      const destinationCandidates = findSwapAssetAliasOptions(toItem, toOptions, toNetwork!)
+      let nextQuote: ServerSwapQuote | null = null
+      let selectedDestination = toItem
+      let lastError: unknown = null
+
+      for (const candidate of destinationCandidates) {
+        try {
+          nextQuote = await requestServerSwapQuote(rpcConfig, {
+            source: {
+              networkId: fromNetwork!.id,
+              symbol: fromItem?.symbol || fromNetwork!.symbol,
+              address: sourceAddress,
+              amount: fromAmount,
+              asset: sourceAsset
+            },
+            destination: {
+              networkId: toNetwork!.id,
+              symbol: candidate.symbol || toNetwork!.symbol,
+              address: destinationAddress,
+              asset: toServerSwapAsset(candidate, toNetwork!.id)
+            },
+            slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
+            sponsorPreference
+          })
+          selectedDestination = candidate
+          break
+        } catch (error) {
+          lastError = error
+          if (!isQuoteRouteAvailabilityError(error)) throw error
+        }
+      }
+
+      if (!nextQuote) {
+        throw lastError || new Error('No route is available for the selected swap')
+      }
+
+      if (selectedDestination && selectedDestination.id !== toAssetId) {
+        setToAssetId(selectedDestination.id)
+        const note = `Using ${selectedDestination.symbol} on ${toNetwork!.name} because no direct ${toItem?.symbol || toNetwork!.symbol} route was available.`
+        setSelectionHint(note)
+        showToast(note, 'info')
+      } else {
+        setSelectionHint('')
+      }
+
       setQuote(nextQuote)
       setToAmount(nextQuote.destinationAmount)
       showToast(`Server quote ready: ${nextQuote.mode}`, 'success')
@@ -504,154 +544,158 @@ const Swap: React.FC = () => {
           onClick={() => navigate('/wallet/assets')}
           className="text-gray-400 hover:text-white transition-colors"
         >
-          <IoArrowBack className="w-5 h-5" />
+          <IoArrowBackOutline className="w-5 h-5" />
         </button>
-        <div className="flex-1">
-          <h1 className="text-sm font-black uppercase tracking-widest text-gray-200">Server Swap</h1>
-          <p className="text-[10px] text-gray-500 uppercase tracking-[0.16em]">Quote, sign, submit through bridge API</p>
-        </div>
+        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200 flex-1">Swap</h1>
       </header>
 
-      <div className="flex-1 flex flex-col p-6 space-y-5 overflow-y-auto custom-scrollbar">
-        <section className="rounded-2xl border border-primary/25 bg-gradient-to-br from-dark-700/90 to-dark-900 p-4 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
-              <IoFlashOutline className="w-4 h-4" />
-              Server-Mediated Execution
+      <div className="p-4 border-b border-dark-600/60 space-y-3">
+        <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+          <div className="flex items-start gap-2">
+            <IoFlashOutline className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-gray-200">Non-custodial server route</p>
+              <p className="text-[11px] text-gray-400">
+                Choose what to swap, review the quote, then sign once. The server handles routing and can sponsor network fees when allowed.
+              </p>
             </div>
-            <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-orange-200">
-              Non-custodial
-            </span>
           </div>
-          <p className="text-[11px] text-gray-400">
-            The wallet signs bounded approval for the selected asset pair. The server chooses the route and can sponsor network fees when the policy allows it.
-          </p>
-        </section>
+        </div>
+      </div>
 
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/30 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-gray-400 uppercase">From</span>
-              <span className="text-[10px] text-gray-500">Balance: {fromBalance}</span>
+      <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+        <div className="p-4 space-y-4">
+          <section className="rounded-2xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Pay With</span>
+              <span className="text-[10px] text-gray-500">{fromNetwork?.name || 'Current network'}</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <select
-                value={fromNetworkId}
-                onChange={(event) => setFromNetworkId(event.target.value)}
-                className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
-              >
-                {enabledNetworks.map((network) => (
-                  <option key={network.id} value={network.id}>{network.symbol}</option>
-                ))}
-              </select>
-              <select
-                value={fromAssetId}
-                onChange={(event) => setFromAssetId(event.target.value)}
-                className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
-              >
-                {fromOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
-                ))}
-              </select>
-            </div>
-            <Input
-              type="number"
-              placeholder="0.0"
-              value={fromAmount}
-              onChange={(event) => setFromAmount(event.target.value)}
-              className="w-full bg-dark-800 border-dark-600"
-            />
-          </div>
-
-          <div className="flex justify-center -my-2">
-            <button
-              onClick={swapAssets}
-              className="p-2 bg-dark-700 border border-dark-600 rounded-full hover:bg-dark-600 transition-colors"
+            <select
+              value={fromAssetId}
+              onChange={(event) => setFromAssetId(event.target.value)}
+              className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm font-bold text-gray-200"
             >
-              <IoSwapHorizontal className="w-5 h-5 text-gray-400" />
-            </button>
-          </div>
-
-          <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/30 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-gray-400 uppercase">To</span>
-              <span className="text-[10px] text-gray-500">{quote ? 'Quoted by server' : 'Waiting for quote'}</span>
+              {fromOptions.map((item) => (
+                <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
+              ))}
+            </select>
+            <div className="space-y-2">
+              <Input
+                type="number"
+                placeholder="0.0"
+                value={fromAmount}
+                onChange={(event) => setFromAmount(event.target.value)}
+                className="w-full bg-dark-800 border-dark-600 text-base"
+              />
+              <div className="flex items-center justify-between text-[11px] text-gray-500">
+                <span>Available</span>
+                <span>{fromBalance} {fromItem?.symbol || fromNetwork?.symbol}</span>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+          </section>
+
+          <section className="rounded-2xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Receive</span>
+              <span className="text-[10px] text-gray-500">{quote ? 'Quote ready' : 'Choose destination'}</span>
+            </div>
+            <label className="space-y-1.5 block">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Network</span>
               <select
                 value={toNetworkId}
                 onChange={(event) => setToNetworkId(event.target.value)}
-                className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
+                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm font-bold text-gray-200"
               >
                 {enabledNetworks.map((network) => (
-                  <option key={network.id} value={network.id}>{network.symbol}</option>
+                  <option key={network.id} value={network.id}>{network.name}</option>
                 ))}
               </select>
-              <select
-                value={toAssetId}
-                onChange={(event) => setToAssetId(event.target.value)}
-                className="px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
-              >
-                {toOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
-                ))}
-              </select>
-            </div>
+            </label>
             <Input
               type="text"
-              placeholder="Search destination assets from server catalog"
+              placeholder="Search destination asset"
               value={destinationQuery}
               onChange={(event) => setDestinationQuery(event.target.value)}
               className="w-full bg-dark-800 border-dark-600"
             />
-            <Input
-              type="number"
-              placeholder="0.0"
-              value={toAmount}
-              onChange={(event) => setToAmount(event.target.value)}
-              className="w-full bg-dark-800 border-dark-600"
-              readOnly
-            />
-          </div>
-        </div>
+            <select
+              value={toAssetId}
+              onChange={(event) => setToAssetId(event.target.value)}
+              className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm font-bold text-gray-200"
+            >
+              {toOptions.map((item) => (
+                <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
+              ))}
+            </select>
+            <div className="rounded-xl border border-dark-600 bg-dark-800/80 px-3 py-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500 mb-1">Estimated You Receive</p>
+              <p className="text-sm font-bold text-gray-200">
+                {toAmount || '--'} {toItem?.symbol || toNetwork?.symbol || ''}
+              </p>
+            </div>
+            {selectionHint ? (
+              <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2 flex items-start gap-2">
+                <IoInformationCircleOutline className="w-4 h-4 text-blue-200 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-blue-100/90">{selectionHint}</p>
+              </div>
+            ) : null}
+          </section>
 
-        <section className="rounded-xl border border-dark-600 bg-dark-900/50 p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Slippage</span>
-              <select
-                value={slippagePct}
-                onChange={(event) => setSlippagePct(event.target.value)}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
-              >
-                <option value="0.3">0.3%</option>
-                <option value="0.5">0.5%</option>
-                <option value="1">1.0%</option>
-              </select>
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Sponsor</span>
-              <select
-                value={sponsorPreference}
-                onChange={(event) => setSponsorPreference(event.target.value as ServerSponsorPreference)}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
-              >
-                <option value="preferred">Preferred</option>
-                <option value="required">Required</option>
-                <option value="never">Never</option>
-              </select>
-            </label>
-          </div>
-          <p className="text-[11px] text-gray-500">
-            `Preferred` lets the server choose the cheapest route. `Required` fails when sponsorship is unavailable. `Never` asks for a normal user-paid route if the backend supports one.
-          </p>
-        </section>
+          <section className="rounded-2xl border border-dark-600 bg-dark-900/40 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((prev) => !prev)}
+              className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-dark-700/30 transition-colors"
+            >
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Advanced</p>
+                <p className="text-[11px] text-gray-500">Slippage and sponsorship preferences</p>
+              </div>
+              <IoChevronDownOutline className={`w-4 h-4 text-gray-500 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+            </button>
+            {showAdvanced && (
+              <div className="px-4 pb-4 space-y-3 border-t border-dark-600/60">
+                <div className="grid grid-cols-2 gap-3 pt-3">
+                  <label className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Slippage</span>
+                    <select
+                      value={slippagePct}
+                      onChange={(event) => setSlippagePct(event.target.value)}
+                      className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
+                    >
+                      <option value="0.3">0.3%</option>
+                      <option value="0.5">0.5%</option>
+                      <option value="1">1.0%</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Sponsor</span>
+                    <select
+                      value={sponsorPreference}
+                      onChange={(event) => setSponsorPreference(event.target.value as ServerSponsorPreference)}
+                      className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200"
+                    >
+                      <option value="preferred">Preferred</option>
+                      <option value="required">Required</option>
+                      <option value="never">Never</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="rounded-xl border border-dark-600 bg-dark-700/30 px-3 py-2 flex items-start gap-2">
+                  <IoInformationCircleOutline className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-gray-500">
+                    `Preferred` picks the cheapest eligible route. `Required` only allows sponsored paths. `Never` asks for a standard user-paid route when available.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
 
         {quote ? (
-          <section className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3">
+          <section className="rounded-2xl border border-primary/25 bg-primary/5 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-primary">Quote Ready</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-primary">Review Quote</p>
                 <p className="text-xs font-bold text-gray-200">{quote.routeSummary}</p>
               </div>
               <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-orange-200">
@@ -707,7 +751,7 @@ const Swap: React.FC = () => {
         ) : null}
 
         {execution ? (
-          <section className="rounded-xl border border-dark-600 bg-dark-800/60 p-4 space-y-2">
+          <section className="rounded-2xl border border-dark-600 bg-dark-800/60 p-4 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-300">Execution Status</p>
               <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
@@ -742,20 +786,27 @@ const Swap: React.FC = () => {
         ) : null}
 
         {errorText ? (
-          <section className="rounded-xl border border-red-500/25 bg-red-500/10 p-3">
-            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-200">Server Error</p>
+          <section className="rounded-2xl border border-red-500/25 bg-red-500/10 p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-200">Could Not Continue</p>
             <p className="mt-1 text-[11px] text-red-100/90">{errorText}</p>
           </section>
         ) : null}
+        </div>
 
-        <div className="mt-auto pt-2 flex flex-col gap-3">
+        <div className="mt-auto p-4 border-t border-dark-600/60 flex flex-col gap-3 bg-dark-800">
+          <div className="rounded-xl border border-dark-600 bg-dark-700/30 px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Swap Summary</p>
+            <p className="mt-1 text-sm font-bold text-gray-200">
+              {formatAssetLabel(fromItem, fromNetwork?.symbol)} {'->'} {formatAssetLabel(toItem, toNetwork?.symbol)}
+            </p>
+          </div>
           <Button
             className="w-full btn-secondary"
             onClick={requestQuote}
             isLoading={isQuoting}
             disabled={!fromAmount || !fromItem || !toItem || Number(fromAmount) <= 0 || isSameAssetPair}
           >
-            Request Quote
+            Get Quote
           </Button>
           <Button
             className="w-full btn-primary"
@@ -763,7 +814,7 @@ const Swap: React.FC = () => {
             isLoading={isSubmitting}
             disabled={!quote || isQuoting || isSameAssetPair}
           >
-            Sign And Submit
+            Review And Sign
           </Button>
         </div>
       </div>

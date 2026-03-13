@@ -11,7 +11,8 @@ import {
   IoCopyOutline,
   IoCheckmark,
   IoLayersOutline,
-  IoSearchOutline
+  IoSearchOutline,
+  IoSwapHorizontalOutline
 } from 'react-icons/io5'
 import { Tabs } from '../../components/Tabs'
 import { PageTransition } from '../../components/PageTransition'
@@ -109,13 +110,15 @@ const WalletLayout: React.FC = () => {
     )
   }, [networkSearch, rankedNetworks])
   const isSendRoute = location.pathname.startsWith('/wallet/send')
+  const isSwapRoute = location.pathname.startsWith('/wallet/swap')
+  const isFocusedFlowRoute = isSendRoute || isSwapRoute
   // Balance refresh (visibility-aware to avoid bridge/RPC spam while popup is hidden)
   useEffect(() => {
     void fetchNetworkFiat()
   }, [activeAccountId, activeNetworkId, fetchNetworkFiat])
 
   useEffect(() => {
-    if (isSendRoute) return
+    if (isFocusedFlowRoute) return
 
     const tick = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
@@ -139,7 +142,7 @@ const WalletLayout: React.FC = () => {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [refreshActiveBalance, activeAccountId, activeNetworkId, isSendRoute])
+  }, [refreshActiveBalance, activeAccountId, activeNetworkId, isFocusedFlowRoute])
 
   // ── tabs — only show Assets if the network supports token assets ───────────
   const caps = networkCapabilities(activeNetwork)
@@ -152,7 +155,7 @@ const WalletLayout: React.FC = () => {
     ...(caps.ui.showActivityTab ? [{ id: 'activity', label: 'Activity' }] : [])
   ]
 
-  const activeTab = isSendRoute
+  const activeTab = isFocusedFlowRoute
     ? ''
     : isModelRoute
     ? ''
@@ -170,8 +173,8 @@ const WalletLayout: React.FC = () => {
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <WalletFrame hideHeader={isSendRoute}>
-      {!isSendRoute && (
+    <WalletFrame hideHeader={isFocusedFlowRoute}>
+      {!isFocusedFlowRoute && (
         <div className="flex flex-col items-center pt-3 pb-4 shrink-0">
         {/* Coin logo */}
         <div className={clsx(
@@ -202,7 +205,7 @@ const WalletLayout: React.FC = () => {
         </div>
 
         {/* Quick-action buttons */}
-        <div className={`flex justify-center gap-6 w-full px-6 mb-3 ${(caps.ui.showAssetsAction || caps.ui.showSendAction) ? '' : 'gap-0 justify-center'}`}>
+        <div className="flex justify-center gap-6 w-full px-6 mb-3">
           {caps.ui.showAssetsAction && (
             <QuickAction
               icon={<IoLayersOutline className="w-5 h-5" />}
@@ -218,6 +221,11 @@ const WalletLayout: React.FC = () => {
             />
           )}
           <QuickAction
+            icon={<IoSwapHorizontalOutline className="w-5 h-5" />}
+            label="Swap"
+            onClick={() => navigate('/wallet/swap')}
+          />
+          <QuickAction
             icon={<IoSearchOutline className="w-5 h-5" />}
             label="Model"
             onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
@@ -227,7 +235,7 @@ const WalletLayout: React.FC = () => {
       )}
 
       {/* Tabs — hidden on dedicated send route */}
-      {!isSendRoute && <Tabs tabs={TABS} activeTab={activeTab} onChange={handleTabChange} />}
+      {!isFocusedFlowRoute && <Tabs tabs={TABS} activeTab={activeTab} onChange={handleTabChange} />}
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <PageTransition>
