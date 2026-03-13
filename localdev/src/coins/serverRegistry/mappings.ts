@@ -22,10 +22,10 @@ const BLOCKED_SERVER_COIN_IDS = new Set<string>([
 const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   raptoreum: 'rtm',
   atomone: 'cosmos',
-  aurora: 'eth',
+  aurora: 'aurora',
   axelar: 'cosmos',
   babylon: 'cosmos',
-  bahamut: 'eth',
+  bahamut: 'bahamut',
   bitcanna: 'cosmos',
   dogecoin: 'doge',
   dash: 'dash',
@@ -53,7 +53,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   'terra-classic': 'cosmos',
   tidecoin: 'tide',
   firo: 'firo',
-  gnosis: 'eth',
+  gnosis: 'gnosis',
   xrp: 'xrp',
   arr: 'arr',
   cardano: 'ada',
@@ -104,7 +104,10 @@ const SERVER_ID_ALIAS_TO_NETWORK_ID: Record<string, string> = {
 
 const SERVER_SYMBOL_OVERRIDES: Record<string, string> = {
   bitcoin: 'BTC',
-  'bitcoin-testnet': 'BTC'
+  'bitcoin-testnet': 'BTC',
+  aurora: 'ETH',
+  bahamut: 'FTN',
+  gnosis: 'XDAI'
 }
 
 const FORCE_DOGE_UTXO_COMPAT_IDS = new Set([
@@ -204,7 +207,20 @@ const SERVER_COIN_VARIANT_SUFFIXES = [
   'tanenbaum'
 ]
 
-export const EVM_MODEL_NETWORK_IDS = new Set(['eth', 'arb', 'op', 'base', 'bnb', 'polygon', 'avaxc', 'cronos', 'zksync'])
+export const EVM_MODEL_NETWORK_IDS = new Set([
+  'eth',
+  'arb',
+  'op',
+  'base',
+  'bnb',
+  'polygon',
+  'avaxc',
+  'aurora',
+  'bahamut',
+  'gnosis',
+  'cronos',
+  'zksync'
+])
 export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
 
 export function isBlockedServerCoinId(coinId: string): boolean {
@@ -335,6 +351,9 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       op: 'optimism',
       base: 'base',
       bnb: 'bsc',
+      aurora: 'aurora',
+      bahamut: 'bahamut',
+      gnosis: 'gnosis',
       cronos: 'cronos',
       polygon: 'polygon-bor',
       avaxc: 'avalanche-c-chain',
@@ -382,12 +401,15 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   const normalized = String(coinId || '').trim().toLowerCase()
   if (!normalized) return null
   if (normalized.includes('arbitrum')) return 'arb'
+  if (normalized.includes('aurora')) return 'aurora'
+  if (normalized.includes('bahamut')) return 'bahamut'
   if (normalized.includes('optimism')) return 'op'
   if (normalized.includes('polygon')) return 'polygon'
   if (normalized.includes('avalanche')) return 'avaxc'
   if (normalized.includes('base')) return 'base'
   if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
   if (normalized.includes('cronos')) return 'cronos'
+  if (normalized.includes('gnosis') || normalized.includes('xdai')) return 'gnosis'
   if (normalized.includes('zksync')) return 'zksync'
   if (normalized.includes('sui')) return 'sui'
   if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'

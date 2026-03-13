@@ -18,7 +18,6 @@ const bnbTestnetModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BSC_TESTNET_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BSC_TESTNET_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BSC_TESTNET_EXPLORER',
-  defaultRpcUrl: 'https://bsc-testnet-rpc.publicnode.com',
   defaultExplorerUrl: 'https://testnet.bscscan.com'
 })
 

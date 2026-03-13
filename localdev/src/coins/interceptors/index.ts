@@ -3,12 +3,7 @@ import { DASH_API_INFO, dashApiInterceptor } from './dash'
 import { FIRO_API_INFO, firoApiInterceptor } from './firo'
 import { RTM_API_INFO, rtmApiInterceptor } from './rtm'
 import { createCoinApiInterceptor } from './factory'
-import { getCoinPayloadCatalog } from '../payloads'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
-import {
-  SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID,
-  SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID
-} from './serverScaffolds'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
 export const COIN_API_ORDER = ['rtm', 'dash', 'btcz', 'firo'] as const
@@ -116,8 +111,7 @@ function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
       : `/v1/bridge/send/coin/${meta.coinId}/${chain}`,
     sendAssetPathTemplate: walletScopedSend
       ? `/v1/bridge/send/asset/${meta.coinId}/${chain}/:wallet`
-      : `/v1/bridge/send/asset/${meta.coinId}/${chain}`,
-    payloads: getCoinPayloadCatalog(networkId)
+      : `/v1/bridge/send/asset/${meta.coinId}/${chain}`
   }
 }
 
@@ -126,8 +120,6 @@ export function getCoinApiInterceptor(networkId?: string): CoinApiInterceptor | 
   if (!key) return undefined
   const direct = INTERCEPTOR_BY_NETWORK_ID[key]
   if (direct) return direct
-  const scaffolded = SERVER_SCAFFOLD_INTERCEPTOR_BY_NETWORK_ID[key]
-  if (scaffolded) return scaffolded
   const cached = DYNAMIC_INTERCEPTOR_CACHE.get(key)
   if (cached) return cached
   const info = getCoinApiInfo(key)
@@ -142,8 +134,6 @@ export function getCoinApiInfo(networkId?: string): CoinApiInfo | undefined {
   if (!key) return undefined
   const direct = API_INFO_BY_NETWORK_ID[key]
   if (direct) return direct
-  const scaffolded = SERVER_SCAFFOLD_API_INFO_BY_NETWORK_ID[key]
-  if (scaffolded) return scaffolded
   const cached = DYNAMIC_API_INFO_CACHE.get(key)
   if (cached) return cached
   const dynamic = createStandardApiInfo(key)

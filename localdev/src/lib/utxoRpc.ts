@@ -430,6 +430,14 @@ async function getSecureBridgeSession(
   return { token, address: address.toLowerCase(), apiBase }
 }
 
+export async function getSecureBridgeSessionInfo(
+  config: UtxoRpcConfig
+): Promise<{ token: string; address: string; apiBase: string }> {
+  const bridgeUrl = String(config.bridgeUrl || '').trim()
+  if (!bridgeUrl) throw new Error('Bridge URL is required for secure bridge session')
+  return getSecureBridgeSession(config, bridgeUrl)
+}
+
 async function executeSecureBridgeWriteRpc(
   config: UtxoRpcConfig,
   bridgeUrl: string,
@@ -1026,7 +1034,7 @@ function createEvmDirectRpcConfig(config: UtxoRpcConfig): UtxoRpcConfig {
   if (isLikelyExplorerApiUrl(rpcUrl)) {
     throw new Error(
       `Direct EVM RPC fallback is misconfigured: rpcUrl points to an explorer API (${rpcUrl}). `
-      + 'Configure a JSON-RPC endpoint (for example https://ethereum-rpc.publicnode.com).'
+      + 'Configure a MetaYoshi-served JSON-RPC endpoint for this network or use Local RPC mode.'
     )
   }
   return {

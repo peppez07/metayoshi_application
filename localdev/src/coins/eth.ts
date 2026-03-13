@@ -16,7 +16,6 @@ const ethModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ETH_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ETH_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ETH_EXPLORER',
-  defaultRpcUrl: 'https://ethereum-rpc.publicnode.com',
   defaultExplorerUrl: 'https://etherscan.io'
 })
 

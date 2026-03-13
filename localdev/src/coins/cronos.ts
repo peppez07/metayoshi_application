@@ -16,7 +16,6 @@ const cronosModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_CRONOS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_CRONOS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_CRONOS_EXPLORER',
-  defaultRpcUrl: 'https://cronos-rpc.publicnode.com',
   defaultExplorerUrl: 'https://cronoscan.com'
 })
 

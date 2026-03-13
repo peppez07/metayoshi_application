@@ -1,6 +1,5 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
-import { RTM_PAYLOADS } from '../payloads'
 
 // RTM mainnet API profile and transport interceptor.
 const DEFAULT_API_BASE = 'https://api.metayoshi.app'
@@ -24,8 +23,7 @@ export const RTM_API_INFO: CoinApiInfo = {
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/raptoreum`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/raptoreum/main/:wallet',
-  sendAssetPathTemplate: '/v1/bridge/send/asset/raptoreum/main/:wallet',
-  payloads: RTM_PAYLOADS
+  sendAssetPathTemplate: '/v1/bridge/send/asset/raptoreum/main/:wallet'
 }
 
 export const rtmApiInterceptor = createCoinApiInterceptor(RTM_API_INFO)

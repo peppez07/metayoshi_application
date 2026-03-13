@@ -1,6 +1,8 @@
 import { adaCoin } from './ada'
 import { arbCoin } from './arb'
 import { avaxcCoin } from './avaxc'
+import { auroraCoin } from './aurora'
+import { bahamutCoin } from './bahamut'
 import { baseCoin } from './base'
 import { bnbCoin } from './bnb'
 import { bnbTestnetCoin } from './bnbTestnet'
@@ -13,6 +15,7 @@ import { dashCoin } from './dash'
 import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
+import { gnosisCoin } from './gnosis'
 import { opCoin } from './op'
 import { polygonCoin } from './polygon'
 import { rtmCoin } from './rtm'
@@ -185,6 +188,35 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'aurora',
+      runtimeModelId: 'aurora',
+      protocolFamily: 'evm',
+      coinId: 'aurora',
+      chain: 'main',
+      aliases: ['aurora', 'aurora-mainnet', 'mainnet-aurora'],
+      chainId: 1313161554,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      testedByDefault: true
+    },
+    coin: auroraCoin
+  },
+  {
+    manifest: {
+      id: 'bahamut',
+      runtimeModelId: 'bahamut',
+      protocolFamily: 'evm',
+      coinId: 'bahamut',
+      chain: 'main',
+      aliases: ['bahamut', 'bahamut-mainnet', 'mainnet-bahamut', 'ftn'],
+      chainId: 5165,
+      includeInEvmSet: true,
+      testedByDefault: true
+    },
+    coin: bahamutCoin
+  },
+  {
+    manifest: {
       id: 'cronos',
       runtimeModelId: 'cronos',
       protocolFamily: 'evm',
@@ -195,6 +227,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       includeInEvmSet: true
     },
     coin: cronosCoin
+  },
+  {
+    manifest: {
+      id: 'gnosis',
+      runtimeModelId: 'gnosis',
+      protocolFamily: 'evm',
+      coinId: 'gnosis',
+      chain: 'main',
+      aliases: ['gnosis', 'gnosis-chain', 'xdai', 'mainnet-gnosis'],
+      chainId: 100,
+      includeInEvmSet: true,
+      testedByDefault: true
+    },
+    coin: gnosisCoin
   },
   {
     manifest: {

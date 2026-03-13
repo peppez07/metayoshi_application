@@ -24,6 +24,7 @@
     "test:api:firo-eth": "node scripts/smoke-api-firo-eth.mjs",
     "smoke:catalog-cache": "tsx scripts/smoke-catalog-cache.ts",
     "verify:coin-catalog": "tsx scripts/verify-coin-catalog-coverage.ts",
+    "verify:evm-networks": "tsx scripts/verify-evm-network-support.ts",
     "search:sol-logos": "node scripts/search-solana-token-logos.mjs",
     "research:top100-coins": "node scripts/research-top100-coins.mjs",
     "validate:agents": "node scripts/validate-agent-skills.mjs",

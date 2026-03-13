@@ -45,9 +45,28 @@ type EvmCoinFactoryConfig = {
   bridgeUserEnvKey: string
   bridgePasswordEnvKey: string
   explorerEnvKey: string
-  defaultRpcUrl: string
   defaultExplorerUrl: string
   capabilities?: NetworkCapabilitiesInput
+}
+
+function isAllowedServerRpcUrl(candidateUrl: string, apiBaseUrl: string): boolean {
+  try {
+    const candidate = new URL(candidateUrl)
+    const apiBase = new URL(apiBaseUrl)
+    const candidateHost = String(candidate.hostname || '').trim().toLowerCase()
+    const apiHost = String(apiBase.hostname || '').trim().toLowerCase()
+    if (!candidateHost || !apiHost) return false
+    return candidateHost === apiHost || candidateHost.endsWith('.metayoshi.app')
+  } catch {
+    return false
+  }
+}
+
+function resolveServerBackedRpcUrl(configuredUrl: unknown, apiBaseUrl: string): string {
+  const fallback = String(apiBaseUrl || '').trim().replace(/\/+$/, '')
+  const explicit = String(configuredUrl || '').trim()
+  if (!explicit) return fallback
+  return isAllowedServerRpcUrl(explicit, fallback) ? explicit : fallback
 }
 
 export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
@@ -68,7 +87,7 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     coinType: 'EVM',
     coinSymbol: config.coinSymbol,
     chainId: config.chainId,
-    rpcUrl: String(env[config.rpcEnvKey] || config.defaultRpcUrl).trim() || config.defaultRpcUrl,
+    rpcUrl: resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl),
     rpcWallet: '',
     rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
     rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),

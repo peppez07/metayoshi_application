@@ -16,7 +16,6 @@ const arbModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ARB_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ARB_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ARB_EXPLORER',
-  defaultRpcUrl: 'https://arbitrum-one-rpc.publicnode.com',
   defaultExplorerUrl: 'https://arbiscan.io'
 })
 

@@ -16,7 +16,6 @@ const bnbModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BSC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BSC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BSC_EXPLORER',
-  defaultRpcUrl: 'https://bsc-dataseed.bnbchain.org',
   defaultExplorerUrl: 'https://bscscan.com'
 })
 

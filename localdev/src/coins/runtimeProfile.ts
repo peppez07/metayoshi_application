@@ -1,7 +1,5 @@
 import { getCoinApiInfo } from './interceptors'
-import { getCoinPayloadCatalog } from './payloads'
 import type { CoinApiInfo, CoinRpcProtocol } from './interceptors/types'
-import type { CoinPayloadCatalog } from './payloads/types'
 
 export interface CoinRuntimeProfile {
   networkId: string
@@ -10,7 +8,6 @@ export interface CoinRuntimeProfile {
   chain: 'main' | 'test'
   protocol: CoinRpcProtocol
   api: CoinApiInfo
-  payloads?: CoinPayloadCatalog
 }
 
 function resolveProtocol(api: CoinApiInfo): CoinRpcProtocol {
@@ -27,8 +24,7 @@ export function getCoinRuntimeProfile(networkId?: string): CoinRuntimeProfile | 
     coinId: api.coinId,
     chain: api.chain,
     protocol: resolveProtocol(api),
-    api,
-    payloads: api.payloads || getCoinPayloadCatalog(networkId)
+    api
   }
 }
 

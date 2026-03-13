@@ -1,4 +1,3 @@
-import type { CoinPayloadCatalog } from '../payloads/types'
 export type CoinChain = 'main' | 'test'
 export type CoinRpcProtocol =
   | 'utxo-jsonrpc'
@@ -31,7 +30,6 @@ export interface CoinApiInfo {
   bridgeMethodsUrl: string
   sendCoinPathTemplate: string
   sendAssetPathTemplate: string
-  payloads?: CoinPayloadCatalog
 }
 
 export interface RpcInterceptorRequest {

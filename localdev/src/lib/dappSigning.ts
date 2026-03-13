@@ -13,6 +13,7 @@ import { resolveEvmExternalSigner } from './evmExternalSigner'
 import { deriveSolanaAddress } from './solanaAddress'
 import { deriveCosmosAddress, resolveCosmosAddressConfig } from './cosmosAddress'
 import type { Network } from '../coins'
+import { sendBridgeEvmSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
 type JsonObject = Record<string, any>
 
@@ -243,7 +244,7 @@ export async function signEvmTransaction(input: {
 export async function signAndSendEvmTransaction(input: {
   mnemonic: string
   accountIndex?: number
-  rpcUrl: string
+  rpcConfig: UtxoRpcConfig
   tx: {
     to?: string
     value?: string
@@ -262,9 +263,11 @@ export async function signAndSendEvmTransaction(input: {
     accountIndex: input.accountIndex,
     tx: input.tx
   })
-  const provider = new ethers.JsonRpcProvider(String(input.rpcUrl || '').trim())
-  const sent = await provider.broadcastTransaction(signedTx)
-  return { hash: String(sent.hash || '').trim() }
+  const relayed = await sendBridgeEvmSignedRelay(input.rpcConfig, {
+    kind: 'coin',
+    signedTxHex: signedTx
+  })
+  return { hash: String(relayed.txid || '').trim() }
 }
 
 export async function signSolanaMessage(input: {

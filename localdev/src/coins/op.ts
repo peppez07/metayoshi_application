@@ -16,7 +16,6 @@ const opModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_OP_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_OP_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_OP_EXPLORER',
-  defaultRpcUrl: 'https://optimism-rpc.publicnode.com',
   defaultExplorerUrl: 'https://optimistic.etherscan.io'
 })
 

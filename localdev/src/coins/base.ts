@@ -16,7 +16,6 @@ const baseModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BASE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BASE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BASE_EXPLORER',
-  defaultRpcUrl: 'https://base-rpc.publicnode.com',
   defaultExplorerUrl: 'https://basescan.org'
 })
 

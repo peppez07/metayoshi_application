@@ -1,6 +1,5 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
-import { BTCZ_PAYLOADS } from '../payloads'
 
 // BTCZ mainnet API profile and transport interceptor.
 const DEFAULT_API_BASE = 'https://api.metayoshi.app'
@@ -21,8 +20,7 @@ export const BTCZ_API_INFO: CoinApiInfo = {
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/bitcoinz`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/bitcoinz/main/:wallet',
-  sendAssetPathTemplate: '/v1/bridge/send/asset/bitcoinz/main/:wallet',
-  payloads: BTCZ_PAYLOADS
+  sendAssetPathTemplate: '/v1/bridge/send/asset/bitcoinz/main/:wallet'
 }
 
 export const btczApiInterceptor = createCoinApiInterceptor(BTCZ_API_INFO)

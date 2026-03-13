@@ -16,7 +16,6 @@ const zksyncModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ZKSYNC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ZKSYNC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ZKSYNC_EXPLORER',
-  defaultRpcUrl: 'https://mainnet.era.zksync.io',
   defaultExplorerUrl: 'https://explorer.zksync.io'
 })
 

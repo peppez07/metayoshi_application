@@ -16,7 +16,6 @@ const polygonModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_POLYGON_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_POLYGON_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_POLYGON_EXPLORER',
-  defaultRpcUrl: 'https://polygon-bor-rpc.publicnode.com',
   defaultExplorerUrl: 'https://polygonscan.com'
 })
 
