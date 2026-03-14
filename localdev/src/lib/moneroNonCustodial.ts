@@ -1,4 +1,5 @@
 import type { Network } from '../coins'
+import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl } from './apiBase'
 import { deriveMoneroAddress } from './moneroAddress'
 
 type MoneroSignerRuntime = {
@@ -35,7 +36,7 @@ function isHex(value: string): boolean {
 }
 
 function resolveApiBaseUrl(network: Network): string {
-  const explicit = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+  const explicit = normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
   if (explicit) return explicit
   const bridge = String(network.bridgeUrl || '').trim()
   if (bridge) {
@@ -46,7 +47,7 @@ function resolveApiBaseUrl(network: Network): string {
       // ignore
     }
   }
-  throw new Error('VITE_API_BASE_URL is required for Monero non-custodial submit flow')
+  return DEFAULT_PUBLIC_API_BASE_URL
 }
 
 function resolveApiHeaders(): Record<string, string> {

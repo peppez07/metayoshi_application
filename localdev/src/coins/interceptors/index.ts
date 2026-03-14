@@ -3,6 +3,7 @@ import { DASH_API_INFO, dashApiInterceptor } from './dash'
 import { FIRO_API_INFO, firoApiInterceptor } from './firo'
 import { RTM_API_INFO, rtmApiInterceptor } from './rtm'
 import { createCoinApiInterceptor } from './factory'
+import { resolvePublicApiBaseUrl } from '../../lib/apiBase'
 import { STANDARD_RUNTIME_META } from '../standardRuntimeMeta'
 import type { CoinApiInfo, CoinApiInterceptor } from './types'
 
@@ -89,7 +90,7 @@ function usesWalletScopedSendRoutes(coinId: string): boolean {
 function createStandardApiInfo(networkId: string): CoinApiInfo | undefined {
   const meta = STANDARD_RUNTIME_META[networkId]
   if (!meta) return undefined
-  const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || 'https://api.metayoshi.app').trim().replace(/\/+$/, '')
+  const apiBaseUrl = resolvePublicApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
   const chain = meta.chain || 'main'
   const bridgePath = resolveDefaultBridgePath(meta.coinId, chain)
   const walletScopedSend = usesWalletScopedSendRoutes(meta.coinId)

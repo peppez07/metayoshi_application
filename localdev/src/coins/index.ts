@@ -2,6 +2,7 @@ import { getBundledCoinRegistryEntries } from './coinRegistry'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
 import { validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
+import { resolvePublicApiBaseUrl } from '../lib/apiBase'
 import { normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import type { ServerCoinCatalogItem, ServerCoinCatalogKind } from './serverRegistry/types'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
@@ -10,7 +11,7 @@ export type { CoinType, Network } from './types'
 export type { ServerCoinCatalogItem, ServerCoinCatalogKind } from './serverRegistry/types'
 export { getCoinRuntimeProfile, type CoinRuntimeProfile } from './runtimeProfile'
 
-const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+const API_BASE_URL = resolvePublicApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 const GLOBAL_BRIDGE_USER = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_USER)
 const GLOBAL_BRIDGE_PASSWORD = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD)
@@ -20,10 +21,6 @@ if ((GLOBAL_BRIDGE_USER && !GLOBAL_BRIDGE_PASSWORD) || (!GLOBAL_BRIDGE_USER && G
     'Bridge credentials are partially configured. ' +
     'Set both VITE_BRIDGE_USER and VITE_BRIDGE_PASSWORD, or leave both unset.'
   )
-}
-
-if (!API_BASE_URL) {
-  throw new Error('VITE_API_BASE_URL is required. Set it in your environment (for example .env.local).')
 }
 
 export function buildBridgeUrl(coin: string, chain: 'main' | 'test', wallet?: string): string {

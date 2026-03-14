@@ -1,11 +1,11 @@
 import { createCoinApiInterceptor } from './factory'
 import type { CoinApiInfo } from './types'
+import { resolvePublicApiBaseUrl } from '../../lib/apiBase'
 
 // RTM mainnet API profile and transport interceptor.
-const DEFAULT_API_BASE = 'https://api.metayoshi.app'
 const DEFAULT_WALLET = 'mainwallet'
 
-const apiBaseUrl = String((import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE).trim().replace(/\/+$/, '')
+const apiBaseUrl = resolvePublicApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
 const wallet = String(import.meta.env.VITE_RTM_WALLET || DEFAULT_WALLET).trim() || DEFAULT_WALLET
 const defaultBridgeUrl = `${apiBaseUrl}/v1/bridge/raptoreum/main/wallet/${encodeURIComponent(wallet)}`
 

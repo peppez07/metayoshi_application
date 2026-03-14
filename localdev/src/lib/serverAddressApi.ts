@@ -1,4 +1,5 @@
 import type { Network } from '../coins'
+import { normalizeConfiguredApiBaseUrl } from './apiBase'
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
@@ -20,7 +21,7 @@ function loadTronWebModule() {
 }
 
 export function deriveServerApiBaseUrl(network: Network): string {
-  const envBase = String((import.meta as any)?.env?.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+  const envBase = normalizeConfiguredApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
   if (envBase) return envBase
 
   const bridgeUrl = String(network.bridgeUrl || '').trim().replace(/\/+$/, '')

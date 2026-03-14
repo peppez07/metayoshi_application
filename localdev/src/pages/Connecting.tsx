@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { IoRefresh, IoWarningOutline, IoCloseCircleOutline } from 'react-icons/io5'
 import clsx from 'clsx'
+import { normalizeConfiguredApiBaseUrl } from '../lib/apiBase'
 import { assertBridgeCredentialsConfigured } from '../lib/bridgeCredentials'
 import { useWalletStore } from '../store/walletStore'
 import type { Network } from '../store/walletStore'
@@ -21,16 +22,8 @@ function getBridgeOrigin(network?: Network): string | null {
   }
 }
 
-function normalizeApiBaseUrl(value: string | undefined): string | null {
-  const v = String(value || '').trim()
-  if (!v) return null
-  if (v.includes('yourdomain.com')) return null
-  if (!/^https?:\/\//i.test(v)) return null
-  return v.replace(/\/+$/, '')
-}
-
 function resolveServerBase(network?: Network): string | null {
-  const envBase = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
+  const envBase = normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
   if (envBase) return envBase
   return getBridgeOrigin(network)
 }

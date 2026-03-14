@@ -159,6 +159,19 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return out
 }
 
+function loadLocalWalletEnvFiles(): Record<string, string> {
+  const files = [
+    path.resolve(__dirname, '.env'),
+    path.resolve(__dirname, '.env.local')
+  ]
+  const out: Record<string, string> = {}
+  for (const file of files) {
+    const parsed = parseEnvFile(file)
+    for (const [key, value] of Object.entries(parsed)) out[key] = value
+  }
+  return out
+}
+
 function setProcessEnvIfMissing(key: string, value: unknown): void {
   const current = String(process.env[key] ?? '').trim()
   if (current) return
@@ -170,22 +183,29 @@ function setProcessEnvIfMissing(key: string, value: unknown): void {
 function loadBridgeEnvFromSiblingServerRepo(): void {
   // Local developer convenience:
   // Pull bridge env context from sibling metayoshi_SERVER env file.
-  // Never map shared bridge secrets into VITE_* because those values are
-  // bundled into the extension and extractable from release artifacts.
+  // Secrets are imported only when explicitly enabled for local development.
+  const localWalletEnv = loadLocalWalletEnvFiles()
   const enabled = parseBooleanLike(
     process.env.BRIDGE_AUTOCONFIG_FROM_SERVER_ENV
-      ?? process.env.VITE_BRIDGE_AUTOCONFIG_FROM_SERVER_ENV,
+      ?? process.env.VITE_BRIDGE_AUTOCONFIG_FROM_SERVER_ENV
+      ?? localWalletEnv.BRIDGE_AUTOCONFIG_FROM_SERVER_ENV
+      ?? localWalletEnv.VITE_BRIDGE_AUTOCONFIG_FROM_SERVER_ENV,
     false
   )
   if (!enabled) return
 
+  const includeSecrets = parseBooleanLike(
+    process.env.BRIDGE_AUTOCONFIG_INCLUDE_SECRETS
+      ?? process.env.VITE_BRIDGE_AUTOCONFIG_INCLUDE_SECRETS
+      ?? localWalletEnv.BRIDGE_AUTOCONFIG_INCLUDE_SECRETS
+      ?? localWalletEnv.VITE_BRIDGE_AUTOCONFIG_INCLUDE_SECRETS,
+    false
+  )
+
   const candidateFiles = [
-    path.resolve(__dirname, '../metayoshi_SERVER/windows/local/.env.windows'),
-    path.resolve(__dirname, '../metayoshi_SERVER/windows/local/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/windows/vultr/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/docker/local/.env.windows'),
-    path.resolve(__dirname, '../metayoshi_SERVER/docker/local/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/docker/vultr/.env'),
+    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.windows'),
+    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.secondary'),
+    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/vultr/.env'),
     path.resolve(__dirname, '../metayoshi_SERVER/.env')
   ]
 
@@ -201,12 +221,23 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
   }
   if (!selectedFile) return
 
-  // Do not import BRIDGE_BASIC_USER / BRIDGE_BASIC_PASSWORD / BRIDGE_TX_AUTH_KEY
-  // into the client bundle.
   const secureApiBase = sourceEnv.SECURE_BRIDGE_API_BASE_URL || sourceEnv.API_BASE_URL
-  setProcessEnvIfMissing('VITE_SECURE_BRIDGE_API_BASE_URL', secureApiBase)
+  const localApiPort = String(sourceEnv.LOCAL_API_PORT || '').trim()
+  const localApiBase = /^\d+$/.test(localApiPort) ? `http://127.0.0.1:${localApiPort}` : ''
+  const resolvedApiBase = String(secureApiBase || localApiBase).trim()
+  setProcessEnvIfMissing('VITE_API_BASE_URL', resolvedApiBase)
+  setProcessEnvIfMissing('VITE_SECURE_BRIDGE_API_BASE_URL', resolvedApiBase)
 
-  console.log(`[metayoshi] Bridge env auto-config loaded from ${selectedFile} (secrets ignored)`)
+  if (includeSecrets) {
+    setProcessEnvIfMissing('VITE_BRIDGE_USER', sourceEnv.BRIDGE_BASIC_USER)
+    setProcessEnvIfMissing('VITE_BRIDGE_PASSWORD', sourceEnv.BRIDGE_BASIC_PASSWORD)
+    setProcessEnvIfMissing('VITE_APP_API_KEY', sourceEnv.APP_API_KEY)
+  }
+
+  console.log(
+    `[metayoshi] Bridge env auto-config loaded from ${selectedFile}` +
+    (includeSecrets ? ' (bridge auth + app API key imported)' : ' (secrets skipped)')
+  )
 }
 
 loadBridgeEnvFromSiblingServerRepo()

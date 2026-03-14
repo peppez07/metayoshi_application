@@ -23,6 +23,7 @@ import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
+import { normalizeConfiguredApiBaseUrl } from '../lib/apiBase'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
@@ -1596,12 +1597,11 @@ function parseBridgeEvmNftReference(row: BridgeTokenBalanceRow): { address: stri
 }
 
 function resolvePortfolioRequestMeta(network: Network): { apiBase: string; coin: string; chain: string } | null {
-  const apiBase = String(
-    import.meta.env.VITE_API_BASE_URL
+  const apiBase = (
+    normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
     || deriveApiBaseFromBridgeUrl(String(network.bridgeUrl || ''))
-    || network.rpcUrl
-    || ''
-  ).trim().replace(/\/+$/, '')
+    || String(network.rpcUrl || '').trim().replace(/\/+$/, '')
+  )
   if (!apiBase) return null
 
   const modelId = String(resolveNetworkModelId(network) || network.id || '').trim().toLowerCase()
