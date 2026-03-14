@@ -1,11 +1,11 @@
 import { ethers } from 'ethers'
 import type { Network } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
-import { callBridgeMethod } from './utxoRpc'
+import { callBridgeMethod, getSecureBridgeSessionInfo } from './utxoRpc'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-const DEFAULT_UNISWAP_API_BASE = 'https://trade-api.gateway.uniswap.org/v1'
+const DEFAULT_LEGACY_UNISWAP_API_BASE = 'https://trade-api.gateway.uniswap.org/v1'
 const UNISWAP_NATIVE_ADDRESS = '0x0000000000000000000000000000000000000000'
 const ERC20_METADATA_IFACE = new ethers.Interface(['function decimals() view returns (uint8)'])
 const TX_RECEIPT_POLL_MS = 4_000
@@ -25,7 +25,7 @@ export type ServerExecutionStatusState =
 
 export interface ServerSwapAssetRef {
   assetId: string
-  kind: 'native' | 'fungible' | 'nft'
+  kind: 'native' | 'fungible' | 'wrapped' | 'nft'
   symbol?: string
   label?: string
   contractAddress?: string
@@ -55,6 +55,8 @@ export interface ServerSwapQuoteRequest {
 export interface ServerSwapQuote {
   quoteId: string
   mode: ServerExecutionMode
+  sourceSymbol?: string
+  destinationSymbol?: string
   sourceAmount: string
   destinationAmount: string
   minDestinationAmount: string
@@ -119,6 +121,8 @@ type JsonResponse = {
 }
 
 type ServerExecutionAction = 'quote' | 'submit' | 'status' | 'approval'
+
+type ServerManagedExecutionAction = 'quote' | 'submit' | 'status'
 
 type BridgeNetworkInput = Pick<
   Network,
@@ -192,26 +196,26 @@ function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
   }
 }
 
-function getUniswapApiBase(): string {
+function getLegacyUniswapApiBase(): string {
   const explicit = readString((import.meta as any)?.env?.VITE_UNISWAP_API_BASE_URL).replace(/\/+$/, '')
   if (explicit) return explicit
   const legacy = readString((import.meta as any)?.env?.VITE_SECURE_BRIDGE_API_BASE_URL).replace(/\/+$/, '')
   if (legacy) return legacy
-  return DEFAULT_UNISWAP_API_BASE
+  return DEFAULT_LEGACY_UNISWAP_API_BASE
 }
 
 function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {
   switch (action) {
     case 'quote':
-      return 'uniswap.quote'
+      return 'swap.quote'
     case 'approval':
-      return 'uniswap.check_approval'
+      return 'swap.approval'
     case 'submit':
-      return 'uniswap.swap'
+      return 'swap.submit'
     case 'status':
-      return 'uniswap.swaps'
+      return 'swap.status'
     default:
-      return 'uniswap'
+      return 'swap'
   }
 }
 
@@ -266,7 +270,7 @@ async function executeUniswapJsonRequest(
     throw new Error('VITE_APP_API_KEY is required for Uniswap swap execution')
   }
 
-  const url = `${getUniswapApiBase()}${path}`
+  const url = `${getLegacyUniswapApiBase()}${path}`
   const monitorRequestId = beginServerExecutionMonitor(config, action, url)
   try {
     const headers: Record<string, string> = {
@@ -305,6 +309,78 @@ async function executeUniswapJsonRequest(
   }
 }
 
+function isSecureUnavailableError(error: unknown): boolean {
+  return compactErrorText(error instanceof Error ? error.message : String(error || '')).includes('[secure-bridge-unavailable]')
+}
+
+function asLegacySwapFallbackError(message: string): Error {
+  return new Error(`[legacy-swap-fallback] ${message}`)
+}
+
+function isLegacySwapFallbackError(error: unknown): boolean {
+  return compactErrorText(error instanceof Error ? error.message : String(error || '')).includes('[legacy-swap-fallback]')
+}
+
+function isServerManagedQuoteResponse(raw: unknown): boolean {
+  const response = asRecord(raw)
+  return Boolean(readString(response.quoteId) && readString(response.mode) && readString(response.destinationAmount))
+}
+
+function isLikelyTransactionHash(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(readString(value))
+}
+
+async function executeServerManagedJsonRequest(
+  config: ServerExecutionRpcConfig,
+  path: string,
+  init: RequestInit,
+  action: ServerManagedExecutionAction
+): Promise<any> {
+  let session: { token: string; address: string; apiBase: string }
+  try {
+    session = await getSecureBridgeSessionInfo(config)
+  } catch (error) {
+    if (isSecureUnavailableError(error)) {
+      throw asLegacySwapFallbackError(error instanceof Error ? error.message : 'Secure bridge auth is unavailable')
+    }
+    throw error
+  }
+
+  const url = `${session.apiBase}${path}`
+  const monitorRequestId = beginServerExecutionMonitor(config, action, url)
+  try {
+    const response = await fetchJsonWithStatus(url, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+        ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {}),
+        ...(init.headers as Record<string, string> | undefined)
+      }
+    })
+
+    if (!response.ok) {
+      const detail = readString(
+        response.json?.error?.message
+        || response.json?.error
+        || response.json?.message
+        || response.text
+        || `HTTP ${response.status}`
+      )
+      if (response.status === 404 || response.status === 405 || response.status === 501) {
+        throw asLegacySwapFallbackError(`Server-managed swap endpoint unavailable: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
+      }
+      throw new Error(`Server execution request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
+    }
+
+    completeServerExecutionMonitor(monitorRequestId, response.status)
+    return response.json ?? {}
+  } catch (error) {
+    failServerExecutionMonitor(monitorRequestId, error)
+    throw error
+  }
+}
+
 function resolveUniswapTokenAddress(asset: ServerSwapAssetRef | undefined, networkId: string, label: string): string {
   if (!asset || asset.kind === 'native') return UNISWAP_NATIVE_ADDRESS
   const contractAddress = readString(asset.contractAddress)
@@ -322,9 +398,38 @@ function buildExplorerTxUrl(baseUrl: string | undefined, txid: string): string |
 }
 
 function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
+  if (isServerManagedQuoteResponse(raw)) {
+    const response = asRecord(raw)
+    const quoteId = readString(response.quoteId)
+    if (!quoteId) throw new Error('Swap quote response is missing quoteId')
+    return {
+      quoteId,
+      mode: (() => {
+        const mode = readString(response.mode).toLowerCase()
+        return mode === 'sponsored' || mode === 'intent' ? mode : 'standard'
+      })(),
+      sourceSymbol: readString(response.sourceSymbol) || request.source.symbol,
+      destinationSymbol: readString(response.destinationSymbol) || request.destination.symbol,
+      sourceAmount: readString(response.sourceAmount) || request.source.amount,
+      destinationAmount: readString(response.destinationAmount),
+      minDestinationAmount: readString(response.minDestinationAmount),
+      expiresAt: readNumber(response.expiresAt) || Date.now() + 60_000,
+      routeSummary: readString(response.routeSummary) || 'Server-mediated swap route',
+      sponsorCoversNetworkFee: Boolean(response.sponsorCoversNetworkFee),
+      estimatedNetworkFee: readString(response.estimatedNetworkFee) || undefined,
+      estimatedNetworkFeeSymbol: readString(response.estimatedNetworkFeeSymbol) || undefined,
+      estimatedServerFee: readString(response.estimatedServerFee) || undefined,
+      priceImpactPct: readNumber(response.priceImpactPct) ?? null,
+      warnings: readStringArray(response.warnings),
+      metadata: {
+        provider: 'server-execution',
+        ...response
+      }
+    }
+  }
+
   const response = asRecord(raw)
   const quote = asRecord(response.quote)
-  const input = asRecord(quote.input)
   const output = asRecord(quote.output)
   const routing = readString(response.routing).toUpperCase()
   const quoteId = readString(quote.quoteId || response.requestId)
@@ -350,6 +455,8 @@ function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSw
   return {
     quoteId,
     mode: 'standard',
+    sourceSymbol: request.source.symbol,
+    destinationSymbol: request.destination.symbol,
     sourceAmount: request.source.amount,
     destinationAmount: formatRawTokenAmount(destinationAmountRaw, destinationDecimals),
     minDestinationAmount: formatRawTokenAmount(minDestinationAmountRaw, destinationDecimals),
@@ -381,6 +488,192 @@ function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSw
 function hasTransactionRequest(value: unknown): boolean {
   const tx = asRecord(value)
   return Boolean(readString(tx.to) && readString(tx.data))
+}
+
+function normalizeSettledAssetKind(value: unknown, fallback: ServerSwapAssetRef['kind']): ServerSwapAssetRef['kind'] {
+  const normalized = readString(value).toLowerCase()
+  if (normalized === 'native') return 'native'
+  if (normalized === 'wrapped') return 'wrapped'
+  if (normalized === 'fungible' || normalized === 'asset' || normalized === 'token' || normalized === 'erc20') return 'fungible'
+  if (normalized === 'nft' || normalized === 'erc721' || normalized === 'erc1155') return 'nft'
+  return fallback
+}
+
+function buildCanonicalAssetRef(
+  side: 'source' | 'destination',
+  requestAsset: ServerSwapAssetRef | undefined,
+  metadata: Record<string, unknown>
+): ServerSwapAssetRef | undefined {
+  const assetId = readString(metadata[`${side}AssetId`]) || readString(requestAsset?.assetId)
+  if (!assetId && !requestAsset) return undefined
+  const kind = normalizeSettledAssetKind(metadata[`${side}AssetKind`], requestAsset?.kind || 'fungible')
+  const contractAddress = readString(metadata[`${side}ContractAddress`]) || readString(requestAsset?.contractAddress) || undefined
+  const decimals = readNumber((metadata as any)[`${side}Decimals`]) ?? requestAsset?.decimals
+  return {
+    assetId: assetId || readString(requestAsset?.assetId) || `${side}:asset`,
+    kind,
+    symbol: readString(metadata[`${side}Symbol`]) || requestAsset?.symbol,
+    label: requestAsset?.label,
+    contractAddress,
+    decimals
+  }
+}
+
+function buildServerManagedQuoteRequestBody(request: ServerSwapQuoteRequest): Record<string, unknown> {
+  return {
+    source: {
+      networkId: request.source.networkId,
+      symbol: request.source.symbol,
+      address: request.source.address,
+      amount: request.source.amount,
+      asset: request.source.asset
+        ? {
+            assetId: request.source.asset.assetId,
+            kind: request.source.asset.kind,
+            contractAddress: request.source.asset.contractAddress
+          }
+        : undefined
+    },
+    destination: {
+      networkId: request.destination.networkId,
+      symbol: request.destination.symbol,
+      address: request.destination.address,
+      asset: request.destination.asset
+        ? {
+            assetId: request.destination.asset.assetId,
+            kind: request.destination.asset.kind,
+            contractAddress: request.destination.asset.contractAddress
+          }
+        : undefined
+    },
+    slippageBps: request.slippageBps,
+    sponsorPreference: request.sponsorPreference
+  }
+}
+
+function buildApprovalMessage(
+  request: ServerSwapSubmitRequest,
+  metadata: Record<string, unknown>,
+  sourceAsset: ServerSwapAssetRef | undefined,
+  destinationAsset: ServerSwapAssetRef | undefined,
+  nonce: string
+): string {
+  const expiresAt = readString(metadata.expiresAt)
+  const sourceNetworkId = readString(metadata.sourceNetworkId) || request.source.networkId
+  const sourceSymbol = readString(metadata.sourceSymbol) || request.source.symbol
+  const destinationNetworkId = readString(metadata.destinationNetworkId) || request.destination.networkId
+  const destinationSymbol = readString(metadata.destinationSymbol) || request.destination.symbol
+  return [
+    'MetaYoshi server execution approval',
+    'version=1',
+    'action=swap',
+    `quoteId=${request.quoteId}`,
+    `executionMode=${request.executionMode}`,
+    `sourceNetworkId=${sourceNetworkId}`,
+    `sourceSymbol=${sourceSymbol}`,
+    `sourceAssetId=${readString(sourceAsset?.assetId)}`,
+    `sourceAssetKind=${readString(sourceAsset?.kind)}`,
+    `sourceContractAddress=${readString(sourceAsset?.contractAddress)}`,
+    `sourceAddress=${request.source.address}`,
+    `sourceAmount=${request.source.amount}`,
+    `destinationNetworkId=${destinationNetworkId}`,
+    `destinationSymbol=${destinationSymbol}`,
+    `destinationAssetId=${readString(destinationAsset?.assetId)}`,
+    `destinationAssetKind=${readString(destinationAsset?.kind)}`,
+    `destinationContractAddress=${readString(destinationAsset?.contractAddress)}`,
+    `destinationAddress=${request.destination.address}`,
+    `minDestinationAmount=${request.minDestinationAmount}`,
+    `sponsorPreference=${request.sponsorPreference}`,
+    `expiresAt=${expiresAt}`,
+    `nonce=${nonce}`
+  ].join('\n')
+}
+
+async function submitServerManagedSwap(
+  config: ServerExecutionRpcConfig,
+  request: ServerSwapSubmitRequest
+): Promise<ServerExecutionStatus> {
+  const metadata = asRecord(request.quoteMetadata)
+  if (!request.quoteId || Object.keys(metadata).length === 0) {
+    throw new Error('Swap quote metadata is missing the server execution payload')
+  }
+  const signer = config.secureBridgeSigner
+  if (typeof signer !== 'function') {
+    throw new Error('Secure bridge signer is unavailable. Unlock wallet and retry.')
+  }
+
+  const sourceAsset = buildCanonicalAssetRef('source', request.source.asset, metadata)
+  const destinationAsset = buildCanonicalAssetRef('destination', request.destination.asset, metadata)
+  const sourceNetworkId = readString(metadata.sourceNetworkId) || request.source.networkId
+  const sourceSymbol = readString(metadata.sourceSymbol) || request.source.symbol
+  const destinationNetworkId = readString(metadata.destinationNetworkId) || request.destination.networkId
+  const destinationSymbol = readString(metadata.destinationSymbol) || request.destination.symbol
+  const approvalNonce = crypto.randomUUID()
+  const approvalMessage = buildApprovalMessage(request, metadata, sourceAsset, destinationAsset, approvalNonce)
+  const signature = await signer(approvalMessage)
+  const approvalAddress = readString(signature?.address)
+  const approvalSignature = readString(signature?.signature)
+  if (!approvalAddress || !approvalSignature) {
+    throw new Error('Swap approval signing failed')
+  }
+
+  const response = await executeServerManagedJsonRequest(config, '/v1/swap/submit', {
+    method: 'POST',
+    body: JSON.stringify({
+      quoteId: request.quoteId,
+      source: {
+        networkId: sourceNetworkId,
+        symbol: sourceSymbol,
+        address: request.source.address,
+        amount: request.source.amount,
+        asset: sourceAsset
+          ? {
+              assetId: sourceAsset.assetId,
+              kind: sourceAsset.kind,
+              contractAddress: sourceAsset.contractAddress
+            }
+          : undefined
+      },
+      destination: {
+        networkId: destinationNetworkId,
+        symbol: destinationSymbol,
+        address: request.destination.address,
+        asset: destinationAsset
+          ? {
+              assetId: destinationAsset.assetId,
+              kind: destinationAsset.kind,
+              contractAddress: destinationAsset.contractAddress
+            }
+          : undefined
+      },
+      minDestinationAmount: request.minDestinationAmount,
+      sponsorPreference: request.sponsorPreference,
+      executionMode: request.executionMode,
+      approval: {
+        nonce: approvalNonce,
+        address: approvalAddress,
+        message: approvalMessage,
+        signature: approvalSignature,
+        signedAt: Date.now()
+      }
+    })
+  }, 'submit')
+
+  return {
+    executionId: readString(response.executionId),
+    quoteId: readString(response.quoteId) || request.quoteId,
+    status: normalizeExecutionStatus(response.status === 'submitted' ? 'PENDING' : response.status) === 'pending'
+      ? (readString(response.status).toLowerCase() === 'broadcasted' ? 'broadcasted' : 'submitted')
+      : normalizeExecutionStatus(response.status),
+      detail: readString(response.detail) || 'Server swap submitted',
+      updatedAt: readNumber(response.updatedAt) || Date.now(),
+      receipt: {
+        txid: readString(response.txid) || undefined,
+        explorerUrl: readString(response.explorerUrl) || undefined,
+        networkId: readString(response.networkId) || destinationNetworkId || sourceNetworkId
+      },
+    warnings: readStringArray(response.warnings)
+  }
 }
 
 async function waitForTransactionReceipt(
@@ -440,6 +733,7 @@ export function createServerExecutionRpcConfig(
   network: BridgeNetworkInput,
   options?: {
     sendTransaction?: ServerExecutionRpcConfig['sendTransaction']
+    secureBridgeSigner?: ServerExecutionRpcConfig['secureBridgeSigner']
   }
 ): ServerExecutionRpcConfig {
   return {
@@ -452,6 +746,7 @@ export function createServerExecutionRpcConfig(
     chainId: network.chainId,
     explorerUrl: network.explorerUrl,
     sendTransaction: options?.sendTransaction,
+    secureBridgeSigner: options?.secureBridgeSigner,
     useLocalRpc: false
   }
 }
@@ -485,6 +780,16 @@ export async function requestServerSwapQuote(
   config: ServerExecutionRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
+  try {
+    const raw = await executeServerManagedJsonRequest(config, '/v1/swap/quote', {
+      method: 'POST',
+      body: JSON.stringify(buildServerManagedQuoteRequestBody(request))
+    }, 'quote')
+    return normalizeQuote(raw, request)
+  } catch (error) {
+    if (!isLegacySwapFallbackError(error)) throw error
+  }
+
   const sourceChainId = Number(request.source.chainId || config.chainId || 0)
   const destinationChainId = Number(request.destination.chainId || 0)
   if (!sourceChainId || !destinationChainId) {
@@ -520,13 +825,17 @@ export async function submitServerSwap(
   config: ServerExecutionRpcConfig,
   request: ServerSwapSubmitRequest
 ): Promise<ServerExecutionStatus> {
+  const metadata = asRecord(request.quoteMetadata)
+  if (readString(metadata.provider) === 'server-execution') {
+    return submitServerManagedSwap(config, request)
+  }
+
   const sourceChainId = Number(request.source.chainId || config.chainId || 0)
   const destinationChainId = Number(request.destination.chainId || 0)
   if (!sourceChainId || !destinationChainId) {
     throw new Error('EVM chainId is required for Uniswap swap execution')
   }
 
-  const metadata = asRecord(request.quoteMetadata)
   const rawQuote = asRecord(metadata.quote)
   if (Object.keys(rawQuote).length === 0) {
     throw new Error('Swap quote metadata is missing the Uniswap quote payload')
@@ -596,6 +905,42 @@ export async function fetchServerExecutionStatus(
   config: ServerExecutionRpcConfig,
   executionId: string
 ): Promise<ServerExecutionStatus> {
+  const normalizedExecutionId = readString(executionId)
+  if (!normalizedExecutionId) throw new Error('Execution id is required')
+
+  if (!isLikelyTransactionHash(normalizedExecutionId)) {
+    const raw = await executeServerManagedJsonRequest(
+      config,
+      `/v1/execute/${encodeURIComponent(normalizedExecutionId)}`,
+      { method: 'GET' },
+      'status'
+    )
+    return {
+      executionId: readString(raw.executionId) || normalizedExecutionId,
+      quoteId: readString(raw.quoteId) || undefined,
+      status: (() => {
+        const normalized = readString(raw.status).toLowerCase()
+        if (normalized === 'quoted') return 'quoted'
+        if (normalized === 'submitted') return 'submitted'
+        if (normalized === 'broadcasted') return 'broadcasted'
+        if (normalized === 'pending') return 'pending'
+        if (normalized === 'confirmed') return 'confirmed'
+        if (normalized === 'failed') return 'failed'
+        if (normalized === 'expired') return 'expired'
+        if (normalized === 'rejected') return 'rejected'
+        return 'pending'
+      })(),
+      detail: readString(raw.detail) || undefined,
+      updatedAt: readNumber(raw.updatedAt) || Date.now(),
+      receipt: {
+        txid: readString(raw.txid) || undefined,
+        explorerUrl: readString(raw.explorerUrl) || undefined,
+        networkId: readString(raw.networkId) || config.networkId
+      },
+      warnings: readStringArray(raw.warnings)
+    }
+  }
+
   const txid = encodeURIComponent(readString(executionId))
   if (!txid) throw new Error('Execution id is required')
   const chainId = Number(config.chainId || 0)

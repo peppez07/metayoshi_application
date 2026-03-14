@@ -32,11 +32,11 @@ function formatSwapUiError(error: unknown): string {
   const normalized = message.toLowerCase()
 
   if (normalized.includes('vite_app_api_key is required')) {
-    return 'Swap is not configured yet. Set VITE_APP_API_KEY for the Uniswap API and reload the wallet.'
+    return 'Swap is not configured yet. Set VITE_APP_API_KEY for the server API and reload the wallet.'
   }
 
   if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
-    return 'Uniswap swaps are currently available only for EVM networks in this wallet.'
+    return 'Swap is currently available only for EVM networks in this wallet.'
   }
 
   if (
@@ -44,22 +44,22 @@ function formatSwapUiError(error: unknown): string {
     || normalized.includes('requested asset pair')
     || normalized.includes('selected swap')
   ) {
-    return 'No Uniswap route is available for this network and asset pair.'
+    return 'No swap route is available for this network and asset pair.'
   }
 
   if (
     normalized.includes('routing "')
     || normalized.includes('not supported by this swap flow')
   ) {
-    return 'This quote returned an unsupported Uniswap routing mode for the current wallet flow.'
+    return 'This quote returned an unsupported execution mode for the current wallet flow.'
   }
 
   if (normalized.includes('swap quote request failed')) {
-    return 'Uniswap quote service is unavailable right now. Please try again in a moment.'
+    return 'Swap quote service is unavailable right now. Please try again in a moment.'
   }
 
   if (normalized.includes('server execution request failed')) {
-    return 'Uniswap swap service is temporarily unavailable. Please try again in a moment.'
+    return 'Swap service is temporarily unavailable. Please try again in a moment.'
   }
 
   return message
@@ -194,7 +194,8 @@ const Swap: React.FC = () => {
     addActivity,
     refreshActiveBalance,
     getSendableItems,
-    sendPreparedEvmTransaction
+    sendPreparedEvmTransaction,
+    signBackendAuthMessage
   } = useWalletStore()
 
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
@@ -335,7 +336,9 @@ const Swap: React.FC = () => {
     if (!execution || !fromNetwork || isTerminalServerExecutionStatus(execution.status)) return
 
     let cancelled = false
-    const rpcConfig = createServerExecutionRpcConfig(fromNetwork)
+    const rpcConfig = createServerExecutionRpcConfig(fromNetwork, {
+      secureBridgeSigner: signBackendAuthMessage
+    })
     const executionId = execution.executionId
 
     const poll = async () => {
@@ -358,7 +361,7 @@ const Swap: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [execution, fromNetwork])
+  }, [execution, fromNetwork, signBackendAuthMessage])
 
   useEffect(() => {
     if (!execution || !isTerminalServerExecutionStatus(execution.status)) return
@@ -445,6 +448,7 @@ const Swap: React.FC = () => {
 
     return {
       rpcConfig: createServerExecutionRpcConfig(fromNetwork, {
+        secureBridgeSigner: signBackendAuthMessage,
         sendTransaction: async (tx) => await sendPreparedEvmTransaction({
           networkId: fromNetwork.id,
           tx
@@ -518,7 +522,7 @@ const Swap: React.FC = () => {
 
       setQuote(nextQuote)
       setToAmount(nextQuote.destinationAmount)
-      showToast(`Uniswap quote ready: ${nextQuote.mode}`, 'success')
+      showToast(`Swap quote ready: ${nextQuote.mode}`, 'success')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)
@@ -563,7 +567,7 @@ const Swap: React.FC = () => {
         quoteMetadata: quote.metadata
       })
       setExecution(submitted)
-      showToast('Swap submitted to Uniswap', 'info')
+      showToast('Swap submitted to server execution', 'info')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)
@@ -590,9 +594,9 @@ const Swap: React.FC = () => {
           <div className="flex items-start gap-2">
             <IoInformationCircleOutline className="w-4 h-4 text-red-300 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="text-xs font-bold text-red-200">Uniswap-powered swap</p>
+              <p className="text-xs font-bold text-red-200">Server-mediated swap</p>
               <p className="text-[11px] text-red-100/90">
-                This flow uses the Uniswap Trade API for EVM swaps. Non-EVM networks and unsupported routing modes will be rejected.
+                This flow uses the MetaYoshi server swap routes for EVM swaps. Non-EVM networks and unsupported execution modes will be rejected.
               </p>
             </div>
           </div>
@@ -671,7 +675,7 @@ const Swap: React.FC = () => {
             <div className="rounded-xl border border-dark-600 bg-dark-800/80 px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500 mb-1">Estimated You Receive</p>
               <p className="text-sm font-bold text-gray-200">
-                {toAmount || '--'} {toItem?.symbol || toNetwork?.symbol || ''}
+                {toAmount || '--'} {quote?.destinationSymbol || toItem?.symbol || toNetwork?.symbol || ''}
               </p>
             </div>
             {selectionHint ? (
@@ -746,11 +750,11 @@ const Swap: React.FC = () => {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between gap-3">
                 <span className="text-gray-500">Expected output</span>
-                <span className="font-bold text-gray-200">{quote.destinationAmount} {toItem?.symbol || toNetwork?.symbol}</span>
+                <span className="font-bold text-gray-200">{quote.destinationAmount} {quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-gray-500">Minimum output</span>
-                <span className="font-bold text-gray-200">{quote.minDestinationAmount} {toItem?.symbol || toNetwork?.symbol}</span>
+                <span className="font-bold text-gray-200">{quote.minDestinationAmount} {quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-gray-500">Network fee</span>
