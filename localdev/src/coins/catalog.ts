@@ -48,6 +48,7 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       coinId: 'bitcoin',
       chain: 'main',
       aliases: ['srv--bitcoin', 'srv--btc', 'btc', 'bitcoin'],
+      testedByDefault: true,
       visibleByDefault: true
     },
     coin: btcCoin
@@ -290,6 +291,7 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       coinId: 'solana',
       chain: 'main',
       aliases: ['sol', 'solana'],
+      testedByDefault: true,
       visibleByDefault: true
     },
     coin: solCoin
@@ -312,7 +314,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       protocolFamily: 'sui',
       coinId: 'sui',
       chain: 'main',
-      aliases: ['sui']
+      aliases: ['sui'],
+      testedByDefault: true
     },
     coin: suiCoin
   },

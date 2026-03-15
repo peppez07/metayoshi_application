@@ -38,6 +38,7 @@ import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
+const OPEN_WALLET_COMMAND = 'open-wallet'
 
 type ExtensionSurfaceTarget = {
   tabId?: number
@@ -602,7 +603,10 @@ async function resolveExtensionSurfaceTarget(target?: ExtensionSurfaceTarget): P
 
   if (typeof resolved.tabId !== 'number') {
     try {
-      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      let [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      if (!activeTab) {
+        ;[activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      }
       if (typeof activeTab?.id === 'number') {
         resolved.tabId = activeTab.id
       }
@@ -688,6 +692,8 @@ async function openExtensionSurface(
     return
   }
 
+  let sidePanelFailure: Error | null = null
+
   if (sidePanel.setOptions) {
     try {
       await sidePanel.setOptions({
@@ -695,12 +701,16 @@ async function openExtensionSurface(
         path: APP_ENTRY_PATH,
         enabled: true
       })
-    } catch {
-      throw new Error('Failed to configure extension side panel')
+    } catch (err) {
+      sidePanelFailure = new Error('Failed to configure extension side panel')
+      void recordRuntimeError('background-sw', err, {
+        kind: 'open-extension-surface-set-options',
+        routePath
+      })
     }
   }
 
-  if (sidePanel.open) {
+  if (!sidePanelFailure && sidePanel.open) {
     try {
       if (typeof resolvedTarget.tabId === 'number') {
         await sidePanel.open({ tabId: resolvedTarget.tabId })
@@ -710,9 +720,18 @@ async function openExtensionSurface(
         await sidePanel.open({ windowId: resolvedTarget.windowId })
         return
       }
-    } catch {
-      throw new Error('Failed to open extension side panel')
+    } catch (err) {
+      sidePanelFailure = new Error('Failed to open extension side panel')
+      void recordRuntimeError('background-sw', err, {
+        kind: 'open-extension-surface-open',
+        routePath
+      })
     }
+  }
+
+  if (sidePanelFailure) {
+    await openOrFocusExtensionTab(routePath, resolvedTarget)
+    return
   }
 }
 
@@ -726,6 +745,10 @@ async function openRequestSurface(
   target?: ExtensionSurfaceTarget
 ): Promise<void> {
   await openExtensionSurface(buildRequestRoutePath(requestId, method), target)
+}
+
+async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void> {
+  await openExtensionSurface('/wallet/assets', target)
 }
 
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
@@ -2297,6 +2320,14 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
 if (!chrome.storage.onChanged.hasListener(handleWalletStorageBroadcast)) {
   chrome.storage.onChanged.addListener(handleWalletStorageBroadcast)
 }
+
+chrome.commands?.onCommand.addListener((command) => {
+  if (command !== OPEN_WALLET_COMMAND) return
+
+  void openWalletSurface().catch((err) => {
+    void recordRuntimeError('background-sw', err, { kind: 'open-wallet-command' })
+  })
+})
 
 {
   const sidePanel = getSidePanelApi()

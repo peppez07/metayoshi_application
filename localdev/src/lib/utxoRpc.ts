@@ -1067,6 +1067,25 @@ function isLikelyExplorerApiUrl(url: string): boolean {
   return hasApiPath && hasExplorerQuery
 }
 
+function isLikelyBridgeApiBaseUrl(rpcUrl: string, bridgeUrl?: string): boolean {
+  const direct = String(rpcUrl || '').trim()
+  const bridgeBase = deriveBridgeApiBaseUrl(String(bridgeUrl || '').trim())
+  if (!direct || !bridgeBase) return false
+
+  try {
+    const directUrl = new URL(direct)
+    const bridgeBaseUrl = new URL(bridgeBase)
+    const directPath = directUrl.pathname.replace(/\/+$/, '') || '/'
+    const bridgePath = bridgeBaseUrl.pathname.replace(/\/+$/, '') || '/'
+    return (
+      directUrl.origin === bridgeBaseUrl.origin
+      && directPath === bridgePath
+    )
+  } catch {
+    return direct.replace(/\/+$/, '') === bridgeBase.replace(/\/+$/, '')
+  }
+}
+
 function isBlockedDirectEvmRpcUrl(url: string): boolean {
   const lower = String(url || '').trim().toLowerCase()
   if (!lower) return false
@@ -1080,6 +1099,12 @@ function createEvmDirectRpcConfig(config: UtxoRpcConfig): UtxoRpcConfig {
   const rpcUrl = String(config.rpcUrl || '').trim()
   if (!rpcUrl) {
     throw new Error('Direct EVM RPC fallback is unavailable: rpcUrl is not configured.')
+  }
+  if (isLikelyBridgeApiBaseUrl(rpcUrl, config.bridgeUrl)) {
+    throw new Error(
+      `Direct EVM RPC fallback is misconfigured: rpcUrl points to the MetaYoshi API base (${rpcUrl}). `
+      + 'Configure a chain JSON-RPC endpoint for this network instead of the bridge host root.'
+    )
   }
   if (isBlockedDirectEvmRpcUrl(rpcUrl)) {
     throw new Error(

@@ -15,7 +15,12 @@ import type { Network } from '../../coins/types'
 import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
 import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-import { findSwapAssetAliasOptions } from '../../lib/swapAssetAliases'
+import {
+  buildSwappableCatalogIdentitySet,
+  isCatalogAssetSwappable,
+  isSwapSupportedNetwork,
+  isWalletAssetSwappable
+} from '../../lib/swapEligibility'
 import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
@@ -41,6 +46,14 @@ function formatSwapUiError(error: unknown): string {
 
   if (normalized.includes('vite_app_api_key is required')) {
     return 'Swap is not configured yet. Set VITE_APP_API_KEY for the server API and reload the wallet.'
+  }
+
+  if (
+    normalized.includes('did not come from the metayoshi server swap service')
+    || normalized.includes('only supports metayoshi server-managed swaps')
+    || normalized.includes('metayoshi server swap service is unavailable')
+  ) {
+    return 'Swap is disabled until the MetaYoshi server swap service is available.'
   }
 
   if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
@@ -73,13 +86,6 @@ function formatSwapUiError(error: unknown): string {
   return message
 }
 
-function isQuoteRouteAvailabilityError(error: unknown): boolean {
-  const message = compactError(error).toLowerCase()
-  return message.includes('no route')
-    || message.includes('not available for the requested asset pair')
-    || message.includes('route is available')
-}
-
 function formatExpiry(expiresAt: number): string {
   const deltaMs = Math.max(0, expiresAt - Date.now())
   const seconds = Math.max(0, Math.round(deltaMs / 1000))
@@ -95,16 +101,6 @@ function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string)
   return `${item.symbol} - ${item.label}`
 }
 
-function formatModeLabel(mode?: ServerSwapQuote['mode']): string {
-  if (mode === 'sponsored') return 'Sponsored'
-  if (mode === 'intent') return 'Intent'
-  return 'Standard'
-}
-
-function isSwapEligibleItem(item: SendableItem): boolean {
-  return item.kind !== 'nft'
-}
-
 type SwapAssetOption = {
   id: string
   source: 'wallet' | 'catalog'
@@ -117,8 +113,6 @@ type SwapAssetOption = {
 }
 
 type ChainSegment = 'all' | 'l1' | 'l2' | 'non-evm'
-
-type QuoteRequestMode = 'auto' | 'manual'
 
 const CHAIN_SEGMENTS: Array<{ id: ChainSegment; label: string }> = [
   { id: 'all', label: 'All' },
@@ -342,8 +336,8 @@ function buildQuotePreviewKey(input: {
 function DetailRow({ label, value, subdued = false }: { label: string; value: React.ReactNode; subdued?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 text-[11px]">
-      <span className={subdued ? 'text-gray-400' : 'text-gray-500'}>{label}</span>
-      <span className="text-right font-semibold text-gray-200">{value}</span>
+      <span className={subdued ? 'text-slate-400' : 'text-slate-500'}>{label}</span>
+      <span className="text-right font-semibold text-slate-900">{value}</span>
     </div>
   )
 }
@@ -355,8 +349,8 @@ function TogglePill({ active, label, onClick }: { active: boolean; label: string
       onClick={onClick}
       className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition-colors ${
         active
-          ? 'border-primary/40 bg-primary/15 text-orange-100'
-          : 'border-dark-600 bg-dark-700/40 text-gray-400 hover:border-dark-500 hover:text-gray-200'
+          ? 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700'
+          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'
       }`}
     >
       {label}
@@ -371,8 +365,8 @@ function AssetQuickPick({ active, option, onClick }: { active: boolean; option: 
       onClick={onClick}
       className={`rounded-full border px-3 py-1.5 text-[10px] font-bold transition-colors ${
         active
-          ? 'border-blue-400/45 bg-blue-500/15 text-blue-100'
-          : 'border-dark-600 bg-dark-800/70 text-gray-300 hover:border-dark-500 hover:text-white'
+          ? 'border-slate-900 bg-slate-900 text-white'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
       }`}
     >
       {option.symbol}
@@ -385,7 +379,6 @@ const Swap: React.FC = () => {
   const { showToast } = useToast()
   const finalizedExecutionsRef = useRef<Set<string>>(new Set())
   const latestQuoteRequestRef = useRef(0)
-  const lastResolvedQuoteKeyRef = useRef('')
   const {
     accounts,
     activeAccountId,
@@ -415,18 +408,18 @@ const Swap: React.FC = () => {
   const [fromAssetId, setFromAssetId] = useState('')
   const [toAssetId, setToAssetId] = useState('')
   const [destinationQuery, setDestinationQuery] = useState('')
+  const [catalogSourceItems, setCatalogSourceItems] = useState<ServerCoinCatalogItem[]>([])
+  const [catalogDestinationRows, setCatalogDestinationRows] = useState<ServerCoinCatalogItem[]>([])
   const [catalogDestinationItems, setCatalogDestinationItems] = useState<SwapAssetOption[]>([])
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [selectionHint, setSelectionHint] = useState('')
   const [quote, setQuote] = useState<ServerSwapQuote | null>(null)
   const [execution, setExecution] = useState<ServerExecutionStatus | null>(null)
   const [isQuoting, setIsQuoting] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorText, setErrorText] = useState('')
 
-  const deferredAmount = useDeferredValue(fromAmount)
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
 
   const sourceNetworkOptions = useMemo(
@@ -451,23 +444,25 @@ const Swap: React.FC = () => {
 
   const fromItems = useMemo(() => {
     if (!activeAccount?.id || !fromNetwork?.id) return []
+    const swappableCatalogIds = buildSwappableCatalogIdentitySet(catalogSourceItems, fromNetwork.id)
     return getSendableItems({
       accountId: activeAccount.id,
       networkId: fromNetwork.id,
       includeHidden: false,
       includeZeroBalance: false
-    }).filter(isSwapEligibleItem)
-  }, [activeAccount?.id, fromNetwork?.id, getSendableItems])
+    }).filter((item) => isWalletAssetSwappable(item, fromNetwork, swappableCatalogIds))
+  }, [activeAccount?.id, catalogSourceItems, fromNetwork, getSendableItems])
 
   const walletToItems = useMemo(() => {
     if (!activeAccount?.id || !toNetwork?.id) return []
+    const swappableCatalogIds = buildSwappableCatalogIdentitySet(catalogDestinationRows, toNetwork.id)
     return getSendableItems({
       accountId: activeAccount.id,
       networkId: toNetwork.id,
       includeHidden: true,
       includeZeroBalance: true
-    }).filter(isSwapEligibleItem)
-  }, [activeAccount?.id, toNetwork?.id, getSendableItems])
+    }).filter((item) => isWalletAssetSwappable(item, toNetwork, swappableCatalogIds))
+  }, [activeAccount?.id, catalogDestinationRows, toNetwork, getSendableItems])
 
   const fromOptions = useMemo(() => fromItems.map(createWalletAssetOption), [fromItems])
   const toOptions = useMemo(
@@ -487,23 +482,23 @@ const Swap: React.FC = () => {
     && resolveSwapAssetIdentity(fromItem, fromNetwork.id) === resolveSwapAssetIdentity(toItem, toNetwork.id)
   )
   const canRequestQuote = Boolean(
-    deferredAmount
+    fromAmount
     && fromItem
     && toItem
-    && Number(deferredAmount) > 0
+    && Number(fromAmount) > 0
     && !isSameAssetPair
     && fromNetwork
     && toNetwork
   )
   const quotePreviewKey = useMemo(() => buildQuotePreviewKey({
-    amount: deferredAmount,
+    amount: fromAmount,
     fromNetworkId: fromNetworkId || '',
     toNetworkId: toNetworkId || '',
     fromAssetId: fromAssetId || '',
     toAssetId: toAssetId || '',
     slippagePct,
     sponsorPreference
-  }), [deferredAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference])
+  }), [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference])
 
   const fromQuickPicks = useMemo(
     () => pickQuickAssets(fromOptions, fromNetwork, fromItem),
@@ -564,7 +559,36 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!toNetwork?.id) {
+    if (!fromNetwork?.id || !isSwapSupportedNetwork(fromNetwork)) {
+      setCatalogSourceItems([])
+      return
+    }
+
+    void (async () => {
+      try {
+        const runtimeModelId = String(fromNetwork.runtimeModelId || '').trim() || null
+        const rows = await searchMetayoshiServerCatalogAssets({
+          networkId: fromNetwork.id,
+          runtimeModelId,
+          includeMain: true,
+          maxResults: 60
+        })
+        if (cancelled) return
+        setCatalogSourceItems(rows.filter((item) => isCatalogAssetSwappable(item, fromNetwork)))
+      } catch (error) {
+        if (cancelled) return
+        console.warn('Failed to load source catalog assets', error)
+        setCatalogSourceItems([])
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [fromNetwork])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!toNetwork?.id || !isSwapSupportedNetwork(toNetwork)) {
+      setCatalogDestinationRows([])
       setCatalogDestinationItems([])
       return
     }
@@ -580,10 +604,13 @@ const Swap: React.FC = () => {
           maxResults: deferredDestinationQuery ? 24 : 12
         })
         if (cancelled) return
-        setCatalogDestinationItems(rows.map((item) => createCatalogAssetOption(item, toNetwork.id)))
+        const filtered = rows.filter((item) => isCatalogAssetSwappable(item, toNetwork))
+        setCatalogDestinationRows(filtered)
+        setCatalogDestinationItems(filtered.map((item) => createCatalogAssetOption(item, toNetwork.id)))
       } catch (error) {
         if (cancelled) return
         console.warn('Failed to load destination catalog assets', error)
+        setCatalogDestinationRows([])
         setCatalogDestinationItems([])
       }
     })()
@@ -596,7 +623,6 @@ const Swap: React.FC = () => {
     setExecution(null)
     setToAmount('')
     setErrorText('')
-    setSelectionHint('')
   }, [quotePreviewKey])
 
   useEffect(() => {
@@ -740,81 +766,38 @@ const Swap: React.FC = () => {
     }
   }
 
-  const requestQuote = async (
-    mode: QuoteRequestMode,
-    options?: { suppressErrors?: boolean; suppressSuccess?: boolean }
-  ) => {
+  const requestQuote = async (options?: { suppressErrors?: boolean; suppressSuccess?: boolean }) => {
     const requestId = ++latestQuoteRequestRef.current
     setIsQuoting(true)
-    if (mode === 'manual') {
-      setErrorText('')
-    }
+    setErrorText('')
     try {
       const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
       const slippage = Number(slippagePct)
-      const destinationCandidates = findSwapAssetAliasOptions(toItem, toOptions, toNetwork!)
-      const destinationRpcConfig = createServerExecutionRpcConfig(toNetwork!, {
-        secureBridgeAddressResolver: resolveBackendAuthAddress,
-        secureBridgeSigner: signBackendAuthMessage
+      const nextQuote = await requestServerSwapQuote(rpcConfig, {
+        source: {
+          networkId: fromNetwork!.id,
+          chainId: fromNetwork!.chainId,
+          symbol: fromItem?.symbol || fromNetwork!.symbol,
+          address: sourceAddress,
+          amount: fromAmount,
+          asset: sourceAsset
+        },
+        destination: {
+          networkId: toNetwork!.id,
+          chainId: toNetwork!.chainId,
+          symbol: toItem?.symbol || toNetwork!.symbol,
+          address: destinationAddress,
+          asset: destinationAsset
+        },
+        slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
+        sponsorPreference
       })
-      let nextQuote: ServerSwapQuote | null = null
-      let selectedDestination = toItem
-      let lastError: unknown = null
-
-      for (const candidate of destinationCandidates) {
-        try {
-          const candidateAsset = await withResolvedSwapAsset(
-            toNetwork!,
-            destinationRpcConfig,
-            toServerSwapAsset(candidate, toNetwork!.id)
-          )
-          nextQuote = await requestServerSwapQuote(rpcConfig, {
-            source: {
-              networkId: fromNetwork!.id,
-              chainId: fromNetwork!.chainId,
-              symbol: fromItem?.symbol || fromNetwork!.symbol,
-              address: sourceAddress,
-              amount: fromAmount,
-              asset: sourceAsset
-            },
-            destination: {
-              networkId: toNetwork!.id,
-              chainId: toNetwork!.chainId,
-              symbol: candidate.symbol || toNetwork!.symbol,
-              address: destinationAddress,
-              asset: candidateAsset || destinationAsset
-            },
-            slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
-            sponsorPreference
-          })
-          selectedDestination = candidate
-          break
-        } catch (error) {
-          lastError = error
-          if (!isQuoteRouteAvailabilityError(error)) throw error
-        }
-      }
-
-      if (!nextQuote) {
-        throw lastError || new Error('No route is available for the selected swap')
-      }
       if (latestQuoteRequestRef.current !== requestId) return
-
-      if (selectedDestination && selectedDestination.id !== toAssetId) {
-        setToAssetId(selectedDestination.id)
-        const note = `Using ${selectedDestination.symbol} on ${toNetwork!.name} because no direct ${toItem?.symbol || toNetwork!.symbol} route was available.`
-        setSelectionHint(note)
-        if (mode === 'manual') showToast(note, 'info')
-      } else {
-        setSelectionHint('')
-      }
-
-      lastResolvedQuoteKeyRef.current = quotePreviewKey
       setQuote(nextQuote)
       setToAmount(nextQuote.destinationAmount)
       setErrorText('')
       if (!options?.suppressSuccess) {
-        showToast(`Swap quote ready: ${nextQuote.mode}`, 'success')
+        showToast('Quote ready', 'success')
       }
     } catch (error) {
       if (latestQuoteRequestRef.current !== requestId) return
@@ -891,63 +874,59 @@ const Swap: React.FC = () => {
     if (prevToAmount) setFromAmount(prevToAmount)
   }
 
-  useEffect(() => {
-    if (!canRequestQuote || isSubmitting) return
-    if (
-      quote
-      && lastResolvedQuoteKeyRef.current === quotePreviewKey
-      && quote.expiresAt > Date.now() + 8_000
-    ) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void requestQuote('auto', {
-        suppressErrors: true,
-        suppressSuccess: true
-      })
-    }, 550)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [canRequestQuote, quote, quotePreviewKey, isSubmitting])
-
+  const swapUnavailable = !isSwapSupportedNetwork(fromNetwork) || fromOptions.length === 0
+  const swapStatus = execution
+    ? execution.status === 'confirmed'
+      ? 'Confirmed'
+      : execution.status === 'failed' || execution.status === 'rejected' || execution.status === 'expired'
+        ? 'Failed'
+        : 'Submitting'
+    : quote
+      ? 'Quote ready'
+      : isQuoting
+        ? 'Requesting quote'
+        : swapUnavailable
+          ? 'Unavailable'
+          : 'Idle'
   const quoteStatusText = quote
-    ? `${formatModeLabel(quote.mode)} route ready`
-    : (isQuoting && canRequestQuote
-        ? 'Finding the best route and receive amount'
-        : 'Enter an amount to preview the receive amount')
+    ? 'Quote ready. Review the received amount, fees, and expiry before signing.'
+    : swapUnavailable
+        ? 'Swap is available only when the server-backed route is supported for the selected asset and network.'
+        : (isQuoting
+        ? 'Requesting a quote from the MetaYoshi server.'
+        : 'Select the pair and request a quote to preview the receive amount.')
   const rateText = quote
     ? `1 ${quote.sourceSymbol || fromItem?.symbol || fromNetwork?.symbol || 'FROM'} = ${formatQuoteRate(quote)} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || 'TO'}`
-    : 'Live rate appears here once a route is found'
+    : 'Rate appears here after the server returns a quote'
 
   return (
-    <div className="flex h-full flex-col bg-dark-800">
-      <header className="p-4 border-b border-dark-600 flex items-center gap-3">
+    <div className="flex h-full flex-col bg-[#f5f7fb] text-slate-900">
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
         <button
           onClick={() => navigate('/wallet/assets')}
-          className="text-gray-400 hover:text-white transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
         >
           <IoArrowBackOutline className="w-5 h-5" />
         </button>
-        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200 flex-1">Swap</h1>
+        <h1 className="text-[1.05rem] font-semibold tracking-tight text-slate-950">Swap</h1>
         <button
           type="button"
           onClick={() => setShowAdvanced((prev) => !prev)}
-          className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-dark-700 transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
           title="Swap settings"
         >
-          <IoSettingsOutline className="w-4.5 h-4.5 text-gray-400 hover:text-white" />
+          <IoSettingsOutline className="h-5 w-5" />
         </button>
       </header>
 
-      <div className="border-b border-dark-600/60 p-4">
-        <div className="rounded-2xl border border-primary/20 bg-[linear-gradient(135deg,rgba(249,115,22,0.12),rgba(15,23,42,0.15))] px-4 py-3">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="flex items-start gap-3">
-            <IoInformationCircleOutline className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <IoInformationCircleOutline className="mt-0.5 h-4 w-4 shrink-0 text-fuchsia-500" />
             <div className="space-y-1">
-              <p className="text-xs font-bold text-gray-100">Live swap preview</p>
-              <p className="text-[11px] text-gray-400">
-                Quotes now refresh as you type, and you can narrow source and destination chains to L1, L2, or other runtimes before signing.
+              <p className="text-xs font-semibold text-slate-900">Server-backed swap</p>
+              <p className="text-[11px] text-slate-500">
+                This screen now requests quotes only from the MetaYoshi server. Nothing is routed automatically and nothing is sent until you confirm.
               </p>
             </div>
           </div>
@@ -955,22 +934,22 @@ const Swap: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="p-4 space-y-4">
-          <section className="space-y-3 rounded-2xl border border-dark-600 bg-dark-900/40 p-4">
+        <div className="space-y-4 p-4">
+          <section className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">Chain Scope</p>
-                <p className="mt-1 text-[11px] text-gray-500">Filter the route builder the same way most swap wallets do.</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Networks</p>
+                <p className="mt-1 text-[11px] text-slate-500">Pick the source and destination chain scope before choosing tokens.</p>
               </div>
-              <div className="rounded-full border border-dark-600 bg-dark-800/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-300">
+              <div className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">
                 {fromNetwork ? `${fromNetwork.name} ${formatNetworkSegment(fromNetwork)}` : 'Select source'}
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Pay network</span>
-                <span className="text-[10px] text-gray-500">{sourceNetworkOptions.length} chains</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Pay network</span>
+                <span className="text-[10px] text-slate-500">{sourceNetworkOptions.length} chains</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {CHAIN_SEGMENTS.map((segment) => (
@@ -986,8 +965,8 @@ const Swap: React.FC = () => {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Receive network</span>
-                <span className="text-[10px] text-gray-500">{destinationNetworkOptions.length} chains</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Receive network</span>
+                <span className="text-[10px] text-slate-500">{destinationNetworkOptions.length} chains</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {CHAIN_SEGMENTS.map((segment) => (
@@ -1002,19 +981,19 @@ const Swap: React.FC = () => {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
+          <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Pay With</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sell</span>
               <div className="flex items-center gap-2">
                 {fromNetwork ? (
-                  <span className="rounded-full border border-dark-500 bg-dark-800/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-300">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
                     {formatNetworkSegment(fromNetwork)}
                   </span>
                 ) : null}
                 <select
                   value={fromNetworkId}
                   onChange={(event) => setFromNetworkId(event.target.value)}
-                  className="rounded-lg border border-dark-600 bg-dark-700 px-2.5 py-1.5 text-[11px] font-bold text-gray-200 outline-none"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 outline-none"
                 >
                   {sourceNetworkOptions.map((network) => (
                     <option key={network.id} value={network.id}>{network.name}</option>
@@ -1029,12 +1008,12 @@ const Swap: React.FC = () => {
                 placeholder="0.0"
                 value={fromAmount}
                 onChange={(event) => setFromAmount(event.target.value)}
-                className="w-full bg-transparent text-[30px] font-bold tracking-tight text-white outline-none placeholder:text-gray-600"
+                className="w-full bg-transparent text-[32px] font-semibold tracking-tight text-slate-950 outline-none placeholder:text-slate-300"
               />
               <select
                 value={fromAssetId}
                 onChange={(event) => setFromAssetId(event.target.value)}
-                className="min-w-[140px] px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm font-bold text-gray-200 outline-none"
+                className="min-w-[140px] rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none"
               >
                 {fromOptions.map((item) => (
                   <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
@@ -1045,8 +1024,8 @@ const Swap: React.FC = () => {
             {fromQuickPicks.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Popular</span>
-                  <span className="text-[10px] text-gray-500">Quick token picks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Popular</span>
+                  <span className="text-[10px] text-slate-500">Quick token picks</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {fromQuickPicks.map((item) => (
@@ -1061,12 +1040,12 @@ const Swap: React.FC = () => {
               </div>
             ) : null}
 
-            <div className="flex items-center justify-between text-[11px] text-gray-500">
+            <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>Available</span>
               <button
                 type="button"
                 onClick={() => setFromAmount(fromBalance)}
-                className="font-medium text-gray-300 hover:text-white transition-colors"
+                className="font-medium text-slate-700 transition-colors hover:text-slate-950"
               >
                 {fromBalance} {fromItem?.symbol || fromNetwork?.symbol}
               </button>
@@ -1077,26 +1056,26 @@ const Swap: React.FC = () => {
             <button
               type="button"
               onClick={flipSwapDirection}
-              className="w-10 h-10 rounded-full border border-dark-600 bg-dark-700 flex items-center justify-center text-gray-300 hover:text-white hover:bg-dark-600 transition-colors"
+              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
               title="Switch assets and networks"
             >
               <IoSwapVerticalOutline className="w-4.5 h-4.5" />
             </button>
           </div>
 
-          <section className="rounded-2xl border border-dark-600 bg-dark-700/30 p-4 space-y-3">
+          <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Receive</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Buy</span>
               <div className="flex items-center gap-2">
                 {toNetwork ? (
-                  <span className="rounded-full border border-dark-500 bg-dark-800/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-300">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
                     {formatNetworkSegment(toNetwork)}
                   </span>
                 ) : null}
                 <select
                   value={toNetworkId}
                   onChange={(event) => setToNetworkId(event.target.value)}
-                  className="rounded-lg border border-dark-600 bg-dark-700 px-2.5 py-1.5 text-[11px] font-bold text-gray-200 outline-none"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 outline-none"
                 >
                   {destinationNetworkOptions.map((network) => (
                     <option key={network.id} value={network.id}>{network.name}</option>
@@ -1107,17 +1086,17 @@ const Swap: React.FC = () => {
 
             <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
               <div>
-                <div className="text-[30px] font-bold tracking-tight text-white">
+                <div className="text-[32px] font-semibold tracking-tight text-slate-950">
                   {quote ? toAmount || '0.0' : (isQuoting && canRequestQuote ? '...' : '0.0')}
                 </div>
-                <p className="mt-1 text-[11px] text-gray-500">
+                <p className="mt-1 text-[11px] text-slate-500">
                   {quoteStatusText}
                 </p>
               </div>
               <select
                 value={toAssetId}
                 onChange={(event) => setToAssetId(event.target.value)}
-                className="min-w-[140px] px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm font-bold text-gray-200 outline-none"
+                className="min-w-[140px] rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none"
               >
                 {toOptions.map((item) => (
                   <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
@@ -1128,8 +1107,8 @@ const Swap: React.FC = () => {
             {toQuickPicks.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Most swapped</span>
-                  <span className="text-[10px] text-gray-500">Quick token picks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Most swapped</span>
+                  <span className="text-[10px] text-slate-500">Quick token picks</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {toQuickPicks.map((item) => (
@@ -1149,35 +1128,37 @@ const Swap: React.FC = () => {
               placeholder="Search asset to receive"
               value={destinationQuery}
               onChange={(event) => setDestinationQuery(event.target.value)}
-              className="w-full bg-dark-800 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-gray-200 outline-none placeholder:text-gray-500"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
             />
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-dark-600 bg-[linear-gradient(180deg,rgba(15,23,42,0.82),rgba(2,6,23,0.9))]">
-            <div className="px-4 py-3 border-b border-dark-600/60 flex items-center justify-between gap-3">
+          <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Quote Preview</p>
-                <p className="text-[11px] text-gray-500">Best route, effective rate, fees, and expiry.</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quote Preview</p>
+                <p className="text-[11px] text-slate-500">Server quote details, effective rate, fees, and expiry.</p>
               </div>
-              {quote ? (
-                <span className="rounded-full px-2 py-0.5 border border-primary/30 bg-primary/10 text-[9px] font-bold uppercase text-orange-200">
-                  {formatModeLabel(quote.mode)}
-                </span>
-              ) : isQuoting && canRequestQuote ? (
-                <span className="rounded-full px-2 py-0.5 border border-blue-500/30 bg-blue-500/10 text-[9px] font-bold uppercase text-blue-200">
-                  Updating
-                </span>
-              ) : null}
+              <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
+                swapStatus === 'Confirmed'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : swapStatus === 'Failed' || swapStatus === 'Unavailable'
+                    ? 'border-red-200 bg-red-50 text-red-700'
+                    : swapStatus === 'Quote ready'
+                      ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
+                      : 'border-sky-200 bg-sky-50 text-sky-700'
+              }`}>
+                {swapStatus}
+              </span>
             </div>
 
             {showAdvanced ? (
-              <div className="px-4 pt-3 grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 px-4 pt-3">
                 <label className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Slippage</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Slippage</span>
                   <select
                     value={slippagePct}
                     onChange={(event) => setSlippagePct(event.target.value)}
-                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200 outline-none"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 outline-none"
                   >
                     <option value="0.3">0.3%</option>
                     <option value="0.5">0.5%</option>
@@ -1185,11 +1166,11 @@ const Swap: React.FC = () => {
                   </select>
                 </label>
                 <label className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Sponsor</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sponsor</span>
                   <select
                     value={sponsorPreference}
                     onChange={(event) => setSponsorPreference(event.target.value as ServerSponsorPreference)}
-                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-bold text-gray-200 outline-none"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 outline-none"
                   >
                     <option value="preferred">Preferred</option>
                     <option value="required">Required</option>
@@ -1201,16 +1182,16 @@ const Swap: React.FC = () => {
 
             <div className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-dark-600 bg-dark-800/80 p-3">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     <IoTrendingUpOutline className="h-3.5 w-3.5" />
                     Effective Rate
                   </div>
-                  <p className="mt-2 text-sm font-bold text-gray-100">{rateText}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{rateText}</p>
                 </div>
-                <div className="rounded-2xl border border-dark-600 bg-dark-800/80 p-3">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Minimum Received</div>
-                  <p className="mt-2 text-sm font-bold text-gray-100">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Minimum Received</div>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
                     {quote ? `${quote.minDestinationAmount} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || ''}` : '--'}
                   </p>
                 </div>
@@ -1219,7 +1200,7 @@ const Swap: React.FC = () => {
               <div className="space-y-2">
               <DetailRow
                 label="Route"
-                value={quote?.routeSummary || 'Waiting for a route preview'}
+                value={quote?.routeSummary || 'Waiting for a server quote'}
                 subdued={!quote}
               />
               <DetailRow
@@ -1267,34 +1248,25 @@ const Swap: React.FC = () => {
             </div>
           </section>
 
-          {selectionHint ? (
-            <section className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-3">
-              <div className="flex items-start gap-2">
-                <IoInformationCircleOutline className="w-4 h-4 text-blue-200 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-blue-100/90">{selectionHint}</p>
-              </div>
-            </section>
-          ) : null}
-
           {quote?.warnings.length ? (
-            <section className="rounded-2xl border border-yellow-500/25 bg-yellow-500/10 p-3 space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-yellow-200">Warnings</p>
+            <section className="space-y-1 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-700">Warnings</p>
               {quote.warnings.map((warning) => (
-                <p key={warning} className="text-[11px] text-yellow-100/90">{warning}</p>
+                <p key={warning} className="text-[11px] text-amber-800">{warning}</p>
               ))}
             </section>
           ) : null}
 
           {execution ? (
-            <section className="rounded-2xl border border-dark-600 bg-dark-800/60 p-4 space-y-2">
+            <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-300">Execution Status</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Execution Status</p>
                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
                   execution.status === 'confirmed'
-                    ? 'border-green-500/40 bg-green-500/10 text-green-200'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : execution.status === 'failed' || execution.status === 'rejected' || execution.status === 'expired'
-                      ? 'border-red-500/40 bg-red-500/10 text-red-200'
-                      : 'border-blue-500/40 bg-blue-500/10 text-blue-200'
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-sky-200 bg-sky-50 text-sky-700'
                 }`}>
                   {execution.status}
                 </span>
@@ -1308,28 +1280,28 @@ const Swap: React.FC = () => {
           ) : null}
 
           {errorText ? (
-            <section className="rounded-2xl border border-red-500/25 bg-red-500/10 p-3">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-200">Could Not Continue</p>
-              <p className="mt-1 text-[11px] text-red-100/90">{errorText}</p>
+            <section className="rounded-2xl border border-red-200 bg-red-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-700">Could Not Continue</p>
+              <p className="mt-1 text-[11px] text-red-800">{errorText}</p>
             </section>
           ) : null}
         </div>
       </div>
 
-      <div className="p-4 border-t border-dark-600/60 bg-dark-800 space-y-3">
-        <div className="rounded-xl border border-dark-600 bg-dark-700/30 px-3 py-2">
+      <div className="space-y-3 border-t border-slate-200 bg-white p-4">
+        <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">Swap Summary</p>
-              <p className="mt-1 text-sm font-bold text-gray-200">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Swap Summary</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
                 {formatAssetLabel(fromItem, fromNetwork?.symbol)} {'->'} {formatAssetLabel(toItem, toNetwork?.symbol)}
               </p>
-              <p className="mt-1 text-[11px] text-gray-500">
+              <p className="mt-1 text-[11px] text-slate-500">
                 {fromNetwork?.name || 'Source'} {'->'} {toNetwork?.name || 'Destination'}
               </p>
             </div>
             {quote ? (
-              <span className="text-[10px] font-medium text-gray-400 text-right">
+              <span className="text-right text-[10px] font-medium text-slate-500">
                 {quote.sourceAmount} {quote.sourceSymbol || fromItem?.symbol} {'->'} {quote.destinationAmount} {quote.destinationSymbol || toItem?.symbol}
               </span>
             ) : null}
@@ -1341,29 +1313,29 @@ const Swap: React.FC = () => {
             className="w-full"
             onClick={submitQuote}
             isLoading={isSubmitting}
-            disabled={!quote || isQuoting || isSameAssetPair}
+            disabled={!quote || isQuoting || isSameAssetPair || swapUnavailable}
           >
-            Review and sign
+            Sign and submit
           </Button>
         ) : (
           <Button
             className="w-full"
-            onClick={() => { void requestQuote('manual') }}
+            onClick={() => { void requestQuote() }}
             isLoading={isQuoting}
-            disabled={!canRequestQuote}
+            disabled={!canRequestQuote || swapUnavailable}
           >
-            {isQuoting ? 'Previewing best route' : 'Preview quote'}
+            {isQuoting ? 'Requesting quote' : 'Get quote'}
           </Button>
         )}
 
         <Button
           variant="outline"
           className="w-full"
-          onClick={() => { void requestQuote('manual', { suppressSuccess: false }) }}
+          onClick={() => { void requestQuote({ suppressSuccess: false }) }}
           isLoading={isQuoting}
-          disabled={!canRequestQuote || isSubmitting}
+          disabled={!canRequestQuote || isSubmitting || swapUnavailable}
         >
-          {quote ? 'Refresh quote' : 'Force refresh preview'}
+          {quote ? 'Refresh quote' : 'Retry quote'}
         </Button>
       </div>
     </div>

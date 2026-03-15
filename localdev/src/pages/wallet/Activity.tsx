@@ -22,9 +22,17 @@ const Activity: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('all')
   const [periodFilter, setPeriodFilter] = useState<'all' | '24h' | '7d' | '30d'>('all')
 
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0] || null
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-  const activeCaps = resolveNetworkCapabilities(activeNetwork)
+  const activeCaps = resolveNetworkCapabilities(activeNetwork || {})
+
+  if (!activeNetwork) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-60">
+        <p className="text-sm font-medium text-gray-300">No active network available</p>
+      </div>
+    )
+  }
 
   const activeNetworkAccountAddressSet = useMemo(() => {
     const set = new Set<string>()

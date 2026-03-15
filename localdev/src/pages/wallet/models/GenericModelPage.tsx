@@ -4,7 +4,8 @@ import { useWalletStore } from '../../../store/walletStore'
 
 const GenericModelPage: React.FC = () => {
   const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0] || null
+  if (!activeNetwork) return null
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">

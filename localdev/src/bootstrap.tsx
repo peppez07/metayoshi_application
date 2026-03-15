@@ -103,56 +103,61 @@ if (!rootElement) {
   console.error('App element not found!')
   throw new Error('App element not found')
 }
+const mountNode = rootElement
 
-try {
-  const root = ReactDOM.createRoot(rootElement)
+async function startApp(): Promise<void> {
+  try {
+    const root = ReactDOM.createRoot(mountNode)
 
-  root.render(
-    <React.StrictMode>
-      <ErrorBoundary>
-        <HashRouter>
+    root.render(
+      <React.StrictMode>
+        <ErrorBoundary>
           <ToastProvider>
-            <App />
+            <HashRouter>
+              <App />
+            </HashRouter>
           </ToastProvider>
-        </HashRouter>
-      </ErrorBoundary>
-    </React.StrictMode>
-  )
-} catch (error) {
-  console.error('Failed to render React app:', error)
-  void recordRuntimeError('wallet-ui', error, { kind: 'bootstrap-render' })
-  rootElement.replaceChildren()
+        </ErrorBoundary>
+      </React.StrictMode>
+    )
+  } catch (error) {
+    console.error('Failed to render React app:', error)
+    void recordRuntimeError('wallet-ui', error, { kind: 'bootstrap-render' })
+    mountNode.replaceChildren()
 
-  const wrapper = document.createElement('div')
-  wrapper.style.padding = '20px'
-  wrapper.style.color = 'white'
-  wrapper.style.backgroundColor = '#0b0c0e'
-  wrapper.style.minHeight = '100vh'
+    const wrapper = document.createElement('div')
+    wrapper.style.padding = '20px'
+    wrapper.style.color = 'white'
+    wrapper.style.backgroundColor = '#0b0c0e'
+    wrapper.style.minHeight = '100vh'
 
-  const title = document.createElement('h1')
-  title.textContent = 'Failed to load application'
+    const title = document.createElement('h1')
+    title.textContent = 'Failed to load application'
 
-  const message = document.createElement('p')
-  message.textContent = error instanceof Error ? error.message : 'Unknown error'
+    const message = document.createElement('p')
+    message.textContent = error instanceof Error ? error.message : 'Unknown error'
 
-  const details = document.createElement('pre')
-  details.style.background = '#1a1a1a'
-  details.style.padding = '10px'
-  details.style.overflow = 'auto'
-  details.textContent = error instanceof Error ? (error.stack || error.message) : String(error)
+    const details = document.createElement('pre')
+    details.style.background = '#1a1a1a'
+    details.style.padding = '10px'
+    details.style.overflow = 'auto'
+    details.textContent = error instanceof Error ? (error.stack || error.message) : String(error)
 
-  const reloadButton = document.createElement('button')
-  reloadButton.type = 'button'
-  reloadButton.textContent = 'Reload'
-  reloadButton.style.marginTop = '10px'
-  reloadButton.style.padding = '10px 20px'
-  reloadButton.style.background = '#f97316'
-  reloadButton.style.color = 'white'
-  reloadButton.style.border = 'none'
-  reloadButton.style.borderRadius = '5px'
-  reloadButton.style.cursor = 'pointer'
-  reloadButton.addEventListener('click', () => window.location.reload())
+    const reloadButton = document.createElement('button')
+    reloadButton.type = 'button'
+    reloadButton.textContent = 'Reload'
+    reloadButton.style.marginTop = '10px'
+    reloadButton.style.padding = '10px 20px'
+    reloadButton.style.background = '#f97316'
+    reloadButton.style.color = 'white'
+    reloadButton.style.border = 'none'
+    reloadButton.style.borderRadius = '5px'
+    reloadButton.style.cursor = 'pointer'
+    reloadButton.addEventListener('click', () => window.location.reload())
 
-  wrapper.append(title, message, details, reloadButton)
-  rootElement.appendChild(wrapper)
+    wrapper.append(title, message, details, reloadButton)
+    mountNode.appendChild(wrapper)
+  }
 }
+
+void startApp()

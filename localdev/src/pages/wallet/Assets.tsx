@@ -29,6 +29,15 @@ const Assets: React.FC = () => {
     ensurePreviewAvailability
   } = useAssetListModel()
 
+  if (!activeNetwork) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center py-14 gap-3 text-center px-6 opacity-60">
+        <IoLayersOutline className="w-7 h-7 text-gray-500" />
+        <p className="text-sm font-medium text-gray-300">No active network available</p>
+      </div>
+    )
+  }
+
   const previewRows = useMemo(() => sorted.slice(0, 3), [sorted])
   const previewAssetNames = useMemo(() => previewRows.map(([name]) => name), [previewRows])
   const total = sorted.length

@@ -20,8 +20,9 @@ import { PageTransition } from '../../components/PageTransition'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
 import { getAccountDisplayName } from '../../lib/accountName'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey, compareNetworksByModelFamily } from '../../lib/coinModel'
-import { getModelIconFrameClass, getModelIconRingClass, getModelStatus } from '../../buildConfig'
+import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
+import { isWalletAssetSwappable } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -58,9 +59,9 @@ const WalletLayout: React.FC = () => {
     activity,
     setActiveAccount,
     setActiveNetwork,
-    setNetworkEnabled,
     refreshActiveBalance,
-    fetchNetworkFiat
+    fetchNetworkFiat,
+    getSendableItems
   } = useWalletStore()
 
   // ── sheet visibility ──────────────────────────────────────────────────────
@@ -90,12 +91,23 @@ const WalletLayout: React.FC = () => {
   const enabledNetworkCount = enabledNetworks.length
   const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
   const activeNetwork = enabledNetworks.find(n => n.id === activeNetworkId) || enabledNetworks[0]
+  const hasActiveNetwork = Boolean(activeNetwork)
   const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const portfolioFiatValue =
     accountNetworkFiatTotals[fiatScopeKey]?.usd
     ?? accountNetworkFiatNative[fiatScopeKey]?.usd
   const displayFiatValue = formatFiatValue(portfolioFiatValue)
+  const activeNetworkSwapItems = useMemo(() => {
+    if (!activeAccount?.id || !activeNetwork?.id) return []
+    return getSendableItems({
+      accountId: activeAccount.id,
+      networkId: activeNetwork.id,
+      includeHidden: false,
+      includeZeroBalance: false
+    }).filter((item) => isWalletAssetSwappable(item, activeNetwork))
+  }, [activeAccount?.id, activeNetwork, getSendableItems])
+  const showSwapAction = activeNetworkSwapItems.length > 0
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
@@ -114,6 +126,7 @@ const WalletLayout: React.FC = () => {
   const visibleNetworks = useMemo(() => {
     const query = networkSearch.trim().toLowerCase()
     return rankedNetworks.filter((net) => {
+      if (!enabledNetworkIds.has(net.id)) return false
       if (
         query
         && !net.name.toLowerCase().includes(query)
@@ -125,7 +138,7 @@ const WalletLayout: React.FC = () => {
       if (networkFilter === 'all') return true
       return getNetworkChainGroup(net) === networkFilter
     })
-  }, [networkFilter, networkSearch, rankedNetworks])
+  }, [enabledNetworkIds, networkFilter, networkSearch, rankedNetworks])
   const visibleNetworkGroups = useMemo(
     () => splitNetworksByChain(visibleNetworks),
     [visibleNetworks]
@@ -166,8 +179,8 @@ const WalletLayout: React.FC = () => {
   }, [refreshActiveBalance, activeAccountId, activeNetworkId, isFocusedFlowRoute])
 
   // ── tabs — only show Assets if the network supports token assets ───────────
-  const caps = networkCapabilities(activeNetwork)
-  const coinModel = resolveCoinModelFamily(activeNetwork)
+  const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
+  const coinModel = activeNetwork ? resolveCoinModelFamily(activeNetwork) : 'generic'
   const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
   const isModelRoute = location.pathname.startsWith('/wallet/model/')
   const expectedModelPath = `/wallet/model/${coinModelRouteKey}`
@@ -194,28 +207,40 @@ const WalletLayout: React.FC = () => {
 
   const handleSelectNetwork = async (networkId: string) => {
     const target = networks.find((network) => network.id === networkId)
-    if (!target) return
-    const isEnabled = enabledNetworkIds.has(target.id)
-
-    if (!isEnabled) {
-      const modelStatus = getModelStatus(String(target.runtimeModelId || target.id || ''))
-      if (modelStatus !== 'tested' || enabledNetworkCount >= MAX_ACTIVE_REFRESH_NETWORKS) {
-        closeNetworkSheet()
-        navigate('/settings/blockchains')
-        return
-      }
-      setNetworkEnabled(target.id, true)
-    }
+    if (!target || !enabledNetworkIds.has(target.id)) return
 
     await setActiveNetwork(target.id)
     closeNetworkSheet()
   }
 
   useEffect(() => {
-    if (!isModelRoute) return
+    if (!hasActiveNetwork || !isModelRoute) return
     if (location.pathname === expectedModelPath) return
     navigate(expectedModelPath, { replace: true })
-  }, [isModelRoute, location.pathname, expectedModelPath, navigate])
+  }, [hasActiveNetwork, isModelRoute, location.pathname, expectedModelPath, navigate])
+
+  if (!hasActiveNetwork) {
+    return (
+      <WalletFrame>
+        <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+          <div className="max-w-[280px] space-y-3 rounded-3xl border border-dark-600 bg-dark-800/70 px-5 py-6">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Wallet Unavailable</p>
+            <p className="text-sm font-semibold text-gray-200">No enabled network is ready for this wallet session.</p>
+            <p className="text-xs text-gray-500">
+              Open blockchain settings and enable at least one chain, then reopen the wallet surface.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/settings/blockchains')}
+              className="w-full rounded-2xl bg-primary px-4 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-dark-950 transition-opacity hover:opacity-90"
+            >
+              Manage Blockchains
+            </button>
+          </div>
+        </div>
+      </WalletFrame>
+    )
+  }
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
@@ -278,11 +303,13 @@ const WalletLayout: React.FC = () => {
               onClick={() => navigate('/wallet/send', { state: { quickSendNative: true } })}
             />
           )}
-          <QuickAction
-            icon={<IoSwapHorizontalOutline className="w-5 h-5" />}
-            label="Swap"
-            onClick={() => navigate('/wallet/swap')}
-          />
+          {showSwapAction && (
+            <QuickAction
+              icon={<IoSwapHorizontalOutline className="w-5 h-5" />}
+              label="Swap"
+              onClick={() => navigate('/wallet/swap')}
+            />
+          )}
           <QuickAction
             icon={<IoSearchOutline className="w-5 h-5" />}
             label="Model"
@@ -439,7 +466,7 @@ const WalletLayout: React.FC = () => {
             </div>
 
             <p className="text-[10px] text-gray-500">
-              Enabled: {enabledNetworkCount} / {MAX_ACTIVE_REFRESH_NETWORKS}. Disabled networks stay visible here; untested or capacity-limited ones are managed in blockchain settings.
+              Showing enabled networks only. Active: {enabledNetworkCount} / {MAX_ACTIVE_REFRESH_NETWORKS}. Use Manage to review disabled or hidden chains.
             </p>
 
             {/* List */}
@@ -484,9 +511,7 @@ const WalletLayout: React.FC = () => {
                           'w-full flex items-center justify-between p-3 rounded-xl border transition-all',
                           net.id === activeNetworkId
                             ? 'border-primary bg-primary/10'
-                            : enabledNetworkIds.has(net.id)
-                              ? 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
-                              : 'border-dark-600/70 bg-dark-800/70 hover:bg-dark-700/70 opacity-90'
+                            : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
                         )}
                       >
                         <div className="flex items-center gap-3">
@@ -499,41 +524,11 @@ const WalletLayout: React.FC = () => {
                             : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
                           }
                           <div className="flex flex-col items-start">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-bold">{net.name}</span>
-                              <span className={clsx(
-                                'px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase',
-                                getNetworkChainGroup(net) === 'test'
-                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {getNetworkChainGroup(net) === 'test' ? 'Testnet' : 'Mainnet'}
-                              </span>
-                              {networkCapabilities(net).features.assetLayer && (
-                                <span
-                                  title="Supports assets/tokens"
-                                  className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200"
-                                >
-                                  Assets
-                                </span>
-                              )}
-                              {!enabledNetworkIds.has(net.id) && (
-                                <span className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-800/80 text-[9px] font-black tracking-widest uppercase text-gray-400">
-                                  Disabled
-                                </span>
-                              )}
-                            </div>
+                            <span className="text-sm font-bold">{net.name}</span>
                             <span className="text-[10px] text-gray-500 uppercase font-mono">{net.symbol}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          {!enabledNetworkIds.has(net.id) && (
-                            <span className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-500">
-                              {getModelStatus(String(net.runtimeModelId || net.id || '')) === 'tested' && enabledNetworkCount < MAX_ACTIVE_REFRESH_NETWORKS
-                                ? 'Enable'
-                                : 'Settings'}
-                            </span>
-                          )}
                           {net.id === activeNetworkId && (
                             <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />
                           )}

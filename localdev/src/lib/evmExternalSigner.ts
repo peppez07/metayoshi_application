@@ -33,6 +33,11 @@ export function resolveEvmExternalSignerMode(): EvmExternalSignerMode {
   return parseMode(String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || 'local'))
 }
 
+function isWalletConnectSignerRuntimeEnabled(): boolean {
+  const raw = String((import.meta as any)?.env?.VITE_ENABLE_WALLETCONNECT_SIGNER || '').trim().toLowerCase()
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on'
+}
+
 function normalizeEvmAddress(value: string): string {
   if (!ethers.isAddress(value)) throw new Error(`Invalid EVM address: ${value}`)
   return ethers.getAddress(value)
@@ -139,23 +144,13 @@ let wcProviderSingleton: any = null
 
 async function getWalletConnectProvider(): Promise<any> {
   if (wcProviderSingleton) return wcProviderSingleton
-  const projectId = String((import.meta as any)?.env?.VITE_WALLETCONNECT_PROJECT_ID || '').trim()
-  if (!projectId) throw new Error('VITE_WALLETCONNECT_PROJECT_ID is required for WalletConnect signer mode')
-  const chainListRaw = String((import.meta as any)?.env?.VITE_WALLETCONNECT_CHAINS || 'eip155:1,eip155:56,eip155:137,eip155:42161,eip155:8453,eip155:43114')
+  if (!isWalletConnectSignerRuntimeEnabled()) {
+    throw new Error('WalletConnect signer mode is disabled in this build')
+  }
+  const chainListRaw = String((import.meta as any)?.env?.VITE_WALLETCONNECT_CHAINS || '')
   const chainIds = parseChainList(chainListRaw)
-  if (chainIds.length === 0) throw new Error('No WalletConnect chains configured')
-
-  const mod = await import('@walletconnect/ethereum-provider')
-  const EthereumProvider = (mod as any)?.default || (mod as any)?.EthereumProvider
-  if (!EthereumProvider?.init) throw new Error('WalletConnect EthereumProvider is unavailable')
-
-  wcProviderSingleton = await EthereumProvider.init({
-    projectId,
-    chains: chainIds,
-    optionalChains: chainIds,
-    showQrModal: true
-  })
-  return wcProviderSingleton
+  void chainIds
+  throw new Error('WalletConnect signer mode is currently unavailable in the extension build')
 }
 
 function createWalletConnectSigner(): EvmExternalSigner {
@@ -210,5 +205,8 @@ export async function resolveEvmExternalSigner(): Promise<EvmExternalSigner | nu
   const mode = resolveEvmExternalSignerMode()
   if (mode === 'local') return null
   if (mode === 'hardware') return createInjectedHardwareSigner()
+  if (!isWalletConnectSignerRuntimeEnabled()) {
+    throw new Error('WalletConnect signer mode is disabled in this build')
+  }
   return createWalletConnectSigner()
 }

@@ -53,6 +53,16 @@ const AssetsPage: React.FC = () => {
   const catalogMainCount = catalogSummary.mainCount
   const catalogAssetRows = catalogSummary.assetRows
 
+  if (!activeNetwork) {
+    return (
+      <div className="bg-dark-800 w-full h-full flex flex-col items-center justify-center overflow-hidden px-6 text-center">
+        <IoLayersOutline className="w-8 h-8 text-gray-500" />
+        <p className="mt-3 text-sm font-bold text-gray-300">No active network available</p>
+        <p className="mt-1 text-xs text-gray-500">Enable a blockchain first, then reopen the wallet assets page.</p>
+      </div>
+    )
+  }
+
   const isSearching = search.trim().length > 0
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()

@@ -55,35 +55,45 @@ import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
 import BlockchainVisibilitySettings from './pages/settings/BlockchainVisibilitySettings'
 import TermsAndRules from './pages/TermsAndRules'
 import { WALLET_TERMS_VERSION } from './lib/legalMetadata'
+import type { Network } from './coins'
+
+function resolveActiveEnabledNetwork(
+  networks: Network[],
+  activeNetworkId: string,
+  disabledNetworkIds: string[]
+): Network | null {
+  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
+  return enabledNetworks.find((network) => network.id === activeNetworkId) || enabledNetworks[0] || null
+}
 
 const WalletIndexRedirect = () => {
   const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
-  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
-  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
+  const activeNetwork = resolveActiveEnabledNetwork(networks, activeNetworkId, disabledNetworkIds)
+  if (!activeNetwork) return <Navigate to="/settings/blockchains" replace />
   const caps = resolveNetworkCapabilities(activeNetwork)
   return <Navigate to={caps.ui.showAssetsTab ? '/wallet/assets' : '/wallet/activity'} replace />
 }
 
 const SendRouteGate = () => {
   const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
-  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
-  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
+  const activeNetwork = resolveActiveEnabledNetwork(networks, activeNetworkId, disabledNetworkIds)
+  if (!activeNetwork) return <Navigate to="/settings/blockchains" replace />
   const caps = resolveNetworkCapabilities(activeNetwork)
   return (caps.ui.showSendAction || caps.features.assetSend) ? <Send /> : <Navigate to="/wallet/activity" replace />
 }
 
 const AssetsRouteGate = () => {
   const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
-  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
-  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
+  const activeNetwork = resolveActiveEnabledNetwork(networks, activeNetworkId, disabledNetworkIds)
+  if (!activeNetwork) return <Navigate to="/settings/blockchains" replace />
   const caps = resolveNetworkCapabilities(activeNetwork)
   return caps.ui.showAssetsTab ? <Assets /> : <Navigate to="/wallet/activity" replace />
 }
 
 const WalletModelRedirect = () => {
   const { networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
-  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
-  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
+  const activeNetwork = resolveActiveEnabledNetwork(networks, activeNetworkId, disabledNetworkIds)
+  if (!activeNetwork) return <Navigate to="/settings/blockchains" replace />
   const modelKey = coinModelFamilyToRouteKey(resolveCoinModelFamily(activeNetwork))
   return <Navigate to={`/wallet/model/${modelKey}`} replace />
 }
@@ -114,11 +124,11 @@ const TxRouteGate = ({ element }: { element: ReactElement }) => {
   const location = useLocation()
   const { isLocked, networks, activeNetworkId, disabledNetworkIds } = useWalletStore()
   const isDappTxRoute = new URLSearchParams(location.search).get('dappRequest') === '1'
-  const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
-  const activeNetwork = enabledNetworks.find((n) => n.id === activeNetworkId) || enabledNetworks[0]
-  const caps = resolveNetworkCapabilities(activeNetwork)
   if (isDappTxRoute) return element
   if (isLocked) return <Navigate to="/unlock" replace />
+  const activeNetwork = resolveActiveEnabledNetwork(networks, activeNetworkId, disabledNetworkIds)
+  if (!activeNetwork) return <Navigate to="/settings/blockchains" replace />
+  const caps = resolveNetworkCapabilities(activeNetwork)
   if (!caps.features.nativeSend && !caps.features.assetSend) return <Navigate to="/wallet/activity" replace />
   return element
 }

@@ -4,7 +4,8 @@ import { useWalletStore } from '../../../store/walletStore'
 
 const CosmosModelPage: React.FC = () => {
   const { networks, activeNetworkId } = useWalletStore()
-  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0] || null
+  if (!activeNetwork) return null
   const coinId = String(activeNetwork?.serverCoinId || activeNetwork?.id || 'cosmos').trim()
 
   return (

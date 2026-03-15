@@ -47,8 +47,8 @@ export function useAssetListModel() {
     previewByAssetRef.current = previewByAsset
   }, [previewByAsset])
 
-  const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0]
-  const caps = resolveNetworkCapabilities(activeNetwork)
+  const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0] || null
+  const caps = resolveNetworkCapabilities(activeNetwork || {})
   const activeModelId = String(activeNetwork?.runtimeModelId || activeNetwork?.id || '').trim().toLowerCase()
   const isEvmEcosystem = activeNetwork?.coinType === 'EVM'
   const isSolanaEcosystem = activeNetwork?.coinType === 'SOL' || activeModelId === 'sol'

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IoAlertCircle, IoCheckmarkCircle, IoClose, IoCloseCircle, IoWarningOutline } from 'react-icons/io5'
+import { IoAlertCircle, IoClose, IoWarningOutline } from 'react-icons/io5'
 import clsx from 'clsx'
 import { Button } from '../../components/Button'
 import { useWalletStore } from '../../store/walletStore'
@@ -8,12 +8,34 @@ import { compareNetworksByModelFamily } from '../../lib/coinModel'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import {
   getEnabledNetworks,
-  getNetworkChainGroup,
   normalizeDisabledNetworkIds,
   splitNetworksByChain
 } from '../../lib/networkVisibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { getModelIconRingClass, getModelStatus } from '../../buildConfig'
+
+function NetworkTag({
+  label,
+  tone = 'neutral'
+}: {
+  label: string
+  tone?: 'neutral' | 'positive' | 'warning' | 'danger' | 'accent'
+}) {
+  return (
+    <span
+      className={clsx(
+        'px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase shrink-0',
+        tone === 'positive' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+        tone === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+        tone === 'danger' && 'border-red-500/30 bg-red-500/10 text-red-200',
+        tone === 'accent' && 'border-primary/30 bg-primary/10 text-primary',
+        tone === 'neutral' && 'border-dark-600 bg-dark-700/70 text-gray-200'
+      )}
+    >
+      {label}
+    </span>
+  )
+}
 
 const BlockchainVisibilitySettings: React.FC = () => {
   const {
@@ -136,33 +158,20 @@ const BlockchainVisibilitySettings: React.FC = () => {
                             <div className="w-8 h-8 rounded-full bg-dark-600 shrink-0" />
                           )}
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-xs font-bold text-gray-200 truncate">{network.name}</p>
-                              <span className={clsx(
-                                'px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase shrink-0',
-                                getNetworkChainGroup(network) === 'test'
-                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {getNetworkChainGroup(network) === 'test' ? 'Testnet' : 'Mainnet'}
-                              </span>
-                              {getModelStatus(String(network.runtimeModelId || network.id || '')) === 'tested' ? (
-                                <IoCheckmarkCircle className="w-4 h-4 text-green-400 shrink-0" title="Tested" />
-                              ) : (
-                                <IoCloseCircle className="w-4 h-4 text-red-400 shrink-0" title="Not tested" />
-                              )}
+                              <NetworkTag
+                                label={isEnabled ? 'Enabled' : 'Disabled'}
+                                tone={isEnabled ? 'accent' : 'neutral'}
+                              />
                               {network.id === activeNetworkId && (
-                                <span className="px-1.5 py-0.5 rounded-md border border-primary/30 bg-primary/10 text-[9px] font-black tracking-widest uppercase text-primary shrink-0">
-                                  Active
-                                </span>
+                                <NetworkTag label="Active" tone="accent" />
                               )}
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5">
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                               <p className="text-[10px] text-gray-500 uppercase font-mono">{network.symbol}</p>
                               {capabilities.features.assetLayer && (
-                                <span className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200">
-                                  Assets
-                                </span>
+                                <NetworkTag label="Assets" tone="neutral" />
                               )}
                             </div>
                           </div>

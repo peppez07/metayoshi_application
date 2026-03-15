@@ -553,7 +553,8 @@ function buildServerManagedQuoteRequestBody(request: ServerSwapQuoteRequest): Re
         ? {
             assetId: request.source.asset.assetId,
             kind: request.source.asset.kind,
-            contractAddress: request.source.asset.contractAddress
+            contractAddress: request.source.asset.contractAddress,
+            decimals: request.source.asset.decimals
           }
         : undefined
     },
@@ -565,7 +566,8 @@ function buildServerManagedQuoteRequestBody(request: ServerSwapQuoteRequest): Re
         ? {
             assetId: request.destination.asset.assetId,
             kind: request.destination.asset.kind,
-            contractAddress: request.destination.asset.contractAddress
+            contractAddress: request.destination.asset.contractAddress,
+            decimals: request.destination.asset.decimals
           }
         : undefined
     },
@@ -681,6 +683,41 @@ async function submitServerManagedSwap(
       }
     })
   }, 'submit')
+
+  const steps = Array.isArray((response as any)?.steps) ? (response as any).steps : []
+  const hasPreparedSteps = steps.some((step: unknown) => hasTransactionRequest(asRecord(asRecord(step).tx)))
+  if (hasPreparedSteps) {
+    let finalTxid = ''
+    for (const step of steps) {
+      const stepRecord = asRecord(step)
+      const tx = asRecord(stepRecord.tx)
+      if (!hasTransactionRequest(tx)) continue
+      finalTxid = await broadcastTransaction(
+        config,
+        tx,
+        readString(stepRecord.label) || readString(stepRecord.kind) || 'Swap step',
+        Boolean(stepRecord.waitForConfirmation)
+      )
+    }
+
+    if (!finalTxid) {
+      throw new Error('Server swap submit returned prepared steps but no broadcastable transaction')
+    }
+
+    return {
+      executionId: finalTxid,
+      quoteId: readString(response.quoteId) || request.quoteId,
+      status: 'submitted',
+      detail: readString(response.detail) || 'Swap submitted',
+      updatedAt: readNumber(response.updatedAt) || Date.now(),
+      receipt: {
+        txid: finalTxid,
+        explorerUrl: buildExplorerTxUrl(config.explorerUrl, finalTxid),
+        networkId: readString(response.networkId) || sourceNetworkId
+      },
+      warnings: readStringArray(response.warnings)
+    }
+  }
 
   return {
     executionId: readString(response.executionId),
@@ -805,45 +842,23 @@ export async function requestServerSwapQuote(
   config: ServerExecutionRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
+  let raw: unknown
   try {
-    const raw = await executeServerManagedJsonRequest(config, '/v1/swap/quote', {
+    raw = await executeServerManagedJsonRequest(config, '/v1/swap/quote', {
       method: 'POST',
       body: JSON.stringify(buildServerManagedQuoteRequestBody(request))
     }, 'quote')
-    return normalizeQuote(raw, request)
   } catch (error) {
-    if (!isLegacySwapFallbackError(error)) throw error
+    if (isLegacySwapFallbackError(error)) {
+      throw new Error('MetaYoshi server swap service is unavailable')
+    }
+    throw error
   }
-
-  const sourceChainId = Number(request.source.chainId || config.chainId || 0)
-  const destinationChainId = Number(request.destination.chainId || 0)
-  if (!sourceChainId || !destinationChainId) {
-    throw new Error('EVM chainId is required for Uniswap swap quoting')
+  const quote = normalizeQuote(raw, request)
+  if (readString(asRecord(quote.metadata).provider) !== 'server-execution') {
+    throw new Error('Swap quote response did not come from the MetaYoshi server swap service')
   }
-
-  const sourceDecimals = request.source.asset?.decimals ?? 18
-  const sourceAmountRaw = uiAmountToRaw(request.source.amount, sourceDecimals)
-  const body: Record<string, unknown> = {
-    type: 'EXACT_INPUT',
-    amount: sourceAmountRaw,
-    tokenInChainId: sourceChainId,
-    tokenOutChainId: destinationChainId,
-    tokenIn: resolveUniswapTokenAddress(request.source.asset, request.source.networkId, 'Source asset'),
-    tokenOut: resolveUniswapTokenAddress(request.destination.asset, request.destination.networkId, 'Destination asset'),
-    swapper: request.source.address,
-    slippageTolerance: Number((Math.max(1, request.slippageBps) / 100).toFixed(2)),
-    routingPreference: 'BEST_PRICE'
-  }
-
-  if (sourceChainId === destinationChainId) {
-    body.protocols = ['V2', 'V3', 'V4']
-  }
-
-  const raw = await executeUniswapJsonRequest(config, '/quote', {
-    method: 'POST',
-    body: JSON.stringify(body)
-  }, 'quote')
-  return normalizeQuote(raw, request)
+  return quote
 }
 
 export async function submitServerSwap(
@@ -851,78 +866,16 @@ export async function submitServerSwap(
   request: ServerSwapSubmitRequest
 ): Promise<ServerExecutionStatus> {
   const metadata = asRecord(request.quoteMetadata)
-  if (readString(metadata.provider) === 'server-execution') {
-    return submitServerManagedSwap(config, request)
+  if (readString(metadata.provider) !== 'server-execution') {
+    throw new Error('This wallet build only supports MetaYoshi server-managed swaps')
   }
-
-  const sourceChainId = Number(request.source.chainId || config.chainId || 0)
-  const destinationChainId = Number(request.destination.chainId || 0)
-  if (!sourceChainId || !destinationChainId) {
-    throw new Error('EVM chainId is required for Uniswap swap execution')
-  }
-
-  const rawQuote = asRecord(metadata.quote)
-  if (Object.keys(rawQuote).length === 0) {
-    throw new Error('Swap quote metadata is missing the Uniswap quote payload')
-  }
-
-  const sourceAmountRaw = readString(asRecord(rawQuote.input).amount)
-    || uiAmountToRaw(request.source.amount, request.source.asset?.decimals ?? 18)
-  const tokenIn = resolveUniswapTokenAddress(request.source.asset, request.source.networkId, 'Source asset')
-  const tokenOut = resolveUniswapTokenAddress(request.destination.asset, request.destination.networkId, 'Destination asset')
-
-  if (tokenIn !== UNISWAP_NATIVE_ADDRESS) {
-    const approvalResponse = await executeUniswapJsonRequest(config, '/check_approval', {
-      method: 'POST',
-      body: JSON.stringify({
-        walletAddress: request.source.address,
-        token: tokenIn,
-        amount: sourceAmountRaw,
-        chainId: sourceChainId,
-        tokenOut,
-        tokenOutChainId: destinationChainId,
-        includeGasInfo: true,
-        urgency: 'normal'
-      })
-    }, 'approval')
-    const cancelTx = asRecord(approvalResponse?.cancel)
-    const approvalTx = asRecord(approvalResponse?.approval)
-
-    if (hasTransactionRequest(cancelTx)) {
-      await broadcastTransaction(config, cancelTx, 'Approval reset', true)
+  try {
+    return await submitServerManagedSwap(config, request)
+  } catch (error) {
+    if (isLegacySwapFallbackError(error)) {
+      throw new Error('MetaYoshi server swap service is unavailable')
     }
-    if (hasTransactionRequest(approvalTx)) {
-      await broadcastTransaction(config, approvalTx, 'Approval', true)
-    }
-  }
-
-  const swapResponse = await executeUniswapJsonRequest(config, '/swap', {
-    method: 'POST',
-    body: JSON.stringify({
-      quote: rawQuote,
-      refreshGasPrice: true,
-      simulateTransaction: false,
-      urgency: 'normal'
-    })
-  }, 'submit')
-  const swapTx = asRecord(swapResponse?.swap)
-  if (!hasTransactionRequest(swapTx)) {
-    throw new Error('Swap execution response is missing a transaction payload')
-  }
-
-  const txid = await broadcastTransaction(config, swapTx, 'Swap', false)
-  return {
-    executionId: txid,
-    quoteId: request.quoteId,
-    status: 'submitted',
-    detail: 'Uniswap swap submitted',
-    updatedAt: Date.now(),
-    receipt: {
-      txid,
-      explorerUrl: buildExplorerTxUrl(config.explorerUrl, txid),
-      networkId: request.source.networkId
-    },
-    warnings: []
+    throw error
   }
 }
 
@@ -932,71 +885,75 @@ export async function fetchServerExecutionStatus(
 ): Promise<ServerExecutionStatus> {
   const normalizedExecutionId = readString(executionId)
   if (!normalizedExecutionId) throw new Error('Execution id is required')
+  if (isLikelyTransactionHash(normalizedExecutionId)) {
+    const receipt = await callBridgeMethod(config, 'eth_getTransactionReceipt', [normalizedExecutionId]).catch(() => null)
+    const body = asRecord(receipt)
+    const status = readString(body.status).toLowerCase()
+    if (!Object.keys(body).length) {
+      return {
+        executionId: normalizedExecutionId,
+        status: 'pending',
+        detail: 'Swap transaction pending',
+        updatedAt: Date.now(),
+        receipt: {
+          txid: normalizedExecutionId,
+          explorerUrl: buildExplorerTxUrl(config.explorerUrl, normalizedExecutionId),
+          networkId: config.networkId
+        },
+        warnings: []
+      }
+    }
 
-  if (!isLikelyTransactionHash(normalizedExecutionId)) {
-    const raw = await executeServerManagedJsonRequest(
+    return {
+      executionId: normalizedExecutionId,
+      status: status === '0x1' || status === '1' ? 'confirmed' : 'failed',
+      detail: status === '0x1' || status === '1' ? 'Swap transaction confirmed' : 'Swap transaction failed',
+      updatedAt: Date.now(),
+      receipt: {
+        txid: normalizedExecutionId,
+        explorerUrl: buildExplorerTxUrl(config.explorerUrl, normalizedExecutionId),
+        networkId: config.networkId
+      },
+      warnings: []
+    }
+  }
+  let raw: unknown
+  try {
+    raw = await executeServerManagedJsonRequest(
       config,
       `/v1/execute/${encodeURIComponent(normalizedExecutionId)}`,
       { method: 'GET' },
       'status'
     )
-    return {
-      executionId: readString(raw.executionId) || normalizedExecutionId,
-      quoteId: readString(raw.quoteId) || undefined,
-      status: (() => {
-        const normalized = readString(raw.status).toLowerCase()
-        if (normalized === 'quoted') return 'quoted'
-        if (normalized === 'submitted') return 'submitted'
-        if (normalized === 'broadcasted') return 'broadcasted'
-        if (normalized === 'pending') return 'pending'
-        if (normalized === 'confirmed') return 'confirmed'
-        if (normalized === 'failed') return 'failed'
-        if (normalized === 'expired') return 'expired'
-        if (normalized === 'rejected') return 'rejected'
-        return 'pending'
-      })(),
-      detail: readString(raw.detail) || undefined,
-      updatedAt: readNumber(raw.updatedAt) || Date.now(),
-      receipt: {
-        txid: readString(raw.txid) || undefined,
-        explorerUrl: readString(raw.explorerUrl) || undefined,
-        networkId: readString(raw.networkId) || config.networkId
-      },
-      warnings: readStringArray(raw.warnings)
+  } catch (error) {
+    if (isLegacySwapFallbackError(error)) {
+      throw new Error('MetaYoshi server swap service is unavailable')
     }
+    throw error
   }
-
-  const txid = encodeURIComponent(readString(executionId))
-  if (!txid) throw new Error('Execution id is required')
-  const chainId = Number(config.chainId || 0)
-  if (!chainId) throw new Error('Source chainId is required to fetch Uniswap swap status')
-
-  const raw = await executeUniswapJsonRequest(
-    config,
-    `/swaps?txHashes=${txid}&chainId=${encodeURIComponent(String(chainId))}`,
-    { method: 'GET' },
-    'status'
-  )
-  const row = Array.isArray(raw?.swaps) ? asRecord(raw.swaps[0]) : {}
-  const resolvedTxid = readString(row.txHash || executionId)
-  const status = normalizeExecutionStatus(row.status)
-  const swapType = readString(row.swapType)
+  const response = asRecord(raw)
   return {
-    executionId: resolvedTxid || readString(executionId),
-    status,
-    detail: status === 'confirmed'
-      ? `Uniswap ${swapType || 'swap'} confirmed`
-      : status === 'failed'
-        ? `Uniswap ${swapType || 'swap'} failed`
-        : status === 'expired'
-          ? `Uniswap ${swapType || 'swap'} expired`
-          : `Uniswap ${swapType || 'swap'} pending`,
-    updatedAt: Date.now(),
+    executionId: readString(response.executionId) || normalizedExecutionId,
+    quoteId: readString(response.quoteId) || undefined,
+    status: (() => {
+      const normalized = readString(response.status).toLowerCase()
+      if (normalized === 'quoted') return 'quoted'
+      if (normalized === 'submitted') return 'submitted'
+      if (normalized === 'broadcasted') return 'broadcasted'
+      if (normalized === 'pending') return 'pending'
+      if (normalized === 'confirmed') return 'confirmed'
+      if (normalized === 'failed') return 'failed'
+      if (normalized === 'expired') return 'expired'
+      if (normalized === 'rejected') return 'rejected'
+      return 'pending'
+    })(),
+    detail: readString(response.detail) || undefined,
+    updatedAt: readNumber(response.updatedAt) || Date.now(),
     receipt: {
-      txid: resolvedTxid || undefined,
-      explorerUrl: buildExplorerTxUrl(config.explorerUrl, resolvedTxid),
-      networkId: config.networkId
+      txid: readString(response.txid) || undefined,
+      explorerUrl: readString(response.explorerUrl) || undefined,
+      networkId: readString(response.networkId) || config.networkId
     },
-    warnings: []
+    warnings: readStringArray(response.warnings)
   }
 }

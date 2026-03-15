@@ -3469,9 +3469,10 @@ export const useWalletStore = create<WalletState>()(
             let tokenBalanceEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'token-balance')
             let addressAssetsEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'address-assets')
 
+            let bridgeTokenRows: BridgeTokenBalanceRow[] = []
             if (!tokenBalanceEndpointUnsupported) {
               try {
-                await fetchBridgeTokenBalances(rpcConfig, {
+                bridgeTokenRows = await fetchBridgeTokenBalances(rpcConfig, {
                   coin: bridgeCoin,
                   chain: bridgeChain,
                   owner: address,
@@ -3555,6 +3556,31 @@ export const useWalletStore = create<WalletState>()(
               }
               trackedByAddress.set(token.address, token)
             }
+            for (const row of bridgeTokenRows) {
+              const tokenAddress = normalizeEvmAddressLoose(String(
+                row.tokenAddress || row.tokenId || row.issuer || ''
+              ).trim())
+              if (!tokenAddress) continue
+              const existing = trackedByAddress.get(tokenAddress)
+              const nextToken: EvmTrackedToken = {
+                address: tokenAddress,
+                symbol: String(row.symbol || row.name || shortAddress(tokenAddress)).trim().toUpperCase() || shortAddress(tokenAddress),
+                decimals: Number.isInteger(Number(row.decimals)) ? Number(row.decimals) : 18,
+                logoUri: String(row.logoUri || '').trim() || undefined,
+                discovered: true
+              }
+              if (existing) {
+                trackedByAddress.set(tokenAddress, {
+                  ...existing,
+                  symbol: nextToken.symbol || existing.symbol,
+                  decimals: nextToken.decimals,
+                  logoUri: existing.logoUri || nextToken.logoUri,
+                  discovered: true
+                })
+                continue
+              }
+              trackedByAddress.set(tokenAddress, nextToken)
+            }
 
             let mergedTokens = [...trackedByAddress.values()]
             if (discoveredAddresses.length === 0 && assetsEndpointTokens.length === 0 && mergedTokens.length > 80) {
@@ -3569,6 +3595,29 @@ export const useWalletStore = create<WalletState>()(
             const fungibleAssetLabels: Record<string, string> = {}
             const usedAssetKeys = new Set<string>()
             const assetKeyByContract = new Map<string, string>()
+            const bridgeAssetBuckets = buildEvmAssetBucketsFromBridgeRows(bridgeTokenRows, chainId)
+            for (const [assetKey, amount] of Object.entries(bridgeAssetBuckets.assets)) {
+              if (String(assetKey || '').startsWith('EVMNFT:')) continue
+              fungibleAssets[assetKey] = amount
+              usedAssetKeys.add(assetKey)
+            }
+            for (const [assetKey, logoUri] of Object.entries(bridgeAssetBuckets.logos)) {
+              fungibleAssetLogos[assetKey] = logoUri
+            }
+            for (const [assetKey, label] of Object.entries(bridgeAssetBuckets.labels)) {
+              fungibleAssetLabels[assetKey] = label
+            }
+            for (const row of bridgeTokenRows) {
+              const tokenAddress = normalizeEvmAddressLoose(String(
+                row.tokenAddress || row.tokenId || row.issuer || ''
+              ).trim())
+              if (!tokenAddress) continue
+              const symbol = String(row.symbol || row.name || shortAddress(tokenAddress)).trim().toUpperCase() || shortAddress(tokenAddress)
+              const bridgeKey = `${symbol}@${shortAddress(tokenAddress)}`
+              if (fungibleAssets[bridgeKey] > 0) {
+                assetKeyByContract.set(tokenAddress, bridgeKey)
+              }
+            }
             let tokenReadSuccesses = 0
             let tokenReadErrors = 0
             const tokenRows = await mapWithConcurrency(mergedTokens, 6, async (token) => {
@@ -3650,7 +3699,11 @@ export const useWalletStore = create<WalletState>()(
             const standardCache = new Map<string, EvmNftStandard | null>()
             const collectionCache = new Map<string, string>()
             const nftAssets: Record<string, number> = {}
-            const nftLookup: Record<string, EvmNftHolding> = {}
+            const nftLookup: Record<string, EvmNftHolding> = { ...bridgeAssetBuckets.evmNfts }
+            for (const [assetKey, amount] of Object.entries(bridgeAssetBuckets.assets)) {
+              if (!String(assetKey || '').startsWith('EVMNFT:')) continue
+              nftAssets[assetKey] = amount
+            }
 
             const readCollectionName = async (contract: string, standard: EvmNftStandard): Promise<string> => {
               const cached = collectionCache.get(contract)

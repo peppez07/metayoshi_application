@@ -26,10 +26,18 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "commands": {
+    "open-wallet": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Open MetaYoshi wallet"
+    }
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "permissions": ["storage", "sidePanel"],
+  "permissions": ["storage", "sidePanel", "tabs"],
   "host_permissions": [
     "https://*/*",
     "http://*/*"
