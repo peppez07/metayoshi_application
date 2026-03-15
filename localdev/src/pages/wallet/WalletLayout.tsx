@@ -21,7 +21,7 @@ import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../..
 import { getAccountDisplayName } from '../../lib/accountName'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey, compareNetworksByModelFamily } from '../../lib/coinModel'
 import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
-import { getEnabledNetworks } from '../../lib/networkVisibility'
+import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +110,10 @@ const WalletLayout: React.FC = () => {
       net.name.toLowerCase().includes(query) || net.symbol.toLowerCase().includes(query)
     )
   }, [networkSearch, rankedNetworks])
+  const visibleNetworkGroups = useMemo(
+    () => splitNetworksByChain(visibleNetworks),
+    [visibleNetworks]
+  )
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   const isSwapRoute = location.pathname.startsWith('/wallet/swap')
   const isFocusedFlowRoute = isSendRoute || isSwapRoute
@@ -382,47 +386,70 @@ const WalletLayout: React.FC = () => {
                   </div>
                 </div>
               </button>
-              {visibleNetworks
-                .map(net => (
-                  <button
-                    key={net.id}
-                    onClick={() => { void setActiveNetwork(net.id); setShowNetworkSheet(false); setNetworkSearch('') }}
-                    className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
-                      net.id === activeNetworkId
-                        ? 'border-primary bg-primary/10'
-                        : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {net.logo
-                        ? (
-                          <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(String(net.runtimeModelId || net.id || '')))}>
-                            <img src={net.logo} alt={net.name} className="w-full h-full object-cover rounded-full" />
-                          </div>
-                        )
-                        : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
-                      }
-                      <div className="flex flex-col items-start">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold">{net.name}</span>
-                          {networkCapabilities(net).features.assetLayer && (
-                            <span
-                              title="Supports assets/tokens"
-                              className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200"
-                            >
-                              Assets
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-gray-500 uppercase font-mono">{net.symbol}</span>
-                      </div>
+              {[
+                { key: 'main', label: 'Mainnet', rows: visibleNetworkGroups.main },
+                { key: 'test', label: 'Testnet', rows: visibleNetworkGroups.test }
+              ].map((section) => (
+                section.rows.length > 0 ? (
+                  <div key={section.key} className="space-y-2">
+                    <div className="flex items-center justify-between px-1 pt-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">
+                        {section.label}
+                      </span>
+                      <span className="text-[10px] text-gray-600">
+                        {section.rows.length}
+                      </span>
                     </div>
-                    {net.id === activeNetworkId && (
-                      <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />
-                    )}
-                  </button>
-                ))
-              }
+                    {section.rows.map(net => (
+                      <button
+                        key={net.id}
+                        onClick={() => { void setActiveNetwork(net.id); setShowNetworkSheet(false); setNetworkSearch('') }}
+                        className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          net.id === activeNetworkId
+                            ? 'border-primary bg-primary/10'
+                            : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {net.logo
+                            ? (
+                              <div className={clsx('w-7 h-7 rounded-full overflow-hidden', getModelIconRingClass(String(net.runtimeModelId || net.id || '')))}>
+                                <img src={net.logo} alt={net.name} className="w-full h-full object-cover rounded-full" />
+                              </div>
+                            )
+                            : <div className="w-7 h-7 rounded-full bg-dark-600 flex items-center justify-center"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /></div>
+                          }
+                          <div className="flex flex-col items-start">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold">{net.name}</span>
+                              <span className={clsx(
+                                'px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase',
+                                getNetworkChainGroup(net) === 'test'
+                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {getNetworkChainGroup(net) === 'test' ? 'Testnet' : 'Mainnet'}
+                              </span>
+                              {networkCapabilities(net).features.assetLayer && (
+                                <span
+                                  title="Supports assets/tokens"
+                                  className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200"
+                                >
+                                  Assets
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-gray-500 uppercase font-mono">{net.symbol}</span>
+                          </div>
+                        </div>
+                        {net.id === activeNetworkId && (
+                          <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : null
+              ))}
               {visibleNetworks.length === 0 && (
                 <p className="text-xs text-gray-600 text-center py-4">No networks match "{networkSearch}"</p>
               )}

@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import type { Network } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { callBridgeMethod, getSecureBridgeSessionInfo } from './utxoRpc'
+import { getBuildFeatureFlag } from '../buildConfig'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
@@ -313,6 +314,24 @@ function isSecureUnavailableError(error: unknown): boolean {
   return compactErrorText(error instanceof Error ? error.message : String(error || '')).includes('[secure-bridge-unavailable]')
 }
 
+function isSecureBridgeAuthEnabled(): boolean {
+  return getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)
+}
+
+function isSecureAuthVerificationError(error: unknown): boolean {
+  const normalized = compactErrorText(error instanceof Error ? error.message : String(error || '')).toLowerCase()
+  if (!normalized) return false
+  return (
+    normalized.includes('secure bridge auth challenge failed')
+    || normalized.includes('secure bridge auth verify failed')
+    || normalized.includes('auth challenge not found or expired')
+    || normalized.includes('auth challenge address mismatch')
+    || normalized.includes('auth signature verification failed')
+    || normalized.includes('signature verifier is not configured')
+    || normalized.includes('signature verification failed')
+  )
+}
+
 function asLegacySwapFallbackError(message: string): Error {
   return new Error(`[legacy-swap-fallback] ${message}`)
 }
@@ -336,11 +355,15 @@ async function executeServerManagedJsonRequest(
   init: RequestInit,
   action: ServerManagedExecutionAction
 ): Promise<any> {
+  if (!isSecureBridgeAuthEnabled()) {
+    throw asLegacySwapFallbackError('Secure bridge auth is disabled in this build')
+  }
+
   let session: { token: string; address: string; apiBase: string }
   try {
     session = await getSecureBridgeSessionInfo(config)
   } catch (error) {
-    if (isSecureUnavailableError(error)) {
+    if (isSecureUnavailableError(error) || isSecureAuthVerificationError(error)) {
       throw asLegacySwapFallbackError(error instanceof Error ? error.message : 'Secure bridge auth is unavailable')
     }
     throw error

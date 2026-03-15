@@ -4,6 +4,10 @@ function normalizeNetworkIdValue(value: unknown): string {
   return String(value || '').trim()
 }
 
+function normalizeChainValue(value: unknown): 'main' | 'test' {
+  return String(value || '').trim().toLowerCase() === 'test' ? 'test' : 'main'
+}
+
 export function normalizeDisabledNetworkIds(
   disabledNetworkIds: unknown,
   networks: Network[]
@@ -31,4 +35,24 @@ export function isNetworkEnabled(networkId: string, disabledNetworkIds: unknown)
   if (!Array.isArray(disabledNetworkIds)) return true
   const target = normalizeNetworkIdValue(networkId)
   return !disabledNetworkIds.some((value) => normalizeNetworkIdValue(value) === target)
+}
+
+export function getNetworkChainGroup(network?: Pick<Network, 'serverChain'> | null): 'main' | 'test' {
+  return normalizeChainValue(network?.serverChain)
+}
+
+export function splitNetworksByChain<T extends Pick<Network, 'serverChain'>>(networks: T[]): {
+  main: T[]
+  test: T[]
+} {
+  const main: T[] = []
+  const test: T[] = []
+  for (const network of networks) {
+    if (getNetworkChainGroup(network) === 'test') {
+      test.push(network)
+      continue
+    }
+    main.push(network)
+  }
+  return { main, test }
 }

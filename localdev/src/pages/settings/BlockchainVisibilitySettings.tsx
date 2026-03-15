@@ -6,7 +6,12 @@ import { Button } from '../../components/Button'
 import { useWalletStore } from '../../store/walletStore'
 import { compareNetworksByModelFamily } from '../../lib/coinModel'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
-import { getEnabledNetworks, normalizeDisabledNetworkIds } from '../../lib/networkVisibility'
+import {
+  getEnabledNetworks,
+  getNetworkChainGroup,
+  normalizeDisabledNetworkIds,
+  splitNetworksByChain
+} from '../../lib/networkVisibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { getModelIconRingClass, getModelStatus } from '../../buildConfig'
 
@@ -46,6 +51,10 @@ const BlockchainVisibilitySettings: React.FC = () => {
       return a.name.localeCompare(b.name)
     })
   }, [activity, networks])
+  const rankedNetworkGroups = useMemo(
+    () => splitNetworksByChain(rankedNetworks),
+    [rankedNetworks]
+  )
   const pendingRiskNetwork = useMemo(
     () => networks.find((network) => network.id === pendingRiskNetworkId) || null,
     [networks, pendingRiskNetworkId]
@@ -90,62 +99,87 @@ const BlockchainVisibilitySettings: React.FC = () => {
           </p>
 
           <div className="space-y-2">
-            {rankedNetworks.map((network) => {
-              const isEnabled = !disabledSet.has(network.id)
-              const canToggle = isEnabled ? enabledCount > 1 : enabledCount < MAX_ACTIVE_REFRESH_NETWORKS
-              const capabilities = resolveNetworkCapabilities(network)
-              return (
-                <label
-                  key={network.id}
-                  className={clsx(
-                    'flex items-center justify-between gap-3 p-3 rounded-xl border transition-colors',
-                    isEnabled
-                      ? 'border-dark-600 bg-dark-700/40 hover:bg-dark-700/70'
-                      : 'border-dark-600/70 bg-dark-800/60'
-                  )}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {network.logo ? (
-                      <div className={clsx('w-8 h-8 rounded-full overflow-hidden shrink-0', getModelIconRingClass(String(network.runtimeModelId || network.id || '')))}>
-                        <img src={network.logo} alt={network.name} className="w-full h-full rounded-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-dark-600 shrink-0" />
-                    )}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-bold text-gray-200 truncate">{network.name}</p>
-                        {getModelStatus(String(network.runtimeModelId || network.id || '')) === 'tested' ? (
-                          <IoCheckmarkCircle className="w-4 h-4 text-green-400 shrink-0" title="Tested" />
-                        ) : (
-                          <IoCloseCircle className="w-4 h-4 text-red-400 shrink-0" title="Not tested" />
-                        )}
-                        {network.id === activeNetworkId && (
-                          <span className="px-1.5 py-0.5 rounded-md border border-primary/30 bg-primary/10 text-[9px] font-black tracking-widest uppercase text-primary shrink-0">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-[10px] text-gray-500 uppercase font-mono">{network.symbol}</p>
-                        {capabilities.features.assetLayer && (
-                          <span className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200">
-                            Assets
-                          </span>
-                        )}
-                      </div>
-                    </div>
+            {[
+              { key: 'main', label: 'Mainnet', rows: rankedNetworkGroups.main },
+              { key: 'test', label: 'Testnet', rows: rankedNetworkGroups.test }
+            ].map((section) => (
+              section.rows.length > 0 ? (
+                <div key={section.key} className="space-y-2">
+                  <div className="flex items-center justify-between px-1 pt-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">
+                      {section.label}
+                    </p>
+                    <p className="text-[10px] text-gray-600">
+                      {section.rows.length}
+                    </p>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={isEnabled}
-                    onChange={(event) => handleNetworkToggle(network.id, event.target.checked)}
-                    disabled={!canToggle}
-                    className="w-4 h-4 accent-primary disabled:opacity-50"
-                  />
-                </label>
-              )
-            })}
+                  {section.rows.map((network) => {
+                    const isEnabled = !disabledSet.has(network.id)
+                    const canToggle = isEnabled ? enabledCount > 1 : enabledCount < MAX_ACTIVE_REFRESH_NETWORKS
+                    const capabilities = resolveNetworkCapabilities(network)
+                    return (
+                      <label
+                        key={network.id}
+                        className={clsx(
+                          'flex items-center justify-between gap-3 p-3 rounded-xl border transition-colors',
+                          isEnabled
+                            ? 'border-dark-600 bg-dark-700/40 hover:bg-dark-700/70'
+                            : 'border-dark-600/70 bg-dark-800/60'
+                        )}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {network.logo ? (
+                            <div className={clsx('w-8 h-8 rounded-full overflow-hidden shrink-0', getModelIconRingClass(String(network.runtimeModelId || network.id || '')))}>
+                              <img src={network.logo} alt={network.name} className="w-full h-full rounded-full object-cover" />
+                            </div>
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-dark-600 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-bold text-gray-200 truncate">{network.name}</p>
+                              <span className={clsx(
+                                'px-1.5 py-0.5 rounded-md border text-[9px] font-black tracking-widest uppercase shrink-0',
+                                getNetworkChainGroup(network) === 'test'
+                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {getNetworkChainGroup(network) === 'test' ? 'Testnet' : 'Mainnet'}
+                              </span>
+                              {getModelStatus(String(network.runtimeModelId || network.id || '')) === 'tested' ? (
+                                <IoCheckmarkCircle className="w-4 h-4 text-green-400 shrink-0" title="Tested" />
+                              ) : (
+                                <IoCloseCircle className="w-4 h-4 text-red-400 shrink-0" title="Not tested" />
+                              )}
+                              {network.id === activeNetworkId && (
+                                <span className="px-1.5 py-0.5 rounded-md border border-primary/30 bg-primary/10 text-[9px] font-black tracking-widest uppercase text-primary shrink-0">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-[10px] text-gray-500 uppercase font-mono">{network.symbol}</p>
+                              {capabilities.features.assetLayer && (
+                                <span className="px-1.5 py-0.5 rounded-md border border-dark-600 bg-dark-700/70 text-[9px] font-black tracking-widest uppercase text-gray-200">
+                                  Assets
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          onChange={(event) => handleNetworkToggle(network.id, event.target.checked)}
+                          disabled={!canToggle}
+                          className="w-4 h-4 accent-primary disabled:opacity-50"
+                        />
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : null
+            ))}
           </div>
 
           {enabledCount <= 1 && (
