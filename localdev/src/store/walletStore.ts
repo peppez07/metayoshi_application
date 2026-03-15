@@ -4237,11 +4237,13 @@ export const useWalletStore = create<WalletState>()(
 
             const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
             const solDirectFallbackFlag = String(env.VITE_SOL_ALLOW_DIRECT_ASSET_RPC_FALLBACK ?? '').trim().toLowerCase()
-            const allowDirectAssetRpcFallback =
-              solDirectFallbackFlag === '1'
-              || solDirectFallbackFlag === 'true'
-              || solDirectFallbackFlag === 'yes'
-              || solDirectFallbackFlag === 'on'
+            const rpcUrl = String(net.rpcUrl || '').trim()
+            const disableDirectAssetRpcFallback =
+              solDirectFallbackFlag === '0'
+              || solDirectFallbackFlag === 'false'
+              || solDirectFallbackFlag === 'no'
+              || solDirectFallbackFlag === 'off'
+            const allowDirectAssetRpcFallback = Boolean(rpcUrl) && !disableDirectAssetRpcFallback
 
             try {
               const rpcConfig = await createUtxoRpcConfig(net, {
@@ -4280,7 +4282,7 @@ export const useWalletStore = create<WalletState>()(
             if (rows.length === 0 && allowDirectAssetRpcFallback) {
               try {
                 const { listSolanaTokenBalances } = await loadSolanaNonCustodialModule()
-                const directRows = await listSolanaTokenBalances(net.rpcUrl, address)
+                const directRows = await listSolanaTokenBalances(rpcUrl, address)
                 rows = directRows.map((row) => ({
                   tokenId: String(row.tokenId || '').trim(),
                   amountRaw: String(row.amountRaw || '').trim(),
