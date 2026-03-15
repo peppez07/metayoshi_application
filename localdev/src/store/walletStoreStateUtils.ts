@@ -81,13 +81,13 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
   'eth',
-  'base',
   'bnb',
+  'arb',
   'op',
-  'sol',
-  'dash',
+  'base',
   'cro',
-  'cosmos'
+  'polygon',
+  'zksync'
 ]
 
 export const MAX_ACTIVE_REFRESH_NETWORKS = 10

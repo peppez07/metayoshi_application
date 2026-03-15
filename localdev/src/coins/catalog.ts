@@ -125,7 +125,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       aliases: ['arb', 'arbitrum', 'arbitrum-one', 'mainnet-arbitrum'],
       chainId: 42161,
       includeInEvmSet: true,
-      isEthereumLayer2: true
+      isEthereumLayer2: true,
+      visibleByDefault: true
     },
     coin: arbCoin
   },
@@ -169,7 +170,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       chain: 'main',
       aliases: ['polygon', 'polygon-pos', 'polygon-mainnet', 'polygon-bor', 'mainnet-polygon'],
       chainId: 137,
-      includeInEvmSet: true
+      includeInEvmSet: true,
+      visibleByDefault: true
     },
     coin: polygonCoin
   },
@@ -182,7 +184,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       chain: 'main',
       aliases: ['avax', 'avaxc', 'avalanche', 'avalanche-c-chain', 'mainnet-avalanche'],
       chainId: 43114,
-      includeInEvmSet: true
+      includeInEvmSet: true,
+      visibleByDefault: true
     },
     coin: avaxcCoin
   },
@@ -224,7 +227,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       chain: 'main',
       aliases: ['cronos', 'cronos-mainnet', 'cronos-evm', 'mainnet-cronos'],
       chainId: 25,
-      includeInEvmSet: true
+      includeInEvmSet: true,
+      visibleByDefault: true
     },
     coin: cronosCoin
   },
@@ -262,7 +266,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       protocolFamily: 'cosmos',
       coinId: 'cronos-pos',
       chain: 'main',
-      aliases: ['cro', 'cronos-pos', 'crocosmos']
+      aliases: ['cro', 'cronos-pos', 'crocosmos'],
+      visibleByDefault: true
     },
     coin: croCoin
   },
@@ -380,7 +385,8 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       aliases: ['zksync', 'zksync-era', 'zksync-mainnet', 'mainnet-zksync'],
       chainId: 324,
       includeInEvmSet: true,
-      isEthereumLayer2: true
+      isEthereumLayer2: true,
+      visibleByDefault: true
     },
     coin: zksyncCoin
   }

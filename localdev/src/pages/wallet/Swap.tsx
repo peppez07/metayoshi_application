@@ -36,7 +36,7 @@ function formatSwapUiError(error: unknown): string {
   }
 
   if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
-    return 'Swap is currently available only for EVM networks in this wallet.'
+    return 'This swap route is not available for the selected network pair.'
   }
 
   if (
@@ -177,6 +177,19 @@ function toServerSwapAsset(item: SwapAssetOption | null, networkId: string): Ser
     symbol: item.symbol,
     label: item.label,
     contractAddress: item.kind === 'native' ? undefined : (String(item.contractAddress || '').trim() || undefined)
+  }
+}
+
+async function withResolvedSwapAsset(
+  network: { coinType: string },
+  rpcConfig: ReturnType<typeof createServerExecutionRpcConfig>,
+  asset: ServerSwapAssetRef | undefined
+): Promise<ServerSwapAssetRef | undefined> {
+  if (!asset) return undefined
+  if (network.coinType !== 'EVM' || asset.kind === 'native') return asset
+  return {
+    ...asset,
+    decimals: await resolveServerSwapAssetDecimals(rpcConfig, asset)
   }
 }
 
@@ -424,12 +437,6 @@ const Swap: React.FC = () => {
     if (!toItem) throw new Error('Select a destination asset')
     if (!fromAmount || Number(fromAmount) <= 0) throw new Error('Enter a valid amount')
     if (isSameAssetPair) throw new Error('Choose a different destination asset')
-    if (fromNetwork.coinType !== 'EVM' || toNetwork.coinType !== 'EVM') {
-      throw new Error('Selected network is not EVM')
-    }
-    if (!fromNetwork.chainId || !toNetwork.chainId) {
-      throw new Error('EVM chainId is required for Uniswap swaps')
-    }
 
     const sourceAddress = String(await ensureNetworkAddress(fromNetwork.id) || '').trim()
     if (!sourceAddress) throw new Error(`Could not derive a ${fromNetwork.symbol} source address`)
@@ -441,9 +448,9 @@ const Swap: React.FC = () => {
     const destinationRpcConfig = createServerExecutionRpcConfig(toNetwork)
     const sourceAssetBase = toServerSwapAsset(fromItem, fromNetwork.id)
     const destinationAssetBase = toServerSwapAsset(toItem, toNetwork.id)
-    const [sourceDecimals, destinationDecimals] = await Promise.all([
-      resolveServerSwapAssetDecimals(sourceRpcConfig, sourceAssetBase),
-      resolveServerSwapAssetDecimals(destinationRpcConfig, destinationAssetBase)
+    const [sourceAsset, destinationAsset] = await Promise.all([
+      withResolvedSwapAsset(fromNetwork, sourceRpcConfig, sourceAssetBase),
+      withResolvedSwapAsset(toNetwork, destinationRpcConfig, destinationAssetBase)
     ])
 
     return {
@@ -456,8 +463,8 @@ const Swap: React.FC = () => {
       }),
       sourceAddress,
       destinationAddress,
-      sourceAsset: sourceAssetBase ? { ...sourceAssetBase, decimals: sourceDecimals } : undefined,
-      destinationAsset: destinationAssetBase ? { ...destinationAssetBase, decimals: destinationDecimals } : undefined
+      sourceAsset,
+      destinationAsset
     }
   }
 
@@ -468,12 +475,18 @@ const Swap: React.FC = () => {
       const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
       const slippage = Number(slippagePct)
       const destinationCandidates = findSwapAssetAliasOptions(toItem, toOptions, toNetwork!)
+      const destinationRpcConfig = createServerExecutionRpcConfig(toNetwork!)
       let nextQuote: ServerSwapQuote | null = null
       let selectedDestination = toItem
       let lastError: unknown = null
 
       for (const candidate of destinationCandidates) {
         try {
+          const candidateAsset = await withResolvedSwapAsset(
+            toNetwork!,
+            destinationRpcConfig,
+            toServerSwapAsset(candidate, toNetwork!.id)
+          )
           nextQuote = await requestServerSwapQuote(rpcConfig, {
             source: {
               networkId: fromNetwork!.id,
@@ -488,13 +501,7 @@ const Swap: React.FC = () => {
               chainId: toNetwork!.chainId,
               symbol: candidate.symbol || toNetwork!.symbol,
               address: destinationAddress,
-              asset: {
-                ...(toServerSwapAsset(candidate, toNetwork!.id) as ServerSwapAssetRef),
-                decimals: await resolveServerSwapAssetDecimals(
-                  createServerExecutionRpcConfig(toNetwork!),
-                  toServerSwapAsset(candidate, toNetwork!.id)
-                )
-              }
+              asset: candidateAsset
             },
             slippageBps: Number.isFinite(slippage) ? Math.max(1, Math.round(slippage * 100)) : 50,
             sponsorPreference
@@ -596,7 +603,7 @@ const Swap: React.FC = () => {
             <div className="space-y-1">
               <p className="text-xs font-bold text-red-200">Server-mediated swap</p>
               <p className="text-[11px] text-red-100/90">
-                This flow uses the MetaYoshi server swap routes for EVM swaps. Non-EVM networks and unsupported execution modes will be rejected.
+                This flow uses the MetaYoshi server swap routes for every network the server exposes. Legacy fallback execution remains EVM-only.
               </p>
             </div>
           </div>
