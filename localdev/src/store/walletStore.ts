@@ -1571,6 +1571,14 @@ function isBridgeEvmNftTokenType(tokenType: string): boolean {
   )
 }
 
+function isBridgeEvmNativeTokenRow(row: Pick<BridgeTokenBalanceRow, 'tokenType' | 'tokenId' | 'tokenAddress' | 'issuer'>): boolean {
+  const tokenType = String(row.tokenType || '').trim().toLowerCase()
+  const tokenId = String(row.tokenId || '').trim().toLowerCase()
+  const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.issuer || '').trim())
+  if (tokenAddress) return false
+  return tokenType === 'native' || tokenId === 'native' || tokenId === 'eth'
+}
+
 function parseBridgeEvmNftReference(row: BridgeTokenBalanceRow): { address: string; tokenId: string } | null {
   const tokenIdRaw = String(row.tokenId || '').trim()
   const tokenAddressRaw = String(row.tokenAddress || '').trim()
@@ -1746,6 +1754,8 @@ function buildEvmAssetBucketsFromBridgeRows(
   const assetKeyByContract = new Map<string, string>()
 
   for (const row of rows) {
+    if (isBridgeEvmNativeTokenRow(row)) continue
+
     const rawBalanceText = String(row.balanceRaw || '').trim()
     if (!/^\d+$/.test(rawBalanceText)) continue
     const rawBalance = BigInt(rawBalanceText)
@@ -3493,6 +3503,11 @@ export const useWalletStore = create<WalletState>()(
                 // Fall through to slower RPC/explorer scan.
               }
             }
+            console.groupCollapsed(`[EVM assets][${activeNetworkId}] bridge token rows for ${address}`)
+            console.log('bridgeCoin', bridgeCoin)
+            console.log('bridgeChain', bridgeChain)
+            console.log('bridgeTokenRows', bridgeTokenRows)
+            console.groupEnd()
 
             const activityTxids = activity
               .filter((entry) =>
@@ -3532,6 +3547,10 @@ export const useWalletStore = create<WalletState>()(
                 }
               }
             }
+            console.groupCollapsed(`[EVM assets][${activeNetworkId}] discovery payloads for ${address}`)
+            console.log('discoveredAddresses', discoveredAddresses)
+            console.log('assetsEndpointTokens', assetsEndpointTokens)
+            console.groupEnd()
             for (const discoveredAddress of discoveredAddresses) {
               if (trackedByAddress.has(discoveredAddress)) continue
               trackedByAddress.set(discoveredAddress, {
@@ -3557,6 +3576,7 @@ export const useWalletStore = create<WalletState>()(
               trackedByAddress.set(token.address, token)
             }
             for (const row of bridgeTokenRows) {
+              if (isBridgeEvmNativeTokenRow(row)) continue
               const tokenAddress = normalizeEvmAddressLoose(String(
                 row.tokenAddress || row.tokenId || row.issuer || ''
               ).trim())
@@ -3588,6 +3608,10 @@ export const useWalletStore = create<WalletState>()(
               // Keep scan bounded when no dynamic discovery source produced candidates.
               mergedTokens = mergedTokens.slice(0, 80)
             }
+            console.groupCollapsed(`[EVM assets][${activeNetworkId}] merged token candidates for ${address}`)
+            console.log('trackedByAddress', [...trackedByAddress.values()])
+            console.log('mergedTokens', mergedTokens)
+            console.groupEnd()
 
             // Bridge-first: keep app->server transport consistent with wallet policy.
             const fungibleAssets: Record<string, number> = {}
@@ -3608,6 +3632,7 @@ export const useWalletStore = create<WalletState>()(
               fungibleAssetLabels[assetKey] = label
             }
             for (const row of bridgeTokenRows) {
+              if (isBridgeEvmNativeTokenRow(row)) continue
               const tokenAddress = normalizeEvmAddressLoose(String(
                 row.tokenAddress || row.tokenId || row.issuer || ''
               ).trim())
@@ -3665,6 +3690,11 @@ export const useWalletStore = create<WalletState>()(
                 return null
               }
             })
+            console.groupCollapsed(`[EVM assets][${activeNetworkId}] token read results for ${address}`)
+            console.log('tokenRows', tokenRows.filter(Boolean))
+            console.log('tokenReadSuccesses', tokenReadSuccesses)
+            console.log('tokenReadErrors', tokenReadErrors)
+            console.groupEnd()
 
             for (const row of tokenRows) {
               if (!row) continue
@@ -3786,6 +3816,7 @@ export const useWalletStore = create<WalletState>()(
                   wallet: String(net.rpcWallet || '').trim() || undefined
                 })
                 for (const row of bridgeRows) {
+                  if (isBridgeEvmNativeTokenRow(row)) continue
                   const rawBalanceText = String(row.balanceRaw || '').trim()
                   if (!/^\d+$/.test(rawBalanceText)) continue
                   const rawBalance = BigInt(rawBalanceText)
@@ -3868,6 +3899,14 @@ export const useWalletStore = create<WalletState>()(
             }
 
             const assets = { ...fungibleAssets, ...nftAssets }
+            console.groupCollapsed(`[EVM assets][${activeNetworkId}] final asset snapshot for ${address}`)
+            console.log('fungibleAssets', fungibleAssets)
+            console.log('fungibleAssetLabels', fungibleAssetLabels)
+            console.log('fungibleAssetLogos', fungibleAssetLogos)
+            console.log('nftAssets', nftAssets)
+            console.log('nftLookup', nftLookup)
+            console.log('finalAssets', assets)
+            console.groupEnd()
 
             // Do not wipe visible assets on transient provider failures.
             if (tokenReadSuccesses === 0 && tokenReadErrors > 0 && bridgeFallbackRowsApplied === 0 && Object.keys(assets).length === 0) {
@@ -5112,9 +5151,42 @@ export const useWalletStore = create<WalletState>()(
           hidden: hiddenSet.has(row.id)
         }))
 
+        const normalizedRows = network.coinType === 'EVM'
+          ? (() => {
+              const canonicalFungibleKeys = new Set<string>()
+              for (const row of rows) {
+                if (row.requestType !== 'asset' || row.kind !== 'fungible') continue
+                if (!/^EVMTOKEN:/i.test(String(row.id || '').trim())) continue
+                const symbolKey = String(row.symbol || row.label || row.assetId || '').trim().toUpperCase()
+                if (!symbolKey) continue
+                canonicalFungibleKeys.add(`${symbolKey}|${Math.max(0, Math.round(Number(row.rawAmount || 0)))}`)
+              }
+
+              return rows.filter((row) => {
+                if (row.requestType !== 'asset' || row.kind !== 'fungible') return true
+                if (/^EVMTOKEN:/i.test(String(row.id || '').trim())) return true
+
+                const assetId = String(row.assetId || '').trim()
+                if (!assetId) return true
+                if (ethers.isAddress(assetId) || /0x[a-fA-F0-9]{40}/.test(assetId)) return true
+                if (parseEvmNftAssetKey(assetId)) return true
+                if (extractEvmTokenAddressFromLogoUri(String(row.logoUrl || '').trim())) return true
+
+                const symbolKey = (
+                  parseEvmFungibleAssetAlias(assetId).symbol
+                  || String(row.symbol || row.label || '').trim().toUpperCase()
+                )
+                if (!symbolKey) return true
+
+                const dedupeKey = `${symbolKey}|${Math.max(0, Math.round(Number(row.rawAmount || 0)))}`
+                return !canonicalFungibleKeys.has(dedupeKey)
+              })
+            })()
+          : rows
+
         const visibleRows = includeHidden
-          ? rows
-          : rows.filter((row) => !row.hidden || row.kind === 'native')
+          ? normalizedRows
+          : normalizedRows.filter((row) => !row.hidden || row.kind === 'native')
 
         visibleRows.sort((a, b) => {
           const rankA = rankById.has(a.id) ? (rankById.get(a.id) as number) : Number.MAX_SAFE_INTEGER

@@ -178,6 +178,17 @@ function formatAssetOption(item: SwapAssetOption): string {
   return item.source === 'catalog' ? `${label} (Catalog)` : label
 }
 
+function filterAssetOptions(options: SwapAssetOption[], query: string): SwapAssetOption[] {
+  const normalizedQuery = String(query || '').trim().toLowerCase()
+  if (!normalizedQuery) return options
+
+  return options.filter((item) => {
+    const symbol = String(item.symbol || '').trim().toLowerCase()
+    const label = String(item.label || '').trim().toLowerCase()
+    return symbol.includes(normalizedQuery) || label.includes(normalizedQuery)
+  })
+}
+
 function inferAssetContractAddress(item: SendableItem): string | undefined {
   const raw = String(item.assetId || '').trim()
   if (!raw) return undefined
@@ -370,6 +381,49 @@ function AssetQuickPick({
   )
 }
 
+function AssetListItem({
+  active,
+  option,
+  onClick
+}: {
+  active: boolean
+  option: SwapAssetOption
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
+        active
+          ? 'border-slate-900 bg-slate-900 text-white'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{option.symbol}</span>
+          <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] ${
+            active
+              ? 'border-white/20 bg-white/10 text-white/80'
+              : option.source === 'wallet'
+                ? 'border-slate-200 bg-slate-50 text-slate-500'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          }`}>
+            {option.source === 'wallet' ? 'Wallet' : 'Catalog'}
+          </span>
+        </div>
+        <div className={`mt-1 truncate text-[11px] ${active ? 'text-white/75' : 'text-slate-500'}`}>
+          {option.label || option.symbol}
+        </div>
+      </div>
+      <div className={`text-right text-[11px] ${active ? 'text-white/85' : 'text-slate-500'}`}>
+        {option.amount ? option.amount : 'Select'}
+      </div>
+    </button>
+  )
+}
+
 const Swap: React.FC = () => {
   const navigate = useNavigate()
   const { showToast } = useToast()
@@ -542,9 +596,17 @@ const Swap: React.FC = () => {
     () => pickQuickAssets(fromOptions, fromNetwork, fromItem),
     [fromOptions, fromNetwork, fromItem]
   )
+  const visibleFromOptions = useMemo(
+    () => filterAssetOptions(fromOptions, sourceQuery).slice(0, 8),
+    [fromOptions, sourceQuery]
+  )
   const toQuickPicks = useMemo(
     () => pickQuickAssets(toOptions, toNetwork, toItem),
     [toOptions, toNetwork, toItem]
+  )
+  const visibleToOptions = useMemo(
+    () => filterAssetOptions(toOptions, destinationQuery).slice(0, 8),
+    [toOptions, destinationQuery]
   )
 
   useEffect(() => {
@@ -1035,15 +1097,14 @@ const Swap: React.FC = () => {
                 onChange={(event) => setFromAmount(event.target.value)}
                 className="w-full bg-transparent text-[32px] font-semibold tracking-tight text-slate-950 outline-none placeholder:text-slate-300"
               />
-              <select
-                value={fromAssetId}
-                onChange={(event) => setFromAssetId(event.target.value)}
-                className="min-w-[140px] rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none"
-              >
-                {fromOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
-                ))}
-              </select>
+              <div className="min-w-[140px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
+                <div className="text-sm font-semibold text-slate-900">
+                  {fromItem?.symbol || 'Select'}
+                </div>
+                <div className="mt-1 text-[10px] text-slate-500">
+                  {fromItem?.label || 'Token'}
+                </div>
+              </div>
             </div>
 
             {fromQuickPicks.length > 0 ? (
@@ -1081,6 +1142,22 @@ const Swap: React.FC = () => {
                   ? `No live sell tokens are visible for this pair. Matrix-listed sell symbols: ${allowedSourceSymbolList.join(', ')}.`
                   : 'No live sell tokens are listed yet for this network pair.'}
             </p>
+
+            {visibleFromOptions.length > 0 ? (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Choose token</div>
+                <div className="space-y-2">
+                  {visibleFromOptions.map((item) => (
+                    <AssetListItem
+                      key={`from-list-${item.id}`}
+                      active={item.id === fromAssetId}
+                      option={item}
+                      onClick={() => setFromAssetId(item.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>Available</span>
@@ -1122,15 +1199,14 @@ const Swap: React.FC = () => {
                   {quoteStatusText}
                 </p>
               </div>
-              <select
-                value={toAssetId}
-                onChange={(event) => setToAssetId(event.target.value)}
-                className="min-w-[140px] rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none"
-              >
-                {toOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{formatAssetOption(item)}</option>
-                ))}
-              </select>
+              <div className="min-w-[140px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right">
+                <div className="text-sm font-semibold text-slate-900">
+                  {toItem?.symbol || 'Select'}
+                </div>
+                <div className="mt-1 text-[10px] text-slate-500">
+                  {toItem?.label || 'Token'}
+                </div>
+              </div>
             </div>
 
             {toQuickPicks.length > 0 ? (
@@ -1168,6 +1244,22 @@ const Swap: React.FC = () => {
                   ? `No live receive tokens are visible for this pair. Matrix-listed receive symbols: ${allowedDestinationSymbolList.join(', ')}.`
                   : 'No live receive tokens are listed yet for this selection.'}
             </p>
+
+            {visibleToOptions.length > 0 ? (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Choose token</div>
+                <div className="space-y-2">
+                  {visibleToOptions.map((item) => (
+                    <AssetListItem
+                      key={`to-list-${item.id}`}
+                      active={item.id === toAssetId}
+                      option={item}
+                      onClick={() => setToAssetId(item.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
