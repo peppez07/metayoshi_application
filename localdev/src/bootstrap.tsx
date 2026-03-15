@@ -62,7 +62,7 @@ class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('React Error Boundary caught an error:', error, errorInfo)
-    void recordRuntimeError('popup-ui', error, {
+    void recordRuntimeError('wallet-ui', error, {
       kind: 'react-error-boundary',
       componentStack: errorInfo.componentStack
     })
@@ -94,7 +94,7 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-installGlobalErrorMonitor('popup-ui')
+installGlobalErrorMonitor('wallet-ui')
 installZoomShortcutBlockers()
 initThemeMode()
 
@@ -120,7 +120,7 @@ try {
   )
 } catch (error) {
   console.error('Failed to render React app:', error)
-  void recordRuntimeError('popup-ui', error, { kind: 'bootstrap-render' })
+  void recordRuntimeError('wallet-ui', error, { kind: 'bootstrap-render' })
   rootElement.replaceChildren()
 
   const wrapper = document.createElement('div')

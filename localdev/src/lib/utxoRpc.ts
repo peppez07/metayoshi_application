@@ -32,6 +32,7 @@ export interface UtxoRpcConfig {
   bridgeTxKeyCandidates?: string[] // optional key candidates for server rotation/s skew
   secureBridgeApiBaseUrl?: string
   secureBridgeWritesEnabled?: boolean
+  secureBridgeAddressResolver?: () => Promise<string>
   secureBridgeSigner?: (message: string) => Promise<{ address: string; signature: string }>
   timeoutMs?: number      // request timeout (default 10000ms)
   apiInterceptor?: CoinApiInterceptor
@@ -363,14 +364,24 @@ async function getSecureBridgeSession(
     return { token: cached.token, address: cached.address, apiBase }
   }
 
-  let signerProbe: { address: string; signature: string }
-  try {
-    signerProbe = await signer('MetaYoshi secure bridge auth address probe')
-  } catch (error) {
-    throw new Error(`Secure bridge signer failed: ${asError(error).message}`)
+  let address = ''
+  const addressResolver = config.secureBridgeAddressResolver
+  if (addressResolver) {
+    try {
+      address = String(await addressResolver() || '').trim()
+    } catch (error) {
+      throw new Error(`Secure bridge address resolver failed: ${asError(error).message}`)
+    }
   }
-
-  const address = String(signerProbe?.address || '').trim()
+  if (!address) {
+    let signerProbe: { address: string; signature: string }
+    try {
+      signerProbe = await signer('MetaYoshi secure bridge auth address probe')
+    } catch (error) {
+      throw new Error(`Secure bridge signer failed: ${asError(error).message}`)
+    }
+    address = String(signerProbe?.address || '').trim()
+  }
   if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
     throw new Error('Secure bridge signer returned an invalid EVM address')
   }

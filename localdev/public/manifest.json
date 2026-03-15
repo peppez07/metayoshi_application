@@ -12,6 +12,9 @@
       "128": "assets/metayoshi-128.png"
     }
   },
+  "side_panel": {
+    "default_path": "app/src/ui/index.html"
+  },
   "icons": {
     "16": "assets/metayoshi-16.png",
     "32": "assets/metayoshi-32.png",
@@ -26,7 +29,7 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "sidePanel"],
   "host_permissions": [
     "https://*/*",
     "http://*/*"

@@ -756,6 +756,7 @@ export function createServerExecutionRpcConfig(
   network: BridgeNetworkInput,
   options?: {
     sendTransaction?: ServerExecutionRpcConfig['sendTransaction']
+    secureBridgeAddressResolver?: ServerExecutionRpcConfig['secureBridgeAddressResolver']
     secureBridgeSigner?: ServerExecutionRpcConfig['secureBridgeSigner']
   }
 ): ServerExecutionRpcConfig {
@@ -769,6 +770,7 @@ export function createServerExecutionRpcConfig(
     chainId: network.chainId,
     explorerUrl: network.explorerUrl,
     sendTransaction: options?.sendTransaction,
+    secureBridgeAddressResolver: options?.secureBridgeAddressResolver,
     secureBridgeSigner: options?.secureBridgeSigner,
     useLocalRpc: false
   }

@@ -308,6 +308,7 @@ interface WalletState {
   ) => Promise<void>
   unlock: (password: string) => Promise<boolean>
   verifyPassword: (password: string) => Promise<boolean>
+  resolveBackendAuthAddress: () => Promise<string>
   signBackendAuthMessage: (message: string) => Promise<{ address: string; signature: string }>
   lock: () => void
   setLocked: (locked: boolean) => void
@@ -790,6 +791,7 @@ async function createUtxoRpcConfig(
   opts: {
     useLocalRpc?: boolean
     localRpcOverride?: { rpcUrl: string; rpcUsername: string; rpcPassword: string; rpcWallet: string }
+    secureBridgeAddressResolver?: () => Promise<string>
     secureBridgeSigner?: (message: string) => Promise<{ address: string; signature: string }>
   } = {}
 ): Promise<UtxoRpcConfig> {
@@ -818,6 +820,7 @@ async function createUtxoRpcConfig(
     bridgeTxKeyCandidates,
     secureBridgeApiBaseUrl: secureBridgeApiBaseUrl || undefined,
     secureBridgeWritesEnabled,
+    secureBridgeAddressResolver: opts.secureBridgeAddressResolver,
     secureBridgeSigner: opts.secureBridgeSigner,
     // Enforce bridge-first transport for app <-> server communication.
     useLocalRpc: false
@@ -2934,12 +2937,29 @@ export const useWalletStore = create<WalletState>()(
         }
       },
 
+      resolveBackendAuthAddress: async () => {
+        const { isLocked, sessionMnemonic, accounts, activeAccountId } = get()
+        if (isExternalEvmSignerEnabled()) {
+          const signer = await resolveEvmExternalSigner()
+          if (!signer) throw new Error('External EVM signer is not available')
+          return ethers.getAddress(await signer.getAddress())
+        }
+        if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
+
+        const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        if (!activeAccount) throw new Error('No active account')
+
+        const fallbackIndex = accounts.findIndex((a) => a.id === activeAccount.id)
+        const derivationIndex = resolveDerivationIndex(activeAccount, fallbackIndex)
+        return ethers.getAddress(deriveEvmWallet(sessionMnemonic, derivationIndex).address)
+      },
+
       signBackendAuthMessage: async (message) => {
         const { isLocked, sessionMnemonic, accounts, activeAccountId } = get()
         if (isExternalEvmSignerEnabled()) {
           const signer = await resolveEvmExternalSigner()
           if (!signer) throw new Error('External EVM signer is not available')
-          const address = await signer.getAddress()
+          const address = ethers.getAddress(await signer.getAddress())
           const signature = await signer.signMessage(String(message || ''))
           return { address, signature }
         }
@@ -2952,7 +2972,7 @@ export const useWalletStore = create<WalletState>()(
         const derivationIndex = resolveDerivationIndex(activeAccount, fallbackIndex)
         const evmWallet = deriveEvmWallet(sessionMnemonic, derivationIndex)
         const signature = await evmWallet.signMessage(String(message || ''))
-        return { address: evmWallet.address, signature }
+        return { address: ethers.getAddress(evmWallet.address), signature }
       },
 
       unlock: async (password) => {

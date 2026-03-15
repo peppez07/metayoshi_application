@@ -4,6 +4,12 @@ import { useWalletStore } from './store/walletStore'
 import { resolveNetworkCapabilities } from './lib/networkCapabilities'
 import { resolveCoinModelFamily, coinModelFamilyToRouteKey } from './lib/coinModel'
 import { getEnabledNetworks } from './lib/networkVisibility'
+import {
+  EXTENSION_SURFACE_ROUTE_STORAGE_KEY,
+  clearExtensionSurfaceRoute,
+  getExtensionSurfaceRoute,
+  parseExtensionSurfaceRouteEntry
+} from './lib/extensionSurfaceRoute'
 
 // Pages (to be created)
 import Register from './pages/Register'
@@ -187,7 +193,7 @@ function App() {
 
   // Persisted state hydrates asynchronously from extension storage.
   // Re-check after hydration so the wallet never renders as unlocked without
-  // an in-memory mnemonic in a freshly opened popup.
+  // an in-memory mnemonic in a freshly opened extension surface.
   useEffect(() => {
     if (!hasHydrated) return
     if (isInitialized && !isLocked && !sessionMnemonic) {
@@ -247,6 +253,43 @@ function App() {
       }
     }
   }, [hasHydrated])
+
+  useEffect(() => {
+    if (!hasHydrated || typeof chrome === 'undefined' || !chrome.storage?.local) return
+
+    let mounted = true
+    const currentRoute = `${location.pathname}${location.search}`
+
+    const applySurfaceRoute = async (rawValue: unknown): Promise<void> => {
+      const entry = parseExtensionSurfaceRouteEntry(rawValue)
+      if (!mounted || !entry) return
+      await clearExtensionSurfaceRoute().catch(() => {
+        // Best effort cleanup only.
+      })
+      if (entry.route === currentRoute) return
+      window.location.hash = `#${entry.route}`
+    }
+
+    void getExtensionSurfaceRoute()
+      .then((entry) => applySurfaceRoute(entry))
+      .catch(() => {
+        // Ignore storage read failures and keep the current route.
+      })
+
+    const onStorageChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ): void => {
+      if (areaName !== 'local' || !changes[EXTENSION_SURFACE_ROUTE_STORAGE_KEY]) return
+      void applySurfaceRoute(changes[EXTENSION_SURFACE_ROUTE_STORAGE_KEY].newValue)
+    }
+
+    chrome.storage.onChanged.addListener(onStorageChanged)
+    return () => {
+      mounted = false
+      chrome.storage.onChanged.removeListener(onStorageChanged)
+    }
+  }, [hasHydrated, location.pathname, location.search])
 
   if (
     needsTermsAcceptance

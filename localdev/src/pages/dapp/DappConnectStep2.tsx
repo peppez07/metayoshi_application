@@ -71,7 +71,6 @@ const DappConnectStep2: React.FC = () => {
     })
 
     navigate('/wallet/assets')
-    window.close()
   }
 
   if (loadingApproval || !pendingApproval) {

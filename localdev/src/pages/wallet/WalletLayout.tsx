@@ -117,7 +117,7 @@ const WalletLayout: React.FC = () => {
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   const isSwapRoute = location.pathname.startsWith('/wallet/swap')
   const isFocusedFlowRoute = isSendRoute || isSwapRoute
-  // Balance refresh (visibility-aware to avoid bridge/RPC spam while popup is hidden)
+  // Balance refresh (visibility-aware to avoid bridge/RPC spam while the extension surface is hidden)
   useEffect(() => {
     void fetchNetworkFiat()
   }, [activeAccountId, activeNetworkId, fetchNetworkFiat])

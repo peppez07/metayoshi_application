@@ -31,18 +31,18 @@ import {
   type DappRequestMethod,
   type DappScope
 } from '../lib/dappPermissions'
+import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
-const APP_POPUP_WIDTH = 380
-// Chrome window bounds use integer pixels; 663.2px requested by product is rounded to 663px.
-const APP_POPUP_HEIGHT = 663
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
-const managedPopupWindowIds = new Set<number>()
-let managedPopupWindowId: number | null = null
-let managedPopupOpenQueue: Promise<void> = Promise.resolve()
+
+type ExtensionSurfaceTarget = {
+  tabId?: number
+  windowId?: number
+}
 
 type JsonRpcRequest = {
   id?: string | number | null
@@ -99,6 +99,7 @@ type SendAssetParams = {
 }
 
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
+const OPEN_WALLET_METHODS = new Set(['wallet_openWallet', 'metayoshi_openWallet', 'rtm_openWallet'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const CAPABILITIES_METHODS = new Set(['wallet_getCapabilities', 'metayoshi_getCapabilities', 'rtm_getCapabilities'])
 const NETWORKS_METHODS = new Set(['wallet_getNetworks', 'metayoshi_getNetworks', 'rtm_getNetworks'])
@@ -559,132 +560,90 @@ async function touchLastConnected(origin: string): Promise<void> {
   await setDappPermissionMap(permissionMap)
 }
 
-function buildApprovalPopupUrl(): string {
-  return buildPopupRouteUrl('/dapp/connect/1')
+function getSidePanelApi(): {
+  setOptions?: (options: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>
+  open?: (options: { tabId?: number; windowId?: number }) => Promise<void>
+  setPanelBehavior?: (options: { openPanelOnActionClick: boolean }) => Promise<void>
+} | null {
+  const api = (chrome as typeof chrome & {
+    sidePanel?: {
+      setOptions?: (options: { tabId?: number; path?: string; enabled?: boolean }) => Promise<void>
+      open?: (options: { tabId?: number; windowId?: number }) => Promise<void>
+      setPanelBehavior?: (options: { openPanelOnActionClick: boolean }) => Promise<void>
+    }
+  }).sidePanel
+  return api || null
+}
+
+function buildApprovalRoutePath(): string {
+  return '/dapp/connect/1'
 }
 
 function isWalletTxConfirmRequest(method: DappRequestMethod): boolean {
   return method === 'wallet_sendAsset' || method === 'wallet_sendTransaction'
 }
 
-function buildRequestPopupUrl(requestId: string, method: DappRequestMethod): string {
+function buildRequestRoutePath(requestId: string, method: DappRequestMethod): string {
   if (isWalletTxConfirmRequest(method)) {
-    return buildPopupRouteUrl(`/tx/confirm?dappRequest=1&id=${encodeURIComponent(requestId)}`)
+    return `/tx/confirm?dappRequest=1&id=${encodeURIComponent(requestId)}`
   }
-  return buildPopupRouteUrl(`/dapp/request/confirm?id=${encodeURIComponent(requestId)}`)
+  return `/dapp/request/confirm?id=${encodeURIComponent(requestId)}`
 }
 
-function buildPopupRouteUrl(route: string): string {
-  const normalizedRoute = String(route || '').trim()
-  const hashRoute = normalizedRoute.startsWith('/') ? normalizedRoute : `/${normalizedRoute}`
-  return `${chrome.runtime.getURL(APP_ENTRY_PATH)}#${hashRoute}`
+function buildExtensionRouteUrl(routePath: string): string {
+  return chrome.runtime.getURL(`${APP_ENTRY_PATH}#${routePath}`)
 }
 
-function buildWalletHomePopupUrl(): string {
-  return buildPopupRouteUrl('/')
-}
-
-async function openWalletHomePopup(): Promise<void> {
-  await openManagedPopup(buildWalletHomePopupUrl())
-}
-
-async function openApprovalPopup(): Promise<void> {
-  await openManagedPopup(buildApprovalPopupUrl())
-}
-
-async function openRequestPopup(requestId: string, method: DappRequestMethod): Promise<void> {
-  await openManagedPopup(buildRequestPopupUrl(requestId, method))
-}
-
-async function openManagedPopup(url: string): Promise<void> {
-  const nextTask = managedPopupOpenQueue
-    .catch(() => {
-      // Keep queue alive after prior failure.
-    })
-    .then(() => openManagedPopupInternal(url))
-  managedPopupOpenQueue = nextTask
-  await nextTask
-}
-
-async function openManagedPopupInternal(url: string): Promise<void> {
-  const left = await resolvePopupLeft()
-  const top = await resolvePopupTop()
-
-  const existingWindow = await findManagedPopupWindow()
-  if (existingWindow?.id !== undefined) {
-    const windowId = existingWindow.id
-    managedPopupWindowId = windowId
-    managedPopupWindowIds.add(windowId)
-    await chrome.windows.update(windowId, {
-      width: APP_POPUP_WIDTH,
-      height: APP_POPUP_HEIGHT,
-      state: 'normal',
-      left,
-      top,
-      focused: true
-    })
-    await updateManagedPopupWindowRoute(windowId, url)
-    return
+async function resolveExtensionSurfaceTarget(target?: ExtensionSurfaceTarget): Promise<ExtensionSurfaceTarget> {
+  const resolved: ExtensionSurfaceTarget = {
+    ...(typeof target?.tabId === 'number' ? { tabId: target.tabId } : {}),
+    ...(typeof target?.windowId === 'number' ? { windowId: target.windowId } : {})
   }
 
-  const created = await chrome.windows.create({
-    url,
-    type: 'popup',
-    width: APP_POPUP_WIDTH,
-    height: APP_POPUP_HEIGHT,
-    state: 'normal',
-    left,
-    top,
-    focused: true
-  })
-  if (created && typeof created.id === 'number') {
-    managedPopupWindowId = created.id
-    managedPopupWindowIds.add(created.id)
+  if (typeof resolved.tabId !== 'number') {
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      if (typeof activeTab?.id === 'number') {
+        resolved.tabId = activeTab.id
+      }
+      if (typeof activeTab?.windowId === 'number') {
+        resolved.windowId = activeTab.windowId
+      }
+    } catch {
+      // Ignore transient tab query errors.
+    }
   }
+
+  if (typeof resolved.windowId !== 'number') {
+    try {
+      const win = await chrome.windows.getLastFocused()
+      if (typeof win?.id === 'number') {
+        resolved.windowId = win.id
+      }
+    } catch {
+      // Ignore transient window query errors.
+    }
+  }
+
+  return resolved
 }
 
-function isManagedPopupUrl(url: string | undefined): boolean {
+function isManagedExtensionUrl(url: string | undefined): boolean {
   if (!url) return false
   const base = chrome.runtime.getURL(APP_ENTRY_PATH)
   return url.startsWith(base)
 }
 
-function windowHasManagedPopupTab(win: chrome.windows.Window | null | undefined): boolean {
-  if (!win || win.type !== 'popup') return false
-  const tabs = Array.isArray(win.tabs) ? win.tabs : []
-  return tabs.some((tab) => isManagedPopupUrl(tab?.url))
-}
-
-async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
-  if (typeof managedPopupWindowId === 'number') {
-    try {
-      const win = await chrome.windows.get(managedPopupWindowId, { populate: true })
-      if (windowHasManagedPopupTab(win)) {
-        return win
-      }
-    } catch {
-      managedPopupWindowId = null
-    }
-  }
-
+async function findManagedExtensionTab(): Promise<chrome.tabs.Tab | null> {
   try {
-    const all = await chrome.windows.getAll({ populate: true })
-    const managed = all.filter((win) => windowHasManagedPopupTab(win))
+    const tabs = await chrome.tabs.query({})
+    const managed = tabs.filter((tab) => isManagedExtensionUrl(tab.url))
     if (managed.length === 0) return null
 
-    const [primary, ...duplicates] = managed
-    if (typeof primary.id === 'number') {
-      managedPopupWindowId = primary.id
-      managedPopupWindowIds.add(primary.id)
-    }
-    for (const dup of duplicates) {
-      if (typeof dup.id === 'number') {
-        managedPopupWindowIds.delete(dup.id)
-        try {
-          await chrome.windows.remove(dup.id)
-        } catch {
-          // Ignore close races.
-        }
+    let primary = managed[0]
+    for (const candidate of managed) {
+      if (candidate.active && !primary.active) {
+        primary = candidate
       }
     }
     return primary
@@ -693,103 +652,80 @@ async function findManagedPopupWindow(): Promise<chrome.windows.Window | null> {
   }
 }
 
-async function enforceSingleManagedPopupWindow(): Promise<void> {
-  try {
-    const all = await chrome.windows.getAll({ populate: true })
-    const managed = all.filter((win) => windowHasManagedPopupTab(win))
-    if (managed.length === 0) return
+async function openOrFocusExtensionTab(
+  routePath: string,
+  target?: ExtensionSurfaceTarget
+): Promise<void> {
+  const resolvedTarget = await resolveExtensionSurfaceTarget(target)
+  const url = buildExtensionRouteUrl(routePath)
+  const existingTab = await findManagedExtensionTab()
 
-    let primary = managed[0]
-    for (const candidate of managed) {
-      const candidateFocused = candidate.focused === true
-      const primaryFocused = primary.focused === true
-      if (candidateFocused && !primaryFocused) {
-        primary = candidate
-      } else if (candidateFocused === primaryFocused) {
-        const cId = typeof candidate.id === 'number' ? candidate.id : Number.MAX_SAFE_INTEGER
-        const pId = typeof primary.id === 'number' ? primary.id : Number.MAX_SAFE_INTEGER
-        if (cId < pId) primary = candidate
+  if (typeof existingTab?.id === 'number') {
+    await chrome.tabs.update(existingTab.id, { url, active: true })
+    if (typeof existingTab.windowId === 'number') {
+      await chrome.windows.update(existingTab.windowId, { focused: true })
+    }
+    return
+  }
+
+  await chrome.tabs.create({
+    url,
+    active: true,
+    ...(typeof resolvedTarget.windowId === 'number' ? { windowId: resolvedTarget.windowId } : {})
+  })
+}
+
+async function openExtensionSurface(
+  routePath: string,
+  target?: ExtensionSurfaceTarget
+): Promise<void> {
+  const resolvedTarget = await resolveExtensionSurfaceTarget(target)
+  const sidePanel = getSidePanelApi()
+  await setExtensionSurfaceRoute(routePath)
+
+  if (!sidePanel) {
+    await openOrFocusExtensionTab(routePath, resolvedTarget)
+    return
+  }
+
+  if (sidePanel.setOptions) {
+    try {
+      await sidePanel.setOptions({
+        ...(typeof resolvedTarget.tabId === 'number' ? { tabId: resolvedTarget.tabId } : {}),
+        path: APP_ENTRY_PATH,
+        enabled: true
+      })
+    } catch {
+      throw new Error('Failed to configure extension side panel')
+    }
+  }
+
+  if (sidePanel.open) {
+    try {
+      if (typeof resolvedTarget.tabId === 'number') {
+        await sidePanel.open({ tabId: resolvedTarget.tabId })
+        return
       }
-    }
-
-    if (typeof primary.id === 'number') {
-      managedPopupWindowId = primary.id
-      managedPopupWindowIds.add(primary.id)
-    }
-
-    for (const win of managed) {
-      if (win.id === primary.id) continue
-      if (typeof win.id !== 'number') continue
-      managedPopupWindowIds.delete(win.id)
-      try {
-        await chrome.windows.remove(win.id)
-      } catch {
-        // Ignore close races.
+      if (typeof resolvedTarget.windowId === 'number') {
+        await sidePanel.open({ windowId: resolvedTarget.windowId })
+        return
       }
+    } catch {
+      throw new Error('Failed to open extension side panel')
     }
-  } catch {
-    // Ignore transient window query errors.
   }
 }
 
-async function updateManagedPopupWindowRoute(windowId: number, url: string): Promise<void> {
-  try {
-    const tabs = await chrome.tabs.query({ windowId })
-    const targetTab = tabs[0]
-    if (targetTab?.id !== undefined) {
-      await chrome.tabs.update(targetTab.id, { url, active: true })
-      return
-    }
-    await chrome.tabs.create({ windowId, url, active: true })
-  } catch {
-    // Ignore tab update/create races.
-  }
+async function openApprovalSurface(target?: ExtensionSurfaceTarget): Promise<void> {
+  await openExtensionSurface(buildApprovalRoutePath(), target)
 }
 
-async function resolvePopupLeft(): Promise<number | undefined> {
-  try {
-    const base = await chrome.windows.getLastFocused()
-    const baseLeft = Number(base.left)
-    const baseWidth = Number(base.width)
-    if (!Number.isFinite(baseLeft) || !Number.isFinite(baseWidth)) return undefined
-    return Math.max(0, Math.round(baseLeft + (baseWidth - APP_POPUP_WIDTH) / 2))
-  } catch {
-    return undefined
-  }
-}
-
-async function resolvePopupTop(): Promise<number | undefined> {
-  try {
-    const base = await chrome.windows.getLastFocused()
-    const baseTop = Number(base.top)
-    const baseHeight = Number(base.height)
-    if (!Number.isFinite(baseTop) || !Number.isFinite(baseHeight)) return undefined
-    return Math.max(0, Math.round(baseTop + (baseHeight - APP_POPUP_HEIGHT) / 2))
-  } catch {
-    return undefined
-  }
-}
-
-async function enforceManagedPopupBounds(windowId: number): Promise<void> {
-  try {
-    const win = await chrome.windows.get(windowId)
-    if (win.type !== 'popup') return
-    const nextBounds: chrome.windows.UpdateInfo = {}
-    if (typeof win.width === 'number' && win.width !== APP_POPUP_WIDTH) {
-      nextBounds.width = APP_POPUP_WIDTH
-    }
-    if (typeof win.height === 'number' && win.height !== APP_POPUP_HEIGHT) {
-      nextBounds.height = APP_POPUP_HEIGHT
-    }
-    if (win.state && win.state !== 'normal') {
-      nextBounds.state = 'normal'
-    }
-    if (Object.keys(nextBounds).length > 0) {
-      await chrome.windows.update(windowId, nextBounds)
-    }
-  } catch {
-    // Ignore transient failures (window closed/race).
-  }
+async function openRequestSurface(
+  requestId: string,
+  method: DappRequestMethod,
+  target?: ExtensionSurfaceTarget
+): Promise<void> {
+  await openExtensionSurface(buildRequestRoutePath(requestId, method), target)
 }
 
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
@@ -831,25 +767,6 @@ function summarizeTraceValue(value: unknown, maxLength = 180): string | undefine
     const text = String(value)
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
   }
-}
-
-async function focusManagedPopupWindow(): Promise<boolean> {
-  const existingWindow = await findManagedPopupWindow()
-  if (existingWindow?.id === undefined) return false
-
-  const left = await resolvePopupLeft()
-  const top = await resolvePopupTop()
-  managedPopupWindowId = existingWindow.id
-  managedPopupWindowIds.add(existingWindow.id)
-  await chrome.windows.update(existingWindow.id, {
-    width: APP_POPUP_WIDTH,
-    height: APP_POPUP_HEIGHT,
-    state: 'normal',
-    left,
-    top,
-    focused: true
-  })
-  return true
 }
 
 async function waitForApprovalDecision(id: string, timeoutMs: number): Promise<ApprovalDecision> {
@@ -1321,7 +1238,8 @@ async function requestDappActionApproval(
   networkId: string,
   accountId: string,
   method: DappRequestMethod,
-  request: unknown
+  request: unknown,
+  surfaceTarget?: ExtensionSurfaceTarget
 ): Promise<unknown> {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') {
@@ -1350,10 +1268,9 @@ async function requestDappActionApproval(
         method,
         status: pending.status
       })
-      const existingPopup = pending.status === 'pending' ? await findManagedPopupWindow() : null
-      if (pending.status === 'pending' && !existingPopup?.id) {
+      if (pending.status === 'pending') {
         try {
-          await openRequestPopup(pending.id, pending.method)
+          await openRequestSurface(pending.id, pending.method, surfaceTarget)
         } catch {
           // Preserve the original pending request and keep waiting for it.
         }
@@ -1403,10 +1320,10 @@ async function requestDappActionApproval(
   })
 
   try {
-    await openRequestPopup(requestId, method)
+    await openRequestSurface(requestId, method, surfaceTarget)
   } catch {
     await clearPendingRequestIfMatch(requestId)
-    throw { code: 4001, message: 'Unable to open wallet approval popup' }
+    throw { code: 4001, message: 'Unable to open wallet approval view' }
   }
 
   const decision = await waitForRequestDecision(requestId, DAPP_APPROVAL_TIMEOUT_MS)
@@ -1430,11 +1347,11 @@ async function requestDappActionApproval(
   }
 }
 
-// Request scope permission(s) in a single approval popup.
+// Request scope permission(s) in a single approval view.
 async function requestScopes(
   origin: string,
   scopes: DappScope[],
-  options?: { networkId?: string }
+  options?: { networkId?: string; surfaceTarget?: ExtensionSurfaceTarget }
 ): Promise<boolean> {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') return false
@@ -1494,10 +1411,7 @@ async function requestScopes(
   })
 
   try {
-    const existingPopup = reuseExistingApproval ? await findManagedPopupWindow() : null
-    if (!existingPopup?.id) {
-      await openApprovalPopup()
-    }
+    await openApprovalSurface(options?.surfaceTarget)
   } catch {
     await clearPendingApprovalIfMatch(approvalId)
     return false
@@ -1588,7 +1502,12 @@ function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string
 }
 
 // Handle RPC methods
-async function handleRpcMethod(method: string, params: any, origin?: string): Promise<any> {
+async function handleRpcMethod(
+  method: string,
+  params: any,
+  origin?: string,
+  surfaceTarget?: ExtensionSurfaceTarget
+): Promise<any> {
   const normalizedOrigin = origin ? normalizeDappOrigin(origin) : null
   if (normalizedOrigin && isBlockedInternalDappOrigin(normalizedOrigin)) {
     throw { code: 4001, message: DAPP_BLOCKED_INTERNAL_ORIGIN_MESSAGE }
@@ -1649,9 +1568,15 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     return providerState
   }
 
+  if (OPEN_WALLET_METHODS.has(method)) {
+    await openExtensionSurface('/', surfaceTarget)
+    const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
+    return refreshed.providerState
+  }
+
   if (CONNECT_METHODS.has(method)) {
     if (origin) {
-      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
@@ -1716,7 +1641,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   // Request accounts / enable
   if (REQUEST_ACCOUNTS_METHODS.has(method)) {
     if (origin) {
-      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
@@ -1824,7 +1749,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
     const scopes: DappScope[] = ['read', 'sign']
     if (origin) {
-      const approved = await requestScopes(origin, scopes, { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, scopes, { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1834,7 +1759,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signMessage',
-      signPayload
+      signPayload,
+      surfaceTarget
     )
   }
 
@@ -1850,7 +1776,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       throw { code: -32603, message: 'No account available' }
     }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1859,7 +1785,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signTypedData',
-      parseSignTypedDataParams(params)
+      parseSignTypedDataParams(params),
+      surfaceTarget
     )
   }
 
@@ -1871,7 +1798,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1880,7 +1807,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signTransaction',
-      parseSignTransactionParams(params)
+      parseSignTransactionParams(params),
+      surfaceTarget
     )
   }
 
@@ -1892,7 +1820,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1901,7 +1829,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signAllTransactions',
-      parseSignAllTransactionsParams(params)
+      parseSignAllTransactionsParams(params),
+      surfaceTarget
     )
   }
 
@@ -1913,7 +1842,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign', 'send_coin'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1922,7 +1851,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signAndSendTransaction',
-      parseSignAndSendTransactionParams(params)
+      parseSignAndSendTransactionParams(params),
+      surfaceTarget
     )
   }
 
@@ -1934,7 +1864,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1943,7 +1873,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_cosmosGetKey',
-      { chainId: String((params as any)?.chainId || '') }
+      { chainId: String((params as any)?.chainId || '') },
+      surfaceTarget
     )
   }
 
@@ -1955,7 +1886,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1964,7 +1895,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_cosmosSignDirect',
-      parseCosmosSignDirectParams(params)
+      parseCosmosSignDirectParams(params),
+      surfaceTarget
     )
   }
 
@@ -1976,7 +1908,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -1985,7 +1917,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_cosmosSignAmino',
-      parseCosmosSignAminoParams(params)
+      parseCosmosSignAminoParams(params),
+      surfaceTarget
     )
   }
 
@@ -1997,7 +1930,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -2006,7 +1939,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_cosmosSendTx',
-      parseCosmosSendTxParams(params)
+      parseCosmosSendTxParams(params),
+      surfaceTarget
     )
   }
 
@@ -2020,7 +1954,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
       await touchLastConnected(origin)
     }
@@ -2029,7 +1963,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_signAndSendTransaction',
-      { ecosystem: 'evm', ...parseEvmTransactionRequest(params) }
+      { ecosystem: 'evm', ...parseEvmTransactionRequest(params) },
+      surfaceTarget
     )
   }
 
@@ -2046,7 +1981,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
 
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
@@ -2059,7 +1994,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_sendTransaction',
-      parsedSend
+      parsedSend,
+      surfaceTarget
     )
     return result
   }
@@ -2077,7 +2013,7 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     }
 
     if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_asset'], { networkId: effectiveNetworkId })
+      const approved = await requestScopes(origin, ['read', 'send_asset'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) {
         throw { code: 4001, message: 'User rejected the request' }
       }
@@ -2090,7 +2026,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
       network.id,
       activeAccount.id,
       'wallet_sendAsset',
-      parsedSendAsset
+      parsedSendAsset,
+      surfaceTarget
     )
     return result
   }
@@ -2279,6 +2216,10 @@ chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sen
   if (message.type === 'DAPP_INTERNAL_RPC') {
     const { request, origin } = message
     const originUrl = origin || sender?.origin || sender?.url || 'unknown'
+    const surfaceTarget: ExtensionSurfaceTarget = {
+      ...(typeof sender?.tab?.id === 'number' ? { tabId: sender.tab.id } : {}),
+      ...(typeof sender?.tab?.windowId === 'number' ? { windowId: sender.tab.windowId } : {})
+    }
 
     void recordBridgeTrace('background-sw', 'rpc-received', {
       method: request?.method,
@@ -2289,7 +2230,7 @@ chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sen
       senderUrl: sender?.url || null
     })
     
-    handleRpcMethod(request.method, request.params, originUrl)
+    handleRpcMethod(request.method, request.params, originUrl, surfaceTarget)
       .then((result) => {
         void recordBridgeTrace('background-sw', 'rpc-result', {
           method: request?.method,
@@ -2357,42 +2298,12 @@ if (!chrome.storage.onChanged.hasListener(handleWalletStorageBroadcast)) {
   chrome.storage.onChanged.addListener(handleWalletStorageBroadcast)
 }
 
-if (chrome.windows?.onBoundsChanged?.addListener) {
-  chrome.windows.onBoundsChanged.addListener((win) => {
-    if (typeof win.id !== 'number') return
-    if (!managedPopupWindowIds.has(win.id)) return
-    void enforceManagedPopupBounds(win.id)
-    void enforceSingleManagedPopupWindow()
-  })
-}
-
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (managedPopupWindowId === windowId) {
-    managedPopupWindowId = null
+{
+  const sidePanel = getSidePanelApi()
+  if (sidePanel?.setPanelBehavior) {
+    void sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err) => {
+      void recordRuntimeError('background-sw', err, { kind: 'configure-side-panel-action-click' })
+    })
   }
-  managedPopupWindowIds.delete(windowId)
-})
-
-if (chrome.action?.onClicked) {
-  chrome.action.onClicked.addListener(() => {
-    void (async () => {
-      try {
-        await enforceSingleManagedPopupWindow()
-        const focused = await focusManagedPopupWindow()
-        if (!focused) {
-          await openWalletHomePopup()
-        }
-      } catch (err) {
-        void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })
-      }
-    })()
-  })
 }
-
-// Safety sweep: enforce singleton popup even if duplicate windows are created by races
-// outside the normal openManagedPopup flow.
-void enforceSingleManagedPopupWindow()
-setInterval(() => {
-  void enforceSingleManagedPopupWindow()
-}, 1500)
 

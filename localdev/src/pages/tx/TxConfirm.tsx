@@ -668,7 +668,6 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         }
       })
       navigate('/wallet/assets')
-      window.close()
       return
     }
     if (!hasTxState) {

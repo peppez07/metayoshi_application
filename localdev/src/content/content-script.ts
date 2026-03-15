@@ -139,9 +139,33 @@ const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidate
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
 const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
 const BLOCKED_INTERNAL_ORIGIN_MSG = 'Blocked internal application origin'
+const CONTENT_RUNTIME_KEY = '__metayoshi_content_runtime_v1'
+
+type ContentRuntimeState = {
+  bootStarted: boolean
+  messageListenerInstalled: boolean
+  bridgeConnecting: boolean
+  bridgeReconnectTimer: number | null
+  bridgePort: chrome.runtime.Port | null
+}
 
 let bridgeContextInvalidated = false
 installGlobalErrorMonitor('content-script')
+
+const contentRuntime = (() => {
+  const g = globalThis as any
+  const existing = g[CONTENT_RUNTIME_KEY] as ContentRuntimeState | undefined
+  if (existing) return existing
+  const next: ContentRuntimeState = {
+    bootStarted: false,
+    messageListenerInstalled: false,
+    bridgeConnecting: false,
+    bridgeReconnectTimer: null,
+    bridgePort: null
+  }
+  g[CONTENT_RUNTIME_KEY] = next
+  return next
+})()
 
 function normalizeHostPattern(value: string): string {
   return String(value || '').trim().toLowerCase()
@@ -202,6 +226,20 @@ function injectInpage(): void {
 
 function postToPage(payload: any): void {
   window.postMessage({ target: CS_INPAGE_CHANNEL, ...payload }, '*')
+}
+
+function clearEventBridgeReconnectTimer(): void {
+  if (contentRuntime.bridgeReconnectTimer === null) return
+  window.clearTimeout(contentRuntime.bridgeReconnectTimer)
+  contentRuntime.bridgeReconnectTimer = null
+}
+
+function scheduleEventBridgeReconnect(): void {
+  if (bridgeContextInvalidated || contentRuntime.bridgePort || contentRuntime.bridgeReconnectTimer !== null) return
+  contentRuntime.bridgeReconnectTimer = window.setTimeout(() => {
+    contentRuntime.bridgeReconnectTimer = null
+    initEventBridge()
+  }, 1000)
 }
 
 function isContextInvalidatedMessage(message: string): boolean {
@@ -421,24 +459,33 @@ function forwardRequest(request: any, messageId: number): void {
 
 function initEventBridge(): void {
   if (bridgeContextInvalidated) return
-  
+  if (contentRuntime.bridgePort || contentRuntime.bridgeConnecting) return
+
+  clearEventBridgeReconnectTimer()
+  contentRuntime.bridgeConnecting = true
+
   let port: chrome.runtime.Port | undefined
   try {
     port = chrome.runtime.connect({ name: CS_EVENT_PORT_NAME })
   } catch (err: any) {
+    contentRuntime.bridgeConnecting = false
     const errMsg = err?.message ?? String(err ?? '')
     void recordRuntimeError('content-script', errMsg, { kind: 'runtime-connect' })
     if (isContextInvalidatedMessage(errMsg)) {
       markContextInvalidated(errMsg)
       return
     }
-    window.setTimeout(() => {
-      initEventBridge()
-    }, 1000)
+    scheduleEventBridgeReconnect()
     return
   }
-  
-  if (!port) return
+
+  contentRuntime.bridgeConnecting = false
+  if (!port) {
+    scheduleEventBridgeReconnect()
+    return
+  }
+
+  contentRuntime.bridgePort = port
 
   port.onMessage.addListener((msg: any) => {
     if (!msg || typeof msg !== 'object') return
@@ -452,6 +499,9 @@ function initEventBridge(): void {
   })
   
   port.onDisconnect.addListener(() => {
+    if (contentRuntime.bridgePort === port) {
+      contentRuntime.bridgePort = null
+    }
     const runtimeError = chrome.runtime.lastError
     if (runtimeError) {
       const errorMsg = runtimeError.message || 'Unknown error'
@@ -462,9 +512,7 @@ function initEventBridge(): void {
       }
     }
     if (bridgeContextInvalidated) return
-    window.setTimeout(() => {
-      initEventBridge()
-    }, 1000)
+    scheduleEventBridgeReconnect()
   })
 }
 
@@ -477,17 +525,23 @@ async function boot(): Promise<void> {
     // ignore storage errors
   }
 
-  window.addEventListener('message', (event) => {
-    if (event.source !== window) return
-    const data = event.data
-    if (!data || data.target !== CS_CONTENT_CHANNEL) return
-    if (data.type === 'request') {
-      forwardRequest(data.request, data.id)
-    }
-  })
+  if (!contentRuntime.messageListenerInstalled) {
+    window.addEventListener('message', (event) => {
+      if (event.source !== window) return
+      const data = event.data
+      if (!data || data.target !== CS_CONTENT_CHANNEL) return
+      if (data.type === 'request') {
+        forwardRequest(data.request, data.id)
+      }
+    })
+    contentRuntime.messageListenerInstalled = true
+  }
 
   injectInpage()
   initEventBridge()
 }
 
-void boot()
+if (!contentRuntime.bootStarted) {
+  contentRuntime.bootStarted = true
+  void boot()
+}

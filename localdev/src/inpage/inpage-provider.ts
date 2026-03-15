@@ -6,9 +6,11 @@ import { WALLET_VERSION_NAME } from '../lib/legalMetadata'
 const IP_CONTENT_CHANNEL = 'metayoshi:content'
 const IP_INPAGE_CHANNEL = 'metayoshi:inpage'
 const INIT_EVENT = 'metayoshi#initialized'
+const INPAGE_SINGLETON_KEY = '__metayoshi_inpage_provider_v1'
 const PROVIDER_STATE_METHOD = 'metayoshi_getProviderState'
 const PROVIDER_ENABLE_METHOD = 'metayoshi_requestAccounts'
 const CONNECT_METHOD = 'metayoshi_connect'
+const OPEN_WALLET_METHOD = 'metayoshi_openWallet'
 const GET_NETWORKS_METHOD = 'metayoshi_getNetworks'
 const GET_CAPABILITIES_METHOD = 'metayoshi_getCapabilities'
 const SIGN_MESSAGE_METHOD = 'metayoshi_signMessage'
@@ -29,6 +31,19 @@ const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
+
+type InpageRuntimeState = {
+  initialized: boolean
+}
+
+const inpageRuntime = (() => {
+  const g = window as any
+  const existing = g[INPAGE_SINGLETON_KEY] as InpageRuntimeState | undefined
+  if (existing) return existing
+  const next: InpageRuntimeState = { initialized: false }
+  g[INPAGE_SINGLETON_KEY] = next
+  return next
+})()
 
 type Listener = (payload: any) => void
 
@@ -305,98 +320,100 @@ function request({ method, params }: { method: string; params?: any }): Promise<
   })
 }
 
-window.addEventListener('message', (event) => {
-  if (event.source !== window) return
-  const data = event.data as any
-  if (!data || data.target !== IP_INPAGE_CHANNEL) return
-  
-  if (data.type === 'response') {
-    const response = data.response
-    const id = response?.id ?? data.id
-    if (typeof id !== 'number') return
-    const pendingReq = pending.get(id)
-    if (!pendingReq) return
-    pending.delete(id)
-    if (response?.error) {
-      const err: any = new Error(response.error.message ?? 'Request failed')
-      err.code = response.error.code
-      err.data = response.error.data
-      pendingReq.reject(err)
+function installMessageBridge(): void {
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return
+    const data = event.data as any
+    if (!data || data.target !== IP_INPAGE_CHANNEL) return
+
+    if (data.type === 'response') {
+      const response = data.response
+      const id = response?.id ?? data.id
+      if (typeof id !== 'number') return
+      const pendingReq = pending.get(id)
+      if (!pendingReq) return
+      pending.delete(id)
+      if (response?.error) {
+        const err: any = new Error(response.error.message ?? 'Request failed')
+        err.code = response.error.code
+        err.data = response.error.data
+        pendingReq.reject(err)
+        return
+      }
+      pendingReq.resolve(response?.result)
       return
     }
-    pendingReq.resolve(response?.result)
-    return
-  }
-  
-  if (data.type === 'bridge_error') {
-    const bridgeError = data.error ?? {}
-    const err: any = new Error(String(bridgeError.message ?? 'Extension context invalidated'))
-    err.code = Number(bridgeError.code ?? 4900)
-    err.data = bridgeError.data
-    
-    // Reject all pending requests
-    const pendingEntries = Array.from(pending.values())
-    pending.clear()
-    for (const req of pendingEntries) {
-      try {
-        req.reject(err)
-      } catch {
-        // ignore
+
+    if (data.type === 'bridge_error') {
+      const bridgeError = data.error ?? {}
+      const err: any = new Error(String(bridgeError.message ?? 'Extension context invalidated'))
+      err.code = Number(bridgeError.code ?? 4900)
+      err.data = bridgeError.data
+
+      // Reject all pending requests
+      const pendingEntries = Array.from(pending.values())
+      pending.clear()
+      for (const req of pendingEntries) {
+        try {
+          req.reject(err)
+        } catch {
+          // ignore
+        }
       }
+      return
     }
-    return
-  }
-  
-  if (data.type === 'event') {
-    const eventName = String(data.event ?? '')
-    const payload = data.payload ?? {}
-    
-    if (eventName === 'accountsChanged') {
-      if (Array.isArray(payload.accounts)) {
-        updateAccounts(payload.accounts.map((a: any) => String(a.address ?? a)))
-      } else if (payload.address) {
-        updateAccounts([String(payload.address)])
+
+    if (data.type === 'event') {
+      const eventName = String(data.event ?? '')
+      const payload = data.payload ?? {}
+
+      if (eventName === 'accountsChanged') {
+        if (Array.isArray(payload.accounts)) {
+          updateAccounts(payload.accounts.map((a: any) => String(a.address ?? a)))
+        } else if (payload.address) {
+          updateAccounts([String(payload.address)])
+        }
+        if (payload.address) {
+          state.selectedAddress = String(payload.address)
+        }
+        state.connected = state.accounts.length > 0
+        emit('accountsChanged', payload)
+        emit('ethereum#accountsChanged', state.accounts)
       }
-      if (payload.address) {
-        state.selectedAddress = String(payload.address)
+
+      if (eventName === 'networkChanged') {
+        state.chainId = payload.networkId ?? state.chainId
+        state.networkLabel = payload.networkLabel ?? state.networkLabel
+        if (payload.coinId !== undefined) state.coinId = payload.coinId ?? state.coinId
+        if (payload.coinName !== undefined) state.coinName = payload.coinName ?? state.coinName
+        if (payload.coinSymbol !== undefined) state.coinSymbol = payload.coinSymbol ?? state.coinSymbol
+        if (payload.coinDecimals !== undefined) state.coinDecimals = payload.coinDecimals ?? state.coinDecimals
+
+        // Refresh provider state
+        void request({ method: PROVIDER_STATE_METHOD })
+          .then((providerState) => applyProviderState(providerState))
+          .catch(() => {})
+
+        emit('networkChanged', payload)
+        const hexChainId = toHexChainId(payload.chainId ?? state.chainId)
+        if (hexChainId) emit('chainChanged', hexChainId)
       }
-      state.connected = state.accounts.length > 0
-      emit('accountsChanged', payload)
-      emit('ethereum#accountsChanged', state.accounts)
-    }
-    
-    if (eventName === 'networkChanged') {
-      state.chainId = payload.networkId ?? state.chainId
-      state.networkLabel = payload.networkLabel ?? state.networkLabel
-      if (payload.coinId !== undefined) state.coinId = payload.coinId ?? state.coinId
-      if (payload.coinName !== undefined) state.coinName = payload.coinName ?? state.coinName
-      if (payload.coinSymbol !== undefined) state.coinSymbol = payload.coinSymbol ?? state.coinSymbol
-      if (payload.coinDecimals !== undefined) state.coinDecimals = payload.coinDecimals ?? state.coinDecimals
-      
-      // Refresh provider state
-      void request({ method: PROVIDER_STATE_METHOD })
-        .then((providerState) => applyProviderState(providerState))
-        .catch(() => {})
-      
-      emit('networkChanged', payload)
-      const hexChainId = toHexChainId(payload.chainId ?? state.chainId)
-      if (hexChainId) emit('chainChanged', hexChainId)
-    }
-    
-    if (eventName === 'lockChanged') {
-      state.unlocked = !!payload.unlocked
-      if (!state.unlocked) {
-        state.connected = false
-        state.accounts = []
-        state.selectedAddress = null
+
+      if (eventName === 'lockChanged') {
+        state.unlocked = !!payload.unlocked
+        if (!state.unlocked) {
+          state.connected = false
+          state.accounts = []
+          state.selectedAddress = null
+        }
+        emit('lockChanged', payload)
+        if (!state.unlocked) emit('disconnect', { code: 4900, message: 'Wallet locked' })
       }
-      emit('lockChanged', payload)
-      if (!state.unlocked) emit('disconnect', { code: 4900, message: 'Wallet locked' })
+
+      emit(eventName, payload)
     }
-    
-    emit(eventName, payload)
-  }
-})
+  })
+}
 
 function initState(): void {
   request({ method: PROVIDER_STATE_METHOD }).catch(() => {
@@ -452,6 +469,7 @@ const provider = {
   send: request,
   enable: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_ENABLE_METHOD, params }),
   connect: (params?: ProviderNetworkRequest) => request({ method: CONNECT_METHOD, params }),
+  openWallet: (params?: ProviderNetworkRequest) => request({ method: OPEN_WALLET_METHOD, params }),
   getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: GET_NETWORKS_METHOD }),
   getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: GET_CAPABILITIES_METHOD, params }),
@@ -686,25 +704,29 @@ Object.defineProperties(provider, {
   }
 })
 
-// Inject only proprietary globals to avoid colliding with other extension wallets.
-if (!(window as any).metayoshi) {
-  Object.defineProperty(window, 'metayoshi', {
-    value: provider,
-    writable: false,
-    configurable: false
-  })
-}
+if (!inpageRuntime.initialized) {
+  inpageRuntime.initialized = true
+  installMessageBridge()
 
-if (!(window as any).rtm) {
-  Object.defineProperty(window, 'rtm', {
-    value: provider,
-    writable: false,
-    configurable: false
-  })
-}
+  // Inject only proprietary globals to avoid colliding with other extension wallets.
+  if (!(window as any).metayoshi) {
+    Object.defineProperty(window, 'metayoshi', {
+      value: provider,
+      writable: false,
+      configurable: false
+    })
+  }
 
-// Dispatch initialization event
-window.dispatchEvent(new Event(INIT_EVENT))
-initState()
+  if (!(window as any).rtm) {
+    Object.defineProperty(window, 'rtm', {
+      value: provider,
+      writable: false,
+      configurable: false
+    })
+  }
+
+  window.dispatchEvent(new Event(INIT_EVENT))
+  initState()
+}
 
 export {}

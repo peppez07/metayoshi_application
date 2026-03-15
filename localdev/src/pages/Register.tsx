@@ -75,21 +75,6 @@ const Register: React.FC = () => {
 
   const openTermsInInternalTab = () => {
     navigate('/terms')
-    try {
-      if (typeof chrome !== 'undefined' && chrome.windows?.getCurrent) {
-        chrome.windows.getCurrent({}, (win) => {
-          const id = win?.id
-          if (typeof id !== 'number' || !chrome.windows?.update) return
-          chrome.windows.update(id, {
-            width: 520,
-            height: 700,
-            focused: true
-          })
-        })
-      }
-    } catch {
-      // no-op
-    }
   }
 
   useEffect(() => {

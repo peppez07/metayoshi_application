@@ -294,7 +294,6 @@ const DappRequestConfirm: React.FC = () => {
       })
     }
     navigate('/wallet/assets')
-    window.close()
   }
 
   const approveRequest = async (): Promise<void> => {
@@ -594,7 +593,6 @@ const DappRequestConfirm: React.FC = () => {
       }
 
       navigate('/wallet/assets')
-      window.close()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err || 'Transaction failed')
       setSubmitError(message)
@@ -610,7 +608,6 @@ const DappRequestConfirm: React.FC = () => {
         })
       }
       navigate('/wallet/assets')
-      window.close()
     } finally {
       try {
         if (shouldRestoreAccount) {
