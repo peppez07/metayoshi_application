@@ -84,8 +84,21 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   moonbeam: 'moonbeam',
   moonriver: 'moonriver',
   'cronos-pos': 'cro',
-  avail: 'eth',
-  peaq: 'eth',
+  'dymension-evm': 'dymension-evm',
+  'evmos-evm': 'evmos-evm',
+  iris: 'iris-evm',
+  'iris-evm': 'iris-evm',
+  kava: 'kava-evm',
+  'kava-evm': 'kava-evm',
+  nibiru: 'nibiru-evm',
+  'nibiru-evm': 'nibiru-evm',
+  'sei-evm': 'sei-evm',
+  tenet: 'tenet-evm',
+  'tenet-evm': 'tenet-evm',
+  warden: 'warden-evm',
+  'warden-evm': 'warden-evm',
+  xpla: 'xpla-evm',
+  'xpla-evm': 'xpla-evm',
   'syscoin-tanenbaum-evm': 'eth',
   pulsechain: 'pulsechain',
   scroll: 'scroll',
@@ -216,6 +229,8 @@ export const EVM_MODEL_NETWORK_IDS = new Set([
   'blast',
   'bnb',
   'celo',
+  'dymension-evm',
+  'evmos-evm',
   'polygon',
   'avaxc',
   'aurora',
@@ -223,19 +238,26 @@ export const EVM_MODEL_NETWORK_IDS = new Set([
   'fraxtal',
   'gnosis',
   'haqq',
+  'iris-evm',
+  'kava-evm',
   'cronos',
   'linea',
   'mantle',
   'metis',
   'moonbeam',
   'moonriver',
+  'nibiru-evm',
   'pulsechain',
   'scroll',
+  'sei-evm',
   'somnia',
   'soneium',
   'sonic',
   'taiko',
+  'tenet-evm',
   'unichain',
+  'warden-evm',
+  'xpla-evm',
   'zksync'
 ])
 export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
@@ -296,24 +318,24 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'soneium'
   if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'sonic'
   if (normalized === 'evmos' || normalized.startsWith('evmos-')) return 'eth'
-  if (normalized === 'dymension' || normalized.startsWith('dymension-')) return 'eth'
+  if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'dymension-evm'
   if (normalized === 'kava' || normalized.startsWith('kava-')) return 'eth'
-  if (normalized === 'iris' || normalized.startsWith('iris-')) return 'eth'
-  if (normalized === 'nibiru' || normalized.startsWith('nibiru-')) return 'eth'
-  if (normalized === 'tenet' || normalized.startsWith('tenet-')) return 'eth'
-  if (normalized === 'xpla' || normalized.startsWith('xpla-')) return 'eth'
-  if (normalized === 'warden' || normalized.startsWith('warden-')) return 'eth'
+  if (normalized === 'iris' || normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'iris-evm'
+  if (normalized === 'nibiru' || normalized === 'nibiru-evm' || normalized.startsWith('nibiru-evm')) return 'nibiru-evm'
+  if (normalized === 'tenet' || normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'tenet-evm'
+  if (normalized === 'xpla' || normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'xpla-evm'
+  if (normalized === 'warden' || normalized === 'warden-evm' || normalized.startsWith('warden-evm')) return 'warden-evm'
   if (normalized === 'syscoin-evm' || normalized.startsWith('syscoin-')) return 'eth'
-  if (normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'eth'
-  if (normalized === 'sei-evm' || normalized.startsWith('sei-evm')) return 'eth'
-  if (normalized === 'nibiru-evm' || normalized.startsWith('nibiru-evm')) return 'eth'
+  if (normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'xpla-evm'
+  if (normalized === 'sei-evm' || normalized.startsWith('sei-evm')) return 'sei-evm'
+  if (normalized === 'nibiru-evm' || normalized.startsWith('nibiru-evm')) return 'nibiru-evm'
   if (normalized === 'haqq-evm' || normalized.startsWith('haqq-evm')) return 'haqq'
-  if (normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'eth'
-  if (normalized === 'kava-evm' || normalized.startsWith('kava-evm')) return 'eth'
-  if (normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'eth'
-  if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'eth'
-  if (normalized === 'evmos-evm' || normalized.startsWith('evmos-evm')) return 'eth'
-  if (normalized === 'warden-evm' || normalized.startsWith('warden-evm')) return 'eth'
+  if (normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'iris-evm'
+  if (normalized === 'kava-evm' || normalized.startsWith('kava-evm')) return 'kava-evm'
+  if (normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'tenet-evm'
+  if (normalized === 'dymension-evm' || normalized.startsWith('dymension-evm')) return 'dymension-evm'
+  if (normalized === 'evmos-evm' || normalized.startsWith('evmos-evm')) return 'evmos-evm'
+  if (normalized === 'warden-evm' || normalized.startsWith('warden-evm')) return 'warden-evm'
   if (FORCE_DOGE_UTXO_COMPAT_IDS.has(normalized)) return 'doge'
   if (FORCE_AVAXC_COMPAT_IDS.has(normalized)) return 'avaxc'
   if (FORCE_POLYGON_COMPAT_IDS.has(normalized)) return 'polygon'
@@ -371,26 +393,35 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       blast: 'blast',
       bnb: 'bsc',
       celo: 'celo',
+      'dymension-evm': 'dymension-evm',
+      'evmos-evm': 'evmos-evm',
       aurora: 'aurora',
       bahamut: 'bahamut',
       fraxtal: 'fraxtal',
       gnosis: 'gnosis',
       haqq: 'haqq',
+      'iris-evm': 'iris-evm',
+      'kava-evm': 'kava-evm',
       cronos: 'cronos',
       linea: 'linea',
       mantle: 'mantle',
       metis: 'metis',
       moonbeam: 'moonbeam',
       moonriver: 'moonriver',
+      'nibiru-evm': 'nibiru-evm',
       polygon: 'polygon-bor',
       pulsechain: 'pulsechain',
       avaxc: 'avalanche-c-chain',
       scroll: 'scroll',
+      'sei-evm': 'sei-evm',
       somnia: 'somnia',
       soneium: 'soneium',
       sonic: 'sonic',
       taiko: 'taiko',
+      'tenet-evm': 'tenet-evm',
       unichain: 'unichain',
+      'warden-evm': 'warden-evm',
+      'xpla-evm': 'xpla-evm',
       zksync: 'zksync-era'
     }
 
@@ -441,6 +472,11 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('haqq') || normalized.includes('islm')) return 'haqq'
   if (normalized.includes('moonbeam') || normalized.includes('glmr')) return 'moonbeam'
   if (normalized.includes('moonriver') || normalized.includes('movr')) return 'moonriver'
+  if (normalized.includes('dymension-evm')) return 'dymension-evm'
+  if (normalized.includes('evmos-evm')) return 'evmos-evm'
+  if (normalized.includes('iris')) return 'iris-evm'
+  if (normalized.includes('kava')) return 'kava-evm'
+  if (normalized.includes('nibiru') || normalized.includes('nibi')) return 'nibiru-evm'
   if (normalized.includes('optimism')) return 'op'
   if (normalized.includes('polygon')) return 'polygon'
   if (normalized.includes('avalanche')) return 'avaxc'
@@ -448,9 +484,13 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
   if (normalized.includes('cronos')) return 'cronos'
   if (normalized.includes('gnosis') || normalized.includes('xdai')) return 'gnosis'
+  if (normalized.includes('sei-evm')) return 'sei-evm'
   if (normalized.includes('somnia') || normalized.includes('somi')) return 'somnia'
   if (normalized.includes('soneium')) return 'soneium'
   if (normalized.includes('sonic')) return 'sonic'
+  if (normalized.includes('tenet')) return 'tenet-evm'
+  if (normalized.includes('warden')) return 'warden-evm'
+  if (normalized.includes('xpla')) return 'xpla-evm'
   if (normalized.includes('zksync')) return 'zksync'
   if (normalized.includes('sui')) return 'sui'
   if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'

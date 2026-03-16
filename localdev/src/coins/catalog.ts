@@ -16,30 +16,39 @@ import { croCoin } from './cro'
 import { cronosCoin } from './cronos'
 import { dashCoin } from './dash'
 import { dogeCoin } from './doge'
+import { dymensionEvmCoin } from './dymensionEvm'
 import { ethCoin } from './eth'
+import { evmosEvmCoin } from './evmosEvm'
 import { firoCoin } from './firo'
 import { fraxtalCoin } from './fraxtal'
 import { gnosisCoin } from './gnosis'
 import { haqqCoin } from './haqq'
+import { irisEvmCoin } from './irisEvm'
+import { kavaEvmCoin } from './kavaEvm'
 import { lineaCoin } from './linea'
 import { mantleCoin } from './mantle'
 import { metisCoin } from './metis'
 import { moonbeamCoin } from './moonbeam'
 import { moonriverCoin } from './moonriver'
+import { nibiruEvmCoin } from './nibiruEvm'
 import { opCoin } from './op'
 import { polygonCoin } from './polygon'
 import { pulsechainCoin } from './pulsechain'
 import { rtmCoin } from './rtm'
 import { scrollCoin } from './scroll'
+import { seiEvmCoin } from './seiEvm'
 import { solCoin } from './sol'
 import { somniaCoin } from './somnia'
 import { soneiumCoin } from './soneium'
 import { sonicCoin } from './sonic'
 import { suiCoin } from './sui'
 import { taikoCoin } from './taiko'
+import { tenetEvmCoin } from './tenetEvm'
 import { tronCoin } from './tron'
 import { unichainCoin } from './unichain'
+import { wardenEvmCoin } from './wardenEvm'
 import { xlmCoin } from './xlm'
+import { xplaEvmCoin } from './xplaEvm'
 import { zksyncCoin } from './zksync'
 import type { BundledCoinRegistryEntry } from './registryTypes'
 
@@ -411,6 +420,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'dymension-evm',
+      runtimeModelId: 'dymension-evm',
+      protocolFamily: 'evm',
+      coinId: 'dymension-evm',
+      chain: 'main',
+      aliases: ['dymension-evm', 'dymension-evm-mainnet', 'mainnet-dymension-evm'],
+      chainId: 1100,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: dymensionEvmCoin
+  },
+  {
+    manifest: {
       id: 'cosmos',
       runtimeModelId: 'cosmos',
       protocolFamily: 'cosmos',
@@ -447,6 +470,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'evmos-evm',
+      runtimeModelId: 'evmos-evm',
+      protocolFamily: 'evm',
+      coinId: 'evmos-evm',
+      chain: 'main',
+      aliases: ['evmos-evm', 'evmos-evm-mainnet', 'mainnet-evmos-evm'],
+      chainId: 9001,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: evmosEvmCoin
+  },
+  {
+    manifest: {
       id: 'pulsechain',
       runtimeModelId: 'pulsechain',
       protocolFamily: 'evm',
@@ -476,6 +513,34 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'iris-evm',
+      runtimeModelId: 'iris-evm',
+      protocolFamily: 'evm',
+      coinId: 'iris-evm',
+      chain: 'main',
+      aliases: ['iris', 'iris-evm', 'iris-mainnet', 'mainnet-iris'],
+      chainId: 6688,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: irisEvmCoin
+  },
+  {
+    manifest: {
+      id: 'kava-evm',
+      runtimeModelId: 'kava-evm',
+      protocolFamily: 'evm',
+      coinId: 'kava-evm',
+      chain: 'main',
+      aliases: ['kava', 'kava-evm', 'kava-mainnet', 'mainnet-kava'],
+      chainId: 2222,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: kavaEvmCoin
+  },
+  {
+    manifest: {
       id: 'sol',
       runtimeModelId: 'sol',
       protocolFamily: 'solana',
@@ -486,6 +551,34 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: solCoin
+  },
+  {
+    manifest: {
+      id: 'nibiru-evm',
+      runtimeModelId: 'nibiru-evm',
+      protocolFamily: 'evm',
+      coinId: 'nibiru-evm',
+      chain: 'main',
+      aliases: ['nibiru', 'nibiru-evm', 'nibiru-mainnet', 'mainnet-nibiru'],
+      chainId: 6900,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: nibiruEvmCoin
+  },
+  {
+    manifest: {
+      id: 'sei-evm',
+      runtimeModelId: 'sei-evm',
+      protocolFamily: 'evm',
+      coinId: 'sei-evm',
+      chain: 'main',
+      aliases: ['sei-evm', 'sei-evm-mainnet', 'mainnet-sei-evm'],
+      chainId: 1329,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: seiEvmCoin
   },
   {
     manifest: {
@@ -501,6 +594,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: taikoCoin
+  },
+  {
+    manifest: {
+      id: 'tenet-evm',
+      runtimeModelId: 'tenet-evm',
+      protocolFamily: 'evm',
+      coinId: 'tenet-evm',
+      chain: 'main',
+      aliases: ['tenet', 'tenet-evm', 'tenet-mainnet', 'mainnet-tenet'],
+      chainId: 1559,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: tenetEvmCoin
   },
   {
     manifest: {
@@ -570,6 +677,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'warden-evm',
+      runtimeModelId: 'warden-evm',
+      protocolFamily: 'evm',
+      coinId: 'warden-evm',
+      chain: 'main',
+      aliases: ['warden', 'warden-evm', 'warden-mainnet', 'mainnet-warden'],
+      chainId: 8765,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: wardenEvmCoin
+  },
+  {
+    manifest: {
       id: 'unichain',
       runtimeModelId: 'unichain',
       protocolFamily: 'evm',
@@ -582,6 +703,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: unichainCoin
+  },
+  {
+    manifest: {
+      id: 'xpla-evm',
+      runtimeModelId: 'xpla-evm',
+      protocolFamily: 'evm',
+      coinId: 'xpla-evm',
+      chain: 'main',
+      aliases: ['xpla', 'xpla-evm', 'xpla-mainnet', 'mainnet-xpla'],
+      chainId: 37,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: xplaEvmCoin
   },
   {
     manifest: {
