@@ -4,6 +4,7 @@ import { avaxcCoin } from './avaxc'
 import { auroraCoin } from './aurora'
 import { bahamutCoin } from './bahamut'
 import { baseCoin } from './base'
+import { berachainCoin } from './berachain'
 import { blastCoin } from './blast'
 import { bnbCoin } from './bnb'
 import { bnbTestnetCoin } from './bnbTestnet'
@@ -19,15 +20,21 @@ import { ethCoin } from './eth'
 import { firoCoin } from './firo'
 import { fraxtalCoin } from './fraxtal'
 import { gnosisCoin } from './gnosis'
+import { haqqCoin } from './haqq'
 import { lineaCoin } from './linea'
 import { mantleCoin } from './mantle'
 import { metisCoin } from './metis'
+import { moonbeamCoin } from './moonbeam'
+import { moonriverCoin } from './moonriver'
 import { opCoin } from './op'
 import { polygonCoin } from './polygon'
 import { pulsechainCoin } from './pulsechain'
 import { rtmCoin } from './rtm'
 import { scrollCoin } from './scroll'
 import { solCoin } from './sol'
+import { somniaCoin } from './somnia'
+import { soneiumCoin } from './soneium'
+import { sonicCoin } from './sonic'
 import { suiCoin } from './sui'
 import { taikoCoin } from './taiko'
 import { tronCoin } from './tron'
@@ -77,6 +84,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: ethCoin
+  },
+  {
+    manifest: {
+      id: 'berachain',
+      runtimeModelId: 'berachain',
+      protocolFamily: 'evm',
+      coinId: 'berachain',
+      chain: 'main',
+      aliases: ['berachain', 'berachain-mainnet', 'mainnet-berachain'],
+      chainId: 80094,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: berachainCoin
   },
   {
     manifest: {
@@ -303,6 +324,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'haqq',
+      runtimeModelId: 'haqq',
+      protocolFamily: 'evm',
+      coinId: 'haqq',
+      chain: 'main',
+      aliases: ['haqq', 'haqq-mainnet', 'haqq-evm', 'mainnet-haqq'],
+      chainId: 11235,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: haqqCoin
+  },
+  {
+    manifest: {
       id: 'linea',
       runtimeModelId: 'linea',
       protocolFamily: 'evm',
@@ -345,6 +380,34 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: metisCoin
+  },
+  {
+    manifest: {
+      id: 'moonbeam',
+      runtimeModelId: 'moonbeam',
+      protocolFamily: 'evm',
+      coinId: 'moonbeam',
+      chain: 'main',
+      aliases: ['moonbeam', 'moonbeam-mainnet', 'mainnet-moonbeam'],
+      chainId: 1284,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: moonbeamCoin
+  },
+  {
+    manifest: {
+      id: 'moonriver',
+      runtimeModelId: 'moonriver',
+      protocolFamily: 'evm',
+      coinId: 'moonriver',
+      chain: 'main',
+      aliases: ['moonriver', 'moonriver-mainnet', 'mainnet-moonriver'],
+      chainId: 1285,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: moonriverCoin
   },
   {
     manifest: {
@@ -449,6 +512,49 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       aliases: ['ada', 'cardano']
     },
     coin: adaCoin
+  },
+  {
+    manifest: {
+      id: 'somnia',
+      runtimeModelId: 'somnia',
+      protocolFamily: 'evm',
+      coinId: 'somnia',
+      chain: 'main',
+      aliases: ['somnia', 'somnia-mainnet', 'mainnet-somnia'],
+      chainId: 5031,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: somniaCoin
+  },
+  {
+    manifest: {
+      id: 'soneium',
+      runtimeModelId: 'soneium',
+      protocolFamily: 'evm',
+      coinId: 'soneium',
+      chain: 'main',
+      aliases: ['soneium', 'soneium-mainnet', 'mainnet-soneium'],
+      chainId: 1868,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: soneiumCoin
+  },
+  {
+    manifest: {
+      id: 'sonic',
+      runtimeModelId: 'sonic',
+      protocolFamily: 'evm',
+      coinId: 'sonic',
+      chain: 'main',
+      aliases: ['sonic', 'sonic-mainnet', 'mainnet-sonic'],
+      chainId: 146,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: sonicCoin
   },
   {
     manifest: {

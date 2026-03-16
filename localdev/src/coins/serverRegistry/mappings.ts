@@ -73,25 +73,25 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   sui: 'sui',
   tron: 'tron',
   blast: 'blast',
-  berachain: 'eth',
+  berachain: 'berachain',
   celo: 'celo',
   cronos: 'cronos',
   'cronos-evm': 'cronos',
   'zksync-era': 'zksync',
   fraxtal: 'fraxtal',
-  haqq: 'eth',
+  haqq: 'haqq',
   mantle: 'mantle',
-  moonbeam: 'eth',
-  moonriver: 'eth',
+  moonbeam: 'moonbeam',
+  moonriver: 'moonriver',
   'cronos-pos': 'cro',
   avail: 'eth',
   peaq: 'eth',
   'syscoin-tanenbaum-evm': 'eth',
   pulsechain: 'pulsechain',
   scroll: 'scroll',
-  somnia: 'eth',
-  soneium: 'eth',
-  sonic: 'eth',
+  somnia: 'somnia',
+  soneium: 'soneium',
+  sonic: 'sonic',
   taiko: 'taiko',
   unichain: 'unichain',
   'tron-evm': 'eth'
@@ -212,6 +212,7 @@ export const EVM_MODEL_NETWORK_IDS = new Set([
   'arb',
   'op',
   'base',
+  'berachain',
   'blast',
   'bnb',
   'celo',
@@ -221,12 +222,18 @@ export const EVM_MODEL_NETWORK_IDS = new Set([
   'bahamut',
   'fraxtal',
   'gnosis',
+  'haqq',
   'cronos',
   'linea',
   'mantle',
   'metis',
+  'moonbeam',
+  'moonriver',
   'pulsechain',
   'scroll',
+  'somnia',
+  'soneium',
+  'sonic',
   'taiko',
   'unichain',
   'zksync'
@@ -269,25 +276,25 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'tron') return 'tron'
   if (normalized === 'tron-evm') return 'eth'
   if (normalized === 'blast' || normalized.startsWith('blast-')) return 'blast'
-  if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
+  if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'berachain'
   if (normalized === 'celo' || normalized.startsWith('celo-')) return 'celo'
   if (normalized === 'cronos-pos' || normalized.startsWith('cronos-pos')) return 'cro'
   if (normalized === 'cronos' || normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'cronos'
   if (normalized === 'zksync' || normalized === 'zksync-era' || normalized.startsWith('zksync-era-')) return 'zksync'
   if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'fraxtal'
-  if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
+  if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'haqq'
   if (normalized === 'linea' || normalized.startsWith('linea-')) return 'linea'
   if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'mantle'
   if (normalized === 'metis' || normalized.startsWith('metis-')) return 'metis'
-  if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'eth'
-  if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'eth'
+  if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'moonbeam'
+  if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'moonriver'
   if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'pulsechain'
   if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'scroll'
-  if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'eth'
+  if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'somnia'
   if (normalized === 'taiko' || normalized.startsWith('taiko-')) return 'taiko'
   if (normalized === 'unichain' || normalized.startsWith('unichain-')) return 'unichain'
-  if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
-  if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
+  if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'soneium'
+  if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'sonic'
   if (normalized === 'evmos' || normalized.startsWith('evmos-')) return 'eth'
   if (normalized === 'dymension' || normalized.startsWith('dymension-')) return 'eth'
   if (normalized === 'kava' || normalized.startsWith('kava-')) return 'eth'
@@ -300,7 +307,7 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'xpla-evm' || normalized.startsWith('xpla-evm')) return 'eth'
   if (normalized === 'sei-evm' || normalized.startsWith('sei-evm')) return 'eth'
   if (normalized === 'nibiru-evm' || normalized.startsWith('nibiru-evm')) return 'eth'
-  if (normalized === 'haqq-evm' || normalized.startsWith('haqq-evm')) return 'eth'
+  if (normalized === 'haqq-evm' || normalized.startsWith('haqq-evm')) return 'haqq'
   if (normalized === 'iris-evm' || normalized.startsWith('iris-evm')) return 'eth'
   if (normalized === 'kava-evm' || normalized.startsWith('kava-evm')) return 'eth'
   if (normalized === 'tenet-evm' || normalized.startsWith('tenet-evm')) return 'eth'
@@ -360,6 +367,7 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       arb: 'arbitrum-one',
       op: 'optimism',
       base: 'base',
+      berachain: 'berachain',
       blast: 'blast',
       bnb: 'bsc',
       celo: 'celo',
@@ -367,14 +375,20 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       bahamut: 'bahamut',
       fraxtal: 'fraxtal',
       gnosis: 'gnosis',
+      haqq: 'haqq',
       cronos: 'cronos',
       linea: 'linea',
       mantle: 'mantle',
       metis: 'metis',
+      moonbeam: 'moonbeam',
+      moonriver: 'moonriver',
       polygon: 'polygon-bor',
       pulsechain: 'pulsechain',
       avaxc: 'avalanche-c-chain',
       scroll: 'scroll',
+      somnia: 'somnia',
+      soneium: 'soneium',
+      sonic: 'sonic',
       taiko: 'taiko',
       unichain: 'unichain',
       zksync: 'zksync-era'
@@ -423,6 +437,10 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('arbitrum')) return 'arb'
   if (normalized.includes('aurora')) return 'aurora'
   if (normalized.includes('bahamut')) return 'bahamut'
+  if (normalized.includes('berachain') || normalized.includes('bera')) return 'berachain'
+  if (normalized.includes('haqq') || normalized.includes('islm')) return 'haqq'
+  if (normalized.includes('moonbeam') || normalized.includes('glmr')) return 'moonbeam'
+  if (normalized.includes('moonriver') || normalized.includes('movr')) return 'moonriver'
   if (normalized.includes('optimism')) return 'op'
   if (normalized.includes('polygon')) return 'polygon'
   if (normalized.includes('avalanche')) return 'avaxc'
@@ -430,6 +448,9 @@ export function inferRuntimeModelFromTokenLikeCoinId(coinId: string): string | n
   if (normalized.includes('bsc') || normalized.includes('bnb')) return 'bnb'
   if (normalized.includes('cronos')) return 'cronos'
   if (normalized.includes('gnosis') || normalized.includes('xdai')) return 'gnosis'
+  if (normalized.includes('somnia') || normalized.includes('somi')) return 'somnia'
+  if (normalized.includes('soneium')) return 'soneium'
+  if (normalized.includes('sonic')) return 'sonic'
   if (normalized.includes('zksync')) return 'zksync'
   if (normalized.includes('sui')) return 'sui'
   if (normalized.includes('ethereum') || normalized.includes('eth')) return 'eth'
