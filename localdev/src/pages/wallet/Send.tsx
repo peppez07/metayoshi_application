@@ -214,7 +214,6 @@ type SendHubPreferences = {
 
 const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
 const SEND_HUB_PREFERENCES_KEY = 'metayoshi:send-hub:prefs:v1'
-const SEND_HUB_SCAN_STALE_MS = 30_000
 const SEND_HUB_SCAN_MAX_TPS = 5
 const SEND_HUB_SCAN_STEP_DELAY_MS = Math.max(1, Math.trunc(1000 / SEND_HUB_SCAN_MAX_TPS))
 const SEND_HUB_SCAN_STEP_TIMEOUT_MS = 20_000
@@ -1563,22 +1562,15 @@ const Send: React.FC = () => {
   useEffect(() => {
     if (hasDirectRouteRequest || selectedId || selectedBatchKey) return
     const cached = readCachedScanRows()
-    const cacheAgeMs = cached ? Math.max(0, Date.now() - cached.updatedAt) : Number.POSITIVE_INFINITY
     if (visibleScanRows.length === 0 && cached?.rows?.length) {
       setScanRows(cached.rows)
     }
     if (initialAutoScanTriggeredRef.current) return
-    if (cached?.checkpoint && !isScanningRef.current) {
+    if (cached?.rows?.length) {
       initialAutoScanTriggeredRef.current = true
-      void runGlobalScan({
-        mode: cached.checkpoint.mode,
-        reason: cached.checkpoint.reason || 'resume checkpoint',
-        refreshBalances: true,
-        resumeIfAvailable: true
-      })
       return
     }
-    if ((!cached || cacheAgeMs > SEND_HUB_SCAN_STALE_MS || visibleScanRows.length === 0) && !isScanningRef.current) {
+    if (!isScanningRef.current) {
       initialAutoScanTriggeredRef.current = true
       void runGlobalScan({ mode: 'auto', reason: 'initial load', refreshBalances: true })
     }
@@ -1590,7 +1582,7 @@ const Send: React.FC = () => {
     if (requestedModeRaw !== 'global') return
 
     if (routeState?.autoScan === true && visibleScanRows.length === 0 && !isScanningAll) {
-      void runGlobalScan({ mode: 'auto', reason: 'global network entry', resumeIfAvailable: true })
+      void runGlobalScan({ mode: 'auto', reason: 'global network entry' })
     }
 
     navigate('/wallet/send', { replace: true, state: null })

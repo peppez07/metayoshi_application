@@ -13,6 +13,7 @@ import {
 } from '../../lib/networkVisibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { getModelIconRingClass, getModelStatus } from '../../buildConfig'
+import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 
 function NetworkTag({
   label,
@@ -61,14 +62,16 @@ const BlockchainVisibilitySettings: React.FC = () => {
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
-      const networkId = String(row?.networkId || '').trim()
+      const networkId = normalizeActivityNetworkId(String(row?.networkId || '').trim())
       if (!networkId) continue
       usageByNetwork.set(networkId, (usageByNetwork.get(networkId) || 0) + 1)
     }
     return [...networks].sort((a, b) => {
       const familyDelta = compareNetworksByModelFamily(a, b)
       if (familyDelta !== 0) return familyDelta
-      const usageDelta = (usageByNetwork.get(b.id) || 0) - (usageByNetwork.get(a.id) || 0)
+      const usageDelta =
+        (usageByNetwork.get(normalizeActivityNetworkId(b.id)) || 0)
+        - (usageByNetwork.get(normalizeActivityNetworkId(a.id)) || 0)
       if (usageDelta !== 0) return usageDelta
       return a.name.localeCompare(b.name)
     })

@@ -14,6 +14,19 @@ export function normalizeActivityNetworkId(value: string): string {
   if (!lower) return ''
   if (lower === 'sdash' || lower === 'srv--dash') return 'dash'
   if (lower === 'btc' || lower === 'bitcoin' || lower === 'srv--btc') return 'srv--bitcoin'
+  if (lower === 'ada' || lower === 'cardano') return 'ada'
+  if (lower === 'arb' || lower === 'arbitrum' || lower === 'arbitrum-one') return 'arb'
+  if (lower === 'aurora' || lower === 'aurora-mainnet') return 'aurora'
+  if (lower === 'bahamut' || lower === 'bahamut-mainnet' || lower === 'ftn') return 'bahamut'
+  if (lower === 'base' || lower === 'base-mainnet' || lower === 'base-chain') return 'base'
+  if (lower === 'bsc' || lower === 'binance-smart-chain' || lower === 'bnb-smart-chain') return 'bnb'
+  if (lower === 'bsc-testnet' || lower === 'binance-smart-chain-testnet' || lower === 'bnb-smart-chain-testnet') return 'bnb-testnet'
+  if (lower === 'doge' || lower === 'dogecoin') return 'doge'
+  if (lower === 'gnosis' || lower === 'gnosis-chain' || lower === 'xdai') return 'gnosis'
+  if (lower === 'op' || lower === 'optimism' || lower === 'eth-l2--optimism') return 'op'
+  if (lower === 'trx' || lower === 'tron') return 'tron'
+  if (lower === 'xlm' || lower === 'stellar') return 'xlm'
+  if (lower === 'avax' || lower === 'avaxc' || lower === 'avalanche' || lower === 'avalanche-c-chain') return 'avaxc'
   if (lower.endsWith('-mainnet')) {
     const base = lower.slice(0, -'-mainnet'.length)
     if (STABLE_NETWORK_IDS.has(base)) return base

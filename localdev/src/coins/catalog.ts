@@ -4,10 +4,12 @@ import { avaxcCoin } from './avaxc'
 import { auroraCoin } from './aurora'
 import { bahamutCoin } from './bahamut'
 import { baseCoin } from './base'
+import { blastCoin } from './blast'
 import { bnbCoin } from './bnb'
 import { bnbTestnetCoin } from './bnbTestnet'
 import { btcCoin } from './btc'
 import { btczCoin } from './btcz'
+import { celoCoin } from './celo'
 import { cosmosCoin } from './cosmos'
 import { croCoin } from './cro'
 import { cronosCoin } from './cronos'
@@ -15,13 +17,21 @@ import { dashCoin } from './dash'
 import { dogeCoin } from './doge'
 import { ethCoin } from './eth'
 import { firoCoin } from './firo'
+import { fraxtalCoin } from './fraxtal'
 import { gnosisCoin } from './gnosis'
+import { lineaCoin } from './linea'
+import { mantleCoin } from './mantle'
+import { metisCoin } from './metis'
 import { opCoin } from './op'
 import { polygonCoin } from './polygon'
+import { pulsechainCoin } from './pulsechain'
 import { rtmCoin } from './rtm'
+import { scrollCoin } from './scroll'
 import { solCoin } from './sol'
 import { suiCoin } from './sui'
+import { taikoCoin } from './taiko'
 import { tronCoin } from './tron'
+import { unichainCoin } from './unichain'
 import { xlmCoin } from './xlm'
 import { zksyncCoin } from './zksync'
 import type { BundledCoinRegistryEntry } from './registryTypes'
@@ -67,6 +77,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: ethCoin
+  },
+  {
+    manifest: {
+      id: 'blast',
+      runtimeModelId: 'blast',
+      protocolFamily: 'evm',
+      coinId: 'blast',
+      chain: 'main',
+      aliases: ['blast', 'blast-mainnet', 'mainnet-blast'],
+      chainId: 81457,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: blastCoin
   },
   {
     manifest: {
@@ -221,6 +246,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'celo',
+      runtimeModelId: 'celo',
+      protocolFamily: 'evm',
+      coinId: 'celo',
+      chain: 'main',
+      aliases: ['celo', 'celo-mainnet', 'mainnet-celo'],
+      chainId: 42220,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: celoCoin
+  },
+  {
+    manifest: {
       id: 'cronos',
       runtimeModelId: 'cronos',
       protocolFamily: 'evm',
@@ -235,6 +274,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'fraxtal',
+      runtimeModelId: 'fraxtal',
+      protocolFamily: 'evm',
+      coinId: 'fraxtal',
+      chain: 'main',
+      aliases: ['fraxtal', 'fraxtal-mainnet', 'mainnet-fraxtal'],
+      chainId: 252,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: fraxtalCoin
+  },
+  {
+    manifest: {
       id: 'gnosis',
       runtimeModelId: 'gnosis',
       protocolFamily: 'evm',
@@ -246,6 +300,51 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       testedByDefault: true
     },
     coin: gnosisCoin
+  },
+  {
+    manifest: {
+      id: 'linea',
+      runtimeModelId: 'linea',
+      protocolFamily: 'evm',
+      coinId: 'linea',
+      chain: 'main',
+      aliases: ['linea', 'linea-mainnet', 'mainnet-linea'],
+      chainId: 59144,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: lineaCoin
+  },
+  {
+    manifest: {
+      id: 'mantle',
+      runtimeModelId: 'mantle',
+      protocolFamily: 'evm',
+      coinId: 'mantle',
+      chain: 'main',
+      aliases: ['mantle', 'mantle-mainnet', 'mainnet-mantle'],
+      chainId: 5000,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: mantleCoin
+  },
+  {
+    manifest: {
+      id: 'metis',
+      runtimeModelId: 'metis',
+      protocolFamily: 'evm',
+      coinId: 'metis',
+      chain: 'main',
+      aliases: ['metis', 'metis-mainnet', 'mainnet-metis'],
+      chainId: 1088,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: metisCoin
   },
   {
     manifest: {
@@ -285,6 +384,35 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'pulsechain',
+      runtimeModelId: 'pulsechain',
+      protocolFamily: 'evm',
+      coinId: 'pulsechain',
+      chain: 'main',
+      aliases: ['pulsechain', 'pulsechain-mainnet', 'mainnet-pulsechain'],
+      chainId: 369,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: pulsechainCoin
+  },
+  {
+    manifest: {
+      id: 'scroll',
+      runtimeModelId: 'scroll',
+      protocolFamily: 'evm',
+      coinId: 'scroll',
+      chain: 'main',
+      aliases: ['scroll', 'scroll-mainnet', 'mainnet-scroll'],
+      chainId: 534352,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: scrollCoin
+  },
+  {
+    manifest: {
       id: 'sol',
       runtimeModelId: 'sol',
       protocolFamily: 'solana',
@@ -295,6 +423,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: solCoin
+  },
+  {
+    manifest: {
+      id: 'taiko',
+      runtimeModelId: 'taiko',
+      protocolFamily: 'evm',
+      coinId: 'taiko',
+      chain: 'main',
+      aliases: ['taiko', 'taiko-mainnet', 'mainnet-taiko'],
+      chainId: 167000,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: taikoCoin
   },
   {
     manifest: {
@@ -318,6 +461,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       testedByDefault: true
     },
     coin: suiCoin
+  },
+  {
+    manifest: {
+      id: 'unichain',
+      runtimeModelId: 'unichain',
+      protocolFamily: 'evm',
+      coinId: 'unichain',
+      chain: 'main',
+      aliases: ['unichain', 'unichain-mainnet', 'mainnet-unichain'],
+      chainId: 130,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: unichainCoin
   },
   {
     manifest: {

@@ -72,28 +72,28 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   solana: 'sol',
   sui: 'sui',
   tron: 'tron',
-  blast: 'eth',
+  blast: 'blast',
   berachain: 'eth',
-  celo: 'eth',
+  celo: 'celo',
   cronos: 'cronos',
   'cronos-evm': 'cronos',
   'zksync-era': 'zksync',
-  fraxtal: 'eth',
+  fraxtal: 'fraxtal',
   haqq: 'eth',
-  mantle: 'eth',
+  mantle: 'mantle',
   moonbeam: 'eth',
   moonriver: 'eth',
   'cronos-pos': 'cro',
   avail: 'eth',
   peaq: 'eth',
   'syscoin-tanenbaum-evm': 'eth',
-  pulsechain: 'eth',
-  scroll: 'eth',
+  pulsechain: 'pulsechain',
+  scroll: 'scroll',
   somnia: 'eth',
   soneium: 'eth',
   sonic: 'eth',
-  taiko: 'eth',
-  unichain: 'eth',
+  taiko: 'taiko',
+  unichain: 'unichain',
   'tron-evm': 'eth'
 }
 
@@ -212,13 +212,23 @@ export const EVM_MODEL_NETWORK_IDS = new Set([
   'arb',
   'op',
   'base',
+  'blast',
   'bnb',
+  'celo',
   'polygon',
   'avaxc',
   'aurora',
   'bahamut',
+  'fraxtal',
   'gnosis',
   'cronos',
+  'linea',
+  'mantle',
+  'metis',
+  'pulsechain',
+  'scroll',
+  'taiko',
+  'unichain',
   'zksync'
 ])
 export const COSMOS_MODEL_NETWORK_IDS = new Set(['cosmos', 'cro'])
@@ -258,24 +268,24 @@ export function mapServerCoinIdToNetworkId(coinId: string): string | null {
   if (normalized === 'solana') return 'sol'
   if (normalized === 'tron') return 'tron'
   if (normalized === 'tron-evm') return 'eth'
-  if (normalized === 'blast' || normalized.startsWith('blast-')) return 'eth'
+  if (normalized === 'blast' || normalized.startsWith('blast-')) return 'blast'
   if (normalized === 'berachain' || normalized.startsWith('berachain-')) return 'eth'
-  if (normalized === 'celo' || normalized.startsWith('celo-')) return 'eth'
+  if (normalized === 'celo' || normalized.startsWith('celo-')) return 'celo'
   if (normalized === 'cronos-pos' || normalized.startsWith('cronos-pos')) return 'cro'
   if (normalized === 'cronos' || normalized === 'cronos-evm' || normalized.startsWith('cronos-evm')) return 'cronos'
   if (normalized === 'zksync' || normalized === 'zksync-era' || normalized.startsWith('zksync-era-')) return 'zksync'
-  if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'eth'
+  if (normalized === 'fraxtal' || normalized.startsWith('fraxtal-')) return 'fraxtal'
   if (normalized === 'haqq' || normalized.startsWith('haqq-')) return 'eth'
-  if (normalized === 'linea') return 'eth'
-  if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'eth'
-  if (normalized === 'metis') return 'eth'
+  if (normalized === 'linea' || normalized.startsWith('linea-')) return 'linea'
+  if (normalized === 'mantle' || normalized.startsWith('mantle-')) return 'mantle'
+  if (normalized === 'metis' || normalized.startsWith('metis-')) return 'metis'
   if (normalized === 'moonbeam' || normalized.startsWith('moonbeam-')) return 'eth'
   if (normalized === 'moonriver' || normalized.startsWith('moonriver-')) return 'eth'
-  if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'eth'
-  if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'eth'
+  if (normalized === 'pulsechain' || normalized.startsWith('pulsechain-')) return 'pulsechain'
+  if (normalized === 'scroll' || normalized.startsWith('scroll-')) return 'scroll'
   if (normalized === 'somnia' || normalized.startsWith('somnia-')) return 'eth'
-  if (normalized === 'taiko') return 'eth'
-  if (normalized === 'unichain') return 'base'
+  if (normalized === 'taiko' || normalized.startsWith('taiko-')) return 'taiko'
+  if (normalized === 'unichain' || normalized.startsWith('unichain-')) return 'unichain'
   if (normalized === 'soneium' || normalized.startsWith('soneium-')) return 'eth'
   if (normalized === 'sonic' || normalized.startsWith('sonic-')) return 'eth'
   if (normalized === 'evmos' || normalized.startsWith('evmos-')) return 'eth'
@@ -350,13 +360,23 @@ export function resolveAppNetworkId(baseNetworkId: string, serverCoinId: string)
       arb: 'arbitrum-one',
       op: 'optimism',
       base: 'base',
+      blast: 'blast',
       bnb: 'bsc',
+      celo: 'celo',
       aurora: 'aurora',
       bahamut: 'bahamut',
+      fraxtal: 'fraxtal',
       gnosis: 'gnosis',
       cronos: 'cronos',
+      linea: 'linea',
+      mantle: 'mantle',
+      metis: 'metis',
       polygon: 'polygon-bor',
+      pulsechain: 'pulsechain',
       avaxc: 'avalanche-c-chain',
+      scroll: 'scroll',
+      taiko: 'taiko',
+      unichain: 'unichain',
       zksync: 'zksync-era'
     }
 

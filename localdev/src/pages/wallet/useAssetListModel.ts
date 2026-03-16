@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { parseSolanaAssetType } from '../../lib/assetTypes'
+import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 import { useWalletStore } from '../../store/walletStore'
 
 export function formatAssetAmount(raw: number): string {
@@ -72,8 +73,9 @@ export function useAssetListModel() {
 
   const assetUsage = useMemo(() => {
     const out = new Map<string, number>()
+    const activeCanonicalNetworkId = normalizeActivityNetworkId(activeNetworkId)
     for (const row of activity) {
-      if (String(row?.networkId || '').trim() !== activeNetworkId) continue
+      if (normalizeActivityNetworkId(String(row?.networkId || '').trim()) !== activeCanonicalNetworkId) continue
       const name = String(row?.asset || '').trim().toLowerCase()
       if (!name) continue
       out.set(name, (out.get(name) || 0) + 1)
