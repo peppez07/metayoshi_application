@@ -1,33 +1,12 @@
 import type { Network } from '../coins'
 import type { ServerCoinCatalogItem } from '../coins/serverRegistry/types'
 import type { SendableItem } from '../store/walletStore'
+import {
+  isSwapMatrixSupportedAsset,
+  isSwapMatrixSupportedNetworkId
+} from './swapSupportMatrix'
 
 const EVM_CONTRACT_RE = /^0x[a-f0-9]{40}$/i
-
-const FALLBACK_SWAP_SYMBOLS = new Set([
-  'ETH',
-  'WETH',
-  'USDC',
-  'USDT',
-  'WBTC',
-  'BTCB',
-  'DAI',
-  'BNB',
-  'CAKE',
-  'LINK',
-  'UNI',
-  'AAVE',
-  'ARB',
-  'OP',
-  'AVAX',
-  'CRO',
-  'BUSD',
-  'XRP',
-  'ADA',
-  'DOGE',
-  'PEPE',
-  'SHIB'
-])
 
 function normalizeText(value: unknown): string {
   return String(value || '').trim().toLowerCase()
@@ -39,19 +18,29 @@ export function extractSwapContractAddress(assetId?: string): string | undefined
   return match ? match[0].toLowerCase() : undefined
 }
 
-export function isSwapSupportedNetwork(network?: Pick<Network, 'coinType'> | null): boolean {
-  return network?.coinType === 'EVM'
+export function isSwapSupportedNetwork(network?: Pick<Network, 'coinType' | 'id'> | null): boolean {
+  if (!network?.id) return false
+  if (network.coinType !== 'EVM' && network.coinType !== 'SOL') return false
+  return isSwapMatrixSupportedNetworkId(network.id)
 }
 
 export function isCatalogAssetSwappable(
   item: ServerCoinCatalogItem,
-  network?: Pick<Network, 'coinType'> | null
+  network?: Pick<Network, 'coinType' | 'id'> | null
 ): boolean {
   if (!isSwapSupportedNetwork(network)) return false
   if (item.enabled !== true) return false
   if (normalizeText(item.walletCatalogState) === 'blocked') return false
-  if (item.kind === 'main') return true
-  return EVM_CONTRACT_RE.test(String(item.contractAddress || '').trim())
+  if (item.kind === 'main') {
+    return isSwapMatrixSupportedAsset(network?.id, item.symbol, 'native')
+  }
+  return (
+    isSwapMatrixSupportedAsset(network?.id, item.symbol, 'fungible')
+    && (
+      network?.coinType !== 'EVM'
+      || EVM_CONTRACT_RE.test(String(item.contractAddress || '').trim())
+    )
+  )
 }
 
 export function buildSwappableCatalogIdentitySet(items: ServerCoinCatalogItem[], networkId: string): Set<string> {
@@ -79,14 +68,15 @@ export function isWalletAssetSwappable(
 ): boolean {
   if (!isSwapSupportedNetwork(network)) return false
   if (item.kind === 'nft') return false
-  if (item.kind === 'native') return true
+  if (item.kind === 'native') {
+    return isSwapMatrixSupportedAsset(network?.id, item.symbol, 'native')
+  }
+  if (!isSwapMatrixSupportedAsset(network?.id, item.symbol, 'fungible')) return false
 
   const contract = extractSwapContractAddress(item.assetId)
   if (contract && supportedCatalogIdentities?.has(contract)) return true
 
   const assetId = normalizeText(item.assetId)
   if (assetId && supportedCatalogIdentities?.has(assetId)) return true
-
-  const symbol = String(item.symbol || '').trim().toUpperCase()
-  return FALLBACK_SWAP_SYMBOLS.has(symbol)
+  return !supportedCatalogIdentities || supportedCatalogIdentities.size === 0
 }

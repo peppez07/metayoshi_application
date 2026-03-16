@@ -3668,19 +3668,23 @@ export const useWalletStore = create<WalletState>()(
 
             for (const row of tokenRows) {
               if (!row) continue
-              const baseKey = row.token.discovered
-                ? `${row.symbol}@${shortAddress(row.token.address)}`
-                : row.symbol
-              let assetKey = baseKey
-              let suffix = 2
-              while (usedAssetKeys.has(assetKey)) {
-                assetKey = `${baseKey}-${suffix}`
-                suffix += 1
+              let assetKey = String(assetKeyByContract.get(row.token.address) || '').trim()
+              if (!assetKey) {
+                const baseKey = row.token.discovered
+                  ? `${row.symbol}@${shortAddress(row.token.address)}`
+                  : row.symbol
+                assetKey = baseKey
+                let suffix = 2
+                while (usedAssetKeys.has(assetKey)) {
+                  assetKey = `${baseKey}-${suffix}`
+                  suffix += 1
+                }
               }
               usedAssetKeys.add(assetKey)
-              fungibleAssets[assetKey] = row.displaySats
-              fungibleAssetLabels[assetKey] = row.symbol
-              if (row.logoUri) fungibleAssetLogos[assetKey] = row.logoUri
+              const prev = Number(fungibleAssets[assetKey] || 0)
+              fungibleAssets[assetKey] = Math.max(prev, row.displaySats)
+              if (!fungibleAssetLabels[assetKey]) fungibleAssetLabels[assetKey] = row.symbol
+              if (row.logoUri && !fungibleAssetLogos[assetKey]) fungibleAssetLogos[assetKey] = row.logoUri
               assetKeyByContract.set(row.token.address, assetKey)
             }
 

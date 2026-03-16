@@ -104,7 +104,13 @@ const AssetsPage: React.FC = () => {
     if (!canOpenAssetSend || !deepLinkedSendAsset) return
     if (deepLinkHandledRef.current === deepLinkedSendAsset) return
     if (!sorted.some(([name]) => name === deepLinkedSendAsset)) return
-    navigate('/wallet/send', { state: { assetId: deepLinkedSendAsset } })
+    navigate('/wallet/send', {
+      state: {
+        assetId: deepLinkedSendAsset,
+        returnTo: '/assets',
+        returnLabel: 'Assets'
+      }
+    })
     deepLinkHandledRef.current = deepLinkedSendAsset
   }, [canOpenAssetSend, deepLinkedSendAsset, navigate, sorted])
 
@@ -125,7 +131,13 @@ const AssetsPage: React.FC = () => {
 
   const handleAssetRowClick = (name: string): void => {
     if (!canOpenAssetSend) return
-    navigate('/wallet/send', { state: { assetId: name } })
+    navigate('/wallet/send', {
+      state: {
+        assetId: name,
+        returnTo: '/assets',
+        returnLabel: 'Assets'
+      }
+    })
   }
 
   const toggleSendHubHidden = (name: string): void => {

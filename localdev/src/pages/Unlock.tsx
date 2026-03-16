@@ -141,9 +141,12 @@ const Unlock: React.FC = () => {
       </form>
 
       <footer className="flex flex-col items-center gap-1.5 text-gray-500 text-xs font-medium mt-auto">
-        <span className="px-2.5 py-0.5 rounded-full bg-dark-700/60 border border-dark-600/60 text-[10px] font-bold tracking-widest text-gray-600 uppercase">
-          v{APP_VERSION}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-[0.18em] text-red-500">beta</span>
+          <span className="px-2.5 py-0.5 rounded-full bg-dark-700/60 border border-dark-600/60 text-[10px] font-bold tracking-widest text-gray-600 uppercase">
+            v{APP_VERSION}
+          </span>
+        </div>
       </footer>
     </div>
   )

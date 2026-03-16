@@ -121,7 +121,13 @@ const Assets: React.FC = () => {
             fiatValue={formatFiatValue(fiatByAsset[name]?.usd)}
             onClick={() => {
               if (canOpenAssetSend) {
-                navigate('/wallet/send', { state: { assetId: name } })
+                navigate('/wallet/send', {
+                  state: {
+                    assetId: name,
+                    returnTo: '/wallet/assets',
+                    returnLabel: 'Assets'
+                  }
+                })
                 return
               }
               navigate('/assets')

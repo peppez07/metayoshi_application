@@ -9,6 +9,7 @@ const ERROR_STORAGE_KEY = 'metayoshi-runtime-errors-v1'
 const MAX_ERROR_LOG_ITEMS = 120
 const BRIDGE_TRACE_STORAGE_KEY = 'metayoshi-bridge-trace-v1'
 const MAX_BRIDGE_TRACE_ITEMS = 400
+const OPEN_WALLET_TRIGGER_SELECTOR = '[data-metayoshi-open-wallet]'
 
 function normalizeUnknownError(input: unknown): { message: string; stack?: string } {
   if (input instanceof Error) return { message: input.message || 'Unknown error', stack: input.stack }
@@ -222,6 +223,42 @@ function injectInpage(): void {
   script.onload = () => {
     script.remove()
   }
+}
+
+function isWalletSurfaceTriggerElement(target: EventTarget | null): Element | null {
+  if (!(target instanceof Element)) return null
+  return target.closest(OPEN_WALLET_TRIGGER_SELECTOR)
+}
+
+function installWalletSurfaceTriggerBridge(): void {
+  window.addEventListener('click', (event) => {
+    const trigger = isWalletSurfaceTriggerElement(event.target)
+    if (!trigger) return
+
+    void recordBridgeTrace('content-script', 'wallet-surface-trigger-click', {
+      origin: window.location.origin || 'unknown',
+      path: window.location.pathname || '/',
+      triggerTag: trigger.tagName.toLowerCase()
+    })
+
+    chrome.runtime.sendMessage({ type: 'METAYOSHI_OPEN_WALLET_SURFACE' }, (resp: any) => {
+      const runtimeError = chrome.runtime.lastError
+      if (runtimeError) {
+        void recordRuntimeError('content-script', runtimeError.message || 'Failed to request wallet surface open', {
+          kind: 'wallet-surface-trigger',
+          origin: window.location.origin || 'unknown'
+        })
+        return
+      }
+
+      if (!resp?.ok && resp?.error) {
+        void recordRuntimeError('content-script', String(resp.error), {
+          kind: 'wallet-surface-trigger',
+          origin: window.location.origin || 'unknown'
+        })
+      }
+    })
+  }, { capture: true })
 }
 
 function postToPage(payload: any): void {
@@ -537,6 +574,7 @@ async function boot(): Promise<void> {
     contentRuntime.messageListenerInstalled = true
   }
 
+  installWalletSurfaceTriggerBridge()
   injectInpage()
   initEventBridge()
 }

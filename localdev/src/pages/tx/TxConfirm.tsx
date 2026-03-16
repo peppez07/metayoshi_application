@@ -11,6 +11,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
+import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
 import {
   DAPP_PENDING_REQUEST_STORAGE_KEY,
   parseDappPendingRequest,
@@ -42,6 +43,8 @@ interface TxState {
   donationRequired?: boolean
   totalBeforeNetworkFee?: string
   dataHex?: string
+  returnTo?: string
+  returnLabel?: string
 }
 
 interface TxResultState {
@@ -55,6 +58,8 @@ interface TxResultState {
   status?: string
   origin?: string
   requestMethod?: string
+  returnTo?: string
+  returnLabel?: string
 }
 
 function canUseChromeStorage(): boolean {
@@ -272,6 +277,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     ? `${formatCoinAmount(safeAmount)} ${activeNetwork.symbol}`
     : (safeAmount > 0 ? `${safeAmount} ${isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}` : 'No amount provided')
   const modelPreferences = getNetworkModelPreferences(displayNetworkId)
+  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
   const availableNativeBalance = useMemo(() => {
     const scoped = parseCoinAmount(activeAccount?.networkBalances?.[displayNetworkId])
     if (scoped > 0) return scoped
@@ -308,8 +314,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         const canFetchLivePreview = Boolean(
           fromAddress
           && (
-            (activeNetwork.coinType === 'EVM' && (toAddress || String(dappEvmRequest?.data || '').trim()))
-            || (activeNetwork.coinType === 'UTXO' && !isAssetTransfer && toAddress && Number(amount) > 0)
+            (activeNetwork.coinType === 'EVM' && (feePreviewRecipient || String(dappEvmRequest?.data || '').trim()))
+            || (activeNetwork.coinType === 'UTXO' && !isAssetTransfer && feePreviewRecipient && Number(amount) > 0)
           )
         )
         if (!canFetchLivePreview) {
@@ -323,7 +329,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         const preview = await estimateTransactionFeePreview({
           network: activeNetwork,
           fromAddress,
-          toAddress,
+          toAddress: feePreviewRecipient,
           amount,
           assetId: assetId || undefined,
           assetLogos: activeNetworkLogos,
@@ -361,7 +367,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
     modelPreferences.utxoInputStrategy,
-    toAddress
+    feePreviewRecipient
   ])
 
   const TABS = [
@@ -624,7 +630,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         to: toAddress || undefined,
         status: 'pending',
         origin: isDappTxRoute ? requestOrigin : undefined,
-        requestMethod: isDappTxRoute ? currentDappRequest?.method : undefined
+        requestMethod: isDappTxRoute ? currentDappRequest?.method : undefined,
+        returnTo: txState.returnTo,
+        returnLabel: txState.returnLabel
       }
       navigate('/tx/result', { replace: true, state: resultState })
     } catch (e: any) {

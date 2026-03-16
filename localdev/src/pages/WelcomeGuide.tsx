@@ -65,7 +65,10 @@ const WelcomeGuide: React.FC = () => {
           }`}>
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-primary">MetaYoshi Flight Deck</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-primary">MetaYoshi Flight Deck</p>
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-red-500">beta</span>
+                </div>
                 <h1 className={`text-[22px] leading-[1.05] font-black uppercase tracking-tight ${isLight ? 'text-slate-950' : 'text-gray-100'}`}>
                   Wallet Ready.
                   <br />

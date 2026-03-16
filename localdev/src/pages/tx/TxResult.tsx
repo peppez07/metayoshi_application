@@ -16,6 +16,8 @@ interface TxResultState {
   status?: string
   origin?: string
   requestMethod?: string
+  returnTo?: string
+  returnLabel?: string
 }
 
 const TxResult: React.FC = () => {
@@ -51,6 +53,9 @@ const TxResult: React.FC = () => {
   }
 
   if (!txState?.txid) return null
+
+  const returnTo = String(txState.returnTo || '').trim()
+  const returnLabel = String(txState.returnLabel || '').trim() || 'Home'
 
   return (
     <div className="flex flex-col h-full bg-dark-800">
@@ -127,11 +132,11 @@ const TxResult: React.FC = () => {
         </Button>
         <Button
           className="flex-1 btn-primary"
-          onClick={() => navigate('/wallet/assets')}
+          onClick={() => navigate(returnTo || '/wallet/assets')}
         >
           <span className="inline-flex items-center gap-2">
             <IoHomeOutline className="w-4 h-4" />
-            Home
+            {returnLabel}
           </span>
         </Button>
       </footer>

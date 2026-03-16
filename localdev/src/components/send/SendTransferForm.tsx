@@ -11,6 +11,7 @@ import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
+import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
 
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
@@ -52,9 +53,13 @@ function resolveNftQuantityMode(item: SendableItem): NftQuantityMode {
 type SendTransferFormProps = {
   item: SendableItem
   onBack: () => void
+  flowContext?: {
+    returnTo?: string
+    returnLabel?: string
+  }
 }
 
-const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => {
+const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowContext }) => {
   const navigate = useNavigate()
   const {
     accounts,
@@ -115,6 +120,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     ? estimatedNativeFee * (nativeNetworkFiatUsd / nativeBalance)
     : null
   const displayEstimatedNativeFeeFiat = formatFiatValue(estimatedNativeFeeFiat)
+  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
 
   useEffect(() => {
     setToAddress('')
@@ -146,8 +152,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         const canFetchLivePreview = Boolean(
           fromAddress
           && (
-            (activeNetwork.coinType === 'EVM' && toAddress)
-            || (activeNetwork.coinType === 'UTXO' && isNative && toAddress && Number(previewAmount) > 0)
+            (activeNetwork.coinType === 'EVM' && feePreviewRecipient)
+            || (activeNetwork.coinType === 'UTXO' && isNative && feePreviewRecipient && Number(previewAmount) > 0)
           )
         )
 
@@ -164,7 +170,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         const preview = await estimateTransactionFeePreview({
           network: activeNetwork,
           fromAddress,
-          toAddress,
+          toAddress: feePreviewRecipient,
           amount: previewAmount,
           assetId: String(item.assetId || '').trim() || undefined,
           assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
@@ -195,7 +201,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
     modelPreferences.utxoInputStrategy,
-    toAddress
+    feePreviewRecipient
   ])
 
   const validateAmount = (): string | null => {
@@ -303,7 +309,9 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         requestType: 'native',
         to: toAddress.trim(),
         amount: normalizedAmount,
-        from: fromAddress
+        from: fromAddress,
+        returnTo: flowContext?.returnTo,
+        returnLabel: flowContext?.returnLabel
       }
       if (supportsMemo && memo.trim()) txState.memo = memo.trim()
 
@@ -360,6 +368,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack }) => 
         to: toAddress.trim(),
         amount: normalizedAmount,
         from: fromAddress,
+        returnTo: flowContext?.returnTo,
+        returnLabel: flowContext?.returnLabel,
         ...(supportsMemo && memo.trim() ? { memo: memo.trim() } : {})
       }
     })

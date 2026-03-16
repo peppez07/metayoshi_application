@@ -167,6 +167,8 @@ export function normalizeNetworkIdAlias(value: string): string {
   if (normalized === 'arb' || normalized === 'arbitrum' || normalized === 'arbitrum-one') return 'arb'
   if (normalized === 'aurora' || normalized === 'aurora-mainnet') return 'aurora'
   if (normalized === 'bahamut' || normalized === 'bahamut-mainnet' || normalized === 'ftn') return 'bahamut'
+  if (normalized === 'bsc' || normalized === 'binance-smart-chain' || normalized === 'bnb-smart-chain') return 'bnb'
+  if (normalized === 'bsc-testnet' || normalized === 'binance-smart-chain-testnet' || normalized === 'bnb-smart-chain-testnet') return 'bnb-testnet'
   if (normalized === 'doge' || normalized === 'dogecoin') return 'doge'
   if (normalized === 'gnosis' || normalized === 'gnosis-chain' || normalized === 'xdai') return 'gnosis'
   if (normalized === 'op' || normalized === 'optimism' || normalized === 'eth-l2--optimism') return 'op'

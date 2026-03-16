@@ -109,6 +109,12 @@ type SendRouteState = {
   quickSendNative?: boolean
   hubMode?: 'global'
   autoScan?: boolean
+  returnTo?: string
+  returnLabel?: string
+}
+type SendFlowContext = {
+  returnTo?: string
+  returnLabel?: string
 }
 type GlobalScanMode = 'auto' | 'manual'
 type GlobalScanOptions = {
@@ -895,6 +901,7 @@ const Send: React.FC = () => {
   const scanRowsRef = useRef<AggregatedScanRow[]>(scanRows)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
   const handledDeepLinkRef = useRef<string>('')
+  const directFlowContextRef = useRef<SendFlowContext | null>(null)
   const scanRunIdRef = useRef(0)
   const isScanningRef = useRef(false)
   const scanRestoreSelectionRef = useRef<{ accountId: string | null; networkId: string | null } | null>(null)
@@ -1125,6 +1132,11 @@ const Send: React.FC = () => {
     const dedupeKey = `${requestedEntryId}|${requestedAssetId}|${requestedQuickNative ? 'native' : ''}`
     if (handledDeepLinkRef.current === dedupeKey) return
 
+    directFlowContextRef.current = {
+      returnTo: String(routeState?.returnTo || '').trim() || undefined,
+      returnLabel: String(routeState?.returnLabel || '').trim() || undefined
+    }
+
     const composerPreference = getNetworkModelPreferences(activeNetworkId).utxoTransferComposer
     if (requestedAssetId && composerPreference === 'batch') {
       const batchMatch = visibleScanRows.find((row) => (
@@ -1134,6 +1146,10 @@ const Send: React.FC = () => {
       ))
       if (batchMatch) {
         handledDeepLinkRef.current = dedupeKey
+        directFlowContextRef.current = {
+          returnTo: String(routeState?.returnTo || '').trim() || undefined,
+          returnLabel: String(routeState?.returnLabel || '').trim() || undefined
+        }
         setSelectedId(null)
         setSelectedBatchKey(batchMatch.key)
         navigate('/wallet/send', { replace: true, state: null })
@@ -1600,6 +1616,7 @@ const Send: React.FC = () => {
     scanRestoreSelectionRef.current = null
 
     try {
+      directFlowContextRef.current = null
       setSelectedBatchKey(null)
       setActiveAccount(holder.accountId)
       await setActiveNetwork(holder.networkId)
@@ -1711,8 +1728,13 @@ const Send: React.FC = () => {
       <SendTransferForm
         item={selectedItem}
         onBack={() => {
+          if (directFlowContextRef.current?.returnTo) {
+            navigate(directFlowContextRef.current.returnTo)
+            return
+          }
           setSelectedId(null)
         }}
+        flowContext={directFlowContextRef.current || undefined}
       />
     )
   }
@@ -1870,6 +1892,7 @@ const Send: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          directFlowContextRef.current = null
                           setSelectedId(null)
                           setSelectedBatchKey(row.key)
                         }}

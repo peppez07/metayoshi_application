@@ -69,6 +69,10 @@ type DappRequest = {
   origin?: string
 }
 
+type OpenWalletSurfaceRequest = {
+  type: 'METAYOSHI_OPEN_WALLET_SURFACE'
+}
+
 type MonitorRequest =
   | { type: 'METAYOSHI_MONITOR_GET_ERRORS' }
   | { type: 'METAYOSHI_MONITOR_CLEAR_ERRORS' }
@@ -595,6 +599,40 @@ function buildExtensionRouteUrl(routePath: string): string {
   return chrome.runtime.getURL(`${APP_ENTRY_PATH}#${routePath}`)
 }
 
+function isSidePanelEligibleTab(tab: chrome.tabs.Tab | null | undefined): tab is chrome.tabs.Tab & { id: number } {
+  if (typeof tab?.id !== 'number') return false
+  const url = String(tab.url || '').trim().toLowerCase()
+  if (!url) return false
+  if (url.startsWith('http://') || url.startsWith('https://')) return true
+  return false
+}
+
+async function findPreferredSidePanelTab(): Promise<chrome.tabs.Tab | null> {
+  const candidateQueries: chrome.tabs.QueryInfo[] = [
+    { active: true, lastFocusedWindow: true },
+    { active: true, currentWindow: true }
+  ]
+
+  for (const query of candidateQueries) {
+    try {
+      const [activeTab] = await chrome.tabs.query(query)
+      if (isSidePanelEligibleTab(activeTab)) {
+        return activeTab
+      }
+    } catch {
+      // Ignore transient tab query errors.
+    }
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({ lastFocusedWindow: true })
+    const eligibleTab = tabs.find((tab) => isSidePanelEligibleTab(tab))
+    return eligibleTab || null
+  } catch {
+    return null
+  }
+}
+
 async function resolveExtensionSurfaceTarget(target?: ExtensionSurfaceTarget): Promise<ExtensionSurfaceTarget> {
   const resolved: ExtensionSurfaceTarget = {
     ...(typeof target?.tabId === 'number' ? { tabId: target.tabId } : {}),
@@ -602,19 +640,12 @@ async function resolveExtensionSurfaceTarget(target?: ExtensionSurfaceTarget): P
   }
 
   if (typeof resolved.tabId !== 'number') {
-    try {
-      let [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-      if (!activeTab) {
-        ;[activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const preferredTab = await findPreferredSidePanelTab()
+    if (preferredTab) {
+      resolved.tabId = preferredTab.id
+      if (typeof preferredTab.windowId === 'number') {
+        resolved.windowId = preferredTab.windowId
       }
-      if (typeof activeTab?.id === 'number') {
-        resolved.tabId = activeTab.id
-      }
-      if (typeof activeTab?.windowId === 'number') {
-        resolved.windowId = activeTab.windowId
-      }
-    } catch {
-      // Ignore transient tab query errors.
     }
   }
 
@@ -702,11 +733,19 @@ async function openExtensionSurface(
         enabled: true
       })
     } catch (err) {
-      sidePanelFailure = new Error('Failed to configure extension side panel')
-      void recordRuntimeError('background-sw', err, {
-        kind: 'open-extension-surface-set-options',
-        routePath
-      })
+      try {
+        await sidePanel.setOptions({
+          path: APP_ENTRY_PATH,
+          enabled: true
+        })
+      } catch (fallbackErr) {
+        sidePanelFailure = new Error('Failed to configure extension side panel')
+        void recordRuntimeError('background-sw', fallbackErr, {
+          kind: 'open-extension-surface-set-options',
+          routePath,
+          attemptedTabId: resolvedTarget.tabId
+        })
+      }
     }
   }
 
@@ -721,11 +760,20 @@ async function openExtensionSurface(
         return
       }
     } catch (err) {
-      sidePanelFailure = new Error('Failed to open extension side panel')
-      void recordRuntimeError('background-sw', err, {
-        kind: 'open-extension-surface-open',
-        routePath
-      })
+      try {
+        if (typeof resolvedTarget.windowId === 'number') {
+          await sidePanel.open({ windowId: resolvedTarget.windowId })
+          return
+        }
+      } catch (fallbackErr) {
+        sidePanelFailure = new Error('Failed to open extension side panel')
+        void recordRuntimeError('background-sw', fallbackErr, {
+          kind: 'open-extension-surface-open',
+          routePath,
+          attemptedTabId: resolvedTarget.tabId,
+          attemptedWindowId: resolvedTarget.windowId
+        })
+      }
     }
   }
 
@@ -1592,7 +1640,7 @@ async function handleRpcMethod(
   }
 
   if (OPEN_WALLET_METHODS.has(method)) {
-    await openExtensionSurface('/', surfaceTarget)
+    await openWalletSurface(surfaceTarget)
     const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
     return refreshed.providerState
   }
@@ -2199,7 +2247,7 @@ function handleWalletStorageBroadcast(
 }
 
 // Handle messages from content scripts
-chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) => {
+chrome.runtime.onMessage.addListener((message: DappRequest | OpenWalletSurfaceRequest | MonitorRequest, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) => {
   if (message?.type === 'METAYOSHI_MONITOR_GET_ERRORS') {
     void getRuntimeErrorLog()
       .then((errors) => sendResponse({ ok: true, errors }))
@@ -2231,6 +2279,25 @@ chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sen
     void clearBridgeTraceLog()
       .then(() => sendResponse({ ok: true }))
       .catch((err) => {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      })
+    return true
+  }
+
+  if (message?.type === 'METAYOSHI_OPEN_WALLET_SURFACE') {
+    const surfaceTarget: ExtensionSurfaceTarget = {
+      ...(typeof sender?.tab?.id === 'number' ? { tabId: sender.tab.id } : {}),
+      ...(typeof sender?.tab?.windowId === 'number' ? { windowId: sender.tab.windowId } : {})
+    }
+
+    void openWalletSurface(surfaceTarget)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => {
+        void recordRuntimeError('background-sw', err, {
+          kind: 'open-wallet-surface-message',
+          senderOrigin: sender?.origin || null,
+          senderUrl: sender?.url || null
+        })
         sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
       })
     return true

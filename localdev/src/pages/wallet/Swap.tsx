@@ -2,7 +2,6 @@ import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'r
 import { useNavigate } from 'react-router-dom'
 import {
   IoArrowBackOutline,
-  IoInformationCircleOutline,
   IoSettingsOutline,
   IoSwapVerticalOutline,
   IoTimeOutline,
@@ -10,7 +9,6 @@ import {
 } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import { useToast } from '../../components/Toast'
-import { getCoinManifestByAlias } from '../../coins/coinRegistry'
 import type { Network } from '../../coins/types'
 import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
 import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
@@ -22,17 +20,24 @@ import {
   isWalletAssetSwappable
 } from '../../lib/swapEligibility'
 import {
+  hasSwapMatrixRoute,
+  getSwapMatrixAllowedDestinationSymbols,
+  getSwapMatrixAllowedSourceSymbols
+} from '../../lib/swapSupportMatrix'
+import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
   requestServerSwapQuote,
+  resolveWalletSwapReadiness,
   resolveServerSwapAssetDecimals,
   submitServerSwap,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
-  type ServerSwapQuote
-} from '../../lib/serverExecution'
+  type ServerSwapQuote,
+  type WalletSwapRoutePreference
+} from '../../lib/swapClient'
 import { useWalletStore, type SendableItem } from '../../store/walletStore'
 
 function compactError(error: unknown): string {
@@ -112,15 +117,6 @@ type SwapAssetOption = {
   amount?: string
 }
 
-type ChainSegment = 'all' | 'l1' | 'l2' | 'non-evm'
-
-const CHAIN_SEGMENTS: Array<{ id: ChainSegment; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'l1', label: 'L1' },
-  { id: 'l2', label: 'L2' },
-  { id: 'non-evm', label: 'Other' }
-]
-
 const POPULAR_SWAP_SYMBOLS = [
   'ETH',
   'WETH',
@@ -137,6 +133,13 @@ const POPULAR_SWAP_SYMBOLS = [
   'OP',
   'SOL',
   'CRO'
+]
+
+const ROUTE_PREFERENCES: Array<{ id: WalletSwapRoutePreference; label: string }> = [
+  { id: 'best-value', label: 'Best value' },
+  { id: 'fastest', label: 'Fastest' },
+  { id: 'lowest-gas', label: 'Lowest gas' },
+  { id: 'safest', label: 'Safest' }
 ]
 
 function createWalletAssetOption(item: SendableItem): SwapAssetOption {
@@ -230,26 +233,6 @@ async function withResolvedSwapAsset(
   }
 }
 
-function resolveSwapNetworkSegment(network: Pick<Network, 'id' | 'runtimeModelId' | 'coinType'>): ChainSegment {
-  if (network.coinType !== 'EVM') return 'non-evm'
-  const manifest = getCoinManifestByAlias(network.id) || getCoinManifestByAlias(String(network.runtimeModelId || ''))
-  const runtimeHint = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
-  if (manifest?.isEthereumLayer2 || runtimeHint.startsWith('eth-l2--')) return 'l2'
-  return 'l1'
-}
-
-function filterNetworksBySegment(networks: Network[], segment: ChainSegment): Network[] {
-  if (segment === 'all') return networks
-  return networks.filter((network) => resolveSwapNetworkSegment(network) === segment)
-}
-
-function formatNetworkSegment(network: Pick<Network, 'id' | 'runtimeModelId' | 'coinType'>): string {
-  const segment = resolveSwapNetworkSegment(network)
-  if (segment === 'l2') return 'L2'
-  if (segment === 'l1') return 'L1'
-  return 'Other'
-}
-
 function formatDisplayAmount(value: string | number, maxDecimals = 6): string {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return String(value || '0')
@@ -321,6 +304,7 @@ function buildQuotePreviewKey(input: {
   toAssetId: string
   slippagePct: string
   sponsorPreference: ServerSponsorPreference
+  routePreference: WalletSwapRoutePreference
 }): string {
   return [
     input.amount.trim(),
@@ -329,7 +313,8 @@ function buildQuotePreviewKey(input: {
     input.fromAssetId,
     input.toAssetId,
     input.slippagePct,
-    input.sponsorPreference
+    input.sponsorPreference,
+    input.routePreference
   ].join('|')
 }
 
@@ -358,18 +343,29 @@ function TogglePill({ active, label, onClick }: { active: boolean; label: string
   )
 }
 
-function AssetQuickPick({ active, option, onClick }: { active: boolean; option: SwapAssetOption; onClick: () => void }) {
+function AssetQuickPick({
+  active,
+  option,
+  onClick,
+  badge = 'Live route'
+}: {
+  active: boolean
+  option: SwapAssetOption
+  onClick: () => void
+  badge?: string
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-3 py-1.5 text-[10px] font-bold transition-colors ${
+      className={`rounded-2xl border px-3 py-2 text-left transition-colors ${
         active
           ? 'border-slate-900 bg-slate-900 text-white'
           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
       }`}
     >
-      {option.symbol}
+      <div className="text-[10px] font-bold">{option.symbol}</div>
+      <div className={`mt-1 text-[9px] font-medium ${active ? 'text-white/80' : 'text-emerald-600'}`}>{badge}</div>
     </button>
   )
 }
@@ -401,18 +397,18 @@ const Swap: React.FC = () => {
 
   const [fromAmount, setFromAmount] = useState('')
   const [toAmount, setToAmount] = useState('')
-  const [fromNetworkFilter, setFromNetworkFilter] = useState<ChainSegment>('all')
-  const [toNetworkFilter, setToNetworkFilter] = useState<ChainSegment>('all')
   const [fromNetworkId, setFromNetworkId] = useState(initialNetworkId)
   const [toNetworkId, setToNetworkId] = useState(defaultDestinationNetworkId)
   const [fromAssetId, setFromAssetId] = useState('')
   const [toAssetId, setToAssetId] = useState('')
+  const [sourceQuery, setSourceQuery] = useState('')
   const [destinationQuery, setDestinationQuery] = useState('')
   const [catalogSourceItems, setCatalogSourceItems] = useState<ServerCoinCatalogItem[]>([])
   const [catalogDestinationRows, setCatalogDestinationRows] = useState<ServerCoinCatalogItem[]>([])
   const [catalogDestinationItems, setCatalogDestinationItems] = useState<SwapAssetOption[]>([])
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
+  const [routePreference, setRoutePreference] = useState<WalletSwapRoutePreference>('best-value')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [quote, setQuote] = useState<ServerSwapQuote | null>(null)
   const [execution, setExecution] = useState<ServerExecutionStatus | null>(null)
@@ -420,16 +416,14 @@ const Swap: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorText, setErrorText] = useState('')
 
+  const deferredSourceQuery = useDeferredValue(sourceQuery)
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
 
   const sourceNetworkOptions = useMemo(
-    () => filterNetworksBySegment(enabledNetworks, fromNetworkFilter),
-    [enabledNetworks, fromNetworkFilter]
+    () => enabledNetworks.filter((network) => isSwapSupportedNetwork(network)),
+    [enabledNetworks]
   )
-  const destinationNetworkOptions = useMemo(
-    () => filterNetworksBySegment(enabledNetworks, toNetworkFilter),
-    [enabledNetworks, toNetworkFilter]
-  )
+  const destinationNetworkOptions = sourceNetworkOptions
 
   const fromNetwork = sourceNetworkOptions.find((network) => network.id === fromNetworkId)
     || enabledNetworks.find((network) => network.id === fromNetworkId)
@@ -441,7 +435,6 @@ const Swap: React.FC = () => {
     || destinationNetworkOptions[0]
     || enabledNetworks[0]
     || null
-
   const fromItems = useMemo(() => {
     if (!activeAccount?.id || !fromNetwork?.id) return []
     const swappableCatalogIds = buildSwappableCatalogIdentitySet(catalogSourceItems, fromNetwork.id)
@@ -464,14 +457,57 @@ const Swap: React.FC = () => {
     }).filter((item) => isWalletAssetSwappable(item, toNetwork, swappableCatalogIds))
   }, [activeAccount?.id, catalogDestinationRows, toNetwork, getSendableItems])
 
-  const fromOptions = useMemo(() => fromItems.map(createWalletAssetOption), [fromItems])
-  const toOptions = useMemo(
+  const rawFromOptions = useMemo(
+    () => mergeAssetOptions(
+      fromItems.map(createWalletAssetOption),
+      catalogSourceItems.map((item) => createCatalogAssetOption(item, fromNetwork?.id || 'source-network'))
+    ),
+    [fromItems, catalogSourceItems, fromNetwork?.id]
+  )
+  const rawToOptions = useMemo(
     () => mergeAssetOptions(walletToItems.map(createWalletAssetOption), catalogDestinationItems),
     [walletToItems, catalogDestinationItems]
   )
 
+  const allowedSourceSymbols = useMemo(
+    () => getSwapMatrixAllowedSourceSymbols(fromNetwork?.id, toNetwork?.id),
+    [fromNetwork?.id, toNetwork?.id]
+  )
+  const allowedSourceSymbolList = useMemo(() => [...allowedSourceSymbols].sort(), [allowedSourceSymbols])
+  const fromOptions = useMemo(
+    () => rawFromOptions.filter((item) => allowedSourceSymbols.has(String(item.symbol || '').trim().toUpperCase())),
+    [rawFromOptions, allowedSourceSymbols]
+  )
   const fromItem = fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
+  const allowedDestinationSymbols = useMemo(
+    () => getSwapMatrixAllowedDestinationSymbols(fromNetwork?.id, toNetwork?.id, fromItem?.symbol),
+    [fromNetwork?.id, toNetwork?.id, fromItem?.symbol]
+  )
+  const allowedDestinationSymbolList = useMemo(() => [...allowedDestinationSymbols].sort(), [allowedDestinationSymbols])
+  const toOptions = useMemo(
+    () => rawToOptions.filter((item) => allowedDestinationSymbols.has(String(item.symbol || '').trim().toUpperCase())),
+    [rawToOptions, allowedDestinationSymbols]
+  )
   const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
+  const swapReadiness = resolveWalletSwapReadiness(fromNetwork, toNetwork, fromItem?.symbol, toItem?.symbol)
+  const networkPairInMatrix = useMemo(
+    () => hasSwapMatrixRoute(fromNetwork?.id, undefined, toNetwork?.id, undefined),
+    [fromNetwork?.id, toNetwork?.id]
+  )
+  const exactPairInMatrix = useMemo(
+    () => hasSwapMatrixRoute(fromNetwork?.id, fromItem?.symbol, toNetwork?.id, toItem?.symbol),
+    [fromNetwork?.id, fromItem?.symbol, toNetwork?.id, toItem?.symbol]
+  )
+  const matrixStatusLabel = exactPairInMatrix
+    ? 'Live route'
+    : networkPairInMatrix
+      ? 'Not in matrix'
+      : 'Network pair not live'
+  const matrixStatusDetail = exactPairInMatrix
+    ? 'This network and token pair is listed in the live swap matrix.'
+    : networkPairInMatrix
+      ? 'These networks are supported, but the selected token combination is outside the current live matrix.'
+      : 'This source and destination network combination is not listed in the current live matrix.'
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
     fromNetwork?.id
@@ -489,6 +525,7 @@ const Swap: React.FC = () => {
     && !isSameAssetPair
     && fromNetwork
     && toNetwork
+    && swapReadiness.canRequestQuotes
   )
   const quotePreviewKey = useMemo(() => buildQuotePreviewKey({
     amount: fromAmount,
@@ -497,8 +534,9 @@ const Swap: React.FC = () => {
     fromAssetId: fromAssetId || '',
     toAssetId: toAssetId || '',
     slippagePct,
-    sponsorPreference
-  }), [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference])
+    sponsorPreference,
+    routePreference
+  }), [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference, routePreference])
 
   const fromQuickPicks = useMemo(
     () => pickQuickAssets(fromOptions, fromNetwork, fromItem),
@@ -568,10 +606,11 @@ const Swap: React.FC = () => {
       try {
         const runtimeModelId = String(fromNetwork.runtimeModelId || '').trim() || null
         const rows = await searchMetayoshiServerCatalogAssets({
+          query: deferredSourceQuery,
           networkId: fromNetwork.id,
           runtimeModelId,
           includeMain: true,
-          maxResults: 60
+          maxResults: deferredSourceQuery ? 24 : 12
         })
         if (cancelled) return
         setCatalogSourceItems(rows.filter((item) => isCatalogAssetSwappable(item, fromNetwork)))
@@ -583,7 +622,7 @@ const Swap: React.FC = () => {
     })()
 
     return () => { cancelled = true }
-  }, [fromNetwork])
+  }, [deferredSourceQuery, fromNetwork?.id, fromNetwork?.runtimeModelId])
 
   useEffect(() => {
     let cancelled = false
@@ -767,6 +806,14 @@ const Swap: React.FC = () => {
   }
 
   const requestQuote = async (options?: { suppressErrors?: boolean; suppressSuccess?: boolean }) => {
+    if (!swapReadiness.canRequestQuotes) {
+      setErrorText(swapReadiness.detail)
+      if (!options?.suppressErrors) {
+        showToast(swapReadiness.title, 'info')
+      }
+      return
+    }
+
     const requestId = ++latestQuoteRequestRef.current
     setIsQuoting(true)
     setErrorText('')
@@ -820,6 +867,11 @@ const Swap: React.FC = () => {
       showToast('Request a server quote first', 'error')
       return
     }
+    if (!swapReadiness.canRequestQuotes) {
+      setErrorText(swapReadiness.detail)
+      showToast(swapReadiness.title, 'info')
+      return
+    }
 
     setIsSubmitting(true)
     setErrorText('')
@@ -869,12 +921,10 @@ const Swap: React.FC = () => {
     setToNetworkId(prevFromNetworkId)
     setFromAssetId(prevToAssetId)
     setToAssetId(prevFromAssetId)
-    setFromNetworkFilter(toNetwork ? resolveSwapNetworkSegment(toNetwork) : 'all')
-    setToNetworkFilter(fromNetwork ? resolveSwapNetworkSegment(fromNetwork) : 'all')
     if (prevToAmount) setFromAmount(prevToAmount)
   }
 
-  const swapUnavailable = !isSwapSupportedNetwork(fromNetwork) || fromOptions.length === 0
+  const swapUnavailable = !swapReadiness.canRequestQuotes || fromOptions.length === 0
   const swapStatus = execution
     ? execution.status === 'confirmed'
       ? 'Confirmed'
@@ -885,16 +935,20 @@ const Swap: React.FC = () => {
       ? 'Quote ready'
       : isQuoting
         ? 'Requesting quote'
-        : swapUnavailable
-          ? 'Unavailable'
+        : swapReadiness.state === 'planned'
+          ? 'Planned'
+          : swapUnavailable
+            ? 'Unavailable'
           : 'Idle'
   const quoteStatusText = quote
     ? 'Quote ready. Review the received amount, fees, and expiry before signing.'
-    : swapUnavailable
-        ? 'Swap is available only when the server-backed route is supported for the selected asset and network.'
+    : swapReadiness.state === 'planned'
+        ? swapReadiness.detail
+        : swapUnavailable
+        ? `Not in matrix. ${matrixStatusDetail}`
         : (isQuoting
         ? 'Requesting a quote from the MetaYoshi server.'
-        : 'Select the pair and request a quote to preview the receive amount.')
+        : `${matrixStatusLabel}. Select the pair and request a quote to preview the receive amount.`)
   const rateText = quote
     ? `1 ${quote.sourceSymbol || fromItem?.symbol || fromNetwork?.symbol || 'FROM'} = ${formatQuoteRate(quote)} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || 'TO'}`
     : 'Rate appears here after the server returns a quote'
@@ -919,87 +973,58 @@ const Swap: React.FC = () => {
         </button>
       </header>
 
-      <div className="border-b border-slate-200 px-4 py-3">
-        <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex items-start gap-3">
-            <IoInformationCircleOutline className="mt-0.5 h-4 w-4 shrink-0 text-fuchsia-500" />
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-slate-900">Server-backed swap</p>
-              <p className="text-[11px] text-slate-500">
-                This screen now requests quotes only from the MetaYoshi server. Nothing is routed automatically and nothing is sent until you confirm.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="space-y-4 p-4">
           <section className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Networks</p>
-                <p className="mt-1 text-[11px] text-slate-500">Pick the source and destination chain scope before choosing tokens.</p>
+                <p className="mt-1 text-[11px] text-slate-500">Pick the networks, then choose a token from the live list or search within that ecosystem.</p>
+                <p className={`mt-2 text-[11px] font-medium ${
+                  exactPairInMatrix ? 'text-emerald-600' : 'text-amber-700'
+                }`}>
+                  {matrixStatusLabel}: {matrixStatusDetail}
+                </p>
               </div>
               <div className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">
-                {fromNetwork ? `${fromNetwork.name} ${formatNetworkSegment(fromNetwork)}` : 'Select source'}
+                {fromNetwork ? fromNetwork.name : 'Select source'}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Pay network</span>
-                <span className="text-[10px] text-slate-500">{sourceNetworkOptions.length} chains</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {CHAIN_SEGMENTS.map((segment) => (
-                  <TogglePill
-                    key={`from-${segment.id}`}
-                    active={fromNetworkFilter === segment.id}
-                    label={segment.label}
-                    onClick={() => setFromNetworkFilter(segment.id)}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
+                <select
+                  value={fromNetworkId}
+                  onChange={(event) => setFromNetworkId(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] font-bold text-slate-700 outline-none"
+                >
+                  {sourceNetworkOptions.map((network) => (
+                    <option key={network.id} value={network.id}>{network.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Receive network</span>
-                <span className="text-[10px] text-slate-500">{destinationNetworkOptions.length} chains</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {CHAIN_SEGMENTS.map((segment) => (
-                  <TogglePill
-                    key={`to-${segment.id}`}
-                    active={toNetworkFilter === segment.id}
-                    label={segment.label}
-                    onClick={() => setToNetworkFilter(segment.id)}
-                  />
-                ))}
-              </div>
+                <select
+                  value={toNetworkId}
+                  onChange={(event) => setToNetworkId(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] font-bold text-slate-700 outline-none"
+                >
+                  {destinationNetworkOptions.map((network) => (
+                    <option key={network.id} value={network.id}>{network.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </section>
 
           <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sell</span>
-              <div className="flex items-center gap-2">
-                {fromNetwork ? (
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                    {formatNetworkSegment(fromNetwork)}
-                  </span>
-                ) : null}
-                <select
-                  value={fromNetworkId}
-                  onChange={(event) => setFromNetworkId(event.target.value)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 outline-none"
-                >
-                  {sourceNetworkOptions.map((network) => (
-                    <option key={network.id} value={network.id}>{network.name}</option>
-                  ))}
-                </select>
-              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                {fromNetwork?.name || 'Select network'}
+              </span>
             </div>
 
             <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
@@ -1024,8 +1049,8 @@ const Swap: React.FC = () => {
             {fromQuickPicks.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Popular</span>
-                  <span className="text-[10px] text-slate-500">Quick token picks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top tokens</span>
+                  <span className="text-[10px] text-slate-500">Live matrix picks from wallet and catalog</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {fromQuickPicks.map((item) => (
@@ -1033,12 +1058,29 @@ const Swap: React.FC = () => {
                       key={`from-quick-${item.id}`}
                       active={item.id === fromAssetId}
                       option={item}
+                      badge="Live route"
                       onClick={() => setFromAssetId(item.id)}
                     />
                   ))}
                 </div>
               </div>
             ) : null}
+
+            <input
+              type="text"
+              placeholder={fromNetwork ? `Search token on ${fromNetwork.name}` : 'Search token to sell'}
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+            />
+
+            <p className="text-[11px] text-slate-500">
+              {fromOptions.length > 0
+                ? `Showing ${fromOptions.length} live sell token${fromOptions.length === 1 ? '' : 's'} for ${fromNetwork?.name || 'this network'}.`
+                : allowedSourceSymbolList.length > 0
+                  ? `No live sell tokens are visible for this pair. Matrix-listed sell symbols: ${allowedSourceSymbolList.join(', ')}.`
+                  : 'No live sell tokens are listed yet for this network pair.'}
+            </p>
 
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>Available</span>
@@ -1066,22 +1108,9 @@ const Swap: React.FC = () => {
           <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Buy</span>
-              <div className="flex items-center gap-2">
-                {toNetwork ? (
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                    {formatNetworkSegment(toNetwork)}
-                  </span>
-                ) : null}
-                <select
-                  value={toNetworkId}
-                  onChange={(event) => setToNetworkId(event.target.value)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 outline-none"
-                >
-                  {destinationNetworkOptions.map((network) => (
-                    <option key={network.id} value={network.id}>{network.name}</option>
-                  ))}
-                </select>
-              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                {toNetwork?.name || 'Select network'}
+              </span>
             </div>
 
             <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
@@ -1107,8 +1136,8 @@ const Swap: React.FC = () => {
             {toQuickPicks.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Most swapped</span>
-                  <span className="text-[10px] text-slate-500">Quick token picks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top tokens</span>
+                  <span className="text-[10px] text-slate-500">Live matrix picks from wallet and catalog</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {toQuickPicks.map((item) => (
@@ -1116,6 +1145,7 @@ const Swap: React.FC = () => {
                       key={`to-quick-${item.id}`}
                       active={item.id === toAssetId}
                       option={item}
+                      badge="Live route"
                       onClick={() => setToAssetId(item.id)}
                     />
                   ))}
@@ -1125,11 +1155,19 @@ const Swap: React.FC = () => {
 
             <input
               type="text"
-              placeholder="Search asset to receive"
+              placeholder={toNetwork ? `Search token on ${toNetwork.name}` : 'Search token to receive'}
               value={destinationQuery}
               onChange={(event) => setDestinationQuery(event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
             />
+
+            <p className="text-[11px] text-slate-500">
+              {toOptions.length > 0
+                ? `Showing ${toOptions.length} live receive token${toOptions.length === 1 ? '' : 's'} for ${toNetwork?.name || 'this network'}.`
+                : allowedDestinationSymbolList.length > 0
+                  ? `No live receive tokens are visible for this pair. Matrix-listed receive symbols: ${allowedDestinationSymbolList.join(', ')}.`
+                  : 'No live receive tokens are listed yet for this selection.'}
+            </p>
           </section>
 
           <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
@@ -1205,12 +1243,12 @@ const Swap: React.FC = () => {
               />
               <DetailRow
                 label="Source chain"
-                value={fromNetwork ? `${fromNetwork.name} (${formatNetworkSegment(fromNetwork)})` : '--'}
+                value={fromNetwork ? fromNetwork.name : '--'}
                 subdued={!fromNetwork}
               />
               <DetailRow
                 label="Destination chain"
-                value={toNetwork ? `${toNetwork.name} (${formatNetworkSegment(toNetwork)})` : '--'}
+                value={toNetwork ? toNetwork.name : '--'}
                 subdued={!toNetwork}
               />
               <DetailRow
@@ -1280,9 +1318,19 @@ const Swap: React.FC = () => {
           ) : null}
 
           {errorText ? (
-            <section className="rounded-2xl border border-red-200 bg-red-50 p-3">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-700">Could Not Continue</p>
-              <p className="mt-1 text-[11px] text-red-800">{errorText}</p>
+            <section className={`rounded-2xl border p-3 ${
+              swapReadiness.state === 'active'
+                ? 'border-red-200 bg-red-50'
+                : 'border-amber-200 bg-amber-50'
+            }`}>
+              <p className={`text-[10px] font-black uppercase tracking-[0.14em] ${
+                swapReadiness.state === 'active' ? 'text-red-700' : 'text-amber-700'
+              }`}>
+                {swapReadiness.state === 'active' ? 'Could Not Continue' : 'Route Not Live Yet'}
+              </p>
+              <p className={`mt-1 text-[11px] ${
+                swapReadiness.state === 'active' ? 'text-red-800' : 'text-amber-800'
+              }`}>{errorText}</p>
             </section>
           ) : null}
         </div>
@@ -1298,6 +1346,9 @@ const Swap: React.FC = () => {
               </p>
               <p className="mt-1 text-[11px] text-slate-500">
                 {fromNetwork?.name || 'Source'} {'->'} {toNetwork?.name || 'Destination'}
+              </p>
+              <p className={`mt-1 text-[11px] font-medium ${exactPairInMatrix ? 'text-emerald-600' : 'text-amber-700'}`}>
+                {matrixStatusLabel}: {matrixStatusDetail}
               </p>
             </div>
             {quote ? (
@@ -1324,7 +1375,11 @@ const Swap: React.FC = () => {
             isLoading={isQuoting}
             disabled={!canRequestQuote || swapUnavailable}
           >
-            {isQuoting ? 'Requesting quote' : 'Get quote'}
+            {isQuoting
+              ? 'Requesting quote'
+              : swapReadiness.state === 'planned'
+                ? 'Routing not live yet'
+                : 'Get quote'}
           </Button>
         )}
 
@@ -1335,7 +1390,11 @@ const Swap: React.FC = () => {
           isLoading={isQuoting}
           disabled={!canRequestQuote || isSubmitting || swapUnavailable}
         >
-          {quote ? 'Refresh quote' : 'Retry quote'}
+          {swapReadiness.state === 'planned'
+            ? 'Await V1 routing'
+            : quote
+              ? 'Refresh quote'
+              : 'Retry quote'}
         </Button>
       </div>
     </div>
