@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
-import { useWalletStore } from '../../store/walletStore'
+import { MAX_WALLET_ACCOUNTS_PER_COIN, useWalletStore } from '../../store/walletStore'
 import { IoAdd, IoTrashOutline, IoCheckmarkCircle } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 import { validateWatchOnlyAddress } from '../../lib/watchOnlyAddress'
@@ -38,6 +38,7 @@ const AccountManager: React.FC = () => {
     [accounts, activeAccountId]
   )
   const watchOnlyImportEnabled = activeNetwork?.derivation?.status === 'unsupported'
+  const canAddAccount = accounts.length < MAX_WALLET_ACCOUNTS_PER_COIN
 
   useEffect(() => {
     if (!watchOnlyImportEnabled || !activeAccount || !activeNetwork) {
@@ -59,6 +60,11 @@ const AccountManager: React.FC = () => {
 
   const handleAddAccount = async () => {
     setError('')
+
+    if (!canAddAccount) {
+      setError(`Maximum of ${MAX_WALLET_ACCOUNTS_PER_COIN} accounts per coin reached`)
+      return
+    }
     
     if (!accountName.trim()) {
       setError('Account name is required')
@@ -151,10 +157,12 @@ const AccountManager: React.FC = () => {
         <h2 className="text-xs font-bold uppercase tracking-widest text-gray-200">Account Manager</h2>
         <button 
           onClick={() => {
+            if (!canAddAccount) return
             setShowAdd(!showAdd)
             setError('')
           }}
-          className="w-8 h-8 flex items-center justify-center text-primary hover:bg-dark-700 rounded-full transition-colors"
+          disabled={!canAddAccount}
+          className="w-8 h-8 flex items-center justify-center text-primary hover:bg-dark-700 rounded-full transition-colors disabled:text-gray-600 disabled:hover:bg-transparent"
         >
           <IoAdd className="w-6 h-6" />
         </button>
@@ -195,20 +203,31 @@ const AccountManager: React.FC = () => {
             <Button className="w-full" onClick={() => void handleRenameActive()} isLoading={isRenaming}>
               Save {activeNetwork.symbol} Name
             </Button>
+            {!canAddAccount && (
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                {activeNetwork.symbol} is limited to {MAX_WALLET_ACCOUNTS_PER_COIN} accounts to reduce server request spam.
+              </p>
+            )}
           </div>
         )}
 
         {showAdd ? (
           <div className="p-6 space-y-6">
             <h3 className="text-sm font-bold text-gray-200">Create New Account</h3>
-            <div className="space-y-4">
-              <Input 
-                label="Account Name" 
-                placeholder="Account 2" 
-                value={accountName}
-                onChange={(e) => setAccountName(e.target.value)}
-              />
-            </div>
+            {canAddAccount ? (
+              <div className="space-y-4">
+                <Input 
+                  label="Account Name" 
+                  placeholder="Account 2" 
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 text-center">
+                {activeNetwork?.symbol || 'This coin'} already has the maximum of {MAX_WALLET_ACCOUNTS_PER_COIN} accounts.
+              </p>
+            )}
             {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
             <div className="flex gap-4 pt-4">
               <Button 
@@ -222,7 +241,9 @@ const AccountManager: React.FC = () => {
               >
                 Cancel
               </Button>
-              <Button className="flex-1" onClick={() => void handleAddAccount()} isLoading={isCreating}>Create</Button>
+              {canAddAccount && (
+                <Button className="flex-1" onClick={() => void handleAddAccount()} isLoading={isCreating}>Create</Button>
+              )}
             </div>
           </div>
         ) : (

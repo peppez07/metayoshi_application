@@ -105,6 +105,7 @@ import {
 export type { CoinType, Network } from '../coins'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+export const MAX_WALLET_ACCOUNTS_PER_COIN = 2
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Full backup format Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -6154,6 +6155,9 @@ export const useWalletStore = create<WalletState>()(
       addAccount: async (name, networkId) => {
         const { accounts, networks, activeNetworkId, sessionMnemonic, isLocked, nextAccountIndex } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Unlock wallet first to create an account')
+        if (accounts.length >= MAX_WALLET_ACCOUNTS_PER_COIN) {
+          throw new Error(`Maximum of ${MAX_WALLET_ACCOUNTS_PER_COIN} accounts per coin reached`)
+        }
         const normalizedName = name.trim()
         if (!normalizedName) throw new Error('Account name is required')
         const selectedNetworkId = networkId || activeNetworkId
