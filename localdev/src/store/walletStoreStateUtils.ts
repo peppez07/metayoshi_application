@@ -55,6 +55,21 @@ export interface NormalizedWalletActivity {
   networkId: string
 }
 
+function isLegacySeededDemoActivity(activity: NormalizedWalletActivity): boolean {
+  const id = String(activity.id || '').trim()
+  const asset = String(activity.asset || '').trim().toUpperCase()
+  const to = String(activity.to || '').trim()
+  const amount = String(activity.amount || '').trim()
+  return (
+    (id === '1' || id === '2')
+    && activity.type === 'sent'
+    && activity.status === 'confirmed'
+    && amount === '1'
+    && to === 'RGG...vcFFDFdffd'
+    && (asset === 'RTM' || asset === 'ASSETNAME')
+  )
+}
+
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo', 'zec'])
 const LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
@@ -528,7 +543,8 @@ export function normalizeActivityList(
   const out: NormalizedWalletActivity[] = []
   rawActivity.forEach((entry, index) => {
     const normalized = normalizeActivityRecord(entry, context, index)
-    if (normalized) out.push(normalized)
+    if (!normalized || isLegacySeededDemoActivity(normalized)) return
+    out.push(normalized)
   })
   return out
 }

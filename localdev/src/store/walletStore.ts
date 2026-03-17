@@ -2871,28 +2871,7 @@ export const useWalletStore = create<WalletState>()(
       lastActiveTimestamp: Date.now(),
       useLocalRpc: false,
       localRpcOverrides: {},
-      activity: [
-        {
-          id: '1',
-          type: 'sent',
-          asset: 'RTM',
-          amount: '1',
-          to: 'RGG...vcFFDFdffd',
-          status: 'confirmed',
-          timestamp: Date.now() - 3600000,
-          networkId: DEFAULT_ACTIVE_NETWORK_ID
-        },
-        {
-          id: '2',
-          type: 'sent',
-          asset: 'ASSETNAME',
-          amount: '1',
-          to: 'RGG...vcFFDFdffd',
-          status: 'confirmed',
-          timestamp: Date.now() - 7200000,
-          networkId: DEFAULT_ACTIVE_NETWORK_ID
-        }
-      ],
+      activity: [],
 
       initialize: async (password, mnemonic, options) => {
         const vault = await encryptVaultV1({ password, mnemonic })
