@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation } from 'react-router-dom'
 import { ActivityRow } from '../../components/ListItems'
 import { useWalletStore } from '../../store/walletStore'
 import { IoClose, IoCopyOutline, IoOpenOutline, IoCheckmark, IoSearchOutline } from 'react-icons/io5'
+import { normalizeActivityAssetId, resolveActivityAssetFilterKey } from '../../lib/activityIdentity'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { buildActivitySelectionKey, buildTxExplorerUrl, normalizeActivityNetworkId } from '../../lib/txExplorer'
 
 const Activity: React.FC = () => {
+  const location = useLocation()
   const {
     activity,
     activeNetworkId,
@@ -18,9 +21,14 @@ const Activity: React.FC = () => {
   const [selectedTxKey, setSelectedTxKey] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [assetFilter, setAssetFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState<'all' | 'sent' | 'received' | 'swap'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('all')
   const [periodFilter, setPeriodFilter] = useState<'all' | '24h' | '7d' | '30d'>('all')
+  const requestedAssetFilter = normalizeActivityAssetId(
+    String(((location.state as { assetId?: string } | null)?.assetId) || '').trim(),
+    activeNetworkId
+  )
 
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0] || null
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
@@ -83,6 +91,36 @@ const Activity: React.FC = () => {
       .sort((a, b) => b.timestamp - a.timestamp)
   ), [activity, activeAccount?.id, activeNetworkAccountAddressSet, activeNetworkId])
 
+  const assetOptions = useMemo(() => {
+    const byId = new Map<string, { id: string; label: string; count: number }>()
+    for (const tx of baseActivity) {
+      const id = resolveActivityAssetFilterKey(tx, activeNetwork.symbol)
+      if (!id) continue
+      const existing = byId.get(id)
+      if (existing) {
+        existing.count += 1
+        continue
+      }
+      byId.set(id, {
+        id,
+        label: String(tx.asset || id).trim() || id,
+        count: 1
+      })
+    }
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label))
+  }, [baseActivity, activeNetwork.symbol])
+
+  useEffect(() => {
+    if (!requestedAssetFilter) return
+    setAssetFilter(requestedAssetFilter)
+  }, [requestedAssetFilter])
+
+  useEffect(() => {
+    if (assetFilter === 'all') return
+    if (assetOptions.some((option) => option.id === assetFilter)) return
+    setAssetFilter('all')
+  }, [assetFilter, assetOptions])
+
   useEffect(() => {
     for (const tx of baseActivity) {
       if (tx.status !== 'pending') continue
@@ -90,12 +128,14 @@ const Activity: React.FC = () => {
     }
   }, [baseActivity, trackActivityTransactionStatus])
 
+  const getSelectionKey = (tx: typeof baseActivity[number]) => (
+    `${buildActivitySelectionKey(tx.id, tx.networkId)}::${String(tx.accountId || '').trim().toLowerCase()}::${resolveActivityAssetFilterKey(tx, activeNetwork.symbol)}`
+  )
+
   const selectedTx = useMemo(() => {
     if (!selectedTxKey) return null
-    return baseActivity.find((tx) => (
-      buildActivitySelectionKey(tx.id, tx.networkId) === selectedTxKey
-    )) || null
-  }, [baseActivity, selectedTxKey])
+    return baseActivity.find((tx) => getSelectionKey(tx) === selectedTxKey) || null
+  }, [baseActivity, selectedTxKey, activeNetwork.symbol])
 
   useEffect(() => {
     if (!selectedTxKey) return
@@ -115,6 +155,10 @@ const Activity: React.FC = () => {
           : 0
 
     return baseActivity.filter((tx) => {
+      if (assetFilter !== 'all') {
+        const txAssetFilterKey = resolveActivityAssetFilterKey(tx, activeNetwork.symbol)
+        if (txAssetFilterKey !== assetFilter) return false
+      }
       if (typeFilter !== 'all' && tx.type !== typeFilter) return false
       if (statusFilter !== 'all' && tx.status !== statusFilter) return false
       if (periodMs > 0 && now - tx.timestamp > periodMs) return false
@@ -125,6 +169,7 @@ const Activity: React.FC = () => {
         tx.type,
         tx.status,
         tx.asset,
+        tx.assetId || '',
         tx.amount,
         tx.from || '',
         tx.to || '',
@@ -133,7 +178,7 @@ const Activity: React.FC = () => {
 
       return haystack.includes(normalizedQuery)
     })
-  }, [baseActivity, periodFilter, query, statusFilter, typeFilter])
+  }, [activeNetwork.symbol, assetFilter, baseActivity, periodFilter, query, statusFilter, typeFilter])
 
   const fallbackFromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
@@ -193,6 +238,19 @@ const Activity: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5">
+          <select
+            value={assetFilter}
+            onChange={(e) => setAssetFilter(e.target.value)}
+            className="min-w-[120px] bg-dark-700/60 border border-dark-600 rounded-xl px-3 py-2 text-[11px] font-medium text-gray-200 focus:outline-none focus:border-primary transition-colors"
+            aria-label="Filter activity by asset"
+          >
+            <option value="all">Asset: All</option>
+            {assetOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label} ({option.count})
+              </option>
+            ))}
+          </select>
           {(['all', 'sent', 'received', 'swap'] as const).map((value) => (
             <FilterChip
               key={`type-${value}`}
@@ -239,7 +297,7 @@ const Activity: React.FC = () => {
               address={item.to || item.from}
               status={item.status}
               timestamp={item.timestamp}
-              onClick={() => setSelectedTxKey(buildActivitySelectionKey(item.id, item.networkId))}
+              onClick={() => setSelectedTxKey(getSelectionKey(item))}
             />
           ))
         ) : (
@@ -277,6 +335,7 @@ const Activity: React.FC = () => {
               <DetailRow label="Type" value={selectedTx.type} />
               <DetailRow label="Network" value={`${selectedNetwork.name} (${selectedNetwork.symbol})`} />
               <DetailRow label="Asset" value={selectedTx.asset} />
+              {selectedTx.assetId ? <DetailRow label="Asset ID" value={selectedTx.assetId} isMono /> : null}
               <DetailRow label="Amount" value={selectedTx.amount} />
               <DetailRow label="From" value={selectedTx.from || fallbackFromAddress || '-'} isMono />
               <DetailRow label="To" value={selectedTx.to || '-'} isMono />

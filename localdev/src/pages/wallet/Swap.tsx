@@ -5,7 +5,6 @@ import {
   IoChevronDownOutline,
   IoCloseOutline,
   IoSearchOutline,
-  IoSettingsOutline,
   IoSwapVerticalOutline,
   IoTimeOutline,
   IoTrendingUpOutline
@@ -147,13 +146,6 @@ const POPULAR_SWAP_SYMBOLS = [
   'OP',
   'SOL',
   'CRO'
-]
-
-const ROUTE_PREFERENCES: Array<{ id: WalletSwapRoutePreference; label: string }> = [
-  { id: 'best-value', label: 'Best value' },
-  { id: 'fastest', label: 'Fastest' },
-  { id: 'lowest-gas', label: 'Lowest gas' },
-  { id: 'safest', label: 'Safest' }
 ]
 
 function createWalletAssetOption(item: SendableItem): SwapAssetOption {
@@ -388,22 +380,6 @@ function DetailRow({ label, value, subdued = false }: { label: string; value: Re
   )
 }
 
-function TogglePill({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition-colors ${
-        active
-          ? 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700'
-          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'
-      }`}
-    >
-      {label}
-    </button>
-  )
-}
-
 function AssetQuickPick({
   active,
   option,
@@ -421,12 +397,12 @@ function AssetQuickPick({
       onClick={onClick}
       className={`rounded-2xl border px-3 py-2 text-left transition-colors ${
         active
-          ? 'border-slate-900 bg-slate-900 text-white'
-          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+          ? 'border-orange-300 bg-gradient-to-br from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_28px_rgba(255,104,0,0.26)]'
+          : 'border-white/10 bg-white/5 text-slate-600 hover:border-white/20 hover:text-slate-900'
       }`}
     >
       <div className="text-[10px] font-bold">{option.symbol}</div>
-      <div className={`mt-1 text-[9px] font-medium ${active ? 'text-white/80' : 'text-emerald-600'}`}>{badge}</div>
+      <div className={`mt-1 text-[9px] font-medium ${active ? 'text-white/80' : 'text-emerald-300'}`}>{badge}</div>
     </button>
   )
 }
@@ -446,8 +422,8 @@ function AssetListItem({
       onClick={onClick}
       className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
         active
-          ? 'border-slate-900 bg-slate-900 text-white'
-          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+          ? 'border-orange-300 bg-gradient-to-br from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_28px_rgba(255,104,0,0.26)]'
+          : 'border-white/10 bg-white/5 text-slate-700 hover:border-white/20 hover:bg-white/10'
       }`}
     >
       <div className="min-w-0">
@@ -457,17 +433,17 @@ function AssetListItem({
             active
               ? 'border-white/20 bg-white/10 text-white/80'
               : option.source === 'wallet'
-                ? 'border-slate-200 bg-slate-50 text-slate-500'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                ? 'border-white/10 bg-white/5 text-slate-400'
+                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
           }`}>
             {option.source === 'wallet' ? 'Wallet' : 'Catalog'}
           </span>
         </div>
-        <div className={`mt-1 truncate text-[11px] ${active ? 'text-white/75' : 'text-slate-500'}`}>
+        <div className={`mt-1 truncate text-[11px] ${active ? 'text-white/75' : 'text-slate-400'}`}>
           {option.label || option.symbol}
         </div>
       </div>
-      <div className={`text-right text-[11px] ${active ? 'text-white/85' : 'text-slate-500'}`}>
+      <div className={`text-right text-[11px] ${active ? 'text-white/85' : 'text-slate-400'}`}>
         {option.amount ? option.amount : 'Select'}
       </div>
     </button>
@@ -524,7 +500,7 @@ function TokenSelectorModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="wallet-surface rounded-[28px] p-4">
             <div className="relative">
               <IoSearchOutline className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -532,7 +508,7 @@ function TokenSelectorModal({
                 placeholder={`Search token on ${networkName || 'this network'}`}
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
                 autoFocus
               />
             </div>
@@ -570,7 +546,7 @@ function TokenSelectorModal({
                   ))}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-600">
                   {emptyText}
                 </div>
               )}
@@ -624,7 +600,6 @@ const Swap: React.FC = () => {
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
   const [routePreference, setRoutePreference] = useState<WalletSwapRoutePreference>('best-value')
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [tokenSelectorSide, setTokenSelectorSide] = useState<TokenSelectorSide | null>(null)
   const [quote, setQuote] = useState<ServerSwapQuote | null>(null)
   const [execution, setExecution] = useState<ServerExecutionStatus | null>(null)
@@ -981,6 +956,7 @@ const Swap: React.FC = () => {
         id: execution.executionId,
         type: 'swap',
         asset: `${fromItem?.symbol || fromNetwork?.symbol || 'FROM'} -> ${toItem?.symbol || toNetwork?.symbol || 'TO'}`,
+        assetId: String(fromItem?.assetId || '').trim() || (fromNetwork?.id ? `native:${fromNetwork.id}` : undefined),
         amount: fromAmount,
         accountId: activeAccount?.id,
         status: 'confirmed',
@@ -1000,6 +976,7 @@ const Swap: React.FC = () => {
       id: `${execution.executionId}-rejected`,
       type: 'swap',
       asset: `${fromItem?.symbol || fromNetwork?.symbol || 'FROM'} -> ${toItem?.symbol || toNetwork?.symbol || 'TO'}`,
+      assetId: String(fromItem?.assetId || '').trim() || (fromNetwork?.id ? `native:${fromNetwork.id}` : undefined),
       amount: fromAmount,
       accountId: activeAccount?.id,
       status: 'rejected',
@@ -1230,49 +1207,36 @@ const Swap: React.FC = () => {
 
   return (
     <div className="swap-dark-page flex h-full flex-col bg-[#f5f7fb] text-slate-900">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
+      <header className="flex items-center justify-between border-b border-white/10 bg-white/70 px-4 py-4 backdrop-blur-xl">
         <button
           onClick={() => navigate('/wallet/assets')}
           className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
         >
           <IoArrowBackOutline className="w-5 h-5" />
         </button>
-        <h1 className="text-[1.05rem] font-semibold tracking-tight text-slate-950">Swap</h1>
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((prev) => !prev)}
-          className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
-          title="Swap settings"
-        >
-          <IoSettingsOutline className="h-5 w-5" />
-        </button>
+        <div className="text-center">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">MetaYoshi Exchange</div>
+          <h1 className="mt-1 text-[1.05rem] font-semibold tracking-tight text-slate-950">Swap</h1>
+        </div>
+        <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${
+          swapReadiness.state === 'active'
+            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+            : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+        }`}>
+          {swapReadiness.state === 'active' ? 'Ready' : 'Limited'}
+        </span>
       </header>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="space-y-4 p-4">
-          <section className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Networks</p>
-                <p className="mt-1 text-[11px] text-slate-500">Pick the networks, then choose a token from the live list or search within that ecosystem.</p>
-                <p className={`mt-2 text-[11px] font-medium ${
-                  exactPairInMatrix ? 'text-emerald-600' : 'text-amber-700'
-                }`}>
-                  {matrixStatusLabel}: {matrixStatusDetail}
-                </p>
-              </div>
-              <div className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">
-                {fromNetwork ? fromNetwork.name : 'Select source'}
-              </div>
-            </div>
-
+          <section className="wallet-surface p-4">
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Pay network</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sell network</span>
                 <select
                   value={fromNetworkId}
                   onChange={(event) => setFromNetworkId(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] font-bold text-slate-700 outline-none"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-bold text-slate-900 outline-none"
                 >
                   {sourceNetworkOptions.map((network) => (
                     <option key={network.id} value={network.id}>{network.name}</option>
@@ -1280,11 +1244,11 @@ const Swap: React.FC = () => {
                 </select>
               </label>
               <label className="space-y-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Receive network</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Buy network</span>
                 <select
                   value={toNetworkId}
                   onChange={(event) => setToNetworkId(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] font-bold text-slate-700 outline-none"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-bold text-slate-900 outline-none"
                 >
                   {destinationNetworkOptions.map((network) => (
                     <option key={network.id} value={network.id}>{network.name}</option>
@@ -1294,203 +1258,172 @@ const Swap: React.FC = () => {
             </div>
           </section>
 
-          <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sell</span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-600">
-                {fromNetwork?.name || 'Select network'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-              <input
-                type="number"
-                placeholder="0.0"
-                value={fromAmount}
-                onChange={(event) => setFromAmount(event.target.value)}
-                className="w-full bg-transparent text-[32px] font-semibold tracking-tight text-slate-950 outline-none placeholder:text-slate-300"
-              />
-              <button
-                type="button"
-                onClick={() => setTokenSelectorSide('from')}
-                className="min-w-[160px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right transition-colors hover:border-slate-300 hover:bg-slate-50"
-              >
-                <div className="text-sm font-semibold text-slate-900">
-                  {fromItem?.symbol || 'Select'}
-                </div>
-                <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
-                  <span>{fromItem?.label || 'Choose token'}</span>
-                  <IoChevronDownOutline className="h-3.5 w-3.5" />
-                </div>
-              </button>
-            </div>
-
-            {fromQuickPicks.length > 0 ? (
-              <div className="space-y-2">
+          <section className="wallet-surface relative overflow-hidden p-3">
+            <div className="pointer-events-none absolute inset-x-8 top-4 h-24 rounded-full bg-orange-500/12 blur-3xl" />
+            <div className="relative space-y-3">
+              <section className="rounded-[28px] border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top tokens</span>
-                  <span className="text-[10px] text-slate-500">Live matrix picks from wallet and catalog</span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">You pay</span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                    {fromNetwork?.name || 'Select network'}
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {fromQuickPicks.map((item) => (
-                    <AssetQuickPick
-                      key={`from-quick-${item.id}`}
-                      active={item.id === fromAssetId}
-                      option={item}
-                      badge="Live route"
-                      onClick={() => setFromAssetId(item.id)}
+
+                <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-3">
+                  <div>
+                    <input
+                      type="number"
+                      placeholder="0.0"
+                      value={fromAmount}
+                      onChange={(event) => setFromAmount(event.target.value)}
+                      className="w-full bg-transparent text-[36px] font-semibold tracking-tight text-slate-950 outline-none placeholder:text-slate-500"
                     />
-                  ))}
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Enter the amount you want to swap from {fromNetwork?.name || 'the selected chain'}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTokenSelectorSide('from')}
+                    className="min-w-[164px] rounded-[22px] border border-white/10 bg-white/5 px-3 py-3 text-right transition-colors hover:border-white/20 hover:bg-white/10"
+                  >
+                    <div className="text-sm font-semibold text-slate-900">
+                      {fromItem?.symbol || 'Select'}
+                    </div>
+                    <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+                      <span>{fromItem?.label || 'Choose token'}</span>
+                      <IoChevronDownOutline className="h-3.5 w-3.5" />
+                    </div>
+                  </button>
                 </div>
+
+                <div className="mt-4 flex items-center justify-between gap-3 text-[11px] text-slate-400">
+                  <span>Available balance</span>
+                  <button
+                    type="button"
+                    onClick={() => setFromAmount(fromBalance)}
+                    className="font-medium text-slate-700 transition-colors hover:text-slate-950"
+                  >
+                    {fromBalance} {fromItem?.symbol || fromNetwork?.symbol}
+                  </button>
+                </div>
+
+                {fromQuickPicks.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
+                      <span className="text-[10px] text-slate-500">Wallet + server catalog</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {fromQuickPicks.map((item) => (
+                        <AssetQuickPick
+                          key={`from-quick-${item.id}`}
+                          active={item.id === fromAssetId}
+                          option={item}
+                          badge="Live route"
+                          onClick={() => setFromAssetId(item.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <div className="flex justify-center -my-1">
+                <button
+                  type="button"
+                  onClick={flipSwapDirection}
+                  className="flex h-14 w-14 items-center justify-center rounded-[20px] border border-white/10 bg-[#151922] text-slate-200 shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition-colors hover:border-white/20 hover:bg-[#1a1f2b]"
+                  title="Switch assets and networks"
+                >
+                  <IoSwapVerticalOutline className="w-5 h-5" />
+                </button>
               </div>
-            ) : null}
 
-            <p className="text-[11px] text-slate-500">
-              {fromOptions.length > 0
-                ? `Tap the token field to browse ${fromOptions.length} live sell token${fromOptions.length === 1 ? '' : 's'} for ${fromNetwork?.name || 'this network'}.`
-                : sourceSelectorEmptyText}
-            </p>
+              <section className="rounded-[28px] border border-white/10 bg-white/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">You receive</span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                    {toNetwork?.name || 'Select network'}
+                  </span>
+                </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>Available</span>
-              <button
-                type="button"
-                onClick={() => setFromAmount(fromBalance)}
-                className="font-medium text-slate-700 transition-colors hover:text-slate-950"
-              >
-                {fromBalance} {fromItem?.symbol || fromNetwork?.symbol}
-              </button>
+                <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-3">
+                  <div>
+                    <div className="text-[36px] font-semibold tracking-tight text-slate-950">
+                      {quote ? toAmount || '0.0' : (isQuoting && canRequestQuote ? '...' : '0.0')}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {quoteStatusText}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTokenSelectorSide('to')}
+                    className="min-w-[164px] rounded-[22px] border border-white/10 bg-white/5 px-3 py-3 text-right transition-colors hover:border-white/20 hover:bg-white/10"
+                  >
+                    <div className="text-sm font-semibold text-slate-900">
+                      {toItem?.symbol || 'Select'}
+                    </div>
+                    <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+                      <span>{toItem?.label || 'Choose token'}</span>
+                      <IoChevronDownOutline className="h-3.5 w-3.5" />
+                    </div>
+                  </button>
+                </div>
+
+                {toQuickPicks.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
+                      <span className="text-[10px] text-slate-500">Wallet + server catalog</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {toQuickPicks.map((item) => (
+                        <AssetQuickPick
+                          key={`to-quick-${item.id}`}
+                          active={item.id === toAssetId}
+                          option={item}
+                          badge="Live route"
+                          onClick={() => setToAssetId(item.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
             </div>
           </section>
 
-          <div className="flex justify-center -my-1">
-            <button
-              type="button"
-              onClick={flipSwapDirection}
-              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
-              title="Switch assets and networks"
-            >
-              <IoSwapVerticalOutline className="w-4.5 h-4.5" />
-            </button>
-          </div>
-
-          <section className="space-y-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Buy</span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-600">
-                {toNetwork?.name || 'Select network'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+          <section className="overflow-hidden wallet-surface">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
               <div>
-                <div className="text-[32px] font-semibold tracking-tight text-slate-950">
-                  {quote ? toAmount || '0.0' : (isQuoting && canRequestQuote ? '...' : '0.0')}
-                </div>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  {quoteStatusText}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTokenSelectorSide('to')}
-                className="min-w-[160px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right transition-colors hover:border-slate-300 hover:bg-slate-50"
-              >
-                <div className="text-sm font-semibold text-slate-900">
-                  {toItem?.symbol || 'Select'}
-                </div>
-                <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
-                  <span>{toItem?.label || 'Choose token'}</span>
-                  <IoChevronDownOutline className="h-3.5 w-3.5" />
-                </div>
-              </button>
-            </div>
-
-            {toQuickPicks.length > 0 ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top tokens</span>
-                  <span className="text-[10px] text-slate-500">Live matrix picks from wallet and catalog</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {toQuickPicks.map((item) => (
-                    <AssetQuickPick
-                      key={`to-quick-${item.id}`}
-                      active={item.id === toAssetId}
-                      option={item}
-                      badge="Live route"
-                      onClick={() => setToAssetId(item.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <p className="text-[11px] text-slate-500">
-              {toOptions.length > 0
-                ? `Tap the token field to browse ${toOptions.length} live receive token${toOptions.length === 1 ? '' : 's'} for ${toNetwork?.name || 'this network'}.`
-                : destinationSelectorEmptyText}
-            </p>
-          </section>
-
-          <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quote Preview</p>
-                <p className="text-[11px] text-slate-500">Server quote details, effective rate, fees, and expiry.</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Best quote</p>
+                <p className="text-[11px] text-slate-400">A simple estimate for the tokens you selected.</p>
               </div>
               <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
                 swapStatus === 'Confirmed'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                   : swapStatus === 'Failed' || swapStatus === 'Unavailable'
-                    ? 'border-red-200 bg-red-50 text-red-700'
+                    ? 'border-red-500/30 bg-red-500/10 text-red-300'
                     : swapStatus === 'Quote ready'
-                      ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
-                      : 'border-sky-200 bg-sky-50 text-sky-700'
+                      ? 'border-orange-500/30 bg-orange-500/10 text-orange-200'
+                      : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
               }`}>
                 {swapStatus}
               </span>
             </div>
 
-            {showAdvanced ? (
-              <div className="grid grid-cols-2 gap-3 px-4 pt-3">
-                <label className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Slippage</span>
-                  <select
-                    value={slippagePct}
-                    onChange={(event) => setSlippagePct(event.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 outline-none"
-                  >
-                    <option value="0.3">0.3%</option>
-                    <option value="0.5">0.5%</option>
-                    <option value="1">1.0%</option>
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Sponsor</span>
-                  <select
-                    value={sponsorPreference}
-                    onChange={(event) => setSponsorPreference(event.target.value as ServerSponsorPreference)}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 outline-none"
-                  >
-                    <option value="preferred">Preferred</option>
-                    <option value="required">Required</option>
-                    <option value="never">Never</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
-
             <div className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                   <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     <IoTrendingUpOutline className="h-3.5 w-3.5" />
                     Effective Rate
                   </div>
                   <p className="mt-2 text-sm font-semibold text-slate-900">{rateText}</p>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                   <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Minimum Received</div>
                   <p className="mt-2 text-sm font-semibold text-slate-900">
                     {quote ? `${quote.minDestinationAmount} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || ''}` : '--'}
@@ -1498,76 +1431,50 @@ const Swap: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-              <DetailRow
-                label="Route"
-                value={quote?.routeSummary || 'Waiting for a server quote'}
-                subdued={!quote}
-              />
-              <DetailRow
-                label="Source chain"
-                value={fromNetwork ? fromNetwork.name : '--'}
-                subdued={!fromNetwork}
-              />
-              <DetailRow
-                label="Destination chain"
-                value={toNetwork ? toNetwork.name : '--'}
-                subdued={!toNetwork}
-              />
-              <DetailRow
-                label="Network fee"
-                value={quote
-                  ? (quote.sponsorCoversNetworkFee
-                      ? 'Sponsored by route'
-                      : (quote.estimatedNetworkFee
-                          ? `${quote.estimatedNetworkFee} ${quote.estimatedNetworkFeeSymbol || fromItem?.symbol || fromNetwork?.symbol || ''}`.trim()
-                          : 'User-paid route'))
-                  : '--'}
-                subdued={!quote}
-              />
-              <DetailRow
-                label="Server fee"
-                value={quote?.estimatedServerFee || '--'}
-                subdued={!quote}
-              />
-              <DetailRow
-                label="Price impact"
-                value={quote?.priceImpactPct === null || quote?.priceImpactPct === undefined ? '--' : `${quote.priceImpactPct}%`}
-                subdued={!quote}
-              />
-              <DetailRow
-                label="Expires"
-                value={quote ? (
-                  <span className="inline-flex items-center gap-1">
-                    <IoTimeOutline className="w-3.5 h-3.5" />
-                    {formatExpiry(quote.expiresAt)}
-                  </span>
-                ) : '--'}
-                subdued={!quote}
-              />
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-[11px] text-slate-600">
+                {quote ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-400">Selected path</span>
+                      <span className="font-semibold text-slate-900">{fromNetwork?.name || 'Source'} to {toNetwork?.name || 'Destination'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-400">Quote expires</span>
+                      <span className="inline-flex items-center gap-1 font-semibold text-slate-900">
+                        <IoTimeOutline className="h-3.5 w-3.5" />
+                        {formatExpiry(quote.expiresAt)}
+                      </span>
+                    </div>
+                    <p className="text-slate-400">
+                      Fees and routing protections are handled automatically. Review the receive amount and confirm when ready.
+                    </p>
+                  </div>
+                ) : (
+                  <p>Select the token pair and amount. MetaYoshi will fetch the best available quote automatically.</p>
+                )}
               </div>
             </div>
           </section>
 
           {quote?.warnings.length ? (
-            <section className="space-y-1 rounded-2xl border border-amber-200 bg-amber-50 p-3">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-700">Warnings</p>
+            <section className="space-y-1 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-200">Notice</p>
               {quote.warnings.map((warning) => (
-                <p key={warning} className="text-[11px] text-amber-800">{warning}</p>
+                <p key={warning} className="text-[11px] text-amber-100">{warning}</p>
               ))}
             </section>
           ) : null}
 
           {execution ? (
-            <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="wallet-soft-surface space-y-2 p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Execution Status</p>
                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
                   execution.status === 'confirmed'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                     : execution.status === 'failed' || execution.status === 'rejected' || execution.status === 'expired'
-                      ? 'border-red-200 bg-red-50 text-red-700'
-                      : 'border-sky-200 bg-sky-50 text-sky-700'
+                      ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                      : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
                 }`}>
                   {execution.status}
                 </span>
@@ -1583,39 +1490,39 @@ const Swap: React.FC = () => {
           {errorText ? (
             <section className={`rounded-2xl border p-3 ${
               swapReadiness.state === 'active'
-                ? 'border-red-200 bg-red-50'
-                : 'border-amber-200 bg-amber-50'
+                ? 'border-red-500/30 bg-red-500/10'
+                : 'border-amber-500/30 bg-amber-500/10'
             }`}>
               <p className={`text-[10px] font-black uppercase tracking-[0.14em] ${
-                swapReadiness.state === 'active' ? 'text-red-700' : 'text-amber-700'
+                swapReadiness.state === 'active' ? 'text-red-300' : 'text-amber-200'
               }`}>
                 {swapReadiness.state === 'active' ? 'Could Not Continue' : 'Route Not Live Yet'}
               </p>
               <p className={`mt-1 text-[11px] ${
-                swapReadiness.state === 'active' ? 'text-red-800' : 'text-amber-800'
+                swapReadiness.state === 'active' ? 'text-red-100' : 'text-amber-100'
               }`}>{errorText}</p>
             </section>
           ) : null}
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-slate-200 bg-white p-4">
-        <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3">
+      <div className="space-y-3 border-t border-white/10 bg-white/70 p-4 backdrop-blur-xl">
+        <div className="wallet-soft-surface px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Swap Summary</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
                 {formatAssetLabel(fromItem, fromNetwork?.symbol)} {'->'} {formatAssetLabel(toItem, toNetwork?.symbol)}
               </p>
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[11px] text-slate-400">
                 {fromNetwork?.name || 'Source'} {'->'} {toNetwork?.name || 'Destination'}
               </p>
-              <p className={`mt-1 text-[11px] font-medium ${exactPairInMatrix ? 'text-emerald-600' : 'text-amber-700'}`}>
+              <p className={`mt-1 text-[11px] font-medium ${exactPairInMatrix ? 'text-emerald-300' : 'text-amber-200'}`}>
                 {matrixStatusLabel}: {matrixStatusDetail}
               </p>
             </div>
             {quote ? (
-              <span className="text-right text-[10px] font-medium text-slate-500">
+              <span className="text-right text-[10px] font-medium text-slate-400">
                 {quote.sourceAmount} {quote.sourceSymbol || fromItem?.symbol} {'->'} {quote.destinationAmount} {quote.destinationSymbol || toItem?.symbol}
               </span>
             ) : null}
@@ -1698,6 +1605,7 @@ const Swap: React.FC = () => {
       ) : null}
     </div>
   )
+
 }
 
 export default Swap

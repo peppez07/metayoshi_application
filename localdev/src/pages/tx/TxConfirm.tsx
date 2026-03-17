@@ -12,6 +12,7 @@ import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeMod
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
 import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
+import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import {
   DAPP_PENDING_REQUEST_STORAGE_KEY,
   parseDappPendingRequest,
@@ -52,6 +53,7 @@ interface TxResultState {
   networkId: string
   accountId?: string
   asset: string
+  assetId?: string
   amount: string
   from?: string
   to?: string
@@ -224,6 +226,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     : activeAccountId
   const activeAccount = accounts.find(a => a.id === displayAccountId) || accounts[0]
   const activeNetwork = networks.find(n => n.id === displayNetworkId) || networks[0]
+  const activityAssetId = isAssetTransfer ? assetId : buildNativeActivityAssetId(displayNetworkId)
   const fromAddress = isDappTxRoute && currentDappRequest
     ? String(
         activeAccount?.networkAddresses?.[displayNetworkId]
@@ -596,6 +599,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         id: txHash,
         type: 'sent',
         asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
+        assetId: activityAssetId || undefined,
         amount: amount,
         from: fromAddress || '',
         to: toAddress || undefined,
@@ -625,6 +629,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         networkId: activeNetwork.id,
         accountId: activeAccount?.id,
         asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
+        assetId: activityAssetId || undefined,
         amount: amount || '0',
         from: fromAddress || '',
         to: toAddress || undefined,
@@ -686,6 +691,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       id: Math.random().toString(36).substr(2, 9),
       type: 'sent',
       asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
+      assetId: activityAssetId || undefined,
       amount: amount,
       from: fromAddress || '',
       to: toAddress,

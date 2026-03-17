@@ -10,6 +10,7 @@ import { EVM_ETHEREUM_L2_COIN_IDS } from '../../coins/coinSelection'
 import { getUnifiedLogoByName } from '../../coins/logos'
 import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
+import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import {
   IoArrowBackOutline,
   IoChevronDownOutline,
@@ -684,6 +685,9 @@ const SendBatchSweepForm: React.FC<SendBatchSweepFormProps> = ({ row, networkByI
             asset: plan.holder.requestType === 'asset'
               ? (row.label || row.symbol || row.assetId || 'ASSET')
               : String(scopedNetwork.symbol || row.networkSymbol || '').trim() || 'COIN',
+            assetId: plan.holder.requestType === 'asset'
+              ? (String(plan.holder.assetId || row.assetId || '').trim() || undefined)
+              : (buildNativeActivityAssetId(plan.holder.networkId) || undefined),
             amount: amountText,
             from: plan.holder.address,
             to: toAddress,

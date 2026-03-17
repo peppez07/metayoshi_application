@@ -1,5 +1,6 @@
 import { DEFAULT_ACTIVE_NETWORK_ID } from '../coins'
 import type { Network } from '../coins'
+import { buildNativeActivityAssetId, normalizeActivityAssetId } from '../lib/activityIdentity'
 import { isCroCosmosNetwork } from '../lib/runtimeModel'
 import { resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 
@@ -23,6 +24,7 @@ export interface WalletStoreActivityLike {
   id?: string
   type?: 'sent' | 'received' | 'swap' | string
   asset?: string
+  assetId?: string
   amount?: string
   to?: string
   from?: string
@@ -43,6 +45,7 @@ export interface NormalizedWalletActivity {
   id: string
   type: 'sent' | 'received' | 'swap'
   asset: string
+  assetId?: string
   amount: string
   to?: string
   from?: string
@@ -489,6 +492,14 @@ export function normalizeActivityRecord(
   const id = String(candidate.id || '').trim() || `activity-${timestamp}-${indexHint}`
   const network = context.networks.find((entry) => entry.id === networkId)
   const asset = String(candidate.asset || '').trim() || String(network?.symbol || '').trim() || 'UNKNOWN'
+  const assetId = (() => {
+    const explicitAssetId = normalizeActivityAssetId(String(candidate.assetId || '').trim(), networkId)
+    if (explicitAssetId) return explicitAssetId
+    const networkSymbol = String(network?.symbol || '').trim()
+    return asset.toUpperCase() === networkSymbol.toUpperCase()
+      ? buildNativeActivityAssetId(networkId)
+      : undefined
+  })()
   const amount = String(candidate.amount || '').trim() || '0'
   const from = String(candidate.from || '').trim()
   const to = String(candidate.to || '').trim()
@@ -498,6 +509,7 @@ export function normalizeActivityRecord(
     id,
     type,
     asset,
+    assetId,
     amount,
     to: to || undefined,
     from: from || undefined,

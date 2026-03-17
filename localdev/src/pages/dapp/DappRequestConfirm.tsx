@@ -9,6 +9,7 @@ import {
   type DappSendEvmTransactionPayload
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
+import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import {
@@ -53,6 +54,7 @@ interface TxResultState {
   networkId: string
   accountId?: string
   asset: string
+  assetId?: string
   amount: string
   from?: string
   to?: string
@@ -553,6 +555,9 @@ const DappRequestConfirm: React.FC = () => {
             id: txHash,
             type: 'sent',
             asset: requestIsAssetSend ? requestAssetId : networkForActivity.symbol,
+            assetId: requestIsAssetSend
+              ? (requestAssetId || undefined)
+              : (buildNativeActivityAssetId(networkForActivity.id) || undefined),
             amount: requestAmount || '0',
             from: senderAddress,
             to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : requestTo || undefined,
@@ -581,6 +586,9 @@ const DappRequestConfirm: React.FC = () => {
           networkId: pendingRequest.networkId,
           accountId: pendingRequest.accountId,
           asset: requestIsAssetSend ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX'),
+          assetId: requestIsAssetSend
+            ? (requestAssetId || undefined)
+            : (buildNativeActivityAssetId(pendingRequest.networkId) || undefined),
           amount: requestAmount || '0',
           from: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : undefined,
           to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : (requestTo || undefined),

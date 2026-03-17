@@ -1,6 +1,7 @@
 import type { Network } from '../../coins'
 import type { ServerCoinCatalogItem } from '../../coins'
 import { RESEARCH_TOP100_CATALOG_SNAPSHOT, type ResearchCatalogAsset } from './researchSnapshot'
+import { normalizeActivityAssetId } from '../activityIdentity'
 
 type CatalogSource = 'bundled-registry' | 'research-top100' | 'metayoshi-server'
 
@@ -67,6 +68,7 @@ export type ActivityHistoryRecord = {
   id: string
   type: 'sent' | 'received' | 'swap'
   asset: string
+  assetId?: string
   amount: string
   to?: string
   from?: string
@@ -411,10 +413,13 @@ function normalizeEvmAddressLoose(value: string): string {
   return raw.toLowerCase()
 }
 
-function buildActivityStorageId(activity: Pick<ActivityHistoryRecord, 'id' | 'networkId' | 'accountId'>): string {
+function buildActivityStorageId(activity: Pick<ActivityHistoryRecord, 'id' | 'networkId' | 'accountId' | 'assetId' | 'asset'>): string {
+  const assetKey = normalizeActivityAssetId(String(activity.assetId || '').trim(), activity.networkId)
+    || normalizeText(activity.asset || '').toLowerCase()
   return [
     normalizeLower(activity.networkId),
     normalizeLower(activity.accountId || ''),
+    assetKey,
     normalizeLower(activity.id)
   ].join('::')
 }

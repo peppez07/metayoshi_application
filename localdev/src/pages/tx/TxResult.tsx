@@ -10,6 +10,7 @@ interface TxResultState {
   networkId: string
   accountId?: string
   asset: string
+  assetId?: string
   amount: string
   from?: string
   to?: string
@@ -123,7 +124,9 @@ const TxResult: React.FC = () => {
         <Button
           variant="outline"
           className="flex-1 btn-outline"
-          onClick={() => navigate('/wallet/activity')}
+          onClick={() => navigate('/wallet/activity', {
+            state: txState.assetId ? { assetId: txState.assetId } : undefined
+          })}
         >
           <span className="inline-flex items-center gap-2">
             <IoListOutline className="w-4 h-4" />

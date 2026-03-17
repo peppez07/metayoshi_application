@@ -17,6 +17,7 @@ import {
   type UtxoRpcConfig
 } from '../lib/utxoRpc'
 import { resolveBridgeTxKeyCandidates } from '../lib/bridgeAuth'
+import { normalizeActivityAssetId } from '../lib/activityIdentity'
 import { deriveUtxoAddress, deriveUtxoAddressWithSpec, isAddressForCoinSymbol } from '../lib/utxoAddress'
 import { deriveMoneroAddress } from '../lib/moneroAddress'
 import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
@@ -193,6 +194,7 @@ export interface Activity {
   id: string
   type: 'sent' | 'received' | 'swap'
   asset: string
+  assetId?: string
   amount: string
   to?: string
   from?: string
@@ -2596,8 +2598,11 @@ function mergeActivityListsPreferLatest(...lists: Activity[][]): Activity[] {
     for (const item of list || []) {
       const txid = String(item?.id || '').trim().toLowerCase()
       const networkId = normalizeNetworkIdAlias(String(item?.networkId || '').trim()).toLowerCase()
+      const accountId = String(item?.accountId || '').trim().toLowerCase()
+      const assetKey = normalizeActivityAssetId(String(item?.assetId || '').trim(), item?.networkId)
+        || String(item?.asset || '').trim().toLowerCase()
       if (!txid || !networkId) continue
-      const key = `${networkId}::${txid}`
+      const key = `${networkId}::${accountId}::${assetKey}::${txid}`
       const existing = byKey.get(key)
       if (!existing || Number(item.timestamp || 0) >= Number(existing.timestamp || 0)) {
         byKey.set(key, item)

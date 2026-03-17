@@ -9,15 +9,7 @@ import {
 import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import { coinModelFamilyToRouteKey, resolveCoinModelFamily } from '../../lib/coinModel'
 import { formatFiatValue } from '../../store/walletStore'
-import { useAssetListModel } from './useAssetListModel'
-
-function formatAssetAmount(value: number): string {
-  if (!Number.isFinite(value)) return '0'
-  if (Math.abs(value) >= 1) {
-    return value.toLocaleString(undefined, { maximumFractionDigits: 4 })
-  }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 8 })
-}
+import { formatAssetAmount, useAssetListModel } from './useAssetListModel'
 
 const Assets: React.FC = () => {
   const navigate = useNavigate()
