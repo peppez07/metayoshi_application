@@ -91,6 +91,31 @@ for (const entry of bundledWalletLogos) {
   }
 }
 
+const LOGO_ALIASES: Record<string, string[]> = {
+  chihuahua: ['chihuahua-wtf'],
+  regen: ['regen-network'],
+  terra: ['terra-luna-v2', 'luna'],
+  'terra-classic': ['terra-luna', 'lunc']
+}
+
+for (const [alias, targets] of Object.entries(LOGO_ALIASES)) {
+  let resolved: string | null = null
+  for (const target of targets) {
+    for (const key of variantsOf(target)) {
+      const match = logoByKey.get(key)
+      if (match) {
+        resolved = match
+        break
+      }
+    }
+    if (resolved) break
+  }
+  if (!resolved) continue
+  for (const key of variantsOf(alias)) {
+    if (!logoByKey.has(key)) logoByKey.set(key, resolved)
+  }
+}
+
 export function findBundledTokenLogoForAsset(assetName: string): string | null {
   const raw = String(assetName || '').trim()
   if (!raw) return null

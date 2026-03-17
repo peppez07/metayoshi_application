@@ -11,6 +11,7 @@ const polygonAmoyModule = createEvmCoinModule({
   chainId: 80002,
   bridgeCoinId: 'polygon-amoy-bor',
   bridgeChain: 'main',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('polygon'),
   rpcEnvKey: 'VITE_POLYGON_AMOY_RPC',
   rpcUserEnvKey: 'VITE_POLYGON_AMOY_RPC_USER',

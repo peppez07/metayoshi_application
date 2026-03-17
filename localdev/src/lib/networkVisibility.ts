@@ -37,11 +37,11 @@ export function isNetworkEnabled(networkId: string, disabledNetworkIds: unknown)
   return !disabledNetworkIds.some((value) => normalizeNetworkIdValue(value) === target)
 }
 
-export function getNetworkChainGroup(network?: Pick<Network, 'serverChain'> | null): 'main' | 'test' {
-  return normalizeChainValue(network?.serverChain)
+export function getNetworkChainGroup(network?: Pick<Network, 'displayChain' | 'serverChain'> | null): 'main' | 'test' {
+  return normalizeChainValue(network?.displayChain || network?.serverChain)
 }
 
-export function splitNetworksByChain<T extends Pick<Network, 'serverChain'>>(networks: T[]): {
+export function splitNetworksByChain<T extends Pick<Network, 'displayChain' | 'serverChain'>>(networks: T[]): {
   main: T[]
   test: T[]
 } {

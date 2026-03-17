@@ -39,6 +39,7 @@ type EvmCoinFactoryConfig = {
   chainId: number
   bridgeCoinId: string
   bridgeChain?: 'main' | 'test'
+  displayChain?: 'main' | 'test'
   logo: string
   rpcEnvKey: string
   rpcUserEnvKey: string
@@ -58,6 +59,7 @@ type CosmosCoinFactoryConfig = {
   coinSymbol?: string
   bridgeCoinId: string
   bridgeChain?: 'main' | 'test'
+  displayChain?: 'main' | 'test'
   logo: string
   rpcEnvKey: string
   rpcUserEnvKey: string
@@ -103,6 +105,7 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     runtimeModelId: String(config.runtimeModelId || config.id).trim().toLowerCase(),
     serverCoinId: config.bridgeCoinId,
     serverChain: config.bridgeChain || 'main',
+    displayChain: config.displayChain || config.bridgeChain || 'main',
     name: config.name,
     symbol: config.symbol,
     coinType: 'EVM',
@@ -157,6 +160,7 @@ export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
       runtimeModelId: String(config.runtimeModelId || config.id).trim().toLowerCase(),
       serverCoinId: config.bridgeCoinId,
       serverChain: config.bridgeChain || 'main',
+      displayChain: config.displayChain || config.bridgeChain || 'main',
       name: config.name,
       symbol: config.symbol || addressConfig.symbol,
       coinType: 'COSMOS',

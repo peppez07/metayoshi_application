@@ -17,6 +17,8 @@ export interface Network {
   serverCoinId?: string
   /** Original server chain id from /v1/coins (main/test). */
   serverChain?: 'main' | 'test'
+  /** UI grouping chain id when transport routing differs from display classification. */
+  displayChain?: 'main' | 'test'
   name: string
   symbol: string
   coinType: CoinType

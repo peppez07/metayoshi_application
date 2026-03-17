@@ -11,6 +11,7 @@ const baseSepoliaModule = createEvmCoinModule({
   chainId: 84532,
   bridgeCoinId: 'base-sepolia',
   bridgeChain: 'main',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('base'),
   rpcEnvKey: 'VITE_BASE_SEPOLIA_RPC',
   rpcUserEnvKey: 'VITE_BASE_SEPOLIA_RPC_USER',

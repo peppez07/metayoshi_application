@@ -11,6 +11,7 @@ const arbitrumSepoliaModule = createEvmCoinModule({
   chainId: 421614,
   bridgeCoinId: 'arbitrum-sepolia',
   bridgeChain: 'main',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('arbitrum'),
   rpcEnvKey: 'VITE_ARBITRUM_SEPOLIA_RPC',
   rpcUserEnvKey: 'VITE_ARBITRUM_SEPOLIA_RPC_USER',

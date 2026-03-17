@@ -11,6 +11,7 @@ const avalancheFujiModule = createEvmCoinModule({
   chainId: 43113,
   bridgeCoinId: 'avalanche-fuji-c-chain',
   bridgeChain: 'main',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('avalanche'),
   rpcEnvKey: 'VITE_AVALANCHE_FUJI_RPC',
   rpcUserEnvKey: 'VITE_AVALANCHE_FUJI_RPC_USER',

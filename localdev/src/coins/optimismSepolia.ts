@@ -11,6 +11,7 @@ const optimismSepoliaModule = createEvmCoinModule({
   chainId: 11155420,
   bridgeCoinId: 'optimism-sepolia',
   bridgeChain: 'main',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('optimism'),
   rpcEnvKey: 'VITE_OPTIMISM_SEPOLIA_RPC',
   rpcUserEnvKey: 'VITE_OPTIMISM_SEPOLIA_RPC_USER',

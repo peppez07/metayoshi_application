@@ -11,6 +11,7 @@ const bnbTestnetModule = createEvmCoinModule({
   chainId: 97,
   bridgeCoinId: 'bsc-testnet',
   bridgeChain: 'test',
+  displayChain: 'test',
   logo: getUnifiedLogoByName('bnb'),
   rpcEnvKey: 'VITE_BSC_TESTNET_RPC',
   rpcUserEnvKey: 'VITE_BSC_TESTNET_RPC_USER',
