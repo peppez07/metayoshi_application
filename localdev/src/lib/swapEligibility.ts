@@ -5,6 +5,7 @@ import {
   isSwapMatrixSupportedAsset,
   isSwapMatrixSupportedNetworkId
 } from './swapSupportMatrix'
+import { resolveNetworkCapabilities } from './networkCapabilities'
 
 const EVM_CONTRACT_RE = /^0x[a-f0-9]{40}$/i
 
@@ -18,9 +19,19 @@ export function extractSwapContractAddress(assetId?: string): string | undefined
   return match ? match[0].toLowerCase() : undefined
 }
 
-export function isSwapSupportedNetwork(network?: Pick<Network, 'coinType' | 'id'> | null): boolean {
+export function isSwapActionEnabledNetwork(
+  network?: Pick<Network, 'coinType' | 'capabilities' | 'supportsAssets'> | null
+): boolean {
+  if (!network) return false
+  const capabilities = resolveNetworkCapabilities(network)
+  return capabilities.features.swap || capabilities.ui.showSwapAction
+}
+
+export function isSwapSupportedNetwork(
+  network?: Pick<Network, 'coinType' | 'id' | 'capabilities' | 'supportsAssets'> | null
+): boolean {
   if (!network?.id) return false
-  if (network.coinType !== 'EVM' && network.coinType !== 'SOL') return false
+  if (!isSwapActionEnabledNetwork(network)) return false
   return isSwapMatrixSupportedNetworkId(network.id)
 }
 

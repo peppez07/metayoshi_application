@@ -85,7 +85,7 @@ function resolveOperationalModel(runtimeModelId: string | null, coinId: string, 
   if (runtimeModelId === 'xlm' || coinId === 'stellar' || coinId === 'xlm') return 'stellar-account'
   if (runtimeModelId === 'tron' || coinId === 'tron') return 'tron-account'
   if (runtimeModelId === 'rtm' || coinId === 'raptoreum') return 'utxo-asset-layer'
-  if (runtimeModelId === 'srv--bitcoin' || runtimeModelId === 'doge' || runtimeModelId === 'dash' || runtimeModelId === 'firo' || runtimeModelId === 'btcz') {
+  if (runtimeModelId === 'srv--bitcoin' || runtimeModelId === 'doge' || runtimeModelId === 'dash' || runtimeModelId === 'firo' || runtimeModelId === 'btcz' || runtimeModelId === 'zec') {
     return 'utxo'
   }
   if (runtimeModelId && EVM_MODEL_NETWORK_IDS.has(runtimeModelId)) return 'evm-account'

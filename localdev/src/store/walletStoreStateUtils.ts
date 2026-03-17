@@ -52,7 +52,7 @@ export interface NormalizedWalletActivity {
   networkId: string
 }
 
-const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo', 'zec'])
 const LEGACY_CLASSIC_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
@@ -75,6 +75,7 @@ const PREVIOUS_DEFAULT_VISIBLE_NETWORK_IDS = [
   'sol',
   'dash',
   'btcz',
+  'zec',
   'cosmos'
 ]
 const DEFAULT_VISIBLE_NETWORK_IDS = [
@@ -170,6 +171,7 @@ export function normalizeNetworkIdAlias(value: string): string {
   if (normalized === 'bsc' || normalized === 'binance-smart-chain' || normalized === 'bnb-smart-chain') return 'bnb'
   if (normalized === 'bsc-testnet' || normalized === 'binance-smart-chain-testnet' || normalized === 'bnb-smart-chain-testnet') return 'bnb-testnet'
   if (normalized === 'doge' || normalized === 'dogecoin') return 'doge'
+  if (normalized === 'zec' || normalized === 'zcash') return 'zec'
   if (normalized === 'gnosis' || normalized === 'gnosis-chain' || normalized === 'xdai') return 'gnosis'
   if (normalized === 'op' || normalized === 'optimism' || normalized === 'eth-l2--optimism') return 'op'
   if (normalized === 'trx' || normalized === 'tron') return 'tron'

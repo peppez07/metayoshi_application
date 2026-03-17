@@ -1,4 +1,4 @@
-const STABLE_NETWORK_IDS = new Set(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const STABLE_NETWORK_IDS = new Set(['rtm', 'eth', 'dash', 'btcz', 'firo', 'zec'])
 
 export function sanitizeTxIdForExplorer(value: string): string {
   let txid = String(value || '').trim()
@@ -22,6 +22,7 @@ export function normalizeActivityNetworkId(value: string): string {
   if (lower === 'bsc' || lower === 'binance-smart-chain' || lower === 'bnb-smart-chain') return 'bnb'
   if (lower === 'bsc-testnet' || lower === 'binance-smart-chain-testnet' || lower === 'bnb-smart-chain-testnet') return 'bnb-testnet'
   if (lower === 'doge' || lower === 'dogecoin') return 'doge'
+  if (lower === 'zec' || lower === 'zcash') return 'zec'
   if (lower === 'gnosis' || lower === 'gnosis-chain' || lower === 'xdai') return 'gnosis'
   if (lower === 'op' || lower === 'optimism' || lower === 'eth-l2--optimism') return 'op'
   if (lower === 'trx' || lower === 'tron') return 'tron'

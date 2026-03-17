@@ -89,6 +89,7 @@ import { unichainCoin } from './unichain'
 import { wardenEvmCoin } from './wardenEvm'
 import { xlmCoin } from './xlm'
 import { xplaEvmCoin } from './xplaEvm'
+import { zecCoin } from './zec'
 import { zksyncCoin } from './zksync'
 import type { BundledCoinRegistryEntry } from './registryTypes'
 
@@ -1289,6 +1290,19 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: btczCoin
+  },
+  {
+    manifest: {
+      id: 'zec',
+      runtimeModelId: 'zec',
+      protocolFamily: 'utxo',
+      coinId: 'zcash',
+      chain: 'main',
+      aliases: ['zec', 'zcash'],
+      testedByDefault: true,
+      visibleByDefault: true
+    },
+    coin: zecCoin
   },
   {
     manifest: {

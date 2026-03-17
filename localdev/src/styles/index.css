@@ -519,8 +519,8 @@ html.theme-light .placeholder-gray-500::placeholder {
   color: rgb(var(--color-text-muted-500)) !important;
 }
 
-.swap-dark-page,
-.swap-dark-modal {
+html.theme-dark .swap-dark-page,
+html.theme-dark .swap-dark-modal {
   color: rgb(241, 245, 249);
   background:
     radial-gradient(circle at 14% 10%, rgba(245, 132, 31, 0.12), transparent 18%),
@@ -528,72 +528,72 @@ html.theme-light .placeholder-gray-500::placeholder {
     linear-gradient(180deg, rgba(13, 16, 22, 0.98), rgba(8, 10, 15, 0.99));
 }
 
-.swap-dark-page .bg-white,
-.swap-dark-modal .bg-white {
+html.theme-dark .swap-dark-page .bg-white,
+html.theme-dark .swap-dark-modal .bg-white {
   background: rgba(17, 20, 28, 0.92) !important;
 }
 
-.swap-dark-page .bg-slate-50,
-.swap-dark-modal .bg-slate-50,
-.swap-dark-page .bg-\[\#f5f7fb\],
-.swap-dark-modal .bg-\[\#f5f7fb\] {
+html.theme-dark .swap-dark-page .bg-slate-50,
+html.theme-dark .swap-dark-modal .bg-slate-50,
+html.theme-dark .swap-dark-page .bg-\[\#f5f7fb\],
+html.theme-dark .swap-dark-modal .bg-\[\#f5f7fb\] {
   background: rgba(255, 255, 255, 0.04) !important;
 }
 
-.swap-dark-page .border-slate-200,
-.swap-dark-modal .border-slate-200 {
+html.theme-dark .swap-dark-page .border-slate-200,
+html.theme-dark .swap-dark-modal .border-slate-200 {
   border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
-.swap-dark-page .text-slate-950,
-.swap-dark-page .text-slate-900,
-.swap-dark-modal .text-slate-950,
-.swap-dark-modal .text-slate-900 {
+html.theme-dark .swap-dark-page .text-slate-950,
+html.theme-dark .swap-dark-page .text-slate-900,
+html.theme-dark .swap-dark-modal .text-slate-950,
+html.theme-dark .swap-dark-modal .text-slate-900 {
   color: rgb(248, 250, 252) !important;
 }
 
-.swap-dark-page .text-slate-800,
-.swap-dark-page .text-slate-700,
-.swap-dark-modal .text-slate-800,
-.swap-dark-modal .text-slate-700 {
+html.theme-dark .swap-dark-page .text-slate-800,
+html.theme-dark .swap-dark-page .text-slate-700,
+html.theme-dark .swap-dark-modal .text-slate-800,
+html.theme-dark .swap-dark-modal .text-slate-700 {
   color: rgb(226, 232, 240) !important;
 }
 
-.swap-dark-page .text-slate-600,
-.swap-dark-page .text-slate-500,
-.swap-dark-page .text-slate-400,
-.swap-dark-modal .text-slate-600,
-.swap-dark-modal .text-slate-500,
-.swap-dark-modal .text-slate-400 {
+html.theme-dark .swap-dark-page .text-slate-600,
+html.theme-dark .swap-dark-page .text-slate-500,
+html.theme-dark .swap-dark-page .text-slate-400,
+html.theme-dark .swap-dark-modal .text-slate-600,
+html.theme-dark .swap-dark-modal .text-slate-500,
+html.theme-dark .swap-dark-modal .text-slate-400 {
   color: rgb(148, 163, 184) !important;
 }
 
-.swap-dark-page .placeholder\:text-slate-400::placeholder,
-.swap-dark-modal .placeholder\:text-slate-400::placeholder {
+html.theme-dark .swap-dark-page .placeholder\:text-slate-400::placeholder,
+html.theme-dark .swap-dark-modal .placeholder\:text-slate-400::placeholder {
   color: rgb(100, 116, 139) !important;
 }
 
-.swap-dark-page .hover\:bg-slate-50:hover,
-.swap-dark-modal .hover\:bg-slate-50:hover,
-.swap-dark-page .hover\:bg-slate-100:hover,
-.swap-dark-modal .hover\:bg-slate-100:hover {
+html.theme-dark .swap-dark-page .hover\:bg-slate-50:hover,
+html.theme-dark .swap-dark-modal .hover\:bg-slate-50:hover,
+html.theme-dark .swap-dark-page .hover\:bg-slate-100:hover,
+html.theme-dark .swap-dark-modal .hover\:bg-slate-100:hover {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
-.swap-dark-page .hover\:text-slate-900:hover,
-.swap-dark-modal .hover\:text-slate-900:hover,
-.swap-dark-page .hover\:text-slate-950:hover,
-.swap-dark-modal .hover\:text-slate-950:hover {
+html.theme-dark .swap-dark-page .hover\:text-slate-900:hover,
+html.theme-dark .swap-dark-modal .hover\:text-slate-900:hover,
+html.theme-dark .swap-dark-page .hover\:text-slate-950:hover,
+html.theme-dark .swap-dark-modal .hover\:text-slate-950:hover {
   color: rgb(248, 250, 252) !important;
 }
 
-.swap-dark-page .hover\:border-slate-300:hover,
-.swap-dark-modal .hover\:border-slate-300:hover {
+html.theme-dark .swap-dark-page .hover\:border-slate-300:hover,
+html.theme-dark .swap-dark-modal .hover\:border-slate-300:hover {
   border-color: rgba(255, 255, 255, 0.18) !important;
 }
 
-.swap-dark-page .shadow-sm,
-.swap-dark-modal .shadow-sm {
+html.theme-dark .swap-dark-page .shadow-sm,
+html.theme-dark .swap-dark-modal .shadow-sm {
   box-shadow:
     0 18px 40px rgba(0, 0, 0, 0.28),
     0 1px 0 rgba(255, 255, 255, 0.04) inset !important;

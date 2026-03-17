@@ -712,10 +712,12 @@ async function openOrFocusExtensionTab(
 
 async function openExtensionSurface(
   routePath: string,
-  target?: ExtensionSurfaceTarget
+  target?: ExtensionSurfaceTarget,
+  options?: { fallbackToTabOnSidePanelFailure?: boolean }
 ): Promise<void> {
   const resolvedTarget = await resolveExtensionSurfaceTarget(target)
   const sidePanel = getSidePanelApi()
+  const fallbackToTabOnSidePanelFailure = options?.fallbackToTabOnSidePanelFailure ?? true
   await setExtensionSurfaceRoute(routePath)
 
   if (!sidePanel) {
@@ -778,8 +780,11 @@ async function openExtensionSurface(
   }
 
   if (sidePanelFailure) {
-    await openOrFocusExtensionTab(routePath, resolvedTarget)
-    return
+    if (fallbackToTabOnSidePanelFailure) {
+      await openOrFocusExtensionTab(routePath, resolvedTarget)
+      return
+    }
+    throw sidePanelFailure
   }
 }
 
@@ -2391,7 +2396,9 @@ if (!chrome.storage.onChanged.hasListener(handleWalletStorageBroadcast)) {
 chrome.commands?.onCommand.addListener((command) => {
   if (command !== OPEN_WALLET_COMMAND) return
 
-  void openWalletSurface().catch((err) => {
+  void openExtensionSurface('/wallet/assets', undefined, {
+    fallbackToTabOnSidePanelFailure: false
+  }).catch((err) => {
     void recordRuntimeError('background-sw', err, { kind: 'open-wallet-command' })
   })
 })

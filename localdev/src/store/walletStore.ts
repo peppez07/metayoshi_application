@@ -481,7 +481,7 @@ const SEND_OPERATION_MAX_TPS = 5
 const SEND_OPERATION_MIN_INTERVAL_MS = Math.max(1, Math.trunc(1000 / SEND_OPERATION_MAX_TPS))
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
-const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo'])
+const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo', 'zec'])
 const DEFAULT_TRANSIENT_BRIDGE_COOLDOWN_MS = 20_000
 const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
   eth: 60_000,
@@ -941,6 +941,7 @@ const COINGECKO_NATIVE_PRICE_ID_BY_COIN_ID: Record<string, string> = {
   dogecoin: 'dogecoin',
   firo: 'firo',
   dash: 'dash',
+  zcash: 'zcash',
   raptoreum: 'raptoreum',
   bitcoinz: 'bitcoinz'
 }
@@ -2572,7 +2573,7 @@ async function readEvmTokenMetadata(
 // support them reliably for unfunded addresses.
 function supportsAddressIndexBalance(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO'
 }
 
 function normalizeNetworkListSymbols(networks: Network[]): Network[] {

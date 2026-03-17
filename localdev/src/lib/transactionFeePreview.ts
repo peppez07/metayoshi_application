@@ -126,7 +126,7 @@ function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
 }
 
 function parseFiniteNumber(value: unknown): number | null {

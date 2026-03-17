@@ -19,6 +19,7 @@ import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../..
 import { coinModelFamilyToRouteKey, compareNetworksByModelFamily, resolveCoinModelFamily } from '../../lib/coinModel'
 import { getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
+import { isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
@@ -77,6 +78,7 @@ const WalletLayout: React.FC = () => {
   const enabledNetworkCount = enabledNetworks.length
   const activeAccount = accounts.find((account) => account.id === activeAccountId) || accounts[0]
   const activeNetwork = enabledNetworks.find((network) => network.id === activeNetworkId) || enabledNetworks[0]
+  const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
   const hasActiveNetwork = Boolean(activeNetwork)
   const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
@@ -93,7 +95,7 @@ const WalletLayout: React.FC = () => {
       includeZeroBalance: false
     })
   }, [activeAccount?.id, activeNetwork?.id, getSendableItems])
-  const showSwapAction = activeNetworkSwapItems.length > 0
+  const showSwapAction = Boolean(activeNetwork && isSwapActionEnabledNetwork(activeNetwork) && activeNetworkSwapItems.length > 0)
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
@@ -134,7 +136,6 @@ const WalletLayout: React.FC = () => {
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   const isSwapRoute = location.pathname.startsWith('/wallet/swap')
   const isFocusedFlowRoute = isSendRoute || isSwapRoute
-  const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
   const coinModel = activeNetwork ? resolveCoinModelFamily(activeNetwork) : 'generic'
   const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
   const isModelRoute = location.pathname.startsWith('/wallet/model/')

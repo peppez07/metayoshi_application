@@ -32,6 +32,7 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   dash: 'dash',
   bitcoin: 'srv--bitcoin',
   bitcoinz: 'btcz',
+  zcash: 'zec',
   avalanche: 'avaxc',
   celestia: 'celestia',
   chihuahua: 'chihuahua',

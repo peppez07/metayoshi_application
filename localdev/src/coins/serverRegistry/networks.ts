@@ -103,6 +103,7 @@ export function mergeCapabilityInputs(
   const nativeSend = Boolean(baseFeatures.nativeSend || inferredFeatures.nativeSend)
   const assetLayer = Boolean(baseFeatures.assetLayer || inferredFeatures.assetLayer)
   const assetSend = Boolean(baseFeatures.assetSend || inferredFeatures.assetSend)
+  const swap = Boolean(baseFeatures.swap || inferredFeatures.swap)
   const activity = Boolean(
     (baseFeatures.activity ?? true) || (inferredFeatures.activity ?? true)
   )
@@ -112,13 +113,15 @@ export function mergeCapabilityInputs(
       nativeSend,
       assetLayer,
       assetSend,
-      activity
+      activity,
+      swap
     },
     ui: {
       showAssetsTab: Boolean(baseUi.showAssetsTab || inferredUi.showAssetsTab || assetLayer),
       showAssetsAction: Boolean(baseUi.showAssetsAction || inferredUi.showAssetsAction || assetLayer),
       showSendAction: Boolean(baseUi.showSendAction || inferredUi.showSendAction || nativeSend),
-      showActivityTab: Boolean((baseUi.showActivityTab ?? true) || (inferredUi.showActivityTab ?? true))
+      showActivityTab: Boolean((baseUi.showActivityTab ?? true) || (inferredUi.showActivityTab ?? true)),
+      showSwapAction: Boolean(baseUi.showSwapAction || inferredUi.showSwapAction || swap)
     }
   }
 }
@@ -197,8 +200,8 @@ export function createGenericServerNetwork(input: {
       reason: `${input.coinId} address derivation is not supported in this build`
     },
     capabilities: {
-      features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true },
-      ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true }
+      features: { nativeSend: false, assetLayer: false, assetSend: false, activity: true, swap: false },
+      ui: { showAssetsTab: false, showAssetsAction: false, showSendAction: false, showActivityTab: true, showSwapAction: false }
     }
   }
 }

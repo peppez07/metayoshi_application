@@ -268,7 +268,7 @@ function assertCoinAmount(amount: string, decimals: number, symbol: string): voi
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
 }
 
 function isClientSignerFormatError(error: unknown): boolean {
@@ -681,7 +681,7 @@ export async function sendUtxoNonCustodialNetworkTransaction(input: SendUtxoNonC
   const outputs = Object.fromEntries(Object.entries(outputsSats).map(([address, satsValue]) => [address, coins8(satsValue)]))
 
   const coinSymbol = String(net.coinSymbol || '').trim().toUpperCase()
-  const isSaplingTransparent = coinSymbol === 'BTCZ' || coinSymbol === 'ARRR'
+  const isSaplingTransparent = coinSymbol === 'BTCZ' || coinSymbol === 'ZEC' || coinSymbol === 'ARRR'
   let saplingBranchId: number | undefined
   if (isSaplingTransparent) {
     try {
