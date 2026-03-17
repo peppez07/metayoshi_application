@@ -68,6 +68,17 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     symbol: 'ATONE',
     envPrefix: 'ATOMONE'
   },
+  akash: {
+    hrp: 'akash',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'uakt',
+    feeDenom: 'uakt',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'AKT',
+    envPrefix: 'AKASH'
+  },
   axelar: {
     hrp: 'axelar',
     coinType: COSMOS_COIN_TYPE,
@@ -145,9 +156,31 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     symbol: 'COREUM',
     envPrefix: 'COREUM'
   },
+  dydx: {
+    hrp: 'dydx',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 18,
+    nativeDenom: 'adydx',
+    feeDenom: 'adydx',
+    feeAmountRaw: '500000000000000',
+    gasLimit: '180000',
+    symbol: 'DYDX',
+    envPrefix: 'DYDX'
+  },
   cosmos: COSMOS_CONFIG,
   cro: CRO_CONFIG,
   'cronos-pos': CRO_CONFIG,
+  elys: {
+    hrp: 'elys',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'uelys',
+    feeDenom: 'uelys',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'ELYS',
+    envPrefix: 'ELYS'
+  },
   evmos: {
     hrp: 'evmos',
     coinType: 60,
@@ -169,6 +202,17 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     gasLimit: '180000',
     symbol: 'INJ',
     envPrefix: 'INJECTIVE'
+  },
+  fetch: {
+    hrp: 'fetch',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 18,
+    nativeDenom: 'afet',
+    feeDenom: 'afet',
+    feeAmountRaw: '500000000000000',
+    gasLimit: '180000',
+    symbol: 'FET',
+    envPrefix: 'FETCH'
   },
   juno: {
     hrp: 'juno',
@@ -192,6 +236,28 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     symbol: 'KUJI',
     envPrefix: 'KUJIRA'
   },
+  lumera: {
+    hrp: 'lumera',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'ulume',
+    feeDenom: 'ulume',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'LUME',
+    envPrefix: 'LUMERA'
+  },
+  medibloc: {
+    hrp: 'panacea',
+    coinType: 371,
+    decimals: 6,
+    nativeDenom: 'umed',
+    feeDenom: 'umed',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'MED',
+    envPrefix: 'MEDIBLOC'
+  },
   neutron: {
     hrp: 'neutron',
     coinType: COSMOS_COIN_TYPE,
@@ -203,6 +269,28 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     symbol: 'NTRN',
     envPrefix: 'NEUTRON'
   },
+  nolus: {
+    hrp: 'nolus',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'unls',
+    feeDenom: 'unls',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'NLS',
+    envPrefix: 'NOLUS'
+  },
+  oraichain: {
+    hrp: 'orai',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'orai',
+    feeDenom: 'orai',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'ORAI',
+    envPrefix: 'ORAICHAIN'
+  },
   osmosis: {
     hrp: 'osmo',
     coinType: COSMOS_COIN_TYPE,
@@ -213,6 +301,17 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     gasLimit: '180000',
     symbol: 'OSMO',
     envPrefix: 'OSMOSIS'
+  },
+  passage: {
+    hrp: 'pasg',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'upasg',
+    feeDenom: 'upasg',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'PASG',
+    envPrefix: 'PASSAGE'
   },
   persistence: {
     hrp: 'persistence',
@@ -258,6 +357,39 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     symbol: 'SEI',
     envPrefix: 'SEI'
   },
+  saga: {
+    hrp: 'saga',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'usaga',
+    feeDenom: 'usaga',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'SAGA',
+    envPrefix: 'SAGA'
+  },
+  sentinel: {
+    hrp: 'sent',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'udvpn',
+    feeDenom: 'udvpn',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'DVPN',
+    envPrefix: 'SENTINEL'
+  },
+  shentu: {
+    hrp: 'shentu',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'uctk',
+    feeDenom: 'uctk',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'CTK',
+    envPrefix: 'SHENTU'
+  },
   stargaze: {
     hrp: 'stars',
     coinType: COSMOS_COIN_TYPE,
@@ -268,6 +400,17 @@ const COSMOS_NETWORK_CONFIGS: Record<string, CosmosAddressConfig> = {
     gasLimit: '180000',
     symbol: 'STARS',
     envPrefix: 'STARGAZE'
+  },
+  teritori: {
+    hrp: 'tori',
+    coinType: COSMOS_COIN_TYPE,
+    decimals: 6,
+    nativeDenom: 'utori',
+    feeDenom: 'utori',
+    feeAmountRaw: '2500',
+    gasLimit: '180000',
+    symbol: 'TORI',
+    envPrefix: 'TERITORI'
   },
   stride: {
     hrp: 'stride',

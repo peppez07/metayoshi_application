@@ -1,49 +1,89 @@
 import { adaCoin } from './ada'
+import { akashCoin } from './akash'
+import { arbitrumSepoliaCoin } from './arbitrumSepolia'
 import { arbCoin } from './arb'
+import { atomoneCoin } from './atomone'
+import { avalancheFujiCoin } from './avalancheFuji'
 import { avaxcCoin } from './avaxc'
 import { auroraCoin } from './aurora'
+import { axelarCoin } from './axelar'
+import { babylonCoin } from './babylon'
 import { bahamutCoin } from './bahamut'
 import { baseCoin } from './base'
+import { baseSepoliaCoin } from './baseSepolia'
 import { berachainCoin } from './berachain'
 import { blastCoin } from './blast'
 import { bnbCoin } from './bnb'
 import { bnbTestnetCoin } from './bnbTestnet'
 import { btcCoin } from './btc'
 import { btczCoin } from './btcz'
+import { bitcannaCoin } from './bitcanna'
 import { celoCoin } from './celo'
+import { celestiaCoin } from './celestia'
+import { chihuahuaCoin } from './chihuahua'
+import { comdexCoin } from './comdex'
+import { coreumCoin } from './coreum'
 import { cosmosCoin } from './cosmos'
 import { croCoin } from './cro'
 import { cronosCoin } from './cronos'
 import { dashCoin } from './dash'
 import { dogeCoin } from './doge'
 import { dymensionEvmCoin } from './dymensionEvm'
+import { dydxCoin } from './dydx'
+import { elysCoin } from './elys'
 import { ethCoin } from './eth'
+import { ethereumSepoliaCoin } from './ethereumSepolia'
 import { evmosEvmCoin } from './evmosEvm'
+import { fetchCoin } from './fetch'
 import { firoCoin } from './firo'
 import { fraxtalCoin } from './fraxtal'
 import { gnosisCoin } from './gnosis'
 import { haqqCoin } from './haqq'
 import { irisEvmCoin } from './irisEvm'
+import { injectiveCoin } from './injective'
+import { junoCoin } from './juno'
 import { kavaEvmCoin } from './kavaEvm'
+import { kujiraCoin } from './kujira'
 import { lineaCoin } from './linea'
+import { lumeraCoin } from './lumera'
 import { mantleCoin } from './mantle'
+import { mediblocCoin } from './medibloc'
 import { metisCoin } from './metis'
 import { moonbeamCoin } from './moonbeam'
 import { moonriverCoin } from './moonriver'
 import { nibiruEvmCoin } from './nibiruEvm'
+import { neutronCoin } from './neutron'
+import { nolusCoin } from './nolus'
 import { opCoin } from './op'
+import { optimismSepoliaCoin } from './optimismSepolia'
+import { oraichainCoin } from './oraichain'
+import { osmosisCoin } from './osmosis'
+import { persistenceCoin } from './persistence'
+import { passageCoin } from './passage'
 import { polygonCoin } from './polygon'
+import { polygonAmoyCoin } from './polygonAmoy'
 import { pulsechainCoin } from './pulsechain'
 import { rtmCoin } from './rtm'
+import { quicksilverCoin } from './quicksilver'
+import { regenCoin } from './regen'
 import { scrollCoin } from './scroll'
+import { sagaCoin } from './saga'
+import { seiCoin } from './sei'
 import { seiEvmCoin } from './seiEvm'
+import { sentinelCoin } from './sentinel'
+import { shentuCoin } from './shentu'
 import { solCoin } from './sol'
 import { somniaCoin } from './somnia'
 import { soneiumCoin } from './soneium'
 import { sonicCoin } from './sonic'
 import { suiCoin } from './sui'
+import { stargazeCoin } from './stargaze'
+import { strideCoin } from './stride'
 import { taikoCoin } from './taiko'
 import { tenetEvmCoin } from './tenetEvm'
+import { terraCoin } from './terra'
+import { terraClassicCoin } from './terraClassic'
+import { teritoriCoin } from './teritori'
 import { tronCoin } from './tron'
 import { unichainCoin } from './unichain'
 import { wardenEvmCoin } from './wardenEvm'
@@ -81,6 +121,30 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'atomone',
+      runtimeModelId: 'atomone',
+      protocolFamily: 'cosmos',
+      coinId: 'atomone',
+      chain: 'main',
+      aliases: ['atomone', 'atomone-mainnet', 'mainnet-atomone'],
+      visibleByDefault: true
+    },
+    coin: atomoneCoin
+  },
+  {
+    manifest: {
+      id: 'akash',
+      runtimeModelId: 'akash',
+      protocolFamily: 'cosmos',
+      coinId: 'akash',
+      chain: 'main',
+      aliases: ['akash', 'akash-mainnet', 'mainnet-akash'],
+      visibleByDefault: true
+    },
+    coin: akashCoin
+  },
+  {
+    manifest: {
       id: 'eth',
       runtimeModelId: 'eth',
       protocolFamily: 'evm',
@@ -93,6 +157,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: ethCoin
+  },
+  {
+    manifest: {
+      id: 'ethereum-sepolia',
+      runtimeModelId: 'eth',
+      protocolFamily: 'evm',
+      coinId: 'ethereum-sepolia',
+      chain: 'test',
+      aliases: ['ethereum-sepolia', 'eth-sepolia', 'sepolia', 'sepolia-eth', 'testnet-ethereum'],
+      chainId: 11155111,
+      includeInEvmSet: true,
+      testedByDefault: true,
+      visibleByDefault: true
+    },
+    coin: ethereumSepoliaCoin
   },
   {
     manifest: {
@@ -110,6 +189,30 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'axelar',
+      runtimeModelId: 'axelar',
+      protocolFamily: 'cosmos',
+      coinId: 'axelar',
+      chain: 'main',
+      aliases: ['axelar', 'axelar-mainnet', 'mainnet-axelar'],
+      visibleByDefault: true
+    },
+    coin: axelarCoin
+  },
+  {
+    manifest: {
+      id: 'babylon',
+      runtimeModelId: 'babylon',
+      protocolFamily: 'cosmos',
+      coinId: 'babylon',
+      chain: 'main',
+      aliases: ['babylon', 'babylon-mainnet', 'mainnet-babylon'],
+      visibleByDefault: true
+    },
+    coin: babylonCoin
+  },
+  {
+    manifest: {
       id: 'blast',
       runtimeModelId: 'blast',
       protocolFamily: 'evm',
@@ -122,6 +225,17 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: blastCoin
+  },
+  {
+    manifest: {
+      id: 'bitcanna',
+      runtimeModelId: 'bitcanna',
+      protocolFamily: 'cosmos',
+      coinId: 'bitcanna',
+      chain: 'main',
+      aliases: ['bitcanna', 'bitcanna-mainnet', 'mainnet-bitcanna']
+    },
+    coin: bitcannaCoin
   },
   {
     manifest: {
@@ -173,6 +287,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'base-sepolia',
+      runtimeModelId: 'base',
+      protocolFamily: 'evm',
+      coinId: 'base-sepolia',
+      chain: 'test',
+      aliases: ['base-sepolia', 'sepolia-base', 'base-testnet', 'testnet-base'],
+      chainId: 84532,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: baseSepoliaCoin
+  },
+  {
+    manifest: {
       id: 'arb',
       runtimeModelId: 'arb',
       protocolFamily: 'evm',
@@ -188,6 +317,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'arbitrum-sepolia',
+      runtimeModelId: 'arb',
+      protocolFamily: 'evm',
+      coinId: 'arbitrum-sepolia',
+      chain: 'test',
+      aliases: ['arbitrum-sepolia', 'arb-sepolia', 'arbitrum-testnet', 'testnet-arbitrum'],
+      chainId: 421614,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: arbitrumSepoliaCoin
+  },
+  {
+    manifest: {
       id: 'op',
       runtimeModelId: 'op',
       protocolFamily: 'evm',
@@ -200,6 +344,21 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: opCoin
+  },
+  {
+    manifest: {
+      id: 'optimism-sepolia',
+      runtimeModelId: 'op',
+      protocolFamily: 'evm',
+      coinId: 'optimism-sepolia',
+      chain: 'test',
+      aliases: ['optimism-sepolia', 'op-sepolia', 'optimism-testnet', 'testnet-optimism'],
+      chainId: 11155420,
+      includeInEvmSet: true,
+      isEthereumLayer2: true,
+      visibleByDefault: true
+    },
+    coin: optimismSepoliaCoin
   },
   {
     manifest: {
@@ -233,6 +392,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'polygon-amoy',
+      runtimeModelId: 'polygon',
+      protocolFamily: 'evm',
+      coinId: 'polygon-amoy-bor',
+      chain: 'test',
+      aliases: ['polygon-amoy', 'polygon-amoy-bor', 'amoy', 'polygon-testnet', 'testnet-polygon'],
+      chainId: 80002,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: polygonAmoyCoin
+  },
+  {
+    manifest: {
       id: 'avaxc',
       runtimeModelId: 'avaxc',
       protocolFamily: 'evm',
@@ -244,6 +417,20 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: avaxcCoin
+  },
+  {
+    manifest: {
+      id: 'avalanche-fuji',
+      runtimeModelId: 'avaxc',
+      protocolFamily: 'evm',
+      coinId: 'avalanche-fuji-c-chain',
+      chain: 'test',
+      aliases: ['avalanche-fuji', 'avalanche-fuji-c-chain', 'fuji', 'fuji-c-chain', 'avalanche-testnet'],
+      chainId: 43113,
+      includeInEvmSet: true,
+      visibleByDefault: true
+    },
+    coin: avalancheFujiCoin
   },
   {
     manifest: {
@@ -434,6 +621,74 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'dydx',
+      runtimeModelId: 'dydx',
+      protocolFamily: 'cosmos',
+      coinId: 'dydx',
+      chain: 'main',
+      aliases: ['dydx', 'dydx-mainnet', 'mainnet-dydx'],
+      visibleByDefault: true
+    },
+    coin: dydxCoin
+  },
+  {
+    manifest: {
+      id: 'elys',
+      runtimeModelId: 'elys',
+      protocolFamily: 'cosmos',
+      coinId: 'elys',
+      chain: 'main',
+      aliases: ['elys', 'elys-mainnet', 'mainnet-elys']
+    },
+    coin: elysCoin
+  },
+  {
+    manifest: {
+      id: 'celestia',
+      runtimeModelId: 'celestia',
+      protocolFamily: 'cosmos',
+      coinId: 'celestia',
+      chain: 'main',
+      aliases: ['celestia', 'celestia-mainnet', 'mainnet-celestia'],
+      visibleByDefault: true
+    },
+    coin: celestiaCoin
+  },
+  {
+    manifest: {
+      id: 'chihuahua',
+      runtimeModelId: 'chihuahua',
+      protocolFamily: 'cosmos',
+      coinId: 'chihuahua',
+      chain: 'main',
+      aliases: ['chihuahua', 'chihuahua-mainnet', 'mainnet-chihuahua']
+    },
+    coin: chihuahuaCoin
+  },
+  {
+    manifest: {
+      id: 'comdex',
+      runtimeModelId: 'comdex',
+      protocolFamily: 'cosmos',
+      coinId: 'comdex',
+      chain: 'main',
+      aliases: ['comdex', 'comdex-mainnet', 'mainnet-comdex']
+    },
+    coin: comdexCoin
+  },
+  {
+    manifest: {
+      id: 'coreum',
+      runtimeModelId: 'coreum',
+      protocolFamily: 'cosmos',
+      coinId: 'coreum',
+      chain: 'main',
+      aliases: ['coreum', 'coreum-mainnet', 'mainnet-coreum']
+    },
+    coin: coreumCoin
+  },
+  {
+    manifest: {
       id: 'cosmos',
       runtimeModelId: 'cosmos',
       protocolFamily: 'cosmos',
@@ -484,6 +739,52 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'fetch',
+      runtimeModelId: 'fetch',
+      protocolFamily: 'cosmos',
+      coinId: 'fetch',
+      chain: 'main',
+      aliases: ['fetch', 'fetch-mainnet', 'mainnet-fetch', 'fetchhub'],
+      visibleByDefault: true
+    },
+    coin: fetchCoin
+  },
+  {
+    manifest: {
+      id: 'injective',
+      runtimeModelId: 'injective',
+      protocolFamily: 'cosmos',
+      coinId: 'injective',
+      chain: 'main',
+      aliases: ['injective', 'injective-mainnet', 'mainnet-injective'],
+      visibleByDefault: true
+    },
+    coin: injectiveCoin
+  },
+  {
+    manifest: {
+      id: 'juno',
+      runtimeModelId: 'juno',
+      protocolFamily: 'cosmos',
+      coinId: 'juno',
+      chain: 'main',
+      aliases: ['juno', 'juno-mainnet', 'mainnet-juno']
+    },
+    coin: junoCoin
+  },
+  {
+    manifest: {
+      id: 'kujira',
+      runtimeModelId: 'kujira',
+      protocolFamily: 'cosmos',
+      coinId: 'kujira',
+      chain: 'main',
+      aliases: ['kujira', 'kujira-mainnet', 'mainnet-kujira']
+    },
+    coin: kujiraCoin
+  },
+  {
+    manifest: {
       id: 'pulsechain',
       runtimeModelId: 'pulsechain',
       protocolFamily: 'evm',
@@ -513,6 +814,17 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'saga',
+      runtimeModelId: 'saga',
+      protocolFamily: 'cosmos',
+      coinId: 'saga',
+      chain: 'main',
+      aliases: ['saga', 'saga-mainnet', 'mainnet-saga']
+    },
+    coin: sagaCoin
+  },
+  {
+    manifest: {
       id: 'iris-evm',
       runtimeModelId: 'iris-evm',
       protocolFamily: 'evm',
@@ -538,6 +850,117 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: kavaEvmCoin
+  },
+  {
+    manifest: {
+      id: 'lumera',
+      runtimeModelId: 'lumera',
+      protocolFamily: 'cosmos',
+      coinId: 'lumera',
+      chain: 'main',
+      aliases: ['lumera', 'lumera-mainnet', 'mainnet-lumera']
+    },
+    coin: lumeraCoin
+  },
+  {
+    manifest: {
+      id: 'medibloc',
+      runtimeModelId: 'medibloc',
+      protocolFamily: 'cosmos',
+      coinId: 'medibloc',
+      chain: 'main',
+      aliases: ['medibloc', 'medibloc-mainnet', 'mainnet-medibloc', 'panacea']
+    },
+    coin: mediblocCoin
+  },
+  {
+    manifest: {
+      id: 'neutron',
+      runtimeModelId: 'neutron',
+      protocolFamily: 'cosmos',
+      coinId: 'neutron',
+      chain: 'main',
+      aliases: ['neutron', 'neutron-mainnet', 'mainnet-neutron']
+    },
+    coin: neutronCoin
+  },
+  {
+    manifest: {
+      id: 'nolus',
+      runtimeModelId: 'nolus',
+      protocolFamily: 'cosmos',
+      coinId: 'nolus',
+      chain: 'main',
+      aliases: ['nolus', 'nolus-mainnet', 'mainnet-nolus']
+    },
+    coin: nolusCoin
+  },
+  {
+    manifest: {
+      id: 'oraichain',
+      runtimeModelId: 'oraichain',
+      protocolFamily: 'cosmos',
+      coinId: 'oraichain',
+      chain: 'main',
+      aliases: ['oraichain', 'oraichain-mainnet', 'mainnet-oraichain']
+    },
+    coin: oraichainCoin
+  },
+  {
+    manifest: {
+      id: 'osmosis',
+      runtimeModelId: 'osmosis',
+      protocolFamily: 'cosmos',
+      coinId: 'osmosis',
+      chain: 'main',
+      aliases: ['osmosis', 'osmosis-mainnet', 'mainnet-osmosis'],
+      visibleByDefault: true
+    },
+    coin: osmosisCoin
+  },
+  {
+    manifest: {
+      id: 'persistence',
+      runtimeModelId: 'persistence',
+      protocolFamily: 'cosmos',
+      coinId: 'persistence',
+      chain: 'main',
+      aliases: ['persistence', 'persistence-mainnet', 'mainnet-persistence']
+    },
+    coin: persistenceCoin
+  },
+  {
+    manifest: {
+      id: 'passage',
+      runtimeModelId: 'passage',
+      protocolFamily: 'cosmos',
+      coinId: 'passage',
+      chain: 'main',
+      aliases: ['passage', 'passage-mainnet', 'mainnet-passage']
+    },
+    coin: passageCoin
+  },
+  {
+    manifest: {
+      id: 'quicksilver',
+      runtimeModelId: 'quicksilver',
+      protocolFamily: 'cosmos',
+      coinId: 'quicksilver',
+      chain: 'main',
+      aliases: ['quicksilver', 'quicksilver-mainnet', 'mainnet-quicksilver']
+    },
+    coin: quicksilverCoin
+  },
+  {
+    manifest: {
+      id: 'regen',
+      runtimeModelId: 'regen',
+      protocolFamily: 'cosmos',
+      coinId: 'regen',
+      chain: 'main',
+      aliases: ['regen', 'regen-mainnet', 'mainnet-regen']
+    },
+    coin: regenCoin
   },
   {
     manifest: {
@@ -582,6 +1005,62 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'sentinel',
+      runtimeModelId: 'sentinel',
+      protocolFamily: 'cosmos',
+      coinId: 'sentinel',
+      chain: 'main',
+      aliases: ['sentinel', 'sentinel-mainnet', 'mainnet-sentinel']
+    },
+    coin: sentinelCoin
+  },
+  {
+    manifest: {
+      id: 'shentu',
+      runtimeModelId: 'shentu',
+      protocolFamily: 'cosmos',
+      coinId: 'shentu',
+      chain: 'main',
+      aliases: ['shentu', 'shentu-mainnet', 'mainnet-shentu']
+    },
+    coin: shentuCoin
+  },
+  {
+    manifest: {
+      id: 'sei',
+      runtimeModelId: 'sei',
+      protocolFamily: 'cosmos',
+      coinId: 'sei',
+      chain: 'main',
+      aliases: ['sei', 'sei-mainnet', 'mainnet-sei'],
+      visibleByDefault: true
+    },
+    coin: seiCoin
+  },
+  {
+    manifest: {
+      id: 'stargaze',
+      runtimeModelId: 'stargaze',
+      protocolFamily: 'cosmos',
+      coinId: 'stargaze',
+      chain: 'main',
+      aliases: ['stargaze', 'stargaze-mainnet', 'mainnet-stargaze']
+    },
+    coin: stargazeCoin
+  },
+  {
+    manifest: {
+      id: 'stride',
+      runtimeModelId: 'stride',
+      protocolFamily: 'cosmos',
+      coinId: 'stride',
+      chain: 'main',
+      aliases: ['stride', 'stride-mainnet', 'mainnet-stride']
+    },
+    coin: strideCoin
+  },
+  {
+    manifest: {
       id: 'taiko',
       runtimeModelId: 'taiko',
       protocolFamily: 'evm',
@@ -594,6 +1073,40 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: taikoCoin
+  },
+  {
+    manifest: {
+      id: 'terra',
+      runtimeModelId: 'terra',
+      protocolFamily: 'cosmos',
+      coinId: 'terra',
+      chain: 'main',
+      aliases: ['terra', 'terra-mainnet', 'mainnet-terra']
+    },
+    coin: terraCoin
+  },
+  {
+    manifest: {
+      id: 'terra-classic',
+      runtimeModelId: 'terra-classic',
+      protocolFamily: 'cosmos',
+      coinId: 'terra-classic',
+      chain: 'main',
+      aliases: ['terra-classic', 'terra-classic-mainnet', 'mainnet-terra-classic', 'lunc'],
+      visibleByDefault: true
+    },
+    coin: terraClassicCoin
+  },
+  {
+    manifest: {
+      id: 'teritori',
+      runtimeModelId: 'teritori',
+      protocolFamily: 'cosmos',
+      coinId: 'teritori',
+      chain: 'main',
+      aliases: ['teritori', 'teritori-mainnet', 'mainnet-teritori']
+    },
+    coin: teritoriCoin
   },
   {
     manifest: {

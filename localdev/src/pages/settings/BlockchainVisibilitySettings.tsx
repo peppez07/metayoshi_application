@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IoAlertCircle, IoClose, IoWarningOutline } from 'react-icons/io5'
+import { IoAlertCircle, IoClose, IoSearchOutline, IoWarningOutline } from 'react-icons/io5'
 import clsx from 'clsx'
 import { Button } from '../../components/Button'
 import { useWalletStore } from '../../store/walletStore'
@@ -46,6 +46,7 @@ const BlockchainVisibilitySettings: React.FC = () => {
     disabledNetworkIds,
     setNetworkEnabled
   } = useWalletStore()
+  const [searchQuery, setSearchQuery] = useState('')
   const [pendingRiskNetworkId, setPendingRiskNetworkId] = useState<string | null>(null)
 
   const normalizedDisabled = useMemo(
@@ -76,9 +77,18 @@ const BlockchainVisibilitySettings: React.FC = () => {
       return a.name.localeCompare(b.name)
     })
   }, [activity, networks])
+  const visibleNetworks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return rankedNetworks
+    return rankedNetworks.filter((network) => (
+      network.name.toLowerCase().includes(query)
+      || network.symbol.toLowerCase().includes(query)
+      || String(network.serverCoinId || '').toLowerCase().includes(query)
+    ))
+  }, [rankedNetworks, searchQuery])
   const rankedNetworkGroups = useMemo(
-    () => splitNetworksByChain(rankedNetworks),
-    [rankedNetworks]
+    () => splitNetworksByChain(visibleNetworks),
+    [visibleNetworks]
   )
   const pendingRiskNetwork = useMemo(
     () => networks.find((network) => network.id === pendingRiskNetworkId) || null,
@@ -122,6 +132,17 @@ const BlockchainVisibilitySettings: React.FC = () => {
           <p className="text-[10px] text-gray-500">
             {enabledCount} / {MAX_ACTIVE_REFRESH_NETWORKS} active for refresh
           </p>
+
+          <div className="relative">
+            <IoSearchOutline className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search blockchains..."
+              className="w-full bg-dark-700/60 border border-dark-600 rounded-xl pl-9 pr-3 py-2 text-xs font-medium text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary transition-colors"
+            />
+          </div>
 
           <div className="space-y-2">
             {[
@@ -192,6 +213,12 @@ const BlockchainVisibilitySettings: React.FC = () => {
                 </div>
               ) : null
             ))}
+
+            {visibleNetworks.length === 0 && (
+              <p className="py-4 text-center text-xs text-gray-500">
+                No blockchains match "{searchQuery}".
+              </p>
+            )}
           </div>
 
           {enabledCount <= 1 && (

@@ -1,4 +1,5 @@
 import { readBridgeCredentialsFromEnv } from '../lib/bridgeCredentials'
+import { resolveCosmosAddressConfig } from '../lib/cosmosAddress'
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const FULL_ASSET_CAPABILITIES: NetworkCapabilitiesInput = {
@@ -45,6 +46,26 @@ type EvmCoinFactoryConfig = {
   bridgeUserEnvKey: string
   bridgePasswordEnvKey: string
   explorerEnvKey: string
+  defaultExplorerUrl: string
+  capabilities?: NetworkCapabilitiesInput
+}
+
+type CosmosCoinFactoryConfig = {
+  id: string
+  runtimeModelId?: string
+  name: string
+  symbol?: string
+  coinSymbol?: string
+  bridgeCoinId: string
+  bridgeChain?: 'main' | 'test'
+  logo: string
+  rpcEnvKey: string
+  rpcUserEnvKey: string
+  rpcPasswordEnvKey: string
+  bridgeUserEnvKey: string
+  bridgePasswordEnvKey: string
+  explorerEnvKey: string
+  defaultRpcUrl: string
   defaultExplorerUrl: string
   capabilities?: NetworkCapabilitiesInput
 }
@@ -105,6 +126,64 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
   const coin: CoinModule = {
     id: config.id,
     symbol: config.symbol,
+    coinSymbol: config.coinSymbol,
+    capabilities,
+    createNetwork
+  }
+
+  return { createNetwork, coin, capabilities }
+}
+
+export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
+  createNetwork: (ctx: CoinRuntimeContext) => Network
+  coin: CoinModule
+  capabilities: NetworkCapabilitiesInput
+} {
+  // Cosmos-family modules in this wallet are currently native-balance/send focused.
+  // Defaulting them to native-only prevents the UI from issuing unsupported
+  // bridge asset-RPC calls on chains where the backend exposes no asset layer.
+  const capabilities = config.capabilities || NATIVE_ONLY_CAPABILITIES
+  const env = (import.meta as any)?.env || {}
+
+  const createNetwork = (ctx: CoinRuntimeContext): Network => {
+    const addressConfig = resolveCosmosAddressConfig({
+      id: config.id,
+      runtimeModelId: config.runtimeModelId || config.id,
+      serverCoinId: config.bridgeCoinId
+    })
+
+    return {
+      id: config.id,
+      runtimeModelId: String(config.runtimeModelId || config.id).trim().toLowerCase(),
+      serverCoinId: config.bridgeCoinId,
+      serverChain: config.bridgeChain || 'main',
+      name: config.name,
+      symbol: config.symbol || addressConfig.symbol,
+      coinType: 'COSMOS',
+      coinSymbol: config.coinSymbol || addressConfig.symbol,
+      rpcUrl: String(env[config.rpcEnvKey] || config.defaultRpcUrl).trim() || config.defaultRpcUrl,
+      rpcWallet: '',
+      rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
+      rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
+      bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, config.bridgeChain || 'main'),
+      ...readBridgeCredentialsFromEnv(env, {
+        userEnvKey: config.bridgeUserEnvKey,
+        passEnvKey: config.bridgePasswordEnvKey,
+        label: config.id
+      }),
+      explorerUrl: String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim() || config.defaultExplorerUrl,
+      capabilities,
+      logo: config.logo
+    }
+  }
+
+  const coin: CoinModule = {
+    id: config.id,
+    symbol: config.symbol || resolveCosmosAddressConfig({
+      id: config.id,
+      runtimeModelId: config.runtimeModelId || config.id,
+      serverCoinId: config.bridgeCoinId
+    }).symbol,
     coinSymbol: config.coinSymbol,
     capabilities,
     createNetwork

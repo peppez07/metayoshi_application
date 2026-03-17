@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'path'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
 
@@ -73,12 +73,39 @@ function normalizeCoinId(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+function listWalletLogoFiles(): string[] {
+  const logosDir = path.resolve(__dirname, 'src/coins/logos')
+  if (!existsSync(logosDir)) return []
+  return readdirSync(logosDir)
+    .filter((file) => /\.(png|jpg|jpeg|webp|svg)$/i.test(file))
+    .sort((a, b) => a.localeCompare(b))
+}
+
+function createAutoWalletLogoSpecs(existing: WalletLogoSpec[]): WalletLogoSpec[] {
+  const knownFiles = new Set(existing.map((spec) => String(spec.file || '').trim().toLowerCase()).filter(Boolean))
+  const out: WalletLogoSpec[] = []
+  for (const file of listWalletLogoFiles()) {
+    const normalizedFile = file.toLowerCase()
+    if (knownFiles.has(normalizedFile)) continue
+    const parsed = path.parse(file)
+    const baseName = String(parsed.name || '').trim()
+    if (!baseName) continue
+    out.push({
+      coinIds: [baseName],
+      file,
+      names: [baseName]
+    })
+  }
+  return out
+}
+
 function resolveBundledWalletLogoSpecs(config: BuildConfig): WalletLogoSpec[] {
   const disabled = new Set((config.coins?.disabled || []).map(normalizeCoinId).filter(Boolean))
+  const specs = [...WALLET_LOGO_SPECS, ...createAutoWalletLogoSpecs(WALLET_LOGO_SPECS)]
   // Network logo assets must stay available even when the visible network set is
   // restricted by build config. The app can still surface runtime/server-backed
   // EVM variants, and missing bundled logos regress to placeholders.
-  return WALLET_LOGO_SPECS.filter((spec) => spec.coinIds.some((id) => !disabled.has(normalizeCoinId(id))))
+  return specs.filter((spec) => spec.coinIds.some((id) => !disabled.has(normalizeCoinId(id))))
 }
 
 function createWalletLogoRegistryModule(config: BuildConfig): string {
