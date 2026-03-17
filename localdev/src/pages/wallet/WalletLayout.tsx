@@ -1,34 +1,28 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { WalletFrame } from '../../components/WalletFrame'
-import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 import {
   IoArrowUpOutline,
-  IoClose,
   IoCheckmarkCircle,
-  IoCopyOutline,
-  IoCheckmark,
+  IoClose,
+  IoGridOutline,
   IoLayersOutline,
+  IoPulseOutline,
   IoSearchOutline,
   IoSettingsOutline,
   IoSwapHorizontalOutline
 } from 'react-icons/io5'
-import { Tabs } from '../../components/Tabs'
 import { PageTransition } from '../../components/PageTransition'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
-import { getAccountDisplayName } from '../../lib/accountName'
-import { resolveCoinModelFamily, coinModelFamilyToRouteKey, compareNetworksByModelFamily } from '../../lib/coinModel'
-import { getModelIconFrameClass, getModelIconRingClass } from '../../buildConfig'
+import { coinModelFamilyToRouteKey, compareNetworksByModelFamily, resolveCoinModelFamily } from '../../lib/coinModel'
+import { getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
-import { isWalletAssetSwappable } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
+import { formatFiatValue, useWalletStore } from '../../store/walletStore'
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Returns normalized, spec-driven capabilities for the selected network. */
 function networkCapabilities(net: { supportsAssets?: boolean; coinType: string; capabilities?: NetworkCapabilitiesInput }) {
   return resolveNetworkCapabilities(net)
 }
@@ -44,7 +38,11 @@ function formatBalanceDisplay(value: string): string {
   })
 }
 
-// ── main component ────────────────────────────────────────────────────────────
+export interface WalletLayoutOutletContext {
+  openNetworkSheet: () => void
+  openGlobalSendHub: () => void
+  openModelPage: () => void
+}
 
 const WalletLayout: React.FC = () => {
   const navigate = useNavigate()
@@ -58,28 +56,15 @@ const WalletLayout: React.FC = () => {
     accountNetworkFiatTotals,
     accountNetworkFiatNative,
     activity,
-    setActiveAccount,
     setActiveNetwork,
     refreshActiveBalance,
     fetchNetworkFiat,
     getSendableItems
   } = useWalletStore()
 
-  // ── sheet visibility ──────────────────────────────────────────────────────
-  const [showAccountSheet, setShowAccountSheet] = useState(false)
-  const [showNetworkSheet, setShowNetworkSheet]   = useState(false)
-  const [networkSearch,    setNetworkSearch]       = useState('')
-  const [networkFilter,    setNetworkFilter]       = useState<'all' | 'main' | 'test'>('all')
-
-  // ── copy feedback ──────────────────────────────────────────────────────────
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const copyAddress = async (id: string, addr: string) => {
-    try {
-      await navigator.clipboard.writeText(addr)
-      setCopiedId(id)
-      setTimeout(() => setCopiedId(null), 2000)
-    } catch { /* clipboard may be unavailable */ }
-  }
+  const [showNetworkSheet, setShowNetworkSheet] = useState(false)
+  const [networkSearch, setNetworkSearch] = useState('')
+  const [networkFilter, setNetworkFilter] = useState<'all' | 'main' | 'test'>('all')
 
   const enabledNetworks = useMemo(
     () => getEnabledNetworks(networks, disabledNetworkIds),
@@ -90,8 +75,8 @@ const WalletLayout: React.FC = () => {
     [enabledNetworks]
   )
   const enabledNetworkCount = enabledNetworks.length
-  const activeAccount = accounts.find(a => a.id === activeAccountId) || accounts[0]
-  const activeNetwork = enabledNetworks.find(n => n.id === activeNetworkId) || enabledNetworks[0]
+  const activeAccount = accounts.find((account) => account.id === activeAccountId) || accounts[0]
+  const activeNetwork = enabledNetworks.find((network) => network.id === activeNetworkId) || enabledNetworks[0]
   const hasActiveNetwork = Boolean(activeNetwork)
   const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
@@ -106,8 +91,8 @@ const WalletLayout: React.FC = () => {
       networkId: activeNetwork.id,
       includeHidden: false,
       includeZeroBalance: false
-    }).filter((item) => isWalletAssetSwappable(item, activeNetwork))
-  }, [activeAccount?.id, activeNetwork, getSendableItems])
+    })
+  }, [activeAccount?.id, activeNetwork?.id, getSendableItems])
   const showSwapAction = activeNetworkSwapItems.length > 0
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
@@ -149,10 +134,16 @@ const WalletLayout: React.FC = () => {
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   const isSwapRoute = location.pathname.startsWith('/wallet/swap')
   const isFocusedFlowRoute = isSendRoute || isSwapRoute
-  // Balance refresh (visibility-aware to avoid bridge/RPC spam while the extension surface is hidden)
+  const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
+  const coinModel = activeNetwork ? resolveCoinModelFamily(activeNetwork) : 'generic'
+  const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
+  const isModelRoute = location.pathname.startsWith('/wallet/model/')
+  const expectedModelPath = `/wallet/model/${coinModelRouteKey}`
+  const showWalletSummary = !isFocusedFlowRoute
+
   useEffect(() => {
     void fetchNetworkFiat()
-  }, [activeAccountId, activeNetworkId, fetchNetworkFiat])
+  }, [activeNetworkId, fetchNetworkFiat])
 
   useEffect(() => {
     if (isFocusedFlowRoute) return
@@ -179,28 +170,13 @@ const WalletLayout: React.FC = () => {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [refreshActiveBalance, activeAccountId, activeNetworkId, isFocusedFlowRoute])
+  }, [refreshActiveBalance, activeNetworkId, isFocusedFlowRoute])
 
-  // ── tabs — only show Assets if the network supports token assets ───────────
-  const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
-  const coinModel = activeNetwork ? resolveCoinModelFamily(activeNetwork) : 'generic'
-  const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
-  const isModelRoute = location.pathname.startsWith('/wallet/model/')
-  const expectedModelPath = `/wallet/model/${coinModelRouteKey}`
-  const TABS = [
-    ...(caps.ui.showAssetsTab ? [{ id: 'assets', label: 'Assets' }] : []),
-    ...(caps.ui.showActivityTab ? [{ id: 'activity', label: 'Activity' }] : [])
-  ]
-
-  const activeTab = isFocusedFlowRoute
-    ? ''
-    : isModelRoute
-    ? ''
-    : location.pathname.includes('/activity')
-    ? 'activity'
-    : (caps.ui.showAssetsTab ? 'assets' : 'activity')
-
-  const handleTabChange = (id: string) => navigate(`/wallet/${id}`)
+  useEffect(() => {
+    if (!hasActiveNetwork || !isModelRoute) return
+    if (location.pathname === expectedModelPath) return
+    navigate(expectedModelPath, { replace: true })
+  }, [expectedModelPath, hasActiveNetwork, isModelRoute, location.pathname, navigate])
 
   const closeNetworkSheet = () => {
     setShowNetworkSheet(false)
@@ -215,12 +191,6 @@ const WalletLayout: React.FC = () => {
     await setActiveNetwork(target.id)
     closeNetworkSheet()
   }
-
-  useEffect(() => {
-    if (!hasActiveNetwork || !isModelRoute) return
-    if (location.pathname === expectedModelPath) return
-    navigate(expectedModelPath, { replace: true })
-  }, [hasActiveNetwork, isModelRoute, location.pathname, expectedModelPath, navigate])
 
   if (!hasActiveNetwork) {
     return (
@@ -245,174 +215,90 @@ const WalletLayout: React.FC = () => {
     )
   }
 
-  // ── render ─────────────────────────────────────────────────────────────────
   return (
     <WalletFrame hideHeader={isFocusedFlowRoute}>
-      {!isFocusedFlowRoute && (
-        <div className="flex flex-col items-center pt-3 pb-4 shrink-0">
-        {/* Coin logo */}
-        <button
-          type="button"
-          onClick={() => setShowNetworkSheet(true)}
-          className={clsx(
-            'w-14 h-14 rounded-full bg-primary/10 border-2 flex items-center justify-center overflow-hidden mb-2 transition-transform hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-primary/70 focus:ring-offset-2 focus:ring-offset-dark-800',
-            getModelIconFrameClass(activeNetwork.id)
-          )}
-          title="Change network"
-        >
-          {activeNetwork.logo
-            ? <img src={activeNetwork.logo} alt={activeNetwork.name} className="w-full h-full object-cover rounded-full" />
-            : <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.05] translate-y-[1px]" />
-          }
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowNetworkSheet(true)}
-          className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 transition-colors hover:text-gray-300"
-        >
-          Tap logo to change network
-        </button>
+      {showWalletSummary ? (
+        <div className="shrink-0 px-4 pt-4">
+          <section className="wallet-surface p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => setShowNetworkSheet(true)}
+                className="flex items-center gap-3 text-left transition-opacity hover:opacity-85"
+              >
+                {activeNetwork.logo ? (
+                  <div className={clsx('h-12 w-12 overflow-hidden rounded-full border border-white/10', getModelIconRingClass(String(activeNetwork.runtimeModelId || activeNetwork.id || '')))}>
+                    <img src={activeNetwork.logo} alt={activeNetwork.name} className="h-full w-full object-cover rounded-full" />
+                  </div>
+                ) : (
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-primary/25 bg-primary/10">
+                    <IoLayersOutline className="h-5 w-5 text-primary" />
+                  </div>
+                )}
+                <div>
+                  <p className="wallet-eyebrow text-gray-400">Main Coin</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-100">{activeNetwork.name}</p>
+                  <p className="text-xs text-gray-500">{activeNetwork.symbol} - Tap to change network</p>
+                </div>
+              </button>
 
-        {/* Balance */}
-        <div className="mb-3 w-full px-4">
-          <div className="mx-auto max-w-full text-center">
-            <p className="text-[clamp(1.3rem,7.1vw,1.95rem)] font-bold leading-tight tracking-tight break-words">
-              {displayBalance}
-            </p>
-            <p className="text-base font-semibold uppercase tracking-wide text-gray-300 mt-0.5">
-              {activeNetwork.symbol}
-            </p>
-            {displayFiatValue && (
-              <p className="text-sm font-medium text-gray-400 mt-1">
-                {displayFiatValue}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Quick-action buttons */}
-        <div className="flex flex-wrap justify-center gap-x-6 gap-y-4 w-full px-6 mb-3">
-          {caps.ui.showAssetsAction && (
-            <QuickAction
-              icon={<IoLayersOutline className="w-5 h-5" />}
-              label="Assets"
-              onClick={() => navigate('/assets')}
-            />
-          )}
-          {caps.ui.showSendAction && (
-            <QuickAction
-              icon={<IoArrowUpOutline className="w-5 h-5" />}
-              label="Send"
-              onClick={() => navigate('/wallet/send', {
-                state: {
-                  quickSendNative: true,
-                  returnTo: `${location.pathname}${location.search}`,
-                  returnLabel: 'Wallet'
-                }
-              })}
-            />
-          )}
-          {showSwapAction && (
-            <QuickAction
-              icon={<IoSwapHorizontalOutline className="w-5 h-5" />}
-              label="Swap"
-              onClick={() => navigate('/wallet/swap')}
-            />
-          )}
-          <QuickAction
-            icon={<IoSearchOutline className="w-5 h-5" />}
-            label="Model"
-            onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
-          />
-          <QuickAction
-            icon={<IoSettingsOutline className="w-5 h-5" />}
-            label="Settings"
-            onClick={() => navigate('/settings')}
-          />
-        </div>
-        </div>
-      )}
-
-      {/* Tabs — hidden on dedicated send route */}
-      {!isFocusedFlowRoute && <Tabs tabs={TABS} activeTab={activeTab} onChange={handleTabChange} />}
-
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <PageTransition>
-          <Outlet />
-        </PageTransition>
-      </div>
-
-      {/* ══ Account bottom sheet ════════════════════════════════════════════ */}
-      {showAccountSheet && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end"
-          onClick={() => setShowAccountSheet(false)}
-        >
-          <div
-            className="w-full max-w-[380px] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-3 animate-in slide-in-from-bottom duration-200"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Accounts</h3>
-              <button onClick={() => setShowAccountSheet(false)}>
-                <IoClose className="w-5 h-5 text-gray-400 hover:text-white" />
+              <button
+                type="button"
+                onClick={() => navigate(`/wallet/model/${coinModelRouteKey}`)}
+                className="wallet-chip rounded-[18px] px-3 py-2 normal-case tracking-normal"
+              >
+                Open Coin Page
               </button>
             </div>
 
-            {accounts.map(acc => {
-              const addr = acc.networkAddresses?.[activeNetworkId]
-                || (activeNetwork.coinType === 'EVM' ? acc.addresses?.EVM : '')
-                || ''
-              const isCopied = copiedId === acc.id
+            <div className="mt-5">
+              <div className="flex items-end gap-2">
+                <span className="text-[2rem] font-bold tracking-tight text-gray-100">{displayBalance}</span>
+                <span className="pb-1 text-lg font-semibold text-gray-400">{activeNetwork.symbol}</span>
+              </div>
+              {displayFiatValue ? (
+                <p className="mt-1 text-sm font-medium text-gray-400">{displayFiatValue}</p>
+              ) : (
+                <p className="mt-1 text-sm font-medium text-gray-500">No fiat quote available</p>
+              )}
+            </div>
 
-              return (
-                <div
-                  key={acc.id}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
-                    acc.id === activeAccountId
-                      ? 'border-primary bg-primary/10'
-                      : 'border-dark-600 bg-dark-700/50'
-                  }`}
-                >
-                  {/* Account info — click selects */}
-                  <button
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                    onClick={() => { setActiveAccount(acc.id); setShowAccountSheet(false) }}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-yellow-400 shrink-0" />
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-sm font-bold">{getAccountDisplayName(acc, activeNetworkId, acc.name)}</span>
-                      <span className="text-[10px] text-gray-500 font-mono truncate max-w-[160px]">
-                        {addr ? `${addr.slice(0, 8)}…${addr.slice(-6)}` : '—'}
-                      </span>
-                    </div>
-                  </button>
+          </section>
+        </div>
+      ) : null}
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    {acc.id === activeAccountId && (
-                      <IoCheckmarkCircle className="w-4 h-4 text-primary" />
-                    )}
-                    {/* Copy address — click copies full address */}
-                    <button
-                      onClick={() => addr && void copyAddress(acc.id, addr)}
-                      className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
-                      title="Copy full address"
-                    >
-                      {isCopied
-                        ? <IoCheckmark className="w-4 h-4 text-green-400" />
-                        : <IoCopyOutline className="w-4 h-4 text-gray-400 hover:text-white" />
-                      }
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>,
-        document.body
-      )}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <PageTransition>
+          <Outlet
+            context={{
+              openNetworkSheet: () => setShowNetworkSheet(true),
+              openGlobalSendHub: () => navigate('/wallet/send', { state: { hubMode: 'global', autoScan: true } }),
+              openModelPage: () => navigate(`/wallet/model/${coinModelRouteKey}`)
+            } satisfies WalletLayoutOutletContext}
+          />
+        </PageTransition>
+      </div>
 
-      {/* ══ Network bottom sheet ════════════════════════════════════════════ */}
+      {!isFocusedFlowRoute ? (
+        <WalletBottomNav
+          pathname={location.pathname}
+          onAssets={() => navigate('/wallet/assets')}
+          onSend={() => navigate('/wallet/send', {
+            state: {
+              quickSendNative: true,
+              returnTo: `${location.pathname}${location.search}`,
+              returnLabel: 'Wallet'
+            }
+          })}
+          onSwap={() => navigate('/wallet/swap')}
+          onActivity={() => navigate('/wallet/activity')}
+          onSettings={() => navigate('/settings')}
+          showAssets={caps.ui.showAssetsTab}
+          showSwap={showSwapAction}
+          showActivity={caps.ui.showActivityTab}
+        />
+      ) : null}
+
       {showNetworkSheet && createPortal(
         <div
           className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-end"
@@ -420,7 +306,7 @@ const WalletLayout: React.FC = () => {
         >
           <div
             className="w-full max-w-[460px] min-h-[68vh] bg-dark-800 rounded-t-3xl border-t border-dark-600 p-6 space-y-4 animate-in slide-in-from-bottom duration-200"
-            onClick={e => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Select Network</h3>
@@ -429,15 +315,14 @@ const WalletLayout: React.FC = () => {
               </button>
             </div>
 
-            {/* Search */}
             <div className="relative">
               <IoSearchOutline className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
               <input
                 autoFocus
                 type="text"
                 value={networkSearch}
-                onChange={e => setNetworkSearch(e.target.value)}
-                placeholder="Search networks…"
+                onChange={(event) => setNetworkSearch(event.target.value)}
+                placeholder="Search networks..."
                 className="w-full bg-dark-700/60 border border-dark-600 rounded-xl pl-9 pr-3 py-2 text-xs font-medium text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary transition-colors"
               />
             </div>
@@ -478,7 +363,6 @@ const WalletLayout: React.FC = () => {
               Showing enabled networks only. Active: {enabledNetworkCount} / {MAX_ACTIVE_REFRESH_NETWORKS}. Use Manage to review disabled or hidden chains.
             </p>
 
-            {/* List */}
             <div className="space-y-2 max-h-[52vh] overflow-y-auto custom-scrollbar pr-1">
               <button
                 type="button"
@@ -508,11 +392,9 @@ const WalletLayout: React.FC = () => {
                       <span className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">
                         {section.label}
                       </span>
-                      <span className="text-[10px] text-gray-600">
-                        {section.rows.length}
-                      </span>
+                      <span className="text-[10px] text-gray-600">{section.rows.length}</span>
                     </div>
-                    {section.rows.map(net => (
+                    {section.rows.map((net) => (
                       <button
                         key={net.id}
                         onClick={() => { void handleSelectNetwork(net.id) }}
@@ -537,50 +419,122 @@ const WalletLayout: React.FC = () => {
                             <span className="text-[10px] text-gray-500 uppercase font-mono">{net.symbol}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {net.id === activeNetworkId && (
-                            <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" />
-                          )}
-                        </div>
+                        {net.id === activeNetworkId ? <IoCheckmarkCircle className="w-5 h-5 text-primary shrink-0" /> : null}
                       </button>
                     ))}
                   </div>
                 ) : null
               ))}
-              {visibleNetworks.length === 0 && (
+              {visibleNetworks.length === 0 ? (
                 <p className="text-xs text-gray-600 text-center py-4">No networks match "{networkSearch}"</p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>,
         document.body
       )}
-
     </WalletFrame>
   )
 }
 
-// ── Quick-action button ────────────────────────────────────────────────────
-
-interface QuickActionProps {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  disabled?: boolean
+interface WalletBottomNavProps {
+  pathname: string
+  onAssets: () => void
+  onSend: () => void
+  onSwap: () => void
+  onActivity: () => void
+  onSettings: () => void
+  showAssets: boolean
+  showSwap: boolean
+  showActivity: boolean
 }
 
-const QuickAction: React.FC<QuickActionProps> = ({ icon, label, onClick, disabled = false }) => (
-  <button
-    className="flex flex-col items-center gap-1.5 group disabled:opacity-50 disabled:cursor-not-allowed"
-    onClick={onClick}
-    disabled={disabled}
-  >
-    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center transition-transform group-active:scale-90 shadow-lg shadow-primary/20">
-      {icon}
+const WalletBottomNav: React.FC<WalletBottomNavProps> = ({
+  pathname,
+  onAssets,
+  onSend,
+  onSwap,
+  onActivity,
+  onSettings,
+  showAssets,
+  showSwap,
+  showActivity
+}) => {
+  const items = [
+    showAssets
+      ? {
+          id: 'assets',
+          label: 'Assets',
+          active: pathname.startsWith('/wallet/assets') || pathname === '/assets',
+          onClick: onAssets,
+          icon: <IoGridOutline className="h-4.5 w-4.5" />
+        }
+      : null,
+    {
+      id: 'send',
+      label: 'Send',
+      active: pathname.startsWith('/wallet/send'),
+      onClick: onSend,
+      icon: <IoArrowUpOutline className="h-4.5 w-4.5" />
+    },
+    showSwap
+      ? {
+          id: 'swap',
+          label: 'Swap',
+          active: pathname.startsWith('/wallet/swap'),
+          onClick: onSwap,
+          icon: <IoSwapHorizontalOutline className="h-4.5 w-4.5" />
+        }
+      : null,
+    showActivity
+      ? {
+          id: 'activity',
+          label: 'Activity',
+          active: pathname.startsWith('/wallet/activity'),
+          onClick: onActivity,
+          icon: <IoPulseOutline className="h-4.5 w-4.5" />
+        }
+      : null,
+    {
+      id: 'settings',
+      label: 'Settings',
+      active: pathname.startsWith('/settings'),
+      onClick: onSettings,
+      icon: <IoSettingsOutline className="h-4.5 w-4.5" />
+    }
+  ].filter(Boolean) as Array<{
+    id: string
+    label: string
+    active: boolean
+    onClick: () => void
+    icon: React.ReactNode
+  }>
+
+  return (
+    <div className="shrink-0 px-4 pb-4 pt-2">
+      <nav className="rounded-[30px] border border-white/8 bg-[#191a22]/94 px-2 py-2 shadow-[0_24px_40px_rgba(15,23,42,0.24)] backdrop-blur-xl">
+        <div className="flex items-center gap-1">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={item.onClick}
+              className={clsx(
+                'relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[22px] px-2 py-2.5 text-[10px] font-bold tracking-[0.12em] transition-all',
+                item.active
+                  ? 'bg-gradient-to-br from-[#ff9d55] via-[#ff7f2a] to-[#ff6800] text-white shadow-[0_12px_24px_rgba(255,104,0,0.32)]'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+              )}
+            >
+              {item.icon}
+              <span className="truncate">{item.label}</span>
+              {item.active ? <span className="h-1.5 w-1.5 rounded-full bg-white/90" /> : null}
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
-    <span className="text-xs font-bold text-gray-300 group-hover:text-white transition-colors">{label}</span>
-  </button>
-)
+  )
+}
 
 export default WalletLayout
-

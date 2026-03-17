@@ -258,12 +258,13 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
   if (includeSecrets) {
     setProcessEnvIfMissing('VITE_BRIDGE_USER', sourceEnv.BRIDGE_BASIC_USER)
     setProcessEnvIfMissing('VITE_BRIDGE_PASSWORD', sourceEnv.BRIDGE_BASIC_PASSWORD)
+    setProcessEnvIfMissing('VITE_BRIDGE_TX_AUTH_KEY', sourceEnv.BRIDGE_TX_AUTH_KEY)
     setProcessEnvIfMissing('VITE_APP_API_KEY', sourceEnv.APP_API_KEY)
   }
 
   console.log(
     `[metayoshi] Bridge env auto-config loaded from ${selectedFile}` +
-    (includeSecrets ? ' (bridge auth + app API key imported)' : ' (secrets skipped)')
+    (includeSecrets ? ' (bridge credentials + tx auth + app API key imported)' : ' (secrets skipped)')
   )
 }
 

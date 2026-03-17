@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { IoArrowForward, IoShieldCheckmarkOutline } from 'react-icons/io5'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { WALLET_VERSION_NAME } from '../lib/legalMetadata'
@@ -13,7 +14,7 @@ const Unlock: React.FC = () => {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
-  
+
   const navigate = useNavigate()
   const { unlock, isInitialized } = useWalletStore()
 
@@ -22,11 +23,11 @@ const Unlock: React.FC = () => {
     return null
   }
 
-  const handleUnlock = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleUnlock = async (event: React.FormEvent) => {
+    event.preventDefault()
     setIsLoading(true)
     setError('')
-    
+
     try {
       const success = await unlock(password)
       setIsLoading(false)
@@ -37,117 +38,123 @@ const Unlock: React.FC = () => {
       } else {
         setError('Incorrect password')
       }
-    } catch (e: any) {
+    } catch (caughtError: any) {
       setIsLoading(false)
-      setError(String(e?.message ?? 'Unlock failed'))
+      setError(String(caughtError?.message ?? 'Unlock failed'))
     }
   }
 
   if (isTransitioning) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-dark-800 p-8">
-        <div className="relative flex items-center justify-center w-full max-w-[280px] h-40">
-          <motion.div
-            className="absolute w-24 h-24 rounded-full border border-primary/30"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-          />
-
-          <div className="z-10 w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/35 flex items-center justify-center overflow-hidden shadow-[0_0_14px_rgba(245,132,31,0.2)] animate-breathe">
-            <div className="w-8 h-8 rounded-full bg-primary/30" />
-          </div>
-
-          <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 w-[120px] h-[2px] bg-dark-600">
+      <div className="relative flex h-full flex-col items-center justify-center overflow-hidden px-8 text-center">
+        <div className="ambient-glow top-10 h-40 w-40 bg-primary/14" />
+        <div className="wallet-surface flex w-full max-w-[290px] flex-col items-center gap-6 px-6 py-8">
+          <div className="relative flex h-24 w-24 items-center justify-center">
             <motion.div
-              className="h-full bg-primary"
-              initial={{ width: 0, x: -60 }}
-              animate={{
-                width: ['0%', '100%', '0%'],
-                x: ['-50%', '0%', '50%']
-              }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+              className="absolute inset-0 rounded-full border border-primary/30"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
             />
+            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-primary/35 bg-primary/10 shadow-[0_0_18px_rgba(245,132,31,0.22)]">
+              <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="h-10 w-10 object-contain" />
+            </div>
           </div>
 
-          <motion.div
-            className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-primary rounded-full shadow-[0_0_15px_rgba(245,132,31,0.8)]"
-            animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
+          <div>
+            <p className="wallet-eyebrow">MetaYoshi</p>
+            <p className="mt-2 text-base font-bold text-gray-100">Unlock successful, preparing wallet...</p>
+          </div>
 
-          <img
-            src="/MetayoshiLogo.png"
-            alt="MetaYoshi"
-            className="z-10 w-20 h-20 object-contain object-center ml-auto drop-shadow-[0_0_12px_rgba(245,132,31,0.25)]"
-          />
-        </div>
-
-        <p className="mt-8 text-[11px] font-black uppercase tracking-[0.28em] text-primary">METAYOSHI</p>
-        <p className="mt-1.5 text-sm font-medium text-gray-400 text-center">Unlock successful, preparing wallet…</p>
-        <div className="mt-2 flex items-center gap-1.5">
-          {[0, 1, 2].map((i) => (
-            <motion.span
-              key={i}
-              className="w-1.5 h-1.5 rounded-full bg-primary/80"
-              animate={{ y: [0, -4, 0], opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.12 }}
-            />
-          ))}
+          <div className="flex items-center gap-1.5">
+            {[0, 1, 2].map((index) => (
+              <motion.span
+                key={index}
+                className="h-1.5 w-1.5 rounded-full bg-primary/80"
+                animate={{ y: [0, -4, 0], opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 0.9, repeat: Infinity, delay: index * 0.12 }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col items-center justify-between h-full p-8 text-center bg-dark-800">
-      <div className="flex flex-col items-center mt-12 gap-6">
-        <p className="text-2xl font-black uppercase tracking-[0.22em] text-primary">METAYOSHI</p>
-        <img
-          src="/MetayoshiLogo.png"
-          alt="MetaYoshi"
-          className="w-32 h-32 object-contain object-center"
-        />
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black uppercase tracking-tight">Welcome Back!</h1>
+    <div className="relative flex h-full flex-col justify-between overflow-hidden px-5 pb-6 pt-6">
+      <div className="ambient-glow -left-12 top-16 h-40 w-40 bg-primary/16" />
+      <div className="ambient-glow -right-16 bottom-16 h-44 w-44 bg-yellow-500/10" />
+
+      <div className="relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/10 bg-white/[0.04] shadow-[0_14px_32px_rgba(0,0,0,0.24)]">
+            <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="h-8 w-8 object-contain" />
+          </div>
+          <div>
+            <p className="wallet-eyebrow">MetaYoshi</p>
+            <p className="text-sm text-gray-400">Multi-chain wallet</p>
+          </div>
         </div>
       </div>
 
-      <form onSubmit={handleUnlock} className="w-full space-y-6">
-        <Input 
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          error={error}
-          className="bg-dark-700/50 border-dark-600 focus:border-primary text-center h-12"
-        />
-        
-        <div className="space-y-4">
-          <Button 
-            type="submit"
-            className="w-full"
-            isLoading={isLoading}
-          >
-            Unlock
-          </Button>
-          <button
-            type="button"
-            className="text-primary font-bold text-sm hover:underline"
-            onClick={() => navigate('/settings/restore')}
-          >
-            Forgot password?
-          </button>
+      <div className="relative z-10 space-y-6">
+        <div>
+          <p className="wallet-eyebrow">Secure Access</p>
+          <h1 className="mt-3 text-[34px] font-black uppercase leading-[0.95] tracking-tight text-gray-100">
+            Unlock your wallet session.
+          </h1>
+          <p className="mt-3 max-w-[260px] text-[12px] leading-relaxed text-gray-400">
+            Your password unlocks this device only. Recovery phrase control stays with you.
+          </p>
         </div>
-      </form>
 
-      <footer className="flex flex-col items-center gap-1.5 text-gray-500 text-xs font-medium mt-auto">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.18em] text-red-500">beta</span>
-          <span className="px-2.5 py-0.5 rounded-full bg-dark-700/60 border border-dark-600/60 text-[10px] font-bold tracking-widest text-gray-600 uppercase">
-            v{APP_VERSION}
-          </span>
+        <div className="wallet-surface px-5 py-5">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-primary/20 bg-primary/10">
+              <IoShieldCheckmarkOutline className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-gray-100">Welcome back</p>
+              <p className="text-[11px] text-gray-500">Enter your local unlock password</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleUnlock} className="space-y-4">
+            <Input
+              type="password"
+              placeholder="Enter password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              error={error}
+              className="h-12 bg-black/20 border-white/10 text-center"
+            />
+
+            <div className="wallet-soft-surface flex items-center gap-2 px-3 py-2.5">
+              <IoShieldCheckmarkOutline className="h-4 w-4 text-primary" />
+              <span className="text-[11px] text-gray-400">Password never leaves this device.</span>
+            </div>
+
+            <Button type="submit" className="w-full" isLoading={isLoading}>
+              Unlock Wallet
+              {!isLoading && <IoArrowForward className="h-4 w-4" />}
+            </Button>
+          </form>
         </div>
-      </footer>
+      </div>
+
+      <div className="relative z-10 flex flex-col items-center gap-3">
+        <button
+          type="button"
+          className="text-primary font-black text-[11px] uppercase tracking-[0.18em] hover:text-orange-300"
+          onClick={() => navigate('/settings/restore')}
+        >
+          Forgot password?
+        </button>
+        <div className="flex items-center gap-2 text-gray-500 text-[10px] font-bold uppercase tracking-[0.18em]">
+          <span className="text-red-500">beta</span>
+          <span className="wallet-chip">v{APP_VERSION}</span>
+        </div>
+      </div>
     </div>
   )
 }

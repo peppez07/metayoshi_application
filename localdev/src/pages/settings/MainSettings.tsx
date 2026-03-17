@@ -1,6 +1,18 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IoChevronForward, IoMoonOutline, IoSunnyOutline } from 'react-icons/io5'
+import {
+  IoChevronForward,
+  IoCloudUploadOutline,
+  IoColorPaletteOutline,
+  IoGlobeOutline,
+  IoHeartOutline,
+  IoKeyOutline,
+  IoLockClosedOutline,
+  IoMoonOutline,
+  IoPeopleOutline,
+  IoSunnyOutline,
+  IoTimeOutline
+} from 'react-icons/io5'
 import { getStoredThemeMode, setThemeMode, type ThemeMode } from '../../lib/themeMode'
 
 const MainSettings: React.FC = () => {
@@ -13,106 +25,170 @@ const MainSettings: React.FC = () => {
     setThemeModeState(next)
   }
 
-  const SECTIONS = [
+  const sections: Array<{
+    title: string
+    items: Array<{
+      label: string
+      description: string
+      path: string
+      icon: React.ReactNode
+      iconClass: string
+      tone?: 'danger'
+    }>
+  }> = [
     {
-      title: 'ACCOUNT SETTINGS',
+      title: 'Security',
       items: [
-        { label: 'Manage accounts', path: '/settings/accounts' },
-        { label: 'Change wallet password', path: '/settings/password' },
-        { label: 'Change wallet Autolock', path: '/settings/autolock' },
-        { label: 'Change donation %', path: '/settings/donation' },
+        {
+          label: 'Accounts',
+          description: 'Add, rename or switch accounts',
+          path: '/settings/accounts',
+          icon: <IoPeopleOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300'
+        },
+        {
+          label: 'Change password',
+          description: 'Update your wallet passphrase',
+          path: '/settings/password',
+          icon: <IoLockClosedOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300'
+        },
+        {
+          label: 'Auto-lock timer',
+          description: 'Set inactivity timeout',
+          path: '/settings/autolock',
+          icon: <IoTimeOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300'
+        },
+        {
+          label: 'Authorized websites',
+          description: 'Manage dApp permissions',
+          path: '/settings/authorized-sites',
+          icon: <IoGlobeOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300'
+        }
       ]
     },
     {
-      title: 'BACKUP / RESTORE',
+      title: 'Backup',
       items: [
-        { label: 'Backup wallet', path: '/settings/backup' },
-        { label: 'Restore wallet', path: '/settings/restore' },
+        {
+          label: 'Backup wallet',
+          description: 'Download encrypted vault or phrase',
+          path: '/settings/backup',
+          icon: <IoCloudUploadOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300'
+        },
+        {
+          label: 'Restore wallet',
+          description: 'Import from backup file or phrase',
+          path: '/settings/restore',
+          icon: <IoCloudUploadOutline className="h-4.5 w-4.5 rotate-180" />,
+          iconClass: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300'
+        }
       ]
     },
     {
-      title: 'SHOW / DOWNLOAD KEYS',
+      title: 'Network',
       items: [
-        { label: 'Show / download recovery phrase and private key', path: '/settings/show-secrets' },
+        {
+          label: 'Blockchain visibility',
+          description: 'Show or hide networks',
+          path: '/settings/blockchains',
+          icon: <IoGlobeOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300'
+        },
+        {
+          label: 'Donation percentage',
+          description: 'Support MetaYoshi development',
+          path: '/settings/donation',
+          icon: <IoHeartOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-pink-100 text-pink-600 dark:bg-pink-500/15 dark:text-pink-300'
+        }
       ]
     },
     {
-      title: 'DAPP AUTH CONNECTOR MANAGER',
+      title: 'Danger Zone',
       items: [
-        { label: 'Show authorized websites', path: '/settings/authorized-sites' },
-      ]
-    },
-    {
-      title: 'PERFORMANCE / CLEAN MENU',
-      items: [
-        { label: 'Manage blockchain visibility', path: '/settings/blockchains' },
+        {
+          label: 'Recovery phrase & private key',
+          description: 'View or export secret keys. Keep private.',
+          path: '/settings/show-secrets',
+          icon: <IoKeyOutline className="h-4.5 w-4.5" />,
+          iconClass: 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300',
+          tone: 'danger'
+        }
       ]
     }
   ]
 
   return (
-    <div className="flex flex-col">
-      <header className="px-4 py-3 text-center border-b border-dark-600">
-        <h1 className="text-sm font-black uppercase tracking-widest text-gray-200">Settings</h1>
-      </header>
-
-      <div className="flex-1">
-        <div className="mb-4">
-          <div className="px-4 py-2 mt-4">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none">APPEARANCE</p>
-          </div>
-          <div className="space-y-0.5 border-t border-b border-dark-600/50">
-            <div className="flex items-center justify-between p-4">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-bold text-gray-300">Theme mode</span>
-                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                  {themeMode === 'dark' ? 'Dark' : 'Light'}
-                </span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={themeMode === 'light'}
-                aria-label="Toggle light and dark mode"
-                onClick={toggleThemeMode}
-                className={`relative inline-flex h-7 w-14 items-center rounded-full border transition-colors ${
-                  themeMode === 'dark'
-                    ? 'bg-dark-700 border-dark-600'
-                    : 'bg-primary/20 border-primary/40'
+    <div className="space-y-4 pb-1">
+      <section>
+        <p className="px-1 text-[11px] font-black uppercase tracking-[0.24em] text-gray-500">Appearance</p>
+        <div className="wallet-surface mt-2 overflow-hidden p-0">
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-[16px] bg-orange-100 text-orange-600 shadow-[0_10px_22px_rgba(255,132,31,0.12)] dark:bg-orange-500/15 dark:text-orange-300">
+              <IoColorPaletteOutline className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-gray-100">Theme</p>
+              <p className="text-xs text-gray-500">{themeMode === 'dark' ? 'Dark mode' : 'Light mode'}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={themeMode === 'light'}
+              aria-label="Toggle light and dark mode"
+              onClick={toggleThemeMode}
+              className={`relative inline-flex h-10 w-[76px] items-center rounded-full border px-1 transition-colors ${
+                themeMode === 'dark'
+                  ? 'border-white/10 bg-dark-700/70'
+                  : 'border-[#ffcc9b] bg-[#ffe7d2]'
+              }`}
+            >
+              <span
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-800 shadow-[0_6px_12px_rgba(15,23,42,0.14)] transition-transform ${
+                  themeMode === 'dark' ? 'translate-x-0' : 'translate-x-[34px]'
                 }`}
               >
-                <span
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-black shadow-sm transition-transform ${
-                    themeMode === 'dark' ? 'translate-x-0.5' : 'translate-x-7'
-                  }`}
-                >
-                  {themeMode === 'dark' ? <IoMoonOutline className="w-3.5 h-3.5" /> : <IoSunnyOutline className="w-3.5 h-3.5" />}
-                </span>
-              </button>
-            </div>
+                {themeMode === 'dark' ? <IoMoonOutline className="h-4 w-4" /> : <IoSunnyOutline className="h-4 w-4 text-orange-500" />}
+              </span>
+            </button>
           </div>
         </div>
+      </section>
 
-        {SECTIONS.map((section, idx) => (
-          <div key={idx} className="mb-4">
-             <div className="px-4 py-2 mt-4">
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none">{section.title}</p>
-             </div>
-             <div className="space-y-0.5 border-t border-b border-dark-600/50">
-               {section.items.map((item, iidx) => (
-                 <div 
-                   key={iidx}
-                   className="flex items-center justify-between p-4 hover:bg-dark-700 cursor-pointer transition-colors"
-                   onClick={() => navigate(item.path)}
-                 >
-                   <span className="text-xs font-bold text-gray-300">{item.label}</span>
-                   <IoChevronForward className="text-gray-600 w-4 h-4" />
-                 </div>
-               ))}
-             </div>
+      {sections.map((section) => (
+        <section key={section.title}>
+          <p className={`px-1 text-[11px] font-black uppercase tracking-[0.24em] ${section.title === 'Danger Zone' ? 'text-red-400' : 'text-gray-500'}`}>
+            {section.title}
+          </p>
+          <div className="wallet-surface mt-2 overflow-hidden p-0">
+            {section.items.map((item, index) => (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => navigate(item.path)}
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  index !== section.items.length - 1 ? 'border-b border-dark-600/50' : ''
+                } ${item.tone === 'danger' ? 'hover:bg-red-500/5' : 'hover:bg-white/5'}`}
+              >
+                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] ${item.iconClass}`}>
+                  {item.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-semibold ${item.tone === 'danger' ? 'text-red-500 dark:text-red-300' : 'text-gray-100'}`}>
+                    {item.label}
+                  </p>
+                  <p className="text-xs text-gray-500">{item.description}</p>
+                </div>
+                <IoChevronForward className={`h-4 w-4 shrink-0 ${item.tone === 'danger' ? 'text-red-300' : 'text-gray-400'}`} />
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
+        </section>
+      ))}
     </div>
   )
 }

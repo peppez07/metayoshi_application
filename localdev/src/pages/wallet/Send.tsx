@@ -1156,8 +1156,6 @@ const Send: React.FC = () => {
       }
     }
 
-    const rememberedEntryId = String(rememberedSelection?.entryId || '').trim()
-    const rememberedAssetId = String(rememberedSelection?.assetId || '').trim()
     let match: SendableItem | undefined
 
     if (requestedEntryId) {
@@ -1165,21 +1163,8 @@ const Send: React.FC = () => {
     } else if (requestedAssetId) {
       match = allItems.find((item) => item.assetId === requestedAssetId)
     } else if (requestedQuickNative) {
-      if (rememberedEntryId) {
-        match = allItems.find((item) => item.id === rememberedEntryId)
-      }
-      if (!match && rememberedAssetId) {
-        match = allItems.find((item) => item.assetId === rememberedAssetId)
-      }
-      if (!match && (rememberedEntryId || rememberedAssetId)) {
-        clearRememberedSendSelection({
-          accountId: activeAccountId || undefined,
-          networkId: activeNetworkId || undefined
-        })
-      }
-      if (!match) {
-        match = allItems.find((item) => item.requestType === 'native')
-      }
+      match = activePairItems.find((item) => item.requestType === 'native')
+      if (!match) match = allItems.find((item) => item.requestType === 'native')
     }
 
     if (match) {
@@ -1193,12 +1178,9 @@ const Send: React.FC = () => {
   }, [
     location.state,
     allItems,
+    activePairItems,
     navigate,
-    activeAccountId,
-    activeNetworkId,
-    clearRememberedSendSelection,
     getNetworkModelPreferences,
-    rememberedSelection,
     visibleScanRows
   ])
 

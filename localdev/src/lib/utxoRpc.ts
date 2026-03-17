@@ -913,7 +913,7 @@ async function jsonRpcCall(
       && response.status === 403
       && /transaction authorization key|x-bridge-tx-key/i.test(`${rpcErrorMessage} ${bodyText}`)
     const txAuthHint = txAuthRejected
-      ? ' | Configure bridge tx auth in Settings -> Bridge tx auth (runtime storage only; never bundle shared secrets).'
+      ? ' | Configure VITE_BRIDGE_TX_AUTH_KEY at build time. This wallet no longer exposes a runtime bridge tx auth setting.'
       : ''
     const coinDisabled = /coin is disabled(?::| in registry:)/i.test(`${rpcErrorMessage} ${bodyText}`)
     const coinDisabledHint = coinDisabled

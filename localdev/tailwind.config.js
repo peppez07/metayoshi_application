@@ -23,10 +23,10 @@ export default {
         '2xl': '16px',
       },
       boxShadow: {
-        'soft': '0 4px 12px rgba(0, 0, 0, 0.4)',
+        'soft': '0 24px 60px rgba(0, 0, 0, 0.45)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'Avenir', 'Helvetica', 'Arial', 'sans-serif'],
+        sans: ['"Space Grotesk"', 'Inter', 'system-ui', 'sans-serif'],
       },
     },
   },

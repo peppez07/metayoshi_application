@@ -209,13 +209,15 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
   }
 
   return (
-    <div className="flex flex-col h-full bg-dark-800 relative overflow-hidden">
+    <div className="flex flex-col h-full relative overflow-hidden">
+      <div className="ambient-glow -left-16 top-10 h-36 w-36 bg-primary/12" />
+      <div className="ambient-glow -right-20 bottom-16 h-40 w-40 bg-blue-500/10" />
       {!hideHeader && (
-        <div className="px-4 py-3 flex items-center justify-between border-b border-dark-600">
+        <div className="px-4 py-3.5 flex items-center justify-between border-b border-white/8 bg-black/10 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <div className={`status-dot ${statusColor} ${(isSyncing || isApiWaiting) ? 'animate-pulse-sync' : ''}`} />
             <div className="flex flex-col leading-tight">
-              <span className="text-[11px] font-medium text-gray-400">{statusLabel}</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">{statusLabel}</span>
             </div>
           </div>
 
@@ -234,7 +236,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             <button
               onClick={() => setShowReceiveQr(true)}
               disabled={!rawAddress}
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-dark-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="wallet-icon-btn w-9 h-9 disabled:opacity-40 disabled:cursor-not-allowed"
               title="Receive (QR)"
             >
               <IoQrCodeOutline className="w-4.5 h-4.5 text-gray-400 hover:text-white" />
@@ -242,7 +244,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
             <button
               onClick={copyAddress}
-              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-dark-700 transition-colors"
+              className="wallet-icon-btn w-9 h-9"
               title="Copy address"
             >
               {copied
@@ -260,12 +262,12 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
           onClick={() => setShowAccountMenu(false)}
         >
           <div
-            className="w-full h-full min-h-0 bg-dark-800 rounded-2xl border border-dark-600 p-4 space-y-3 animate-in slide-in-from-top duration-200 flex flex-col shadow-xl"
+            className="wallet-surface w-full h-full min-h-0 p-4 space-y-3 animate-in slide-in-from-top duration-200 flex flex-col shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Accounts</h3>
-              <button onClick={() => setShowAccountMenu(false)}>
+              <h3 className="wallet-eyebrow text-gray-400">Accounts</h3>
+              <button className="wallet-icon-btn w-9 h-9" onClick={() => setShowAccountMenu(false)}>
                 <IoClose className="w-6 h-6" />
               </button>
             </div>
@@ -277,8 +279,8 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 return (
                   <div
                     key={account.id}
-                    className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                      activeAccountId === account.id ? 'border-primary bg-primary/5' : 'border-dark-600 bg-dark-700/50 hover:bg-dark-700'
+                    className={`p-4 rounded-[22px] border flex items-center justify-between cursor-pointer transition-all ${
+                      activeAccountId === account.id ? 'border-primary/35 bg-primary/10' : 'border-white/8 bg-white/[0.03] hover:bg-white/[0.06]'
                     }`}
                     onClick={() => {
                       setActiveAccount(account.id)
@@ -299,7 +301,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                     </div>
                     <div className="flex items-center gap-1">
                       <button
-                        className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
+                        className="wallet-icon-btn w-8 h-8 rounded-xl"
                         onClick={(event) => {
                           event.stopPropagation()
                           editAccountName(account.id)
@@ -309,7 +311,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                         <IoCreateOutline className="w-4 h-4 text-gray-400 hover:text-white" />
                       </button>
                       <button
-                        className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
+                        className="wallet-icon-btn w-8 h-8 rounded-xl"
                         onClick={async (event) => {
                           event.stopPropagation()
                           if (!address) return
@@ -335,7 +337,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
           onClick={() => setShowReceiveQr(false)}
         >
           <div
-            className="w-full bg-dark-800 rounded-t-3xl border-t border-dark-600 p-5 space-y-4 animate-in slide-in-from-bottom duration-200"
+            className="wallet-surface w-full rounded-t-[30px] border-t border-white/8 p-5 space-y-4 animate-in slide-in-from-bottom duration-200"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -357,13 +359,13 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               </div>
               <button
                 onClick={() => setShowReceiveQr(false)}
-                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-dark-700 transition-colors"
+                className="wallet-icon-btn w-9 h-9"
               >
                 <IoClose className="w-4 h-4 text-gray-400 hover:text-white" />
               </button>
             </div>
 
-            <div className="rounded-2xl border border-primary/30 bg-dark-900 p-4 flex flex-col items-center justify-center gap-3 shadow-[0_0_24px_rgba(245,132,31,0.10)]">
+            <div className="wallet-soft-surface p-4 flex flex-col items-center justify-center gap-3 shadow-[0_0_24px_rgba(245,132,31,0.10)]">
               <span className="text-[11px] font-black uppercase tracking-[0.28em] text-gray-300">
                 MetaYoshi
               </span>
@@ -395,13 +397,13 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
               )}
             </div>
 
-            <div className="rounded-xl border border-dark-600 bg-dark-700/40 p-3">
+            <div className="wallet-soft-surface p-3">
               <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-1">Selected Address</p>
               <p className="text-[11px] font-mono break-all text-gray-200 leading-relaxed">{rawAddress || 'No address available'}</p>
             </div>
 
             {supportsReceiveMemo && (
-              <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3 space-y-2">
+              <div className="wallet-soft-surface p-3 space-y-2">
                 <div>
                   <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-1">Memo</p>
                   <p className="text-[10px] text-gray-500">Optional {receiveMemoSymbol} memo to share with the sender.</p>

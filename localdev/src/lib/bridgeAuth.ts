@@ -1,17 +1,11 @@
 const ROTATION_TAG = 'metayoshi-bridge-tx-v1'
-const BRIDGE_AUTH_STORAGE_KEY = 'metayoshi-bridge-tx-auth-v1'
 const DEFAULT_ROTATE_BY_DATE = true
 const DEFAULT_ACCEPT_SKEW_DAYS = 1
 
 type BridgeTxAuthConfig = {
-  secret?: string
-  rotateByDate?: boolean
+  secret: string
+  rotateByDate: boolean
 }
-
-export type { BridgeTxAuthConfig }
-
-let runtimeConfigLoaded = false
-let runtimeConfigCache: BridgeTxAuthConfig = {}
 
 function utcDateStamp(date: Date): string {
   return date.toISOString().slice(0, 10)
@@ -30,111 +24,22 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function normalizeBridgeTxAuthConfig(value: unknown): BridgeTxAuthConfig {
-  if (!value || typeof value !== 'object') return {}
-  const raw = value as Record<string, unknown>
-  const secret = String(raw.secret ?? '').trim()
-  const rotateByDate = typeof raw.rotateByDate === 'boolean'
-    ? raw.rotateByDate
-    : DEFAULT_ROTATE_BY_DATE
-  return secret ? { secret, rotateByDate } : {}
-}
-
 function normalizeSecret(value: unknown): string {
   return String(value ?? '').trim()
 }
 
-function canUseChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
+function parseBooleanLike(value: unknown, fallback: boolean): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return fallback
 }
 
-async function readFromChromeStorage(): Promise<BridgeTxAuthConfig | null> {
-  if (!canUseChromeStorage()) return null
-  try {
-    const stored = await chrome.storage.local.get(BRIDGE_AUTH_STORAGE_KEY)
-    return normalizeBridgeTxAuthConfig(stored?.[BRIDGE_AUTH_STORAGE_KEY])
-  } catch {
-    return null
-  }
-}
-
-function canUseLocalStorage(): boolean {
-  try {
-    return typeof localStorage !== 'undefined'
-  } catch {
-    return false
-  }
-}
-
-function readFromLocalStorage(): BridgeTxAuthConfig | null {
-  if (!canUseLocalStorage()) return null
-  try {
-    const raw = localStorage.getItem(BRIDGE_AUTH_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as unknown
-    return normalizeBridgeTxAuthConfig(parsed)
-  } catch {
-    return null
-  }
-}
-
-async function getRuntimeBridgeTxAuthConfig(): Promise<BridgeTxAuthConfig> {
-  if (runtimeConfigLoaded) return runtimeConfigCache
-
-  const chromeConfig = await readFromChromeStorage()
-  if (chromeConfig && chromeConfig.secret) {
-    runtimeConfigCache = chromeConfig
-    runtimeConfigLoaded = true
-    return runtimeConfigCache
-  }
-
-  const localConfig = readFromLocalStorage()
-  runtimeConfigCache = localConfig ?? {}
-  runtimeConfigLoaded = true
-  return runtimeConfigCache
-}
-
-async function persistBridgeTxAuthConfig(config: BridgeTxAuthConfig): Promise<void> {
-  if (canUseChromeStorage()) {
-    try {
-      await chrome.storage.local.set({ [BRIDGE_AUTH_STORAGE_KEY]: config })
-    } catch {
-      // ignore storage errors and keep in-memory config
-    }
-  }
-
-  if (canUseLocalStorage()) {
-    try {
-      if (config.secret) {
-        localStorage.setItem(BRIDGE_AUTH_STORAGE_KEY, JSON.stringify(config))
-      } else {
-        localStorage.removeItem(BRIDGE_AUTH_STORAGE_KEY)
-      }
-    } catch {
-      // ignore storage errors and keep in-memory config
-    }
-  }
-}
-
-export async function setBridgeTxAuthConfig(config: BridgeTxAuthConfig): Promise<void> {
-  runtimeConfigCache = normalizeBridgeTxAuthConfig(config)
-  runtimeConfigLoaded = true
-  await persistBridgeTxAuthConfig(runtimeConfigCache)
-}
-
-export async function clearBridgeTxAuthConfig(): Promise<void> {
-  runtimeConfigCache = {}
-  runtimeConfigLoaded = true
-  await persistBridgeTxAuthConfig(runtimeConfigCache)
-}
-
-export async function getBridgeTxAuthConfig(): Promise<BridgeTxAuthConfig> {
-  const config = await getRuntimeBridgeTxAuthConfig()
+function getBuildTimeBridgeTxAuthConfig(): BridgeTxAuthConfig {
   return {
-    secret: config.secret ?? '',
-    rotateByDate: typeof config.rotateByDate === 'boolean'
-      ? config.rotateByDate
-      : DEFAULT_ROTATE_BY_DATE
+    secret: normalizeSecret(import.meta.env.VITE_BRIDGE_TX_AUTH_KEY),
+    rotateByDate: parseBooleanLike(import.meta.env.VITE_BRIDGE_TX_AUTH_ROTATE_BY_DATE, DEFAULT_ROTATE_BY_DATE)
   }
 }
 
@@ -146,13 +51,13 @@ export async function resolveBridgeTxKey(): Promise<string | undefined> {
 export async function resolveBridgeTxKeyCandidates(
   options: { fallbackSecret?: string } = {}
 ): Promise<string[]> {
-  const config = await getRuntimeBridgeTxAuthConfig()
+  const config = getBuildTimeBridgeTxAuthConfig()
   const primarySecret = normalizeSecret(config.secret)
   const fallbackSecret = normalizeSecret(options.fallbackSecret)
   const secrets = Array.from(new Set([primarySecret, fallbackSecret].filter(Boolean)))
   if (secrets.length === 0) return []
 
-  const rotateByDate = config.rotateByDate !== false
+  const rotateByDate = config.rotateByDate
   const skewDaysRaw = Number(import.meta.env.VITE_BRIDGE_TX_AUTH_ACCEPT_SKEW_DAYS ?? DEFAULT_ACCEPT_SKEW_DAYS)
   const skewDays = Number.isFinite(skewDaysRaw)
     ? Math.max(0, Math.min(7, Math.trunc(skewDaysRaw)))

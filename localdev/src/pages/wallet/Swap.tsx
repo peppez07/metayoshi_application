@@ -503,7 +503,7 @@ function TokenSelectorModal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex h-full w-full flex-col bg-[#f5f7fb]"
+        className="swap-dark-modal flex h-full w-full flex-col bg-[#f5f7fb]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
@@ -1229,7 +1229,7 @@ const Swap: React.FC = () => {
     : 'Rate appears here after the server returns a quote'
 
   return (
-    <div className="flex h-full flex-col bg-[#f5f7fb] text-slate-900">
+    <div className="swap-dark-page flex h-full flex-col bg-[#f5f7fb] text-slate-900">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
         <button
           onClick={() => navigate('/wallet/assets')}

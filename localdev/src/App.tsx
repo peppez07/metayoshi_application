@@ -50,8 +50,6 @@ import RestoreSettings from './pages/settings/RestoreSettings'
 import ShowSecrets from './pages/settings/ShowSecrets'
 import AccountManager from './pages/settings/AccountManager'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
-import LocalRpcSettings from './pages/settings/LocalRpcSettings'
-import BridgeTxAuthSettings from './pages/settings/BridgeTxAuthSettings'
 import BlockchainVisibilitySettings from './pages/settings/BlockchainVisibilitySettings'
 import TermsAndRules from './pages/TermsAndRules'
 import { WALLET_TERMS_VERSION } from './lib/legalMetadata'
@@ -309,7 +307,9 @@ function App() {
   ) {
     const returnTo = `${location.pathname}${location.search}${location.hash}`
     return (
-      <div className="w-full h-full bg-dark-900 overflow-hidden">
+      <div className="wallet-shell-stage w-full h-full overflow-hidden">
+        <div className="ambient-glow left-[-72px] top-[10%] w-44 h-44 bg-primary/16" />
+        <div className="ambient-glow right-[-80px] bottom-[6%] w-52 h-52 bg-yellow-500/10" />
         <div className="wallet-container">
           <Navigate to="/terms" replace state={{ returnTo }} />
         </div>
@@ -318,7 +318,9 @@ function App() {
   }
 
   return (
-    <div className="w-full h-full bg-dark-900 overflow-hidden">
+    <div className="wallet-shell-stage w-full h-full overflow-hidden">
+      <div className="ambient-glow left-[-72px] top-[10%] w-44 h-44 bg-primary/16" />
+      <div className="ambient-glow right-[-80px] bottom-[6%] w-52 h-52 bg-yellow-500/10" />
       <div className="wallet-container">
         <Routes>
           {/* Auth Flow */}
@@ -378,9 +380,8 @@ function App() {
             <Route path="donation" element={<DonationSettings />} />
             <Route path="authorized-sites" element={<AuthorizedSites />} />
             <Route path="blockchains" element={<BlockchainVisibilitySettings />} />
-            <Route path="local-rpc" element={<LocalRpcSettings />} />
-            <Route path="bridge-auth" element={<BridgeTxAuthSettings />} />
             <Route path="rpc" element={<Navigate to="/settings" replace />} />
+            <Route path="*" element={<Navigate to="/settings" replace />} />
           </Route>
 
           {/* Default Route */}
