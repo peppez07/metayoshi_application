@@ -131,8 +131,13 @@ const ETHEREUM_ADD_CHAIN_METHODS = new Set(['wallet_addEthereumChain'])
 const ETHEREUM_SEND_TRANSACTION_METHODS = new Set(['eth_sendTransaction'])
 const ETHEREUM_SIGN_METHODS = new Set(['personal_sign', 'eth_sign'])
 const ETHEREUM_SIGN_TYPED_DATA_METHODS = new Set(['eth_signTypedData', 'eth_signTypedData_v3', 'eth_signTypedData_v4'])
-// Event ports for broadcasting events to content scripts
-const eventPorts = new Set<chrome.runtime.Port>()
+
+type EventPortRecord = {
+  origin: string | null
+}
+
+// Track the page origin behind each event bridge so account-bearing events stay permission-scoped.
+const eventPorts = new Map<chrome.runtime.Port, EventPortRecord>()
 
 interface WalletState {
   isInitialized?: boolean
@@ -1577,6 +1582,31 @@ function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string
   }
 }
 
+function redactProviderState(providerState: DappRuntimeContext['providerState']): DappRuntimeContext['providerState'] {
+  return {
+    ...providerState,
+    connected: false,
+    unlocked: false,
+    accounts: [],
+    selectedAddress: null
+  }
+}
+
+async function canExposeAccountsToOrigin(origin: string | null): Promise<boolean> {
+  if (!origin) return false
+  return hasScope(origin, 'read')
+}
+
+async function buildProviderStateForOrigin(
+  origin: string | null,
+  runtime: DappRuntimeContext
+): Promise<DappRuntimeContext['providerState']> {
+  if (await canExposeAccountsToOrigin(origin)) {
+    return runtime.providerState
+  }
+  return redactProviderState(runtime.providerState)
+}
+
 // Handle RPC methods
 async function handleRpcMethod(
   method: string,
@@ -1641,13 +1671,13 @@ async function handleRpcMethod(
   
   // Provider state methods
   if (PROVIDER_STATE_METHODS.has(method)) {
-    return providerState
+    return buildProviderStateForOrigin(normalizedOrigin, runtime)
   }
 
   if (OPEN_WALLET_METHODS.has(method)) {
     await openWalletSurface(surfaceTarget)
     const refreshed = buildDappRuntimeContext(await getWalletState(), network?.id)
-    return refreshed.providerState
+    return buildProviderStateForOrigin(normalizedOrigin, refreshed)
   }
 
   if (CONNECT_METHODS.has(method)) {
@@ -1737,6 +1767,9 @@ async function handleRpcMethod(
   
   // Get accounts
   if (ACCOUNTS_METHODS.has(method)) {
+    if (!(await canExposeAccountsToOrigin(normalizedOrigin))) {
+      return []
+    }
     if ((state.isLocked ?? true) || !(state.isInitialized ?? false)) {
       return []
     }
@@ -1753,6 +1786,9 @@ async function handleRpcMethod(
   }
 
   if (ETHEREUM_ACCOUNTS_METHODS.has(method)) {
+    if (!(await canExposeAccountsToOrigin(normalizedOrigin))) {
+      return []
+    }
     if ((state.isLocked ?? true) || !(state.isInitialized ?? false) || !network || network.coinType !== 'EVM') {
       return []
     }
@@ -1788,7 +1824,7 @@ async function handleRpcMethod(
       activeNetworkId: nextNetwork.id
     }))
     await touchLastConnected(approvedOrigin)
-    broadcastEvent('networkChanged', {
+    void broadcastEvent('networkChanged', {
       networkId: nextNetwork.id,
       networkLabel: nextNetwork.name,
       coinId: nextNetwork.id,
@@ -2131,7 +2167,7 @@ async function handleRpcMethod(
 
     const refreshedState = await getWalletState()
     const address = getActiveAddressFromState(refreshedState, refreshedState.activeNetworkId || DEFAULT_NETWORK_ID)
-    broadcastEvent('accountsChanged', {
+    void broadcastEvent('accountsChanged', {
       accounts: address ? [address] : [],
       address
     })
@@ -2164,7 +2200,7 @@ async function handleRpcMethod(
     }))
     
     // Broadcast network change event
-    broadcastEvent('networkChanged', {
+    void broadcastEvent('networkChanged', {
       networkId: normalizedNetworkId,
       networkLabel: network.name,
       coinId: network.id,
@@ -2180,11 +2216,19 @@ async function handleRpcMethod(
   throw { code: -32601, message: `Method not found: ${method}` }
 }
 
-// Broadcast event to all connected content scripts
-function broadcastEvent(event: string, payload: any): void {
+async function shouldDeliverEventToOrigin(event: string, origin: string | null): Promise<boolean> {
+  if (event === 'accountsChanged' || event === 'lockChanged') {
+    return canExposeAccountsToOrigin(origin)
+  }
+  return true
+}
+
+// Broadcast event to connected content scripts, keeping account-bearing events permission-scoped.
+async function broadcastEvent(event: string, payload: any): Promise<void> {
   if (eventPorts.size === 0) return
   const message = { type: 'event', event, payload }
-  for (const port of eventPorts) {
+  for (const [port, record] of eventPorts.entries()) {
+    if (!(await shouldDeliverEventToOrigin(event, record.origin))) continue
     try {
       port.postMessage(message)
     } catch (err) {
@@ -2217,7 +2261,7 @@ function handleWalletStorageBroadcast(
     JSON.stringify(newState.accounts) !== JSON.stringify(oldState.accounts)
   ) {
     const address = getActiveAddressFromState(newState, activeDappNetworkId)
-    broadcastEvent('accountsChanged', {
+    void broadcastEvent('accountsChanged', {
       accounts: address ? [address] : [],
       address
     })
@@ -2226,7 +2270,7 @@ function handleWalletStorageBroadcast(
   if (newState.activeNetworkId !== oldState.activeNetworkId) {
     const network = resolveDappNetworks(newState).find((n) => n.id === newState.activeNetworkId)
     if (network && String(network.id || '').trim()) {
-      broadcastEvent('networkChanged', {
+      void broadcastEvent('networkChanged', {
         networkId: network.id,
         networkLabel: network.name,
         coinId: network.id,
@@ -2238,12 +2282,12 @@ function handleWalletStorageBroadcast(
   }
 
   if (newState.isLocked !== oldState.isLocked) {
-    broadcastEvent('lockChanged', {
+    void broadcastEvent('lockChanged', {
       unlocked: !(newState.isLocked ?? true)
     })
 
     if (newState.isLocked) {
-      broadcastEvent('accountsChanged', {
+      void broadcastEvent('accountsChanged', {
         accounts: [],
         address: null
       })
@@ -2375,7 +2419,8 @@ chrome.runtime.onMessage.addListener((message: DappRequest | OpenWalletSurfaceRe
 // Handle event port connections
 chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
   if (port.name === BG_EVENT_PORT_NAME) {
-    eventPorts.add(port)
+    const origin = port.sender?.url ? normalizeDappOrigin(port.sender.url) : null
+    eventPorts.set(port, { origin })
     
     port.onDisconnect.addListener(() => {
       eventPorts.delete(port)

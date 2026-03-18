@@ -19,6 +19,20 @@ type WalletLogoSpec = {
   names: string[]
 }
 
+type ManifestShape = {
+  background?: {
+    scripts?: string[]
+    service_worker?: string
+    type?: string
+  }
+  browser_specific_settings?: {
+    gecko?: {
+      id?: string
+      strict_min_version?: string
+    }
+  }
+}
+
 function loadBuildConfig(): BuildConfig {
   const explicit = String(process.env.METAYOSHI_BUILD_CONFIG_PATH || '').trim()
   const defaultPath = path.resolve(__dirname, 'metayoshi.build.json')
@@ -106,6 +120,59 @@ function resolveBundledWalletLogoSpecs(config: BuildConfig): WalletLogoSpec[] {
   // restricted by build config. The app can still surface runtime/server-backed
   // EVM variants, and missing bundled logos regress to placeholders.
   return specs.filter((spec) => spec.coinIds.some((id) => !disabled.has(normalizeCoinId(id))))
+}
+
+function ensureManifestMetadata(manifestPath: string): void {
+  if (!existsSync(manifestPath)) return
+
+  const raw = readFileSync(manifestPath, 'utf-8')
+  const manifest = JSON.parse(raw) as ManifestShape
+  const background = manifest.background || {}
+
+  manifest.background = {
+    ...background,
+    service_worker: String(background.service_worker || 'background.js').trim() || 'background.js',
+    type: background.type || 'module'
+  }
+
+  manifest.browser_specific_settings = {
+    ...(manifest.browser_specific_settings || {}),
+    gecko: {
+      ...(manifest.browser_specific_settings?.gecko || {}),
+      id: manifest.browser_specific_settings?.gecko?.id || 'wallet@metayoshi.app'
+    }
+  }
+
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8')
+}
+
+function manualChunkId(id: string): string | undefined {
+  const normalized = id.replace(/\\/g, '/')
+
+  if (!normalized.includes('/node_modules/')) return undefined
+  if (normalized.includes('/react/') || normalized.includes('/react-dom/') || normalized.includes('/react-router')) {
+    return 'vendor-react'
+  }
+  if (normalized.includes('/@solana/web3.js/')) {
+    return 'vendor-solana'
+  }
+  if (normalized.includes('/ethers/') || normalized.includes('/@walletconnect/') || normalized.includes('/viem/')) {
+    return 'vendor-evm'
+  }
+  if (normalized.includes('/@mysten/sui/')) {
+    return 'vendor-sui'
+  }
+  if (normalized.includes('/@stellar/stellar-sdk/')) {
+    return 'vendor-stellar'
+  }
+  if (normalized.includes('/@emurgo/cardano-serialization-lib-browser/')) {
+    return 'vendor-cardano'
+  }
+  if (normalized.includes('/@stellar/stellar-sdk/')) {
+    return 'vendor-stellar'
+  }
+
+  return undefined
 }
 
 function createWalletLogoRegistryModule(config: BuildConfig): string {
@@ -300,6 +367,7 @@ export default defineConfig({
         // Copy manifest.json
         try {
           copyFileSync('public/manifest.json', 'dist/manifest.json')
+          ensureManifestMetadata(path.resolve(__dirname, 'dist/manifest.json'))
           console.log('[OK] Copied manifest.json to dist/')
         } catch (err) {
           console.error('Failed to copy manifest.json:', err)
@@ -319,10 +387,25 @@ export default defineConfig({
           console.error('Failed to copy MetayoshiLogo.png:', err)
         }
 
-        // Copy icons: public/icons/icon-*.png -> dist/assets/metayoshi-*.png
+        // Copy early runtime process shim as a real asset so CSP stays clean.
         try {
-          const publicIconsDir = path.resolve(__dirname, 'public/icons')
-          if (existsSync(publicIconsDir)) {
+          const shimSrc = path.resolve(__dirname, 'public/process-prelude.js')
+          const shimDest = path.resolve(__dirname, 'dist/assets/process-prelude.js')
+          if (existsSync(shimSrc)) {
+            copyFileSync(shimSrc, shimDest)
+            console.log('[OK] Copied process-prelude.js -> dist/assets/process-prelude.js')
+          } else {
+            console.warn('MISSING: public/process-prelude.js')
+          }
+        } catch (err) {
+          console.error('Failed to copy process-prelude.js:', err)
+        }
+
+        // Copy icons from the canonical square logo set used by the wallet source.
+        // This avoids store submission failures caused by stale non-square public icons.
+        try {
+          const sourceIconsDir = path.resolve(__dirname, 'src/coins/logos')
+          if (existsSync(sourceIconsDir)) {
             const distIconsDir = path.resolve(__dirname, 'dist/icons')
             if (!existsSync(distIconsDir)) {
               mkdirSync(distIconsDir, { recursive: true })
@@ -335,7 +418,8 @@ export default defineConfig({
               'icon-128.png': 'metayoshi-128.png',
             }
             for (const [src, dest] of Object.entries(iconMapping)) {
-              const srcPath  = path.join(publicIconsDir, src)
+              const sourceFileName = dest
+              const srcPath  = path.join(sourceIconsDir, sourceFileName)
               const destPath = path.join(assetsDir, dest)
               const legacyDestPath = path.join(distIconsDir, src)
               if (existsSync(srcPath)) {
@@ -343,6 +427,8 @@ export default defineConfig({
                 console.log(`[OK] Copied ${src} -> dist/assets/${dest}`)
                 copyFileSync(srcPath, legacyDestPath)
                 console.log(`[OK] Copied ${src} -> dist/icons/${src}`)
+              } else {
+                console.warn(`[WARN] Missing square icon source: ${sourceFileName}`)
               }
             }
           }
@@ -378,6 +464,9 @@ export default defineConfig({
             // Fix any bootstrap.css reference -> ui.css
             html = html.replace(/bootstrap\.css/g, 'ui.css')
 
+            // Ensure runtime prelude executes before any module chunk reads process.browser.
+            html = html.replace(/<script[^>]*src="\/assets\/process-prelude\.js"[^>]*><\/script>\n?\s*/g, '')
+
             // Ensure script tag is present
             if (!html.includes('/assets/ui.js')) {
               html = html.replace(
@@ -385,6 +474,11 @@ export default defineConfig({
                 '    <script type="module" crossorigin src="/assets/ui.js"></script>\n  </head>',
               )
             }
+
+            html = html.replace(
+              '<script type="module" crossorigin src="/assets/ui.js"></script>',
+              '    <script src="/assets/process-prelude.js"></script>\n    <script type="module" crossorigin src="/assets/ui.js"></script>'
+            )
 
             // Ensure CSS link tag is present
             if (!html.includes('/assets/ui.css')) {
@@ -463,6 +557,9 @@ export default defineConfig({
         inpage:     path.resolve(__dirname, 'src/inpage/inpage-provider.ts'),
       },
       output: {
+        manualChunks(id) {
+          return manualChunkId(id)
+        },
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') return 'background.js'
           return 'assets/[name].js'

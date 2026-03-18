@@ -4,7 +4,7 @@ MetaYoshi Wallet is the public browser-extension wallet for the MetaYoshi projec
 
 **Control beats trust.**
 
-This repository is the source for MetaYoshi Wallet `0.1.9`.
+This repository is the source for MetaYoshi Wallet `0.2.0`.
 
 ## Why MetaYoshi
 
@@ -17,7 +17,7 @@ MetaYoshi is aimed at practical daily usage: connect, review, approve, and manag
 
 ## Current focus
 
-MetaYoshi `0.1.9` is focused on:
+MetaYoshi `0.2.0` is focused on:
 
 - browser-extension wallet UX
 - multi-chain runtime support
@@ -29,7 +29,7 @@ The public startup flow now prefers a bridge-free network when possible, so open
 
 ## Configured network coverage
 
-The project metadata for `0.1.9` currently includes these configured networks:
+The project metadata for `0.2.0` currently includes these configured networks:
 
 - Raptoreum
 - Bitcoin
