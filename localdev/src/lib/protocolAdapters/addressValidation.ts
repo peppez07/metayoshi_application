@@ -3,6 +3,9 @@ import { isSuiAddress } from '../suiAddress'
 import { isCosmosLikeModelId } from '../runtimeModel'
 import { isValidCosmosAddress } from './cosmos'
 
+const MONERO_BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]+$/
+const CARDANO_ADDRESS_RE = /^(addr1|addr_test1)[0-9a-z]{20,}$/i
+
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
 let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
 let stellarSdkModulePromise: Promise<typeof import('@stellar/stellar-sdk')> | null = null
@@ -34,10 +37,12 @@ export async function validateProtocolAddress(
   protocol: string,
   value: string
 ): Promise<boolean | null> {
+  const normalizedValue = String(value || '').trim()
+  if (!normalizedValue) return false
   if (modelId === 'sol') {
     try {
       const { PublicKey } = await loadSolanaWeb3Module()
-      void new PublicKey(value)
+      void new PublicKey(normalizedValue)
       return true
     } catch {
       return false
@@ -45,24 +50,32 @@ export async function validateProtocolAddress(
   }
   if (modelId === 'xlm') {
     const { StrKey } = await loadStellarSdkModule()
-    return StrKey.isValidEd25519PublicKey(value)
+    return StrKey.isValidEd25519PublicKey(normalizedValue)
   }
   if (modelId === 'tron') {
     const tronweb = await loadTronWebModule()
-    return tronweb.TronWeb.isAddress(value)
+    return tronweb.TronWeb.isAddress(normalizedValue)
   }
   if (modelId === 'sui') {
-    return isSuiAddress(value)
+    return isSuiAddress(normalizedValue)
   }
   if (isCosmosLikeModelId(modelId)) {
-    return isValidCosmosAddress(network, value)
+    return isValidCosmosAddress(network, normalizedValue)
+  }
+  if (modelId === 'ada' || protocol === 'cardano-wallet-compat') {
+    return CARDANO_ADDRESS_RE.test(normalizedValue)
+  }
+  if (modelId === 'xmr' || protocol === 'monero-wallet-compat') {
+    const length = normalizedValue.length
+    const startsOk = normalizedValue.startsWith('4') || normalizedValue.startsWith('8') || normalizedValue.startsWith('9')
+    return startsOk && (length === 95 || length === 106) && MONERO_BASE58_RE.test(normalizedValue)
   }
   if (network.coinType === 'EVM') {
     const { ethers } = await loadEthersModule()
-    return ethers.isAddress(value)
+    return ethers.isAddress(normalizedValue)
   }
   if (protocol === 'xrp-jsonrpc-compat') {
-    return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(value)
+    return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(normalizedValue) || /^X[1-9A-HJ-NP-Za-km-z]{46,60}$/.test(normalizedValue)
   }
   return null
 }

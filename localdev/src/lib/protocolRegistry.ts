@@ -53,6 +53,8 @@ export interface SendNetworkTransactionInput {
   utxoSend?: () => Promise<{ hash: string }>
   xrpSend?: () => Promise<{ hash: string }>
   suiSend?: () => Promise<{ hash: string }>
+  cardanoSend?: () => Promise<{ hash: string }>
+  moneroSend?: () => Promise<{ hash: string }>
 }
 
 export interface UtxoDonationInput {
@@ -414,6 +416,16 @@ export async function sendNetworkTransaction(
     if (!input.suiSend) throw new Error('SUI sender is not configured')
     return input.suiSend()
   }
+  if (context.family === 'cardano' || context.runtimeProtocol === 'cardano-wallet-compat') {
+    if (!input.cardanoSend) throw new Error('Cardano sender is not configured')
+    assertCoinAmount(input.amount, 6, 'ADA')
+    return input.cardanoSend()
+  }
+  if (context.family === 'monero' || context.runtimeProtocol === 'monero-wallet-compat') {
+    if (!input.moneroSend) throw new Error('Monero sender is not configured')
+    assertCoinAmount(input.amount, 12, 'XMR')
+    return input.moneroSend()
+  }
 
   if (context.family === 'evm') {
     const { ethers } = await loadEthersModule()
@@ -471,16 +483,6 @@ export async function sendNetworkTransaction(
   }
 
   if (!input.rpcConfig) throw new Error(`RPC config is required for ${input.network.symbol}`)
-
-  if (context.family === 'cardano' || context.runtimeProtocol === 'cardano-wallet-compat') {
-    assertCoinAmount(input.amount, 6, 'ADA')
-    throw new Error('Cardano send is disabled by strict non-custodial policy')
-  }
-
-  if (context.family === 'monero' || context.runtimeProtocol === 'monero-wallet-compat') {
-    assertCoinAmount(input.amount, 12, 'XMR')
-    throw new Error('Monero send is disabled by strict non-custodial policy')
-  }
 
   throw new Error(`Unsupported protocol: ${context.runtimeProtocol}`)
 }
@@ -747,8 +749,10 @@ export function resolveNetworkSendCustodyMode(network: Network, options?: Resolv
   if (context.runtimeProtocol === 'cosmos-rest-bridge') return 'non-custodial'
   if (context.runtimeProtocol === 'utxo-jsonrpc') return 'non-custodial'
   if (context.runtimeProtocol === 'xrp-jsonrpc-compat') return 'non-custodial'
-  if (context.runtimeProtocol === 'cardano-wallet-compat' || context.runtimeProtocol === 'monero-wallet-compat') {
-    return 'unsupported'
+  if (context.runtimeProtocol === 'cardano-wallet-compat') return 'non-custodial'
+  if (context.runtimeProtocol === 'monero-wallet-compat') {
+    const enabled = getBuildFeatureFlag('enableXmrNonCustodial', 'VITE_ENABLE_XMR_NON_CUSTODIAL', false)
+    return enabled ? 'non-custodial' : 'unsupported'
   }
 
   return 'unsupported'

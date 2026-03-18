@@ -88,6 +88,8 @@ import { tronCoin } from './tron'
 import { unichainCoin } from './unichain'
 import { wardenEvmCoin } from './wardenEvm'
 import { xlmCoin } from './xlm'
+import { xmrCoin } from './xmr'
+import { xrpCoin } from './xrp'
 import { xplaEvmCoin } from './xplaEvm'
 import { zecCoin } from './zec'
 import { zksyncCoin } from './zksync'
@@ -1125,6 +1127,18 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
   },
   {
     manifest: {
+      id: 'xrp',
+      runtimeModelId: 'xrp',
+      protocolFamily: 'xrp',
+      coinId: 'xrp',
+      chain: 'main',
+      aliases: ['xrp', 'ripple'],
+      visibleByDefault: true
+    },
+    coin: xrpCoin
+  },
+  {
+    manifest: {
       id: 'ada',
       runtimeModelId: 'ada',
       protocolFamily: 'cardano',
@@ -1176,6 +1190,17 @@ export const BUNDLED_COIN_REGISTRY: BundledCoinRegistryEntry[] = [
       visibleByDefault: true
     },
     coin: sonicCoin
+  },
+  {
+    manifest: {
+      id: 'xmr',
+      runtimeModelId: 'xmr',
+      protocolFamily: 'monero',
+      coinId: 'monero',
+      chain: 'main',
+      aliases: ['xmr', 'monero']
+    },
+    coin: xmrCoin
   },
   {
     manifest: {

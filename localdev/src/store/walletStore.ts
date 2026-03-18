@@ -7303,14 +7303,19 @@ export const useWalletStore = create<WalletState>()(
         const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
         if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
         const { sendCardanoNonCustodial } = await loadCardanoNonCustodialModule()
-        return await sendCardanoNonCustodial({
+        return await sendChainTransaction({
           network: net,
-          mnemonic: sessionMnemonic,
-          accountIndex,
-          fromAddress,
-          toAddress: to,
-          amountAda: amount,
-          walletId: String(net.rpcWallet || '').trim() || undefined
+          to,
+          amount,
+          cardanoSend: () => sendCardanoNonCustodial({
+            network: net,
+            mnemonic: sessionMnemonic,
+            accountIndex,
+            fromAddress,
+            toAddress: to,
+            amountAda: amount,
+            walletId: String(net.rpcWallet || '').trim() || undefined
+          })
         })
       },
 
@@ -7325,13 +7330,18 @@ export const useWalletStore = create<WalletState>()(
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
         const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
         if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
-        return await sendMoneroNonCustodial({
+        return await sendChainTransaction({
           network: net,
-          mnemonic: sessionMnemonic,
-          accountIndex,
-          fromAddress,
-          toAddress: to,
-          amountXmr: amount
+          to,
+          amount,
+          moneroSend: () => sendMoneroNonCustodial({
+            network: net,
+            mnemonic: sessionMnemonic,
+            accountIndex,
+            fromAddress,
+            toAddress: to,
+            amountXmr: amount
+          })
         })
       },
 
