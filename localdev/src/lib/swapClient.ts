@@ -30,6 +30,7 @@ export type ServerSwapCatalogAsset = {
   label: string
   kind: ServerSwapCatalogAssetKind
   contractAddress?: string
+  logoUrl?: string
   decimals?: number
   aliases?: string[]
   isWrapped?: boolean
@@ -224,6 +225,7 @@ export async function searchServerSwapAssets(
       label,
       kind,
       contractAddress: readString(item.contractAddress) || undefined,
+      logoUrl: readString(item.logoUrl || item.logoURI || item.logoUri) || undefined,
       decimals: readNumber(item.decimals),
       aliases: readStringArray(item.aliases),
       isWrapped: Boolean(item.isWrapped),

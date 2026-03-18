@@ -107,6 +107,38 @@ export type { CoinType, Network } from '../coins'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 export const MAX_WALLET_ACCOUNTS_PER_COIN = 2
+const SOLANA_BASE58_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+
+function looksLikeSolanaAddressText(value: unknown): boolean {
+  const raw = String(value || '').trim()
+  return Boolean(raw) && SOLANA_BASE58_ADDRESS_RE.test(raw)
+}
+
+function normalizeSolanaDisplayText(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (looksLikeSolanaAddressText(raw)) return ''
+  return raw
+}
+
+function resolveSolanaDisplayName(params: {
+  mint?: string
+  primaryName?: string
+  secondaryName?: string
+  primarySymbol?: string
+  secondarySymbol?: string
+}): string {
+  const mint = String(params.mint || '').trim()
+  const primaryName = normalizeSolanaDisplayText(params.primaryName)
+  if (primaryName) return primaryName
+  const secondaryName = normalizeSolanaDisplayText(params.secondaryName)
+  if (secondaryName) return secondaryName
+  const primarySymbol = normalizeSolanaDisplayText(params.primarySymbol).toUpperCase()
+  if (primarySymbol) return primarySymbol
+  const secondarySymbol = normalizeSolanaDisplayText(params.secondarySymbol).toUpperCase()
+  if (secondarySymbol) return secondarySymbol
+  return mint
+}
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Full backup format Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -4404,7 +4436,13 @@ export const useWalletStore = create<WalletState>()(
               const onchainSymbol = String(row.symbol || '').trim().toUpperCase()
               const registryName = String(info?.name || '').trim()
               const registrySymbol = String(info?.symbol || '').trim().toUpperCase()
-              const displayName = rowName || registryName || onchainSymbol || registrySymbol || tokenId
+              const displayName = resolveSolanaDisplayName({
+                mint: tokenId,
+                primaryName: registryName,
+                secondaryName: rowName,
+                primarySymbol: registrySymbol,
+                secondarySymbol: onchainSymbol
+              })
               if (solAssetType === 'spl-token') labels[assetKey] = displayName
               else if (solAssetType === 'spl-nft') labels[assetKey] = `${displayName} (SPL NFT)`
               else labels[assetKey] = `${displayName} (Compressed NFT)`
@@ -4923,7 +4961,12 @@ export const useWalletStore = create<WalletState>()(
           }
 
           return {
-            name: storedLabel || name || symbol || mint || normalizedAssetId,
+            name: resolveSolanaDisplayName({
+              mint,
+              primaryName: name,
+              secondaryName: storedLabel,
+              primarySymbol: symbol
+            }) || normalizedAssetId,
             amount: Number.isFinite(amountUi) ? amountUi : 0,
             units: 0,
             reissuable: false,

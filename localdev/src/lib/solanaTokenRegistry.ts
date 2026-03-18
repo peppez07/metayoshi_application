@@ -1,4 +1,5 @@
 import cbBtcLogo from '../coins/logos/cbbtc.png'
+import eurcLogo from '../coins/logos/eurc.png'
 import { createRequestCache } from './requestCache'
 
 export type SolanaTokenRegistryEntry = {
@@ -36,6 +37,13 @@ const STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES: Record<string, SolanaTokenRegistryEn
     name: 'Coinbase Wrapped BTC',
     decimals: 8,
     logoURI: cbBtcLogo
+  },
+  HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr: {
+    address: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr',
+    symbol: 'EURC',
+    name: 'Euro Coin',
+    decimals: 6,
+    logoURI: eurcLogo
   }
 }
 

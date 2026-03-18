@@ -12,8 +12,10 @@ import {
 import { Button } from '../../components/Button'
 import { useToast } from '../../components/Toast'
 import type { Network } from '../../coins/types'
+import { readCatalogTrackedEvmTokens } from '../../lib/catalogDb/repository'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
 import { isSwapSupportedNetwork } from '../../lib/swapEligibility'
+import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
 import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
@@ -29,6 +31,7 @@ import {
   type ServerSwapQuote,
   type WalletSwapRoutePreference
 } from '../../lib/swapClient'
+import { getTokenLogoForAsset } from '../../coins/tokenlogos'
 import { useWalletStore, type SendableItem } from '../../store/walletStore'
 
 function compactError(error: unknown): string {
@@ -105,19 +108,24 @@ type SwapAssetOption = {
   symbol: string
   label: string
   contractAddress?: string
+  logoUrl?: string
   amount?: string
+  rawAmount?: number
 }
 
 type TokenSelectorSide = 'from' | 'to'
+type AssetSelectorFilter = 'all' | 'tokens' | 'nfts'
 type LiveServerAssetMetadata = {
   assetId: string
   kind: 'native' | 'fungible' | 'wrapped' | 'nft'
   symbol: string
   label: string
   contractAddress?: string
+  logoUrl?: string
 }
 type LiveServerAssetIndex = {
   nativeAsset?: LiveServerAssetMetadata
+  byAssetId: Map<string, LiveServerAssetMetadata>
   byContract: Map<string, LiveServerAssetMetadata>
 }
 
@@ -138,10 +146,7 @@ const POPULAR_SWAP_SYMBOLS = [
   'SOL',
   'CRO'
 ]
-
-function createWalletAssetOption(item: SendableItem): SwapAssetOption {
-  return createWalletAssetOptionWithServer(item)
-}
+const SOLANA_SWAP_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 
 function normalizeContractAddress(value: unknown): string {
   const raw = String(value || '').trim().toLowerCase()
@@ -149,56 +154,66 @@ function normalizeContractAddress(value: unknown): string {
 }
 
 function buildLiveServerAssetIndex(items: ServerSwapCatalogAsset[]): LiveServerAssetIndex {
+  const byAssetId = new Map<string, LiveServerAssetMetadata>()
   const byContract = new Map<string, LiveServerAssetMetadata>()
   let nativeAsset: LiveServerAssetMetadata | undefined
 
   for (const item of items) {
+    const assetId = String(item.assetId || '').trim()
     const symbol = String(item.symbol || '').trim()
     const label = String(item.label || item.symbol || '').trim() || symbol || 'Asset'
     const kind = item.kind === 'native' || item.kind === 'wrapped' || item.kind === 'nft' ? item.kind : 'fungible'
+    const meta: LiveServerAssetMetadata = {
+      assetId: assetId || `native:${String(item.networkId || '').trim()}`,
+      kind,
+      symbol: symbol || 'NATIVE',
+      label,
+      contractAddress: normalizeContractAddress(item.contractAddress) || undefined,
+      logoUrl: getTokenLogoForAsset(symbol || label || assetId)
+    }
+    if (assetId) {
+      byAssetId.set(assetId.toLowerCase(), meta)
+    }
     if (kind === 'native') {
-      nativeAsset = {
-        assetId: String(item.assetId || '').trim() || `native:${String(item.networkId || '').trim()}`,
-        kind,
-        symbol: symbol || 'NATIVE',
-        label
-      }
+      nativeAsset = meta
       continue
     }
 
-    const contractAddress = normalizeContractAddress(item.contractAddress)
+    const contractAddress = meta.contractAddress
     if (!contractAddress || byContract.has(contractAddress)) continue
-    byContract.set(contractAddress, {
-      assetId: String(item.assetId || '').trim() || contractAddress,
-      kind,
-      symbol: symbol || contractAddress,
-      label,
-      contractAddress
-    })
+    byContract.set(contractAddress, meta)
   }
 
-  return { nativeAsset, byContract }
+  return { nativeAsset, byAssetId, byContract }
 }
 
 function createWalletAssetOptionWithServer(
   item: SendableItem,
   serverIndex?: LiveServerAssetIndex
 ): SwapAssetOption {
+  const rawAssetId = String(item.assetId || item.id || '').trim()
+  const exactMatch = rawAssetId ? serverIndex?.byAssetId.get(rawAssetId.toLowerCase()) : undefined
   const contractAddress = inferAssetContractAddress(item)
   const normalizedContract = normalizeContractAddress(contractAddress)
+  const contractMatch = item.kind === 'nft'
+    ? undefined
+    : (normalizedContract ? serverIndex?.byContract.get(normalizedContract) : undefined)
   const serverMatch = item.kind === 'native'
     ? serverIndex?.nativeAsset
-    : (normalizedContract ? serverIndex?.byContract.get(normalizedContract) : undefined)
+    : (exactMatch || contractMatch)
+  const fallbackLogo = item.logoUrl || getTokenLogoForAsset(item.symbol || item.label || rawAssetId || item.id)
 
   return {
     id: item.id,
     source: 'wallet',
-    assetId: String(serverMatch?.assetId || item.assetId || item.id || '').trim() || item.id,
+    assetId: String(serverMatch?.assetId || rawAssetId || item.id || '').trim() || item.id,
     kind: serverMatch?.kind || item.kind,
     symbol: serverMatch?.symbol || item.symbol,
     label: serverMatch?.label || item.label,
     contractAddress: contractAddress || serverMatch?.contractAddress,
-    amount: item.amount
+    logoUrl: serverMatch?.logoUrl || fallbackLogo,
+    amount: item.amount,
+    rawAmount: item.rawAmount
   }
 }
 
@@ -211,15 +226,138 @@ function createServerAssetOption(item: ServerSwapCatalogAsset): SwapAssetOption 
     kind: item.kind,
     symbol: item.symbol,
     label: item.label,
-    contractAddress
+    contractAddress,
+    logoUrl: item.logoUrl || getTokenLogoForAsset(item.symbol || item.label || item.assetId)
   }
 }
 
-function filterAssetOptions(options: SwapAssetOption[], query: string): SwapAssetOption[] {
-  const normalizedQuery = String(query || '').trim().toLowerCase()
-  if (!normalizedQuery) return options
+function resolveSwapCatalogModelId(network: Pick<Network, 'id' | 'runtimeModelId'> | null | undefined): string {
+  return String(network?.runtimeModelId || network?.id || '').trim().toLowerCase()
+}
 
-  return options.filter((item) => {
+function buildTrackedEvmSwapAssetId(network: Pick<Network, 'id' | 'runtimeModelId'>, address: string): string {
+  const modelId = resolveSwapCatalogModelId(network)
+  return modelId ? `erc20:${modelId}:${address.toLowerCase()}` : address.toLowerCase()
+}
+
+function buildTrackedSolanaSwapAssetId(address: string): string {
+  return `spl:solana:${String(address || '').trim()}`
+}
+
+function normalizeSwapCatalogContractReference(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const evm = normalizeContractAddress(raw)
+  if (evm) return evm
+  return SOLANA_SWAP_MINT_RE.test(raw) ? raw.toLowerCase() : ''
+}
+
+async function loadTrackedDestinationAssets(
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'coinType'> | null | undefined,
+  query: string
+): Promise<ServerSwapCatalogAsset[]> {
+  const normalizedQuery = String(query || '').trim().toLowerCase()
+  const out: ServerSwapCatalogAsset[] = []
+
+  if (!network) return []
+
+  if (network.coinType === 'EVM') {
+    const modelId = resolveSwapCatalogModelId(network)
+    if (!modelId) return []
+    const tracked = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
+
+    for (const token of tracked) {
+      const address = normalizeContractAddress(token.address)
+      if (!address) continue
+      const symbol = String(token.symbol || '').trim().toUpperCase() || address.slice(0, 6)
+      const label = symbol
+      if (normalizedQuery) {
+        const haystack = `${symbol} ${label} ${address}`.toLowerCase()
+        if (!haystack.includes(normalizedQuery)) continue
+      }
+      out.push({
+        networkId: String(network.id || '').trim(),
+        assetId: buildTrackedEvmSwapAssetId(network, address),
+        symbol,
+        label,
+        kind: 'fungible',
+        contractAddress: address,
+        decimals: Number.isFinite(token.decimals) ? token.decimals : 18
+      })
+    }
+  } else if (network.coinType === 'SOL') {
+    const registry = await getSolanaTokenRegistry().catch(() => ({}))
+    for (const token of Object.values(registry)) {
+      const address = String(token.address || '').trim()
+      if (!SOLANA_SWAP_MINT_RE.test(address)) continue
+      const symbol = String(token.symbol || '').trim().toUpperCase() || address.slice(0, 6)
+      const label = String(token.name || token.symbol || '').trim() || symbol
+      if (normalizedQuery) {
+        const haystack = `${symbol} ${label} ${address}`.toLowerCase()
+        if (!haystack.includes(normalizedQuery)) continue
+      }
+      out.push({
+        networkId: String(network.id || '').trim(),
+        assetId: buildTrackedSolanaSwapAssetId(address),
+        symbol,
+        label,
+        kind: 'fungible',
+        contractAddress: address,
+        logoUrl: String(token.logoURI || '').trim() || undefined,
+        decimals: Number.isFinite(token.decimals) ? token.decimals : 0
+      })
+    }
+  }
+
+  return out.sort((left, right) => {
+    const leftPopular = POPULAR_SWAP_SYMBOLS.includes(left.symbol.toUpperCase()) ? 1 : 0
+    const rightPopular = POPULAR_SWAP_SYMBOLS.includes(right.symbol.toUpperCase()) ? 1 : 0
+    if (leftPopular !== rightPopular) return rightPopular - leftPopular
+    const leftLabel = String(left.label || left.symbol || '').trim()
+    const rightLabel = String(right.label || right.symbol || '').trim()
+    const labelCompare = leftLabel.localeCompare(rightLabel)
+    if (labelCompare !== 0) return labelCompare
+    return left.symbol.localeCompare(right.symbol)
+  }).slice(0, normalizedQuery ? 180 : 120)
+}
+
+function mergeServerAssetLists(...groups: ServerSwapCatalogAsset[][]): ServerSwapCatalogAsset[] {
+  const out: ServerSwapCatalogAsset[] = []
+  const seen = new Set<string>()
+
+  for (const group of groups) {
+    for (const item of group) {
+      const networkId = String(item.networkId || '').trim().toLowerCase()
+      const assetId = String(item.assetId || '').trim().toLowerCase()
+      const contract = normalizeSwapCatalogContractReference(item.contractAddress)
+      const identity = item.kind === 'native'
+        ? `native:${networkId}:${assetId || item.symbol.toLowerCase()}`
+        : (contract ? `contract:${networkId}:${contract}` : `asset:${networkId}:${assetId}`)
+      if (!identity || seen.has(identity)) continue
+      seen.add(identity)
+      out.push(item)
+    }
+  }
+
+  return out
+}
+
+function resolveAssetFamily(item: Pick<SwapAssetOption, 'kind'>): AssetSelectorFilter {
+  return item.kind === 'nft' ? 'nfts' : 'tokens'
+}
+
+function filterAssetOptions(
+  options: SwapAssetOption[],
+  query: string,
+  filter: AssetSelectorFilter = 'all'
+): SwapAssetOption[] {
+  const normalizedQuery = String(query || '').trim().toLowerCase()
+  const familyFiltered = filter === 'all'
+    ? options
+    : options.filter((item) => resolveAssetFamily(item) === filter)
+  if (!normalizedQuery) return familyFiltered
+
+  return familyFiltered.filter((item) => {
     const symbol = String(item.symbol || '').trim().toLowerCase()
     const label = String(item.label || '').trim().toLowerCase()
     return symbol.includes(normalizedQuery) || label.includes(normalizedQuery)
@@ -236,6 +374,7 @@ function inferAssetContractAddress(item: SendableItem): string | undefined {
 function resolveSwapAssetIdentity(item: SwapAssetOption | null, networkId: string): string {
   if (!item) return ''
   if (item.kind === 'native') return `native:${networkId}`
+  if (item.kind === 'nft') return String(item.assetId || item.id || '').trim().toLowerCase()
   const contractAddress = String(item.contractAddress || '').trim().toLowerCase()
   if (contractAddress) return contractAddress
   return String(item.assetId || item.id || '').trim().toLowerCase()
@@ -259,7 +398,7 @@ async function withResolvedSwapAsset(
   asset: ServerSwapAssetRef | undefined
 ): Promise<ServerSwapAssetRef | undefined> {
   if (!asset) return undefined
-  if (network.coinType !== 'EVM' || asset.kind === 'native') return asset
+  if (network.coinType !== 'EVM' || asset.kind === 'native' || asset.kind === 'nft') return asset
   return {
     ...asset,
     decimals: await resolveServerSwapAssetDecimals(rpcConfig, asset)
@@ -329,6 +468,16 @@ function pickQuickAssets(
   return out
 }
 
+function countOptionsByFilter(options: SwapAssetOption[]) {
+  const tokenCount = options.filter((item) => resolveAssetFamily(item) === 'tokens').length
+  const nftCount = options.length - tokenCount
+  return {
+    all: options.length,
+    tokens: tokenCount,
+    nfts: nftCount
+  }
+}
+
 function buildQuotePreviewKey(input: {
   amount: string
   fromNetworkId: string
@@ -360,34 +509,12 @@ function DetailRow({ label, value, subdued = false }: { label: string; value: Re
   )
 }
 
-function AssetQuickPick({
-  active,
-  option,
-  onClick,
-  badge = 'Live route'
-}: {
-  active: boolean
-  option: SwapAssetOption
-  onClick: () => void
-  badge?: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-2xl border px-3 py-2 text-left transition-colors ${
-        active
-          ? 'border-orange-300 bg-gradient-to-br from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_28px_rgba(255,104,0,0.26)]'
-          : 'border-white/10 bg-white/5 text-slate-600 hover:border-white/20 hover:text-slate-900'
-      }`}
-    >
-      <div className="text-[10px] font-bold">{option.symbol}</div>
-      <div className={`mt-1 text-[9px] font-medium ${active ? 'text-white/80' : 'text-emerald-300'}`}>{badge}</div>
-    </button>
-  )
+function formatSelectorAmount(option: SwapAssetOption): string {
+  if (option.amount) return option.amount
+  return option.kind === 'nft' ? 'NFT' : 'Route'
 }
 
-function AssetListItem({
+function AssetLogoTile({
   active,
   option,
   onClick
@@ -400,31 +527,57 @@ function AssetListItem({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
+      className={`flex min-h-[104px] flex-col items-center justify-between rounded-[22px] border px-2.5 py-3 text-center transition-colors ${
         active
           ? 'border-orange-300 bg-gradient-to-br from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_28px_rgba(255,104,0,0.26)]'
           : 'border-white/10 bg-white/5 text-slate-700 hover:border-white/20 hover:bg-white/10'
       }`}
     >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">{option.symbol}</span>
-          <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] ${
-            active
-              ? 'border-white/20 bg-white/10 text-white/80'
-              : option.source === 'wallet'
-                ? 'border-white/10 bg-white/5 text-slate-400'
-                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+      <div className="flex w-full items-start justify-between gap-2">
+        <span className={`rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.14em] ${
+          active
+            ? 'border-white/20 bg-white/10 text-white/80'
+            : option.source === 'wallet'
+              ? 'border-white/10 bg-white/5 text-slate-400'
+              : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+        }`}>
+          {option.source === 'wallet' ? 'Pay' : 'Route'}
+        </span>
+        <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] ${
+          active
+            ? 'bg-white/12 text-white/80'
+            : option.kind === 'nft'
+              ? 'bg-fuchsia-500/10 text-fuchsia-300'
+              : 'bg-slate-900/5 text-slate-400'
+        }`}>
+          {option.kind === 'nft' ? 'NFT' : 'Token'}
+        </span>
+      </div>
+      <div className="mt-2 flex min-h-[42px] items-center justify-center">
+        {option.logoUrl ? (
+          <img
+            src={option.logoUrl}
+            alt={`${option.symbol} logo`}
+            className={`h-11 w-11 rounded-full object-cover shadow-sm ${active ? 'ring-2 ring-white/20' : 'ring-1 ring-white/10'}`}
+          />
+        ) : (
+          <div className={`flex h-11 w-11 items-center justify-center rounded-full text-xs font-black uppercase ${
+            active ? 'bg-white/14 text-white' : 'bg-slate-900/5 text-slate-600'
           }`}>
-            {option.source === 'wallet' ? 'Wallet' : 'Server'}
-          </span>
+            {String(option.symbol || option.label || '?').slice(0, 2)}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 min-w-0">
+        <div className="truncate text-[11px] font-black uppercase tracking-[0.08em]">
+          {option.symbol}
         </div>
-        <div className={`mt-1 truncate text-[11px] ${active ? 'text-white/75' : 'text-slate-400'}`}>
+        <div className={`mt-1 truncate text-[10px] ${active ? 'text-white/80' : 'text-slate-400'}`}>
           {option.label || option.symbol}
         </div>
       </div>
-      <div className={`text-right text-[11px] ${active ? 'text-white/85' : 'text-slate-400'}`}>
-        {option.amount ? option.amount : 'Select'}
+      <div className={`mt-2 text-[10px] font-semibold ${active ? 'text-white/88' : 'text-slate-500'}`}>
+        {formatSelectorAmount(option)}
       </div>
     </button>
   )
@@ -438,6 +591,8 @@ function TokenSelectorModal({
   quickPicks,
   options,
   selectedOptionId,
+  filter,
+  onFilterChange,
   emptyText,
   onSelect,
   onClose
@@ -449,10 +604,17 @@ function TokenSelectorModal({
   quickPicks: SwapAssetOption[]
   options: SwapAssetOption[]
   selectedOptionId?: string
+  filter: AssetSelectorFilter
+  onFilterChange: (value: AssetSelectorFilter) => void
   emptyText: string
   onSelect: (optionId: string) => void
   onClose: () => void
 }) {
+  const counts = useMemo(() => countOptionsByFilter(options), [options])
+  const visibleOptions = useMemo(
+    () => filterAssetOptions(options, query, filter).slice(0, 30),
+    [options, query, filter]
+  )
   return (
     <div className="fixed inset-0 z-[10000] bg-slate-950/45 backdrop-blur-sm" onClick={onClose}>
       <div
@@ -485,7 +647,7 @@ function TokenSelectorModal({
               <IoSearchOutline className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder={`Search token on ${networkName || 'this network'}`}
+                placeholder={`Search asset on ${networkName || 'this network'}`}
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
@@ -493,12 +655,33 @@ function TokenSelectorModal({
               />
             </div>
 
+            <div className="mt-4 flex flex-wrap gap-2">
+              {([
+                { id: 'all', label: 'All', count: counts.all },
+                { id: 'tokens', label: 'Tokens', count: counts.tokens },
+                { id: 'nfts', label: 'NFTs', count: counts.nfts }
+              ] as const).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => onFilterChange(tab.id)}
+                  className={`rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] transition-colors ${
+                    filter === tab.id
+                      ? 'border-orange-300 bg-gradient-to-r from-[#ff9a4f] to-[#ff6900] text-white'
+                      : 'border-white/10 bg-white/5 text-slate-500 hover:border-white/20 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label} {tab.count > 0 ? `(${tab.count})` : ''}
+                </button>
+              ))}
+            </div>
+
             {quickPicks.length > 0 ? (
               <div className="mt-4 space-y-2">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top tokens</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick picks</div>
+                <div className="grid grid-cols-3 gap-2">
                   {quickPicks.map((item) => (
-                    <AssetQuickPick
+                    <AssetLogoTile
                       key={`selector-quick-${item.id}`}
                       active={item.id === selectedOptionId}
                       option={item}
@@ -511,13 +694,13 @@ function TokenSelectorModal({
 
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Token list</div>
-                <div className="text-[11px] text-slate-500">{options.length} shown</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Asset list</div>
+                <div className="text-[11px] text-slate-500">{visibleOptions.length} shown</div>
               </div>
-              {options.length > 0 ? (
-                <div className="space-y-2">
-                  {options.map((item) => (
-                    <AssetListItem
+              {visibleOptions.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {visibleOptions.map((item) => (
+                    <AssetLogoTile
                       key={`selector-option-${item.id}`}
                       active={item.id === selectedOptionId}
                       option={item}
@@ -552,6 +735,7 @@ const Swap: React.FC = () => {
     ensureNetworkAddress,
     addActivity,
     refreshActiveBalance,
+    fetchNetworkAssets,
     getSendableItems,
     sendPreparedEvmTransaction,
     resolveBackendAuthAddress,
@@ -571,6 +755,8 @@ const Swap: React.FC = () => {
   const [toAssetId, setToAssetId] = useState('')
   const [sourceQuery, setSourceQuery] = useState('')
   const [destinationQuery, setDestinationQuery] = useState('')
+  const [sourceSelectorFilter, setSourceSelectorFilter] = useState<AssetSelectorFilter>('all')
+  const [destinationSelectorFilter, setDestinationSelectorFilter] = useState<AssetSelectorFilter>('all')
   const [sourceServerAssets, setSourceServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [isSearchingDestinationAssets, setIsSearchingDestinationAssets] = useState(false)
@@ -610,7 +796,7 @@ const Swap: React.FC = () => {
       networkId: fromNetwork.id,
       includeHidden: false,
       includeZeroBalance: false
-    }).filter((item) => item.kind !== 'nft')
+    })
   }, [activeAccount?.id, fromNetwork, getSendableItems])
 
   const sourceServerIndex = useMemo(
@@ -690,31 +876,31 @@ const Swap: React.FC = () => {
   }), [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference, routePreference])
 
   const fromQuickPicks = useMemo(
-    () => pickQuickAssets(fromOptions, fromNetwork, fromItem),
-    [fromOptions, fromNetwork, fromItem]
-  )
-  const visibleFromOptions = useMemo(
-    () => filterAssetOptions(fromOptions, sourceQuery).slice(0, 24),
-    [fromOptions, sourceQuery]
+    () => pickQuickAssets(
+      filterAssetOptions(fromOptions, '', sourceSelectorFilter),
+      fromNetwork,
+      resolveAssetFamily(fromItem || { kind: 'fungible' }) === sourceSelectorFilter || sourceSelectorFilter === 'all' ? fromItem : null
+    ),
+    [fromOptions, fromNetwork, fromItem, sourceSelectorFilter]
   )
   const toQuickPicks = useMemo(
-    () => pickQuickAssets(toOptions, toNetwork, toItem),
-    [toOptions, toNetwork, toItem]
-  )
-  const visibleToOptions = useMemo(
-    () => filterAssetOptions(toOptions, destinationQuery).slice(0, 32),
-    [toOptions, destinationQuery]
+    () => pickQuickAssets(
+      filterAssetOptions(toOptions, '', destinationSelectorFilter),
+      toNetwork,
+      resolveAssetFamily(toItem || { kind: 'fungible' }) === destinationSelectorFilter || destinationSelectorFilter === 'all' ? toItem : null
+    ),
+    [toOptions, toNetwork, toItem, destinationSelectorFilter]
   )
   const sourceSelectorEmptyText = fromOptions.length > 0
     ? `No sell tokens match "${sourceQuery}". Try a symbol like ${fromOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
     : 'No wallet balances are available to sell on this network yet.'
   const destinationSelectorEmptyText = isSearchingDestinationAssets
-    ? 'Searching the live MetaYoshi server catalog...'
+    ? 'Searching the live MetaYoshi server catalog and ecosystem assets...'
     : destinationSearchError
       ? destinationSearchError
       : (toOptions.length > 0
     ? `No receive tokens match "${destinationQuery}". Try a symbol like ${toOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
-    : 'The MetaYoshi server did not return any receive tokens for this network.')
+    : 'No receive tokens were found in the live server catalog or the tracked ecosystem list for this network.')
 
   useEffect(() => {
     if (!enabledNetworks.length) return
@@ -788,6 +974,23 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
+    if (!activeAccount?.id || !fromNetwork?.id || activeNetworkId !== fromNetwork.id) return
+
+    void (async () => {
+      try {
+        await refreshActiveBalance({ fast: false })
+        if (cancelled) return
+        await fetchNetworkAssets({ force: true })
+      } catch (error) {
+        if (!cancelled) console.warn('Failed to refresh swap sell-side balances', error)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [activeAccount?.id, fromNetwork?.id, activeNetworkId, refreshActiveBalance, fetchNetworkAssets])
+
+  useEffect(() => {
+    let cancelled = false
     if (!toNetwork?.id || !isSwapSupportedNetwork(toNetwork)) {
       setDestinationServerAssets([])
       setDestinationSearchError('')
@@ -799,17 +1002,22 @@ const Swap: React.FC = () => {
       setIsSearchingDestinationAssets(true)
       setDestinationSearchError('')
       try {
-        const rows = await searchServerSwapAssets(toNetwork, {
-          query: deferredDestinationQuery,
-          limit: deferredDestinationQuery ? 40 : 24
-        })
+        const [serverRows, ecosystemRows] = await Promise.all([
+          searchServerSwapAssets(toNetwork, {
+            query: deferredDestinationQuery,
+            limit: 50
+          }),
+          loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
+        ])
         if (cancelled) return
-        setDestinationServerAssets(rows)
+        setDestinationServerAssets(mergeServerAssetLists(serverRows, ecosystemRows))
       } catch (error) {
         if (cancelled) return
         console.warn('Failed to load destination swap assets from server', error)
-        setDestinationServerAssets([])
-        setDestinationSearchError(formatSwapUiError(error))
+        const ecosystemRows = await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery).catch(() => [])
+        if (cancelled) return
+        setDestinationServerAssets(mergeServerAssetLists(ecosystemRows))
+        setDestinationSearchError(ecosystemRows.length > 0 ? '' : formatSwapUiError(error))
       } finally {
         if (!cancelled) setIsSearchingDestinationAssets(false)
       }
@@ -1228,13 +1436,12 @@ const Swap: React.FC = () => {
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
                       <span className="text-[10px] text-slate-500">Wallet balances</span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {fromQuickPicks.map((item) => (
-                        <AssetQuickPick
+                        <AssetLogoTile
                           key={`from-quick-${item.id}`}
                           active={item.id === fromAssetId}
                           option={item}
-                          badge="Wallet asset"
                           onClick={() => setFromAssetId(item.id)}
                         />
                       ))}
@@ -1292,13 +1499,12 @@ const Swap: React.FC = () => {
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
                       <span className="text-[10px] text-slate-500">Live server catalog</span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {toQuickPicks.map((item) => (
-                        <AssetQuickPick
+                        <AssetLogoTile
                           key={`to-quick-${item.id}`}
                           active={item.id === toAssetId}
                           option={item}
-                          badge="Server token"
                           onClick={() => setToAssetId(item.id)}
                         />
                       ))}
@@ -1487,8 +1693,10 @@ const Swap: React.FC = () => {
           query={sourceQuery}
           onQueryChange={setSourceQuery}
           quickPicks={fromQuickPicks}
-          options={visibleFromOptions}
+          options={fromOptions}
           selectedOptionId={fromAssetId}
+          filter={sourceSelectorFilter}
+          onFilterChange={setSourceSelectorFilter}
           emptyText={sourceSelectorEmptyText}
           onSelect={(optionId) => {
             setFromAssetId(optionId)
@@ -1505,8 +1713,10 @@ const Swap: React.FC = () => {
           query={destinationQuery}
           onQueryChange={setDestinationQuery}
           quickPicks={toQuickPicks}
-          options={visibleToOptions}
+          options={toOptions}
           selectedOptionId={toAssetId}
+          filter={destinationSelectorFilter}
+          onFilterChange={setDestinationSelectorFilter}
           emptyText={destinationSelectorEmptyText}
           onSelect={(optionId) => {
             setToAssetId(optionId)
