@@ -12,28 +12,17 @@ import {
 import { Button } from '../../components/Button'
 import { useToast } from '../../components/Toast'
 import type { Network } from '../../coins/types'
-import type { ServerCoinCatalogItem } from '../../coins/serverRegistry/types'
-import { searchMetayoshiServerCatalogAssets } from '../../lib/catalogDb/repository'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-import {
-  buildSwappableCatalogIdentitySet,
-  isCatalogAssetSwappable,
-  isSwapSupportedNetwork,
-  isWalletAssetSwappable
-} from '../../lib/swapEligibility'
-import {
-  hasSwapMatrixRoute,
-  getSwapMatrixAllowedDestinationSymbols,
-  getSwapMatrixAllowedSourceSymbols
-} from '../../lib/swapSupportMatrix'
+import { isSwapSupportedNetwork } from '../../lib/swapEligibility'
 import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
   requestServerSwapQuote,
-  resolveWalletSwapReadiness,
   resolveServerSwapAssetDecimals,
+  searchServerSwapAssets,
   submitServerSwap,
+  type ServerSwapCatalogAsset,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
@@ -110,9 +99,9 @@ function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string)
 
 type SwapAssetOption = {
   id: string
-  source: 'wallet' | 'catalog'
+  source: 'wallet' | 'server'
   assetId: string
-  kind: 'native' | 'fungible' | 'nft'
+  kind: 'native' | 'fungible' | 'wrapped' | 'nft'
   symbol: string
   label: string
   contractAddress?: string
@@ -120,14 +109,16 @@ type SwapAssetOption = {
 }
 
 type TokenSelectorSide = 'from' | 'to'
-type CatalogAssetMetadata = {
+type LiveServerAssetMetadata = {
+  assetId: string
+  kind: 'native' | 'fungible' | 'wrapped' | 'nft'
   symbol: string
   label: string
   contractAddress?: string
 }
-type CatalogAssetIndex = {
-  nativeAsset?: CatalogAssetMetadata
-  byContract: Map<string, CatalogAssetMetadata>
+type LiveServerAssetIndex = {
+  nativeAsset?: LiveServerAssetMetadata
+  byContract: Map<string, LiveServerAssetMetadata>
 }
 
 const POPULAR_SWAP_SYMBOLS = [
@@ -149,7 +140,7 @@ const POPULAR_SWAP_SYMBOLS = [
 ]
 
 function createWalletAssetOption(item: SendableItem): SwapAssetOption {
-  return createWalletAssetOptionWithCatalog(item)
+  return createWalletAssetOptionWithServer(item)
 }
 
 function normalizeContractAddress(value: unknown): string {
@@ -157,15 +148,20 @@ function normalizeContractAddress(value: unknown): string {
   return /^0x[a-f0-9]{40}$/.test(raw) ? raw : ''
 }
 
-function buildCatalogAssetIndex(items: ServerCoinCatalogItem[]): CatalogAssetIndex {
-  const byContract = new Map<string, CatalogAssetMetadata>()
-  let nativeAsset: CatalogAssetMetadata | undefined
+function buildLiveServerAssetIndex(items: ServerSwapCatalogAsset[]): LiveServerAssetIndex {
+  const byContract = new Map<string, LiveServerAssetMetadata>()
+  let nativeAsset: LiveServerAssetMetadata | undefined
 
   for (const item of items) {
-    if (item.kind === 'main') {
+    const symbol = String(item.symbol || '').trim()
+    const label = String(item.label || item.symbol || '').trim() || symbol || 'Asset'
+    const kind = item.kind === 'native' || item.kind === 'wrapped' || item.kind === 'nft' ? item.kind : 'fungible'
+    if (kind === 'native') {
       nativeAsset = {
-        symbol: String(item.symbol || '').trim() || 'NATIVE',
-        label: String(item.name || item.symbol || '').trim() || 'Native'
+        assetId: String(item.assetId || '').trim() || `native:${String(item.networkId || '').trim()}`,
+        kind,
+        symbol: symbol || 'NATIVE',
+        label
       }
       continue
     }
@@ -173,8 +169,10 @@ function buildCatalogAssetIndex(items: ServerCoinCatalogItem[]): CatalogAssetInd
     const contractAddress = normalizeContractAddress(item.contractAddress)
     if (!contractAddress || byContract.has(contractAddress)) continue
     byContract.set(contractAddress, {
-      symbol: String(item.symbol || '').trim() || contractAddress,
-      label: String(item.name || item.symbol || '').trim() || String(item.symbol || '').trim() || contractAddress,
+      assetId: String(item.assetId || '').trim() || contractAddress,
+      kind,
+      symbol: symbol || contractAddress,
+      label,
       contractAddress
     })
   }
@@ -182,40 +180,37 @@ function buildCatalogAssetIndex(items: ServerCoinCatalogItem[]): CatalogAssetInd
   return { nativeAsset, byContract }
 }
 
-function createWalletAssetOptionWithCatalog(
+function createWalletAssetOptionWithServer(
   item: SendableItem,
-  catalogIndex?: CatalogAssetIndex
+  serverIndex?: LiveServerAssetIndex
 ): SwapAssetOption {
   const contractAddress = inferAssetContractAddress(item)
   const normalizedContract = normalizeContractAddress(contractAddress)
-  const catalogMatch = item.kind === 'native'
-    ? catalogIndex?.nativeAsset
-    : (normalizedContract ? catalogIndex?.byContract.get(normalizedContract) : undefined)
+  const serverMatch = item.kind === 'native'
+    ? serverIndex?.nativeAsset
+    : (normalizedContract ? serverIndex?.byContract.get(normalizedContract) : undefined)
 
   return {
     id: item.id,
     source: 'wallet',
-    assetId: String(item.assetId || item.id || '').trim() || item.id,
-    kind: item.kind,
-    symbol: catalogMatch?.symbol || item.symbol,
-    label: catalogMatch?.label || item.label,
-    contractAddress: contractAddress || catalogMatch?.contractAddress,
+    assetId: String(serverMatch?.assetId || item.assetId || item.id || '').trim() || item.id,
+    kind: serverMatch?.kind || item.kind,
+    symbol: serverMatch?.symbol || item.symbol,
+    label: serverMatch?.label || item.label,
+    contractAddress: contractAddress || serverMatch?.contractAddress,
     amount: item.amount
   }
 }
 
-function createCatalogAssetOption(item: ServerCoinCatalogItem, networkId: string): SwapAssetOption {
+function createServerAssetOption(item: ServerSwapCatalogAsset): SwapAssetOption {
   const contractAddress = String(item.contractAddress || '').trim() || undefined
-  const assetId = item.kind === 'main'
-    ? `native:${networkId}`
-    : (contractAddress || String(item.coinId || '').trim() || `catalog:${networkId}:${item.symbol}`)
   return {
-    id: `catalog:${networkId}:${String(item.coinId || item.symbol || assetId).trim()}:${contractAddress || item.kind}`,
-    source: 'catalog',
-    assetId,
-    kind: item.kind === 'main' ? 'native' : 'fungible',
+    id: `server:${String(item.networkId || '').trim()}:${String(item.assetId || '').trim()}`,
+    source: 'server',
+    assetId: String(item.assetId || '').trim(),
+    kind: item.kind,
     symbol: item.symbol,
-    label: item.name,
+    label: item.label,
     contractAddress
   }
 }
@@ -246,27 +241,12 @@ function resolveSwapAssetIdentity(item: SwapAssetOption | null, networkId: strin
   return String(item.assetId || item.id || '').trim().toLowerCase()
 }
 
-function mergeAssetOptions(primary: SwapAssetOption[], extra: SwapAssetOption[]): SwapAssetOption[] {
-  const out: SwapAssetOption[] = []
-  const seen = new Set<string>()
-  for (const item of [...primary, ...extra]) {
-    const contractAddress = String(item.contractAddress || '').trim().toLowerCase()
-    const key = item.kind === 'native'
-      ? `native::${item.symbol.toLowerCase()}`
-      : (contractAddress || String(item.assetId || '').trim().toLowerCase() || item.id.toLowerCase())
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(item)
-  }
-  return out
-}
-
 function toServerSwapAsset(item: SwapAssetOption | null, networkId: string): ServerSwapAssetRef | undefined {
   if (!item) return undefined
   const assetId = String(item.assetId || '').trim() || (item.kind === 'native' ? `native:${networkId}` : item.id)
   return {
     assetId,
-    kind: item.kind === 'native' ? 'native' : 'fungible',
+    kind: item.kind,
     symbol: item.symbol,
     label: item.label,
     contractAddress: item.kind === 'native' ? undefined : (String(item.contractAddress || '').trim() || undefined)
@@ -436,7 +416,7 @@ function AssetListItem({
                 ? 'border-white/10 bg-white/5 text-slate-400'
                 : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
           }`}>
-            {option.source === 'wallet' ? 'Wallet' : 'Catalog'}
+            {option.source === 'wallet' ? 'Wallet' : 'Server'}
           </span>
         </div>
         <div className={`mt-1 truncate text-[11px] ${active ? 'text-white/75' : 'text-slate-400'}`}>
@@ -563,13 +543,11 @@ const Swap: React.FC = () => {
   const { showToast } = useToast()
   const finalizedExecutionsRef = useRef<Set<string>>(new Set())
   const latestQuoteRequestRef = useRef(0)
-  const catalogSyncPromiseRef = useRef<Promise<void> | null>(null)
   const {
     accounts,
     activeAccountId,
     networks,
     disabledNetworkIds,
-    catalogQueryNonce,
     activeNetworkId,
     ensureNetworkAddress,
     addActivity,
@@ -577,8 +555,7 @@ const Swap: React.FC = () => {
     getSendableItems,
     sendPreparedEvmTransaction,
     resolveBackendAuthAddress,
-    signBackendAuthMessage,
-    syncNetworksFromServer
+    signBackendAuthMessage
   } = useWalletStore()
 
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
@@ -594,9 +571,10 @@ const Swap: React.FC = () => {
   const [toAssetId, setToAssetId] = useState('')
   const [sourceQuery, setSourceQuery] = useState('')
   const [destinationQuery, setDestinationQuery] = useState('')
-  const [catalogSourceItems, setCatalogSourceItems] = useState<ServerCoinCatalogItem[]>([])
-  const [catalogDestinationRows, setCatalogDestinationRows] = useState<ServerCoinCatalogItem[]>([])
-  const [catalogDestinationItems, setCatalogDestinationItems] = useState<SwapAssetOption[]>([])
+  const [sourceServerAssets, setSourceServerAssets] = useState<ServerSwapCatalogAsset[]>([])
+  const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
+  const [isSearchingDestinationAssets, setIsSearchingDestinationAssets] = useState(false)
+  const [destinationSearchError, setDestinationSearchError] = useState('')
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
   const [routePreference, setRoutePreference] = useState<WalletSwapRoutePreference>('best-value')
@@ -607,7 +585,6 @@ const Swap: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorText, setErrorText] = useState('')
 
-  const deferredSourceQuery = useDeferredValue(sourceQuery)
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
 
   const sourceNetworkOptions = useMemo(
@@ -628,83 +605,60 @@ const Swap: React.FC = () => {
     || null
   const fromItems = useMemo(() => {
     if (!activeAccount?.id || !fromNetwork?.id) return []
-    const swappableCatalogIds = buildSwappableCatalogIdentitySet(catalogSourceItems, fromNetwork.id)
     return getSendableItems({
       accountId: activeAccount.id,
       networkId: fromNetwork.id,
       includeHidden: false,
       includeZeroBalance: false
-    }).filter((item) => isWalletAssetSwappable(item, fromNetwork, swappableCatalogIds))
-  }, [activeAccount?.id, catalogSourceItems, fromNetwork, getSendableItems])
+    }).filter((item) => item.kind !== 'nft')
+  }, [activeAccount?.id, fromNetwork, getSendableItems])
 
-  const walletToItems = useMemo(() => {
-    if (!activeAccount?.id || !toNetwork?.id) return []
-    const swappableCatalogIds = buildSwappableCatalogIdentitySet(catalogDestinationRows, toNetwork.id)
-    return getSendableItems({
-      accountId: activeAccount.id,
-      networkId: toNetwork.id,
-      includeHidden: true,
-      includeZeroBalance: true
-    }).filter((item) => isWalletAssetSwappable(item, toNetwork, swappableCatalogIds))
-  }, [activeAccount?.id, catalogDestinationRows, toNetwork, getSendableItems])
-
-  const sourceCatalogIndex = useMemo(
-    () => buildCatalogAssetIndex(catalogSourceItems),
-    [catalogSourceItems]
-  )
-  const destinationCatalogIndex = useMemo(
-    () => buildCatalogAssetIndex(catalogDestinationRows),
-    [catalogDestinationRows]
+  const sourceServerIndex = useMemo(
+    () => buildLiveServerAssetIndex(sourceServerAssets),
+    [sourceServerAssets]
   )
 
-  const rawFromOptions = useMemo(
-    () => mergeAssetOptions(
-      fromItems.map((item) => createWalletAssetOptionWithCatalog(item, sourceCatalogIndex)),
-      catalogSourceItems.map((item) => createCatalogAssetOption(item, fromNetwork?.id || 'source-network'))
-    ),
-    [fromItems, catalogSourceItems, fromNetwork?.id, sourceCatalogIndex]
+  const fromOptions = useMemo(
+    () => fromItems.map((item) => createWalletAssetOptionWithServer(item, sourceServerIndex)),
+    [fromItems, sourceServerIndex]
   )
-  const rawToOptions = useMemo(
-    () => mergeAssetOptions(
-      walletToItems.map((item) => createWalletAssetOptionWithCatalog(item, destinationCatalogIndex)),
-      catalogDestinationItems
-    ),
-    [walletToItems, catalogDestinationItems, destinationCatalogIndex]
-  )
-
-  const allowedSourceSymbols = useMemo(
-    () => getSwapMatrixAllowedSourceSymbols(fromNetwork?.id, toNetwork?.id),
-    [fromNetwork?.id, toNetwork?.id]
-  )
-  const allowedSourceSymbolList = useMemo(() => [...allowedSourceSymbols].sort(), [allowedSourceSymbols])
-  const fromOptions = rawFromOptions
   const fromItem = fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
-  const allowedDestinationSymbols = useMemo(
-    () => getSwapMatrixAllowedDestinationSymbols(fromNetwork?.id, toNetwork?.id, fromItem?.symbol),
-    [fromNetwork?.id, toNetwork?.id, fromItem?.symbol]
+
+  const toOptions = useMemo(
+    () => destinationServerAssets.map((item) => createServerAssetOption(item)),
+    [destinationServerAssets]
   )
-  const allowedDestinationSymbolList = useMemo(() => [...allowedDestinationSymbols].sort(), [allowedDestinationSymbols])
-  const toOptions = rawToOptions
   const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
-  const swapReadiness = resolveWalletSwapReadiness(fromNetwork, toNetwork, fromItem?.symbol, toItem?.symbol)
-  const networkPairInMatrix = useMemo(
-    () => hasSwapMatrixRoute(fromNetwork?.id, undefined, toNetwork?.id, undefined),
-    [fromNetwork?.id, toNetwork?.id]
-  )
-  const exactPairInMatrix = useMemo(
-    () => hasSwapMatrixRoute(fromNetwork?.id, fromItem?.symbol, toNetwork?.id, toItem?.symbol),
-    [fromNetwork?.id, fromItem?.symbol, toNetwork?.id, toItem?.symbol]
-  )
-  const matrixStatusLabel = exactPairInMatrix
-    ? 'Live route'
-    : networkPairInMatrix
-      ? 'Not in matrix'
-      : 'Network pair not live'
-  const matrixStatusDetail = exactPairInMatrix
-    ? 'This network and token pair is listed in the live swap matrix.'
-    : networkPairInMatrix
-      ? 'These networks are supported, but the selected token combination is outside the current live matrix.'
-      : 'This source and destination network combination is not listed in the current live matrix.'
+  const swapReadiness = useMemo(() => {
+    if (!fromNetwork || !toNetwork) {
+      return {
+        state: 'unsupported' as const,
+        tone: 'slate' as const,
+        engineLabel: 'Select networks',
+        title: 'Choose networks to start swap search',
+        detail: 'The wallet needs both source and destination networks before it can query the MetaYoshi server.',
+        canRequestQuotes: false
+      }
+    }
+    if (!isSwapSupportedNetwork(fromNetwork) || !isSwapSupportedNetwork(toNetwork)) {
+      return {
+        state: 'unsupported' as const,
+        tone: 'slate' as const,
+        engineLabel: 'Not supported',
+        title: 'This network is outside the current swap scope',
+        detail: 'Only networks that expose the MetaYoshi swap catalog can request quotes in this wallet build.',
+        canRequestQuotes: false
+      }
+    }
+    return {
+      state: 'active' as const,
+      tone: 'emerald' as const,
+      engineLabel: 'Live server routing',
+      title: 'Server-backed swap search is available',
+      detail: 'Sell tokens come from wallet balances. Receive tokens and route availability come from the MetaYoshi server.',
+      canRequestQuotes: true
+    }
+  }, [fromNetwork, toNetwork])
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
     fromNetwork?.id
@@ -735,25 +689,12 @@ const Swap: React.FC = () => {
     routePreference
   }), [fromAmount, fromNetworkId, toNetworkId, fromAssetId, toAssetId, slippagePct, sponsorPreference, routePreference])
 
-  async function ensureCatalogIsSynced(): Promise<void> {
-    if (!catalogSyncPromiseRef.current) {
-      catalogSyncPromiseRef.current = syncNetworksFromServer()
-        .catch((error) => {
-          console.warn('Failed to sync swap catalog from server', error)
-        })
-        .finally(() => {
-          catalogSyncPromiseRef.current = null
-        })
-    }
-    await catalogSyncPromiseRef.current
-  }
-
   const fromQuickPicks = useMemo(
     () => pickQuickAssets(fromOptions, fromNetwork, fromItem),
     [fromOptions, fromNetwork, fromItem]
   )
   const visibleFromOptions = useMemo(
-    () => filterAssetOptions(fromOptions, sourceQuery).slice(0, 8),
+    () => filterAssetOptions(fromOptions, sourceQuery).slice(0, 24),
     [fromOptions, sourceQuery]
   )
   const toQuickPicks = useMemo(
@@ -761,19 +702,19 @@ const Swap: React.FC = () => {
     [toOptions, toNetwork, toItem]
   )
   const visibleToOptions = useMemo(
-    () => filterAssetOptions(toOptions, destinationQuery).slice(0, 8),
+    () => filterAssetOptions(toOptions, destinationQuery).slice(0, 32),
     [toOptions, destinationQuery]
   )
   const sourceSelectorEmptyText = fromOptions.length > 0
     ? `No sell tokens match "${sourceQuery}". Try a symbol like ${fromOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
-    : allowedSourceSymbolList.length > 0
-      ? `No tokens are loaded for this source network yet. Live matrix sell symbols include: ${allowedSourceSymbolList.join(', ')}.`
-      : 'No wallet or catalog tokens are loaded for this source network yet.'
-  const destinationSelectorEmptyText = toOptions.length > 0
+    : 'No wallet balances are available to sell on this network yet.'
+  const destinationSelectorEmptyText = isSearchingDestinationAssets
+    ? 'Searching the live MetaYoshi server catalog...'
+    : destinationSearchError
+      ? destinationSearchError
+      : (toOptions.length > 0
     ? `No receive tokens match "${destinationQuery}". Try a symbol like ${toOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
-    : allowedDestinationSymbolList.length > 0
-      ? `No tokens are loaded for this destination network yet. Live matrix receive symbols include: ${allowedDestinationSymbolList.join(', ')}.`
-      : 'No wallet or catalog tokens are loaded for this destination network yet.'
+    : 'The MetaYoshi server did not return any receive tokens for this network.')
 
   useEffect(() => {
     if (!enabledNetworks.length) return
@@ -826,86 +767,56 @@ const Swap: React.FC = () => {
   useEffect(() => {
     let cancelled = false
     if (!fromNetwork?.id || !isSwapSupportedNetwork(fromNetwork)) {
-      setCatalogSourceItems([])
+      setSourceServerAssets([])
       return
     }
 
     void (async () => {
       try {
-        const runtimeModelId = String(fromNetwork.runtimeModelId || '').trim() || null
-        let rows = await searchMetayoshiServerCatalogAssets({
-          query: deferredSourceQuery,
-          networkId: fromNetwork.id,
-          runtimeModelId,
-          includeMain: true,
-          maxResults: deferredSourceQuery ? 24 : 12
-        })
-        if (rows.length === 0) {
-          await ensureCatalogIsSynced()
-          if (cancelled) return
-          rows = await searchMetayoshiServerCatalogAssets({
-            query: deferredSourceQuery,
-            networkId: fromNetwork.id,
-            runtimeModelId,
-            includeMain: true,
-            maxResults: deferredSourceQuery ? 24 : 12
-          })
-        }
+        const rows = await searchServerSwapAssets(fromNetwork, { limit: 80 })
         if (cancelled) return
-        setCatalogSourceItems(rows.filter((item) => isCatalogAssetSwappable(item, fromNetwork)))
+        setSourceServerAssets(rows)
       } catch (error) {
         if (cancelled) return
-        console.warn('Failed to load source catalog assets', error)
-        setCatalogSourceItems([])
+        console.warn('Failed to load source swap assets from server', error)
+        setSourceServerAssets([])
       }
     })()
 
     return () => { cancelled = true }
-  }, [catalogQueryNonce, deferredSourceQuery, fromNetwork?.id, fromNetwork?.runtimeModelId])
+  }, [fromNetwork])
 
   useEffect(() => {
     let cancelled = false
     if (!toNetwork?.id || !isSwapSupportedNetwork(toNetwork)) {
-      setCatalogDestinationRows([])
-      setCatalogDestinationItems([])
+      setDestinationServerAssets([])
+      setDestinationSearchError('')
+      setIsSearchingDestinationAssets(false)
       return
     }
 
     void (async () => {
+      setIsSearchingDestinationAssets(true)
+      setDestinationSearchError('')
       try {
-        const runtimeModelId = String(toNetwork.runtimeModelId || '').trim() || null
-        let rows = await searchMetayoshiServerCatalogAssets({
+        const rows = await searchServerSwapAssets(toNetwork, {
           query: deferredDestinationQuery,
-          networkId: toNetwork.id,
-          runtimeModelId,
-          includeMain: true,
-          maxResults: deferredDestinationQuery ? 24 : 12
+          limit: deferredDestinationQuery ? 40 : 24
         })
-        if (rows.length === 0) {
-          await ensureCatalogIsSynced()
-          if (cancelled) return
-          rows = await searchMetayoshiServerCatalogAssets({
-            query: deferredDestinationQuery,
-            networkId: toNetwork.id,
-            runtimeModelId,
-            includeMain: true,
-            maxResults: deferredDestinationQuery ? 24 : 12
-          })
-        }
         if (cancelled) return
-        const filtered = rows.filter((item) => isCatalogAssetSwappable(item, toNetwork))
-        setCatalogDestinationRows(filtered)
-        setCatalogDestinationItems(filtered.map((item) => createCatalogAssetOption(item, toNetwork.id)))
+        setDestinationServerAssets(rows)
       } catch (error) {
         if (cancelled) return
-        console.warn('Failed to load destination catalog assets', error)
-        setCatalogDestinationRows([])
-        setCatalogDestinationItems([])
+        console.warn('Failed to load destination swap assets from server', error)
+        setDestinationServerAssets([])
+        setDestinationSearchError(formatSwapUiError(error))
+      } finally {
+        if (!cancelled) setIsSearchingDestinationAssets(false)
       }
     })()
 
     return () => { cancelled = true }
-  }, [catalogQueryNonce, deferredDestinationQuery, toNetwork?.id, toNetwork?.runtimeModelId])
+  }, [deferredDestinationQuery, toNetwork])
 
   useEffect(() => {
     setQuote(null)
@@ -1187,23 +1098,26 @@ const Swap: React.FC = () => {
       ? 'Quote ready'
       : isQuoting
         ? 'Requesting quote'
-        : swapReadiness.state === 'planned'
-          ? 'Planned'
-          : swapUnavailable
+        : swapUnavailable
             ? 'Unavailable'
-          : 'Idle'
+            : 'Idle'
   const quoteStatusText = quote
     ? 'Quote ready. Review the received amount, fees, and expiry before signing.'
-    : swapReadiness.state === 'planned'
+    : swapUnavailable
         ? swapReadiness.detail
-        : swapUnavailable
-        ? `Not in matrix. ${matrixStatusDetail}`
         : (isQuoting
         ? 'Requesting a quote from the MetaYoshi server.'
-        : `${matrixStatusLabel}. Select the pair and request a quote to preview the receive amount.`)
+        : 'Search the live server catalog for the receive token, then request a quote to preview the amount.')
   const rateText = quote
     ? `1 ${quote.sourceSymbol || fromItem?.symbol || fromNetwork?.symbol || 'FROM'} = ${formatQuoteRate(quote)} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || 'TO'}`
     : 'Rate appears here after the server returns a quote'
+  const summaryStatusText = swapReadiness.state === 'active'
+    ? 'Server-backed search'
+    : 'Selection incomplete'
+  const summaryRouteText = `${fromNetwork?.name || 'Source'} -> ${toNetwork?.name || 'Destination'}`
+  const summaryAmountText = quote
+    ? `${quote.sourceAmount} ${quote.sourceSymbol || fromItem?.symbol} -> ${quote.destinationAmount} ${quote.destinationSymbol || toItem?.symbol}`
+    : null
 
   return (
     <div className="swap-dark-page flex h-full flex-col bg-[#f5f7fb] text-slate-900">
@@ -1312,7 +1226,7 @@ const Swap: React.FC = () => {
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
-                      <span className="text-[10px] text-slate-500">Wallet + server catalog</span>
+                      <span className="text-[10px] text-slate-500">Wallet balances</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {fromQuickPicks.map((item) => (
@@ -1320,7 +1234,7 @@ const Swap: React.FC = () => {
                           key={`from-quick-${item.id}`}
                           active={item.id === fromAssetId}
                           option={item}
-                          badge="Live route"
+                          badge="Wallet asset"
                           onClick={() => setFromAssetId(item.id)}
                         />
                       ))}
@@ -1376,7 +1290,7 @@ const Swap: React.FC = () => {
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
-                      <span className="text-[10px] text-slate-500">Wallet + server catalog</span>
+                      <span className="text-[10px] text-slate-500">Live server catalog</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {toQuickPicks.map((item) => (
@@ -1384,7 +1298,7 @@ const Swap: React.FC = () => {
                           key={`to-quick-${item.id}`}
                           active={item.id === toAssetId}
                           option={item}
-                          badge="Live route"
+                          badge="Server token"
                           onClick={() => setToAssetId(item.id)}
                         />
                       ))}
@@ -1506,24 +1420,28 @@ const Swap: React.FC = () => {
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-white/10 bg-white/70 p-4 backdrop-blur-xl">
-        <div className="wallet-soft-surface px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Swap Summary</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">
+      <div className="space-y-2 border-t border-white/10 bg-white/70 px-4 py-3 backdrop-blur-xl">
+        <div className="wallet-soft-surface px-3 py-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">Swap Summary</p>
+              <p className="mt-1 truncate text-sm font-semibold text-slate-900">
                 {formatAssetLabel(fromItem, fromNetwork?.symbol)} {'->'} {formatAssetLabel(toItem, toNetwork?.symbol)}
               </p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                {fromNetwork?.name || 'Source'} {'->'} {toNetwork?.name || 'Destination'}
-              </p>
-              <p className={`mt-1 text-[11px] font-medium ${exactPairInMatrix ? 'text-emerald-300' : 'text-amber-200'}`}>
-                {matrixStatusLabel}: {matrixStatusDetail}
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+                <span className="text-slate-400">{summaryRouteText}</span>
+                <span className={`rounded-full px-2 py-0.5 font-semibold ${
+                  swapReadiness.state === 'active'
+                    ? 'bg-emerald-500/10 text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-300'
+                }`}>
+                  {summaryStatusText}
+                </span>
+              </div>
             </div>
-            {quote ? (
-              <span className="text-right text-[10px] font-medium text-slate-400">
-                {quote.sourceAmount} {quote.sourceSymbol || fromItem?.symbol} {'->'} {quote.destinationAmount} {quote.destinationSymbol || toItem?.symbol}
+            {summaryAmountText ? (
+              <span className="max-w-[42%] text-right text-[10px] font-medium text-slate-400">
+                {summaryAmountText}
               </span>
             ) : null}
           </div>
@@ -1547,9 +1465,7 @@ const Swap: React.FC = () => {
           >
             {isQuoting
               ? 'Requesting quote'
-              : swapReadiness.state === 'planned'
-                ? 'Routing not live yet'
-                : 'Get quote'}
+              : 'Get quote'}
           </Button>
         )}
 
@@ -1560,11 +1476,7 @@ const Swap: React.FC = () => {
           isLoading={isQuoting}
           disabled={!canRequestQuote || isSubmitting || swapUnavailable}
         >
-          {swapReadiness.state === 'planned'
-            ? 'Await V1 routing'
-            : quote
-              ? 'Refresh quote'
-              : 'Retry quote'}
+          {quote ? 'Refresh quote' : 'Retry quote'}
         </Button>
       </div>
 

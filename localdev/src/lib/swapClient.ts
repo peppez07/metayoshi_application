@@ -1,5 +1,6 @@
 import { getBuildFeatureFlag } from '../buildConfig'
 import type { Network } from '../coins/types'
+import { deriveServerApiBaseUrl } from './serverAddressApi'
 import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
@@ -20,6 +21,21 @@ export type WalletSwapApiVersion = 'legacy' | 'v1'
 export type WalletSwapRoutePreference = 'best-value' | 'fastest' | 'lowest-gas' | 'safest'
 export type WalletSwapReadinessState = 'active' | 'planned' | 'unsupported'
 export type WalletSwapReadinessTone = 'emerald' | 'amber' | 'slate'
+export type ServerSwapCatalogAssetKind = 'native' | 'fungible' | 'wrapped' | 'nft'
+
+export type ServerSwapCatalogAsset = {
+  networkId: string
+  assetId: string
+  symbol: string
+  label: string
+  kind: ServerSwapCatalogAssetKind
+  contractAddress?: string
+  decimals?: number
+  aliases?: string[]
+  isWrapped?: boolean
+  wrapsAssetId?: string
+  canonicalGroupId?: string
+}
 
 export type WalletSwapReadiness = {
   state: WalletSwapReadinessState
@@ -32,6 +48,21 @@ export type WalletSwapReadiness = {
 
 function readString(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const parsed = Number(readString(value))
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => readString(item)).filter(Boolean)
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 export function getWalletSwapApiVersion(): WalletSwapApiVersion {
@@ -128,6 +159,79 @@ export function resolveWalletSwapReadiness(
     detail: 'The current wallet build is scoped to EVM same-chain swaps first, with Solana and controlled cross-chain routes next.',
     canRequestQuotes: false
   }
+}
+
+export async function searchServerSwapAssets(
+  network: Pick<Network, 'id' | 'bridgeUrl' | 'rpcUrl'>,
+  input: {
+    query?: string
+    limit?: number
+  } = {}
+): Promise<ServerSwapCatalogAsset[]> {
+  const apiBase = deriveServerApiBaseUrl(network as Network)
+  if (!apiBase) throw new Error('Server API base URL is not configured for swap asset search')
+
+  const params = new URLSearchParams()
+  params.set('networkId', readString(network.id))
+  if (readString(input.query)) params.set('q', readString(input.query))
+  params.set('limit', String(Math.max(1, Math.min(50, Math.trunc(Number(input.limit) || 24)))))
+
+  const headers: Record<string, string> = {}
+  const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)
+  if (appApiKey) headers['X-API-Key'] = appApiKey
+
+  const response = await fetch(`${apiBase}/v1/assets/search?${params.toString()}`, {
+    method: 'GET',
+    headers
+  })
+  const text = await response.text().catch(() => '')
+  let json: unknown = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+
+  if (!response.ok) {
+    const body = asRecord(json)
+    const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
+    if (response.status === 404) {
+      throw new Error('Server swap asset search endpoint is unavailable')
+    }
+    throw new Error(`Server swap asset search failed: ${detail || `HTTP ${response.status}`}`)
+  }
+
+  const payload = asRecord(json)
+  const rows = Array.isArray(payload.assets)
+    ? payload.assets
+    : (Array.isArray(payload.items) ? payload.items : [])
+
+  const out: ServerSwapCatalogAsset[] = []
+  for (const row of rows) {
+    const item = asRecord(row)
+    const assetId = readString(item.assetId)
+    const networkId = readString(item.networkId) || readString(network.id)
+    const symbol = readString(item.symbol)
+    const label = readString(item.label) || symbol
+    const kindRaw = readString(item.kind).toLowerCase()
+    const kind: ServerSwapCatalogAssetKind =
+      kindRaw === 'native' || kindRaw === 'wrapped' || kindRaw === 'nft' ? kindRaw : 'fungible'
+    if (!assetId || !networkId || !symbol) continue
+    out.push({
+      networkId,
+      assetId,
+      symbol,
+      label,
+      kind,
+      contractAddress: readString(item.contractAddress) || undefined,
+      decimals: readNumber(item.decimals),
+      aliases: readStringArray(item.aliases),
+      isWrapped: Boolean(item.isWrapped),
+      wrapsAssetId: readString(item.wrapsAssetId) || undefined,
+      canonicalGroupId: readString(item.canonicalGroupId) || undefined
+    })
+  }
+  return out
 }
 
 export {
