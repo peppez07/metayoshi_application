@@ -1,5 +1,6 @@
 import { getBuildFeatureFlag } from '../buildConfig'
 import type { Network } from '../coins/types'
+import { resolveSwapApiBaseUrl } from './apiBase'
 import { deriveServerApiBaseUrl } from './serverAddressApi'
 import {
   createServerExecutionRpcConfig,
@@ -169,7 +170,7 @@ export async function searchServerSwapAssets(
     limit?: number
   } = {}
 ): Promise<ServerSwapCatalogAsset[]> {
-  const apiBase = deriveServerApiBaseUrl(network as Network)
+  const apiBase = resolveSwapApiBaseUrl(deriveServerApiBaseUrl(network as Network))
   if (!apiBase) throw new Error('Server API base URL is not configured for swap asset search')
 
   const params = new URLSearchParams()

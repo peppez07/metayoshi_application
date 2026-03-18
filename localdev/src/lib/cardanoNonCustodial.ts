@@ -1,6 +1,6 @@
 import * as bip39 from 'bip39'
 import type { Network } from '../coins'
-import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl } from './apiBase'
+import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 
 type CardanoLib = typeof import('@emurgo/cardano-serialization-lib-browser')
 
@@ -47,17 +47,17 @@ function resolveCardanoNetworkId(rpcUrl?: string): number {
 
 function resolveApiBaseUrl(network: Network): string {
   const explicit = normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
-  if (explicit) return explicit
+  if (explicit) return resolveSendApiBaseUrl(explicit)
   const bridge = String(network.bridgeUrl || '').trim()
   if (bridge) {
     try {
       const parsed = new URL(bridge)
-      return parsed.origin
+      return resolveSendApiBaseUrl(parsed.origin)
     } catch {
       // fall through
     }
   }
-  return DEFAULT_PUBLIC_API_BASE_URL
+  return resolveSendApiBaseUrl(DEFAULT_PUBLIC_API_BASE_URL)
 }
 
 function resolveApiHeaders(): Record<string, string> {

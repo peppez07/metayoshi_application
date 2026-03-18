@@ -24,7 +24,7 @@ import { sendMoneroNonCustodial } from '../lib/moneroNonCustodial'
 import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
-import { normalizeConfiguredApiBaseUrl } from '../lib/apiBase'
+import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
@@ -1644,11 +1644,10 @@ function parseBridgeEvmNftReference(row: BridgeTokenBalanceRow): { address: stri
 }
 
 function resolvePortfolioRequestMeta(network: Network): { apiBase: string; coin: string; chain: string } | null {
-  const apiBase = (
-    normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
-    || deriveApiBaseFromBridgeUrl(String(network.bridgeUrl || ''))
-    || String(network.rpcUrl || '').trim().replace(/\/+$/, '')
-  )
+  const configuredApiBase = normalizeConfiguredApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
+  const derivedApiBase = deriveApiBaseFromBridgeUrl(String(network.bridgeUrl || ''))
+  const fallbackApiBase = String(network.rpcUrl || '').trim().replace(/\/+$/, '')
+  const apiBase = resolveBalanceApiBaseUrl(configuredApiBase || derivedApiBase || fallbackApiBase)
   if (!apiBase) return null
 
   const modelId = String(resolveNetworkModelId(network) || network.id || '').trim().toLowerCase()
@@ -2392,18 +2391,18 @@ function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
   if (!raw) return ''
   const lower = raw.toLowerCase()
   const idxV1Bridge = lower.indexOf('/v1/bridge/')
-  if (idxV1Bridge >= 0) return raw.slice(0, idxV1Bridge)
+  if (idxV1Bridge >= 0) return resolveBalanceApiBaseUrl(raw.slice(0, idxV1Bridge))
   const idxBridge = lower.indexOf('/bridge/')
-  if (idxBridge >= 0) return raw.slice(0, idxBridge)
-  if (/\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '')
-  return raw
+  if (idxBridge >= 0) return resolveBalanceApiBaseUrl(raw.slice(0, idxBridge))
+  if (/\/v1$/i.test(raw)) return resolveBalanceApiBaseUrl(raw.replace(/\/v1$/i, ''))
+  return resolveBalanceApiBaseUrl(raw)
 }
 
 async function fetchEvmTokensFromAddressAssets(
   rpcConfig: UtxoRpcConfig,
   input: { coin: string; chain: string; ownerAddress: string }
 ): Promise<EvmTrackedToken[]> {
-  const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig.bridgeUrl || ''))
+  const apiBase = resolveBalanceApiBaseUrl(deriveApiBaseFromBridgeUrl(String(rpcConfig.bridgeUrl || '')))
   if (!apiBase) return []
 
   const coin = String(input.coin || '').trim().toLowerCase()

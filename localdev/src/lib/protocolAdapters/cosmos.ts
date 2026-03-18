@@ -1,6 +1,7 @@
 import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
 import { getCoinRuntimeProfile } from '../../coins'
+import { resolveBalanceApiBaseUrl } from '../apiBase'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../cosmosAddress'
 import { resolveRuntimeModelId } from '../runtimeModel'
 
@@ -13,11 +14,11 @@ function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
   if (!raw) return ''
   const lower = raw.toLowerCase()
   const idxV1Bridge = lower.indexOf('/v1/bridge/')
-  if (idxV1Bridge >= 0) return raw.slice(0, idxV1Bridge)
+  if (idxV1Bridge >= 0) return resolveBalanceApiBaseUrl(raw.slice(0, idxV1Bridge))
   const idxBridge = lower.indexOf('/bridge/')
-  if (idxBridge >= 0) return raw.slice(0, idxBridge)
-  if (/\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '')
-  return raw
+  if (idxBridge >= 0) return resolveBalanceApiBaseUrl(raw.slice(0, idxBridge))
+  if (/\/v1$/i.test(raw)) return resolveBalanceApiBaseUrl(raw.replace(/\/v1$/i, ''))
+  return resolveBalanceApiBaseUrl(raw)
 }
 
 export function resolveCosmosNetworkConfig(network: Network): { hrp: string; decimals: number } {
@@ -35,7 +36,7 @@ export function isValidCosmosAddress(network: Network, value: string): boolean {
 }
 
 function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { apiBase: string; coin: string; chain: string } | null {
-  const apiBase = deriveApiBaseFromBridgeUrl(String(rpcConfig?.bridgeUrl || ''))
+  const apiBase = resolveBalanceApiBaseUrl(deriveApiBaseFromBridgeUrl(String(rpcConfig?.bridgeUrl || '')))
   if (!apiBase) return null
   const modelId = String(resolveModelId(network) || network.id || '').trim().toLowerCase()
   const runtimeProfile = getCoinRuntimeProfile(modelId)

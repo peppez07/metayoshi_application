@@ -134,6 +134,8 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
+import { resolveSwapApiBaseUrl } from './apiBase'
+
 function readString(value: unknown): string {
   return String(value ?? '').trim()
 }
@@ -201,8 +203,8 @@ function getLegacyUniswapApiBase(): string {
   const explicit = readString((import.meta as any)?.env?.VITE_UNISWAP_API_BASE_URL).replace(/\/+$/, '')
   if (explicit) return explicit
   const legacy = readString((import.meta as any)?.env?.VITE_SECURE_BRIDGE_API_BASE_URL).replace(/\/+$/, '')
-  if (legacy) return legacy
-  return DEFAULT_LEGACY_UNISWAP_API_BASE
+  if (legacy) return resolveSwapApiBaseUrl(legacy)
+  return resolveSwapApiBaseUrl(DEFAULT_LEGACY_UNISWAP_API_BASE)
 }
 
 function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {
@@ -369,7 +371,7 @@ async function executeServerManagedJsonRequest(
     throw error
   }
 
-  const url = `${session.apiBase}${path}`
+  const url = `${resolveSwapApiBaseUrl(session.apiBase)}${path}`
   const monitorRequestId = beginServerExecutionMonitor(config, action, url)
   try {
     const response = await fetchJsonWithStatus(url, {

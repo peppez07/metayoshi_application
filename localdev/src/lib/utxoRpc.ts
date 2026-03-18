@@ -4,6 +4,7 @@ import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { recordRuntimeError } from './runtimeErrorMonitor'
 import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { getBuildFeatureFlag } from '../buildConfig'
+import { resolveAuthApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 import { assertBridgeCredentialsConfigured } from './bridgeCredentials'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
@@ -305,8 +306,8 @@ function isSecureBridgeWritesEnabled(config: UtxoRpcConfig): boolean {
 
 function resolveSecureBridgeApiBase(config: UtxoRpcConfig, bridgeUrl: string): string {
   const explicit = String(config.secureBridgeApiBaseUrl || '').trim().replace(/\/+$/, '')
-  if (explicit) return explicit
-  return deriveBridgeApiBaseUrl(bridgeUrl)
+  if (explicit) return resolveAuthApiBaseUrl(explicit)
+  return resolveAuthApiBaseUrl(deriveBridgeApiBaseUrl(bridgeUrl))
 }
 
 function isSecureBridgeUnavailableStatus(status: number): boolean {
@@ -566,7 +567,7 @@ async function fetchBridgeAddressAssetUtxos(
   address: string
 ): Promise<RtmUnspentAsset[]> {
   if (!config.bridgeUrl) return []
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) return []
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -609,7 +610,7 @@ async function fetchBridgeAddressBalance(
   address: string
 ): Promise<UtxoBalance | null> {
   if (!config.bridgeUrl) return null
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -671,7 +672,7 @@ async function fetchBridgeAddressUtxos(
   minConf = 0
 ): Promise<UtxoUnspent[] | null> {
   if (!config.bridgeUrl) return null
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -2902,7 +2903,7 @@ export async function sendBridgeTokenTransfer(
   }
 ): Promise<{ txid: string; relayed?: boolean }> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for token transfer')
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) throw new Error('Bridge API base URL is not available')
 
   const hinted = resolveBridgeCoinChainHint(config)
@@ -3042,7 +3043,7 @@ export async function sendBridgeEvmSignedRelay(
   }
 ): Promise<{ txid: string; relayed?: boolean; nonCustodial?: boolean }> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for EVM relay')
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) throw new Error('Bridge API base URL is not available')
 
   const hinted = resolveBridgeCoinChainHint(config)
@@ -3143,7 +3144,7 @@ export async function sendBridgeSuiSignedRelay(
   }
 ): Promise<{ txid: string; relayed?: boolean; nonCustodial?: boolean }> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for SUI relay')
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) throw new Error('Bridge API base URL is not available')
 
   const hinted = resolveBridgeCoinChainHint(config)
@@ -3261,7 +3262,7 @@ export async function fetchBridgeTokenBalances(
   } = {}
 ): Promise<BridgeTokenBalanceRow[]> {
   if (!config.bridgeUrl) throw new Error('Bridge URL is required for token balance')
-  const apiBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) throw new Error('Bridge API base URL is not available')
 
   const hinted = resolveBridgeCoinChainHint(config)

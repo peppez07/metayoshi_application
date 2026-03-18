@@ -1,5 +1,5 @@
 import type { Network } from '../coins'
-import { normalizeConfiguredApiBaseUrl } from './apiBase'
+import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from './apiBase'
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
@@ -22,20 +22,20 @@ function loadTronWebModule() {
 
 export function deriveServerApiBaseUrl(network: Network): string {
   const envBase = normalizeConfiguredApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
-  if (envBase) return envBase
+  if (envBase) return resolveBalanceApiBaseUrl(envBase)
 
   const bridgeUrl = String(network.bridgeUrl || '').trim().replace(/\/+$/, '')
   if (bridgeUrl) {
     const lower = bridgeUrl.toLowerCase()
     const idxV1Bridge = lower.indexOf('/v1/bridge/')
-    if (idxV1Bridge >= 0) return bridgeUrl.slice(0, idxV1Bridge)
+    if (idxV1Bridge >= 0) return resolveBalanceApiBaseUrl(bridgeUrl.slice(0, idxV1Bridge))
     const idxBridge = lower.indexOf('/bridge/')
-    if (idxBridge >= 0) return bridgeUrl.slice(0, idxBridge)
-    if (/\/v1$/i.test(bridgeUrl)) return bridgeUrl.replace(/\/v1$/i, '')
-    return bridgeUrl
+    if (idxBridge >= 0) return resolveBalanceApiBaseUrl(bridgeUrl.slice(0, idxBridge))
+    if (/\/v1$/i.test(bridgeUrl)) return resolveBalanceApiBaseUrl(bridgeUrl.replace(/\/v1$/i, ''))
+    return resolveBalanceApiBaseUrl(bridgeUrl)
   }
 
-  return String(network.rpcUrl || '').trim().replace(/\/+$/, '')
+  return resolveBalanceApiBaseUrl(String(network.rpcUrl || '').trim().replace(/\/+$/, ''))
 }
 
 export function resolveServerCoinChain(network: Network): { coin: string; chain: string } | null {
