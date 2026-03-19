@@ -80,6 +80,10 @@ export interface ServerSwapSubmitRequest {
   sponsorPreference: ServerSponsorPreference
   executionMode: ServerExecutionMode
   quoteMetadata?: Record<string, unknown>
+  providerExecution?: {
+    requestId?: string
+    signedTransaction: string
+  }
 }
 
 export interface ServerExecutionReceipt {
@@ -676,6 +680,12 @@ async function submitServerManagedSwap(
       minDestinationAmount: request.minDestinationAmount,
       sponsorPreference: request.sponsorPreference,
       executionMode: request.executionMode,
+      providerExecution: request.providerExecution
+        ? {
+            requestId: readString(request.providerExecution.requestId) || undefined,
+            signedTransaction: readString(request.providerExecution.signedTransaction)
+          }
+        : undefined,
       approval: {
         nonce: approvalNonce,
         address: approvalAddress,

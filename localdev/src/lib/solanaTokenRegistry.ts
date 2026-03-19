@@ -12,7 +12,7 @@ export type SolanaTokenRegistryEntry = {
 
 const tokenListCache = createRequestCache<Record<string, SolanaTokenRegistryEntry>>({
   defaultTtlMs: 24 * 60 * 60_000,
-  maxEntries: 2
+  maxEntries: 4
 })
 
 const SOLANA_TOKEN_REGISTRY_FALLBACK_URLS = [
@@ -96,11 +96,18 @@ async function fetchRegistryFromUrl(url: string): Promise<Record<string, SolanaT
   return parseTokenRows(extractTokenRows(json))
 }
 
-export async function getSolanaTokenRegistry(): Promise<Record<string, SolanaTokenRegistryEntry>> {
-  return await tokenListCache.get('solana-token-registry:jupiter', async () => {
+export async function getSolanaTokenRegistry(options?: {
+  allowPublicRegistry?: boolean
+}): Promise<Record<string, SolanaTokenRegistryEntry>> {
+  return await tokenListCache.get((() => {
     const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
     const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
-    const allowPublicRegistry = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_TOKEN_REGISTRY', false)
+    const cacheMode = options?.allowPublicRegistry ? 'public' : 'default'
+    return `solana-token-registry:${cacheMode}:${configuredUrl || 'builtin'}`
+  })(), async () => {
+    const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+    const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
+    const allowPublicRegistry = options?.allowPublicRegistry || readEnvFlag('VITE_SOL_ALLOW_PUBLIC_TOKEN_REGISTRY', false)
     // Default behavior: no external token-registry call unless explicitly allowed/configured.
     if (!configuredUrl && !allowPublicRegistry) return { ...STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES }
 

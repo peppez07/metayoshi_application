@@ -66,6 +66,12 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
+export function resolveSwapServerNetworkId(network?: Pick<Network, 'id' | 'runtimeModelId'> | null): string {
+  const normalized = readString(network?.runtimeModelId || network?.id).toLowerCase()
+  if (normalized === 'sol') return 'solana'
+  return normalized
+}
+
 export function getWalletSwapApiVersion(): WalletSwapApiVersion {
   const raw = readString((import.meta as any)?.env?.VITE_SWAP_API_VERSION).toLowerCase()
   return raw === 'v1' ? 'v1' : 'legacy'
@@ -139,7 +145,7 @@ export function resolveWalletSwapReadiness(
 }
 
 export async function searchServerSwapAssets(
-  network: Pick<Network, 'id' | 'bridgeUrl' | 'rpcUrl'>,
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'bridgeUrl' | 'rpcUrl'>,
   input: {
     query?: string
     limit?: number
@@ -149,9 +155,9 @@ export async function searchServerSwapAssets(
   if (!apiBase) throw new Error('Server API base URL is not configured for swap asset search')
 
   const params = new URLSearchParams()
-  params.set('networkId', readString(network.id))
+  params.set('networkId', resolveSwapServerNetworkId(network))
   if (readString(input.query)) params.set('q', readString(input.query))
-  params.set('limit', String(Math.max(1, Math.min(200, Math.trunc(Number(input.limit) || 60)))))
+  params.set('limit', String(Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))))
 
   const headers: Record<string, string> = {}
   const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)

@@ -14,6 +14,7 @@ import { Button } from '../../components/Button'
 import { useToast } from '../../components/Toast'
 import type { Network } from '../../coins/types'
 import { readCatalogTrackedEvmTokens } from '../../lib/catalogDb/repository'
+import { signEvmTransaction, signSolanaTransaction } from '../../lib/dappSigning'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
 import { isSwapSupportedNetwork } from '../../lib/swapEligibility'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
@@ -23,6 +24,7 @@ import {
   isTerminalServerExecutionStatus,
   requestServerSwapQuote,
   resolveServerSwapAssetDecimals,
+  resolveSwapServerNetworkId,
   searchServerSwapAssets,
   submitServerSwap,
   type ServerSwapCatalogAsset,
@@ -38,6 +40,96 @@ import { useWalletStore, type SendableItem } from '../../store/walletStore'
 function compactError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
   return message.replace(/\s+/g, ' ').trim()
+}
+
+function readString(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> {
+  try {
+    return asRecord(JSON.parse(value))
+  } catch {
+    return {}
+  }
+}
+
+function normalizeEvmTransactionType(value: unknown): 2 | undefined {
+  const normalized = readString(value).toLowerCase()
+  return normalized === '2' || normalized === '0x2' ? 2 : undefined
+}
+
+function resolveProviderExecutionTransaction(
+  providerExecution: Record<string, unknown>
+): Parameters<typeof signEvmTransaction>[0]['tx'] | null {
+  const directTransaction = asRecord(providerExecution.transaction)
+  const unsignedTransaction = readString(providerExecution.unsignedTransaction)
+  const fallbackTransaction = unsignedTransaction.startsWith('{') ? parseJsonRecord(unsignedTransaction) : {}
+  const transaction = Object.keys(directTransaction).length > 0 ? directTransaction : fallbackTransaction
+  if (Object.keys(transaction).length === 0) return null
+  return {
+    to: readString(transaction.to) || undefined,
+    value: readString(transaction.value) || undefined,
+    data: readString(transaction.data) || undefined,
+    gasLimit: readString(transaction.gasLimit || transaction.gas) || undefined,
+    gasPrice: readString(transaction.gasPrice) || undefined,
+    maxFeePerGas: readString(transaction.maxFeePerGas) || undefined,
+    maxPriorityFeePerGas: readString(transaction.maxPriorityFeePerGas) || undefined,
+    nonce: readString(transaction.nonce) || undefined,
+    chainId: readString(transaction.chainId) || undefined,
+    type: normalizeEvmTransactionType(transaction.type)
+  }
+}
+
+async function buildSignedProviderExecution(params: {
+  quote: ServerSwapQuote
+  sourceNetwork: Pick<Network, 'coinType'>
+  mnemonic: string | null
+  accountIndex: number
+}): Promise<{ requestId?: string; signedTransaction: string } | undefined> {
+  const providerExecution = asRecord(asRecord(params.quote.metadata).providerExecution)
+  if (Object.keys(providerExecution).length === 0) return undefined
+  const mnemonic = readString(params.mnemonic)
+  if (!mnemonic) throw new Error('Wallet is locked')
+
+  const requestId = readString(providerExecution.requestId) || undefined
+  const signingScheme = readString(providerExecution.signingScheme).toLowerCase()
+  const providerKind = readString(providerExecution.providerKind).toLowerCase()
+  if (
+    params.sourceNetwork.coinType === 'SOL'
+    || signingScheme.includes('solana')
+    || providerKind === 'jupiter'
+  ) {
+    const unsignedTransaction = readString(providerExecution.unsignedTransaction)
+    if (!unsignedTransaction) {
+      throw new Error('Swap quote is missing providerExecution.unsignedTransaction')
+    }
+    return {
+      requestId,
+      signedTransaction: await signSolanaTransaction({
+        mnemonic,
+        accountIndex: params.accountIndex,
+        serializedTxBase64: unsignedTransaction
+      })
+    }
+  }
+
+  const transaction = resolveProviderExecutionTransaction(providerExecution)
+  if (!transaction) {
+    throw new Error('Swap quote is missing providerExecution.transaction')
+  }
+  return {
+    requestId,
+    signedTransaction: await signEvmTransaction({
+      mnemonic,
+      accountIndex: params.accountIndex,
+      tx: transaction
+    })
+  }
 }
 
 function formatSwapUiError(error: unknown): string {
@@ -93,6 +185,14 @@ function formatSwapUiError(error: unknown): string {
 
   if (normalized.includes('swap quote request failed')) {
     return 'Swap quote service is unavailable right now. Please try again in a moment.'
+  }
+
+  if (
+    normalized.includes('providerexecution.')
+    || normalized.includes('unsignedtransaction')
+    || normalized.includes('signedtransaction')
+  ) {
+    return 'This quote is missing the wallet-signing payload required by the current swap backend. Request a fresh quote and try again.'
   }
 
   if (normalized.includes('server execution request failed')) {
@@ -303,7 +403,9 @@ async function loadTrackedDestinationAssets(
       })
     }
   } else if (network.coinType === 'SOL') {
-    const registry = await getSolanaTokenRegistry().catch(() => ({}))
+    // For swap receive-token search, allow the broader public Solana registry
+    // when the server catalog is sparse so tokens like BONK still appear.
+    const registry = await getSolanaTokenRegistry({ allowPublicRegistry: true }).catch(() => ({}))
     for (const token of Object.values(registry)) {
       const address = String(token.address || '').trim()
       if (!SOLANA_SWAP_MINT_RE.test(address)) continue
@@ -335,7 +437,7 @@ async function loadTrackedDestinationAssets(
     const labelCompare = leftLabel.localeCompare(rightLabel)
     if (labelCompare !== 0) return labelCompare
     return left.symbol.localeCompare(right.symbol)
-  }).slice(0, normalizedQuery ? 400 : 300)
+  }).slice(0, normalizedQuery ? 1200 : 800)
 }
 
 function mergeServerAssetLists(...groups: ServerSwapCatalogAsset[][]): ServerSwapCatalogAsset[] {
@@ -730,7 +832,7 @@ function TokenSelectorModal({
 }) {
   const counts = useMemo(() => countOptionsByFilter(options), [options])
   const visibleOptions = useMemo(
-    () => filterAssetOptions(options, query, filter).slice(0, 120),
+    () => filterAssetOptions(options, query, filter).slice(0, 500),
     [options, query, filter]
   )
   return (
@@ -850,6 +952,7 @@ const Swap: React.FC = () => {
     activeAccountId,
     networks,
     disabledNetworkIds,
+    sessionMnemonic,
     activeNetworkId,
     ensureNetworkAddress,
     addActivity,
@@ -913,7 +1016,7 @@ const Swap: React.FC = () => {
     return getSendableItems({
       accountId: activeAccount.id,
       networkId: fromNetwork.id,
-      includeHidden: false,
+      includeHidden: true,
       includeZeroBalance: false
     })
   }, [activeAccount?.id, fromNetwork, getSendableItems])
@@ -1078,7 +1181,7 @@ const Swap: React.FC = () => {
 
     void (async () => {
       try {
-        const rows = await searchServerSwapAssets(fromNetwork, { limit: 200 })
+        const rows = await searchServerSwapAssets(fromNetwork, { limit: 500 })
         if (cancelled) return
         setSourceServerAssets(rows)
       } catch (error) {
@@ -1118,7 +1221,7 @@ const Swap: React.FC = () => {
         const [serverRows, ecosystemRows] = await Promise.all([
           searchServerSwapAssets(toNetwork, {
             query: deferredDestinationQuery,
-            limit: 200
+            limit: 500
           }),
           loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
         ])
@@ -1257,6 +1360,8 @@ const Swap: React.FC = () => {
       resolveSwapAddress(fromNetwork),
       resolveSwapAddress(toNetwork)
     ])
+    const sourceNetworkId = resolveSwapServerNetworkId(fromNetwork)
+    const destinationNetworkId = resolveSwapServerNetworkId(toNetwork)
 
     const sourceRpcConfig = createServerExecutionRpcConfig(fromNetwork, {
       secureBridgeAddressResolver: resolveBackendAuthAddress,
@@ -1266,8 +1371,8 @@ const Swap: React.FC = () => {
       secureBridgeAddressResolver: resolveBackendAuthAddress,
       secureBridgeSigner: signBackendAuthMessage
     })
-    const sourceAssetBase = toServerSwapAsset(fromItem, fromNetwork.id)
-    const destinationAssetBase = toServerSwapAsset(toItem, toNetwork.id)
+    const sourceAssetBase = toServerSwapAsset(fromItem, sourceNetworkId)
+    const destinationAssetBase = toServerSwapAsset(toItem, destinationNetworkId)
     const [sourceAsset, destinationAsset] = await Promise.all([
       withResolvedSwapAsset(fromNetwork, sourceRpcConfig, sourceAssetBase),
       withResolvedSwapAsset(toNetwork, destinationRpcConfig, destinationAssetBase)
@@ -1284,6 +1389,8 @@ const Swap: React.FC = () => {
       }),
       sourceAddress,
       destinationAddress,
+      sourceNetworkId,
+      destinationNetworkId,
       sourceAsset,
       destinationAsset
     }
@@ -1302,11 +1409,19 @@ const Swap: React.FC = () => {
     setIsQuoting(true)
     setErrorText('')
     try {
-      const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
+      const {
+        rpcConfig,
+        sourceAddress,
+        destinationAddress,
+        sourceNetworkId,
+        destinationNetworkId,
+        sourceAsset,
+        destinationAsset
+      } = await buildSwapContext()
       const slippage = Number(slippagePct)
       const nextQuote = await requestServerSwapQuote(rpcConfig, {
         source: {
-          networkId: fromNetwork!.id,
+          networkId: sourceNetworkId,
           chainId: fromNetwork!.chainId,
           symbol: fromItem?.symbol || fromNetwork!.symbol,
           address: sourceAddress,
@@ -1314,7 +1429,7 @@ const Swap: React.FC = () => {
           asset: sourceAsset
         },
         destination: {
-          networkId: toNetwork!.id,
+          networkId: destinationNetworkId,
           chainId: toNetwork!.chainId,
           symbol: toItem?.symbol || toNetwork!.symbol,
           address: destinationAddress,
@@ -1360,11 +1475,25 @@ const Swap: React.FC = () => {
     setIsSubmitting(true)
     setErrorText('')
     try {
-      const { rpcConfig, sourceAddress, destinationAddress, sourceAsset, destinationAsset } = await buildSwapContext()
+      const {
+        rpcConfig,
+        sourceAddress,
+        destinationAddress,
+        sourceNetworkId,
+        destinationNetworkId,
+        sourceAsset,
+        destinationAsset
+      } = await buildSwapContext()
+      const providerExecution = await buildSignedProviderExecution({
+        quote,
+        sourceNetwork: fromNetwork,
+        mnemonic: sessionMnemonic,
+        accountIndex: Number(activeAccount?.derivationIndex) || 0
+      })
       const submitted = await submitServerSwap(rpcConfig, {
         quoteId: quote.quoteId,
         source: {
-          networkId: fromNetwork.id,
+          networkId: sourceNetworkId,
           chainId: fromNetwork.chainId,
           symbol: fromItem.symbol || fromNetwork.symbol,
           address: sourceAddress,
@@ -1372,7 +1501,7 @@ const Swap: React.FC = () => {
           asset: sourceAsset
         },
         destination: {
-          networkId: toNetwork.id,
+          networkId: destinationNetworkId,
           chainId: toNetwork.chainId,
           symbol: toItem.symbol || toNetwork.symbol,
           address: destinationAddress,
@@ -1381,7 +1510,8 @@ const Swap: React.FC = () => {
         minDestinationAmount: quote.minDestinationAmount,
         sponsorPreference,
         executionMode: quote.mode,
-        quoteMetadata: quote.metadata
+        quoteMetadata: quote.metadata,
+        providerExecution
       })
       setExecution(submitted)
       showToast('Swap submitted to server execution', 'info')
