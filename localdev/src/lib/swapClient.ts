@@ -16,7 +16,6 @@ import {
   type ServerSwapQuoteRequest,
   type ServerSwapSubmitRequest
 } from './serverExecution'
-import { hasSwapMatrixRoute, isSwapMatrixSupportedNetworkId } from './swapSupportMatrix'
 
 export type WalletSwapApiVersion = 'legacy' | 'v1'
 export type WalletSwapRoutePreference = 'best-value' | 'fastest' | 'lowest-gas' | 'safest'
@@ -93,23 +92,10 @@ export function resolveWalletSwapReadiness(
     }
   }
 
-  if (!isSwapMatrixSupportedNetworkId(fromNetwork.id) || !isSwapMatrixSupportedNetworkId(toNetwork.id)) {
-    return {
-      state: 'unsupported',
-      tone: 'slate',
-      engineLabel: 'Not supported',
-      title: 'This pair is outside the current swap scope',
-      detail: 'Only the live matrix networks are enabled in the current wallet swap build.',
-      canRequestQuotes: false
-    }
-  }
-
   const sameChain = fromNetwork.id === toNetwork.id
   const version = getWalletSwapApiVersion()
-  const routeIsLive = hasSwapMatrixRoute(fromNetwork.id, fromAssetSymbol, toNetwork.id, toAssetSymbol)
-  const networkPairIsLive = hasSwapMatrixRoute(fromNetwork.id, undefined, toNetwork.id, undefined)
 
-  if (routeIsLive && fromNetwork.coinType === 'SOL' && toNetwork.coinType === 'SOL' && sameChain) {
+  if (fromNetwork.coinType === 'SOL' && toNetwork.coinType === 'SOL' && sameChain) {
     return {
       state: 'active',
       tone: 'emerald',
@@ -120,36 +106,25 @@ export function resolveWalletSwapReadiness(
     }
   }
 
-  if (routeIsLive && fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM' && sameChain) {
+  if (fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM' && sameChain) {
     return {
       state: 'active',
       tone: 'emerald',
       engineLabel: version === 'v1' ? 'V1 EVM routing' : 'Live EVM routing',
-      title: 'Same-chain EVM swaps are available',
-      detail: 'Quotes come from the MetaYoshi server and transactions stay locally signed in the wallet.',
+      title: 'Same-chain EVM swap search is available',
+      detail: 'Quotes depend on what the MetaYoshi server currently exposes for the selected asset pair.',
       canRequestQuotes: true
     }
   }
 
-  if (routeIsLive && fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM' && !sameChain) {
+  if (fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM' && !sameChain) {
     return {
       state: 'active',
       tone: 'emerald',
-      engineLabel: 'Sponsored internal routing',
-      title: 'Cross-chain EVM routes are available',
-      detail: 'The current matrix allows the live deterministic ETH, WETH, and USDC routes between Ethereum, Base, Arbitrum, and Optimism.',
+      engineLabel: 'Server-routed EVM bridge',
+      title: 'Cross-chain EVM route search is available',
+      detail: 'Cross-chain quotes depend on the current MetaYoshi server route inventory and provider health.',
       canRequestQuotes: true
-    }
-  }
-
-  if (networkPairIsLive) {
-    return {
-      state: 'unsupported',
-      tone: 'slate',
-      engineLabel: 'Pair not in matrix',
-      title: 'Choose one of the live matrix asset pairs',
-      detail: 'The selected networks are enabled, but this asset combination is not part of the current live support matrix.',
-      canRequestQuotes: false
     }
   }
 
@@ -158,7 +133,7 @@ export function resolveWalletSwapReadiness(
     tone: 'slate',
     engineLabel: 'Not supported',
     title: 'This pair is outside the current swap scope',
-    detail: 'The current wallet build is scoped to EVM same-chain swaps first, with Solana and controlled cross-chain routes next.',
+    detail: 'The current wallet build can only request quotes for compatible EVM or Solana swap flows.',
     canRequestQuotes: false
   }
 }
@@ -176,7 +151,7 @@ export async function searchServerSwapAssets(
   const params = new URLSearchParams()
   params.set('networkId', readString(network.id))
   if (readString(input.query)) params.set('q', readString(input.query))
-  params.set('limit', String(Math.max(1, Math.min(50, Math.trunc(Number(input.limit) || 24)))))
+  params.set('limit', String(Math.max(1, Math.min(200, Math.trunc(Number(input.limit) || 60)))))
 
   const headers: Record<string, string> = {}
   const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)

@@ -451,7 +451,7 @@ interface WalletState {
   }) => Promise<void>
 
   // Asset layer (cross-chain)
-  fetchNetworkAssets: (options?: { force?: boolean }) => Promise<void>
+  fetchNetworkAssets: (options?: { force?: boolean; staleWhileRefresh?: boolean }) => Promise<void>
   fetchNetworkFiat: (options?: { force?: boolean }) => Promise<void>
   fetchAssetDetails: (assetId: string) => Promise<RtmAssetDetails>
   getSendableItems: (options?: {
@@ -1047,6 +1047,23 @@ function getScopedAssetBucket<T>(
   networkId: string
 ): T | undefined {
   return buckets?.[buildAssetStateScopeKey(accountId, networkId)]
+}
+
+function hasScopedAssetSnapshot(
+  state: Pick<
+    WalletState,
+    'accountNetworkAssets' | 'accountNetworkAssetLogos' | 'accountNetworkAssetLabels' | 'accountNetworkEvmNftAssets'
+  >,
+  accountId: string,
+  networkId: string
+): boolean {
+  const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  return (
+    Object.prototype.hasOwnProperty.call(state.accountNetworkAssets || {}, scopeKey)
+    || Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLogos || {}, scopeKey)
+    || Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLabels || {}, scopeKey)
+    || Object.prototype.hasOwnProperty.call(state.accountNetworkEvmNftAssets || {}, scopeKey)
+  )
 }
 
 function buildScopedAssetProjection(
@@ -3439,30 +3456,32 @@ export const useWalletStore = create<WalletState>()(
         }
         try {
           const force = options?.force === true
-          if (!force) {
+          const staleWhileRefresh = options?.staleWhileRefresh === true
+          const canHydrateCachedSnapshot = !hasScopedAssetSnapshot(get(), requestAccountId, requestNetworkId)
+          if (!force || staleWhileRefresh) {
             const cached = networkAssetsCache.peek(cacheKey)
-             if (cached) {
-               applyAssetSnapshot({
-                 assets: cached.assets,
-                 logos: cached.logos,
-                 labels: cached.labels,
-                 evmNfts: cached.evmNfts || {}
-               })
-               return
-             }
+            if (cached && (!force || canHydrateCachedSnapshot)) {
+              applyAssetSnapshot({
+                assets: cached.assets,
+                logos: cached.logos,
+                labels: cached.labels,
+                evmNfts: cached.evmNfts || {}
+              })
+              if (!staleWhileRefresh) return
+            }
             const repositoryCached = await readCachedAssetSnapshot({
               accountId: requestAccountId,
               networkId: requestNetworkId,
               address
             }).catch(() => null)
-            if (repositoryCached) {
+            if (repositoryCached && (!force || canHydrateCachedSnapshot)) {
               applyAssetSnapshot({
                 assets: repositoryCached.assets,
                 logos: repositoryCached.logos,
                 labels: repositoryCached.labels,
                 evmNfts: repositoryCached.evmNfts as Record<string, EvmNftHolding>
               })
-              return
+              if (!staleWhileRefresh) return
             }
           }
 

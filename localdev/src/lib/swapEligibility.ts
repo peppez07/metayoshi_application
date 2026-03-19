@@ -1,10 +1,6 @@
 import type { Network } from '../coins'
 import type { ServerCoinCatalogItem } from '../coins/serverRegistry/types'
 import type { SendableItem } from '../store/walletStore'
-import {
-  isSwapMatrixSupportedAsset,
-  isSwapMatrixSupportedNetworkId
-} from './swapSupportMatrix'
 import { resolveNetworkCapabilities } from './networkCapabilities'
 
 const EVM_CONTRACT_RE = /^0x[a-f0-9]{40}$/i
@@ -30,9 +26,7 @@ export function isSwapActionEnabledNetwork(
 export function isSwapSupportedNetwork(
   network?: Pick<Network, 'coinType' | 'id' | 'capabilities' | 'supportsAssets'> | null
 ): boolean {
-  if (!network?.id) return false
-  if (!isSwapActionEnabledNetwork(network)) return false
-  return isSwapMatrixSupportedNetworkId(network.id)
+  return Boolean(network?.id) && isSwapActionEnabledNetwork(network)
 }
 
 export function isCatalogAssetSwappable(
@@ -43,14 +37,11 @@ export function isCatalogAssetSwappable(
   if (item.enabled !== true) return false
   if (normalizeText(item.walletCatalogState) === 'blocked') return false
   if (item.kind === 'main') {
-    return isSwapMatrixSupportedAsset(network?.id, item.symbol, 'native')
+    return true
   }
   return (
-    isSwapMatrixSupportedAsset(network?.id, item.symbol, 'fungible')
-    && (
-      network?.coinType !== 'EVM'
-      || EVM_CONTRACT_RE.test(String(item.contractAddress || '').trim())
-    )
+    network?.coinType !== 'EVM'
+    || EVM_CONTRACT_RE.test(String(item.contractAddress || '').trim())
   )
 }
 
@@ -80,9 +71,8 @@ export function isWalletAssetSwappable(
   if (!isSwapSupportedNetwork(network)) return false
   if (item.kind === 'nft') return false
   if (item.kind === 'native') {
-    return isSwapMatrixSupportedAsset(network?.id, item.symbol, 'native')
+    return true
   }
-  if (!isSwapMatrixSupportedAsset(network?.id, item.symbol, 'fungible')) return false
 
   const contract = extractSwapContractAddress(item.assetId)
   if (contract && supportedCatalogIdentities?.has(contract)) return true

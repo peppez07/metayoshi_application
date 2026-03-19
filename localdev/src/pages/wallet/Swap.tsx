@@ -4,6 +4,7 @@ import {
   IoArrowBackOutline,
   IoChevronDownOutline,
   IoCloseOutline,
+  IoLayersOutline,
   IoSearchOutline,
   IoSwapVerticalOutline,
   IoTimeOutline,
@@ -52,7 +53,23 @@ function formatSwapUiError(error: unknown): string {
     || normalized.includes('only supports metayoshi server-managed swaps')
     || normalized.includes('metayoshi server swap service is unavailable')
   ) {
-    return 'Swap is disabled until the MetaYoshi server swap service is available.'
+    return 'The MetaYoshi swap backend is not ready for this request yet. Retry in a moment or switch to a pair the server currently routes.'
+  }
+
+  if (
+    normalized.includes('secure bridge signer is unavailable')
+    || normalized.includes('wallet is locked')
+  ) {
+    return 'Unlock the wallet before requesting a swap quote.'
+  }
+
+  if (
+    normalized.includes('secure bridge auth challenge failed')
+    || normalized.includes('secure bridge auth verify failed')
+    || normalized.includes('secure bridge signer address mismatch')
+    || normalized.includes('secure bridge signer returned an invalid evm address')
+  ) {
+    return 'The wallet could not open a secure swap session with the server. Retry after reconnecting the wallet.'
   }
 
   if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
@@ -318,7 +335,7 @@ async function loadTrackedDestinationAssets(
     const labelCompare = leftLabel.localeCompare(rightLabel)
     if (labelCompare !== 0) return labelCompare
     return left.symbol.localeCompare(right.symbol)
-  }).slice(0, normalizedQuery ? 180 : 120)
+  }).slice(0, normalizedQuery ? 400 : 300)
 }
 
 function mergeServerAssetLists(...groups: ServerSwapCatalogAsset[][]): ServerSwapCatalogAsset[] {
@@ -514,7 +531,88 @@ function formatSelectorAmount(option: SwapAssetOption): string {
   return option.kind === 'nft' ? 'NFT' : 'Route'
 }
 
-function AssetLogoTile({
+function AssetLogo({
+  option,
+  alt,
+  className = 'h-9 w-9'
+}: {
+  option: SwapAssetOption
+  alt: string
+  className?: string
+}) {
+  if (option.logoUrl) {
+    return (
+      <img
+        src={option.logoUrl}
+        alt={alt}
+        className={`${className} rounded-full object-cover`}
+      />
+    )
+  }
+
+  return (
+    <div className={`flex items-center justify-center rounded-full bg-slate-900/5 text-slate-600 ${className}`}>
+      <IoLayersOutline className="h-4 w-4" />
+    </div>
+  )
+}
+
+function AssetCompactTab({
+  active,
+  option,
+  onClick,
+  emphasis = 'default'
+}: {
+  active: boolean
+  option: SwapAssetOption
+  onClick: () => void
+  emphasis?: 'default' | 'soft'
+}) {
+  const amountText = formatSelectorAmount(option)
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-w-[134px] items-center gap-2.5 rounded-[18px] border px-3 py-2.5 text-left transition-colors ${
+        active
+          ? 'border-orange-300 bg-gradient-to-r from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_24px_rgba(255,104,0,0.2)]'
+          : emphasis === 'soft'
+            ? 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+            : 'border-white/10 bg-white/5 text-slate-700 hover:border-white/20 hover:bg-white/10'
+      }`}
+    >
+      <div className="shrink-0">
+        <AssetLogo option={option} alt={`${option.symbol} logo`} className={`h-9 w-9 ${active ? 'ring-2 ring-white/20' : 'ring-1 ring-black/5'}`} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-[11px] font-black uppercase tracking-[0.08em]">
+            {option.symbol}
+          </span>
+          <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] ${
+            active
+              ? 'bg-white/12 text-white/80'
+              : option.source === 'wallet'
+                ? 'bg-slate-900/5 text-slate-400'
+                : 'bg-emerald-500/10 text-emerald-500'
+          }`}>
+            {option.source === 'wallet' ? 'Wallet' : 'Route'}
+          </span>
+        </div>
+        <div className={`mt-0.5 truncate text-[10px] ${active ? 'text-white/80' : 'text-slate-400'}`}>
+          {option.label || option.symbol}
+        </div>
+        <div className={`mt-1 text-[10px] font-semibold ${active ? 'text-white/88' : 'text-slate-500'}`}>
+          {amountText}
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function AssetListRowButton({
   active,
   option,
   onClick
@@ -527,58 +625,78 @@ function AssetLogoTile({
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-[104px] flex-col items-center justify-between rounded-[22px] border px-2.5 py-3 text-center transition-colors ${
+      className={`flex w-full items-center gap-3 rounded-[20px] border px-3 py-3 text-left transition-colors ${
         active
-          ? 'border-orange-300 bg-gradient-to-br from-[#ff9a4f] via-[#ff8129] to-[#ff6900] text-white shadow-[0_12px_28px_rgba(255,104,0,0.26)]'
-          : 'border-white/10 bg-white/5 text-slate-700 hover:border-white/20 hover:bg-white/10'
+          ? 'border-orange-300 bg-orange-50'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
       }`}
     >
-      <div className="flex w-full items-start justify-between gap-2">
-        <span className={`rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.14em] ${
-          active
-            ? 'border-white/20 bg-white/10 text-white/80'
-            : option.source === 'wallet'
-              ? 'border-white/10 bg-white/5 text-slate-400'
-              : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
-        }`}>
-          {option.source === 'wallet' ? 'Pay' : 'Route'}
-        </span>
-        <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] ${
-          active
-            ? 'bg-white/12 text-white/80'
-            : option.kind === 'nft'
-              ? 'bg-fuchsia-500/10 text-fuchsia-300'
-              : 'bg-slate-900/5 text-slate-400'
-        }`}>
-          {option.kind === 'nft' ? 'NFT' : 'Token'}
-        </span>
-      </div>
-      <div className="mt-2 flex min-h-[42px] items-center justify-center">
-        {option.logoUrl ? (
-          <img
-            src={option.logoUrl}
-            alt={`${option.symbol} logo`}
-            className={`h-11 w-11 rounded-full object-cover shadow-sm ${active ? 'ring-2 ring-white/20' : 'ring-1 ring-white/10'}`}
-          />
-        ) : (
-          <div className={`flex h-11 w-11 items-center justify-center rounded-full text-xs font-black uppercase ${
-            active ? 'bg-white/14 text-white' : 'bg-slate-900/5 text-slate-600'
+      <AssetLogo option={option} alt={`${option.symbol} logo`} className="h-11 w-11" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-semibold text-slate-900">{option.symbol}</span>
+          <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] ${
+            option.kind === 'nft'
+              ? 'bg-fuchsia-500/10 text-fuchsia-500'
+              : option.source === 'wallet'
+                ? 'bg-slate-100 text-slate-500'
+                : 'bg-emerald-500/10 text-emerald-600'
           }`}>
-            {String(option.symbol || option.label || '?').slice(0, 2)}
-          </div>
-        )}
-      </div>
-      <div className="mt-3 min-w-0">
-        <div className="truncate text-[11px] font-black uppercase tracking-[0.08em]">
-          {option.symbol}
+            {option.kind === 'nft' ? 'NFT' : option.source === 'wallet' ? 'Wallet' : 'Route'}
+          </span>
         </div>
-        <div className={`mt-1 truncate text-[10px] ${active ? 'text-white/80' : 'text-slate-400'}`}>
+        <div className="mt-0.5 truncate text-[11px] text-slate-500">
           {option.label || option.symbol}
         </div>
       </div>
-      <div className={`mt-2 text-[10px] font-semibold ${active ? 'text-white/88' : 'text-slate-500'}`}>
-        {formatSelectorAmount(option)}
+      <div className="text-right">
+        <div className="text-[11px] font-semibold text-slate-700">{formatSelectorAmount(option)}</div>
+        {active ? (
+          <div className="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-orange-500">Selected</div>
+        ) : null}
       </div>
+    </button>
+  )
+}
+
+function SwapAssetButton({
+  option,
+  networkName,
+  placeholder,
+  onClick
+}: {
+  option: SwapAssetOption | null
+  networkName?: string
+  placeholder: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="min-w-[182px] rounded-[22px] border border-white/10 bg-white/5 px-3 py-3 transition-colors hover:border-white/20 hover:bg-white/10"
+    >
+      {option ? (
+        <div className="flex items-center gap-3 text-left">
+          <AssetLogo option={option} alt={`${option.symbol} logo`} className="h-10 w-10 ring-1 ring-black/5" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-slate-900">{option.symbol}</div>
+            <div className="mt-0.5 truncate text-[10px] text-slate-500">{option.label || placeholder}</div>
+            <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+              <span className="truncate">{networkName || 'Network'}</span>
+              <IoChevronDownOutline className="h-3.5 w-3.5 shrink-0" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="text-right">
+          <div className="text-sm font-semibold text-slate-900">Select</div>
+          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+            <span>{placeholder}</span>
+            <IoChevronDownOutline className="h-3.5 w-3.5" />
+          </div>
+        </div>
+      )}
     </button>
   )
 }
@@ -612,7 +730,7 @@ function TokenSelectorModal({
 }) {
   const counts = useMemo(() => countOptionsByFilter(options), [options])
   const visibleOptions = useMemo(
-    () => filterAssetOptions(options, query, filter).slice(0, 30),
+    () => filterAssetOptions(options, query, filter).slice(0, 120),
     [options, query, filter]
   )
   return (
@@ -679,12 +797,13 @@ function TokenSelectorModal({
             {quickPicks.length > 0 ? (
               <div className="mt-4 space-y-2">
                 <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick picks</div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                   {quickPicks.map((item) => (
-                    <AssetLogoTile
+                    <AssetCompactTab
                       key={`selector-quick-${item.id}`}
                       active={item.id === selectedOptionId}
                       option={item}
+                      emphasis="soft"
                       onClick={() => onSelect(item.id)}
                     />
                   ))}
@@ -698,9 +817,9 @@ function TokenSelectorModal({
                 <div className="text-[11px] text-slate-500">{visibleOptions.length} shown</div>
               </div>
               {visibleOptions.length > 0 ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-2">
                   {visibleOptions.map((item) => (
-                    <AssetLogoTile
+                    <AssetListRowButton
                       key={`selector-option-${item.id}`}
                       active={item.id === selectedOptionId}
                       option={item}
@@ -832,7 +951,7 @@ const Swap: React.FC = () => {
         tone: 'slate' as const,
         engineLabel: 'Not supported',
         title: 'This network is outside the current swap scope',
-        detail: 'Only networks that expose the MetaYoshi swap catalog can request quotes in this wallet build.',
+        detail: 'This network does not currently expose the swap flow needed by the wallet.',
         canRequestQuotes: false
       }
     }
@@ -841,7 +960,7 @@ const Swap: React.FC = () => {
       tone: 'emerald' as const,
       engineLabel: 'Live server routing',
       title: 'Server-backed swap search is available',
-      detail: 'Sell tokens come from wallet balances. Receive tokens and route availability come from the MetaYoshi server.',
+      detail: 'Sell tokens come from wallet balances. Receive tokens and route availability come from the MetaYoshi server and tracked ecosystem assets.',
       canRequestQuotes: true
     }
   }, [fromNetwork, toNetwork])
@@ -959,7 +1078,7 @@ const Swap: React.FC = () => {
 
     void (async () => {
       try {
-        const rows = await searchServerSwapAssets(fromNetwork, { limit: 80 })
+        const rows = await searchServerSwapAssets(fromNetwork, { limit: 200 })
         if (cancelled) return
         setSourceServerAssets(rows)
       } catch (error) {
@@ -973,20 +1092,14 @@ const Swap: React.FC = () => {
   }, [fromNetwork])
 
   useEffect(() => {
-    let cancelled = false
     if (!activeAccount?.id || !fromNetwork?.id || activeNetworkId !== fromNetwork.id) return
 
-    void (async () => {
-      try {
-        await refreshActiveBalance({ fast: false })
-        if (cancelled) return
-        await fetchNetworkAssets({ force: true })
-      } catch (error) {
-        if (!cancelled) console.warn('Failed to refresh swap sell-side balances', error)
-      }
-    })()
-
-    return () => { cancelled = true }
+    void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((error) => {
+      console.warn('Failed to refresh swap sell-side native balance', error)
+    })
+    void fetchNetworkAssets({ force: true, staleWhileRefresh: true }).catch((error) => {
+      console.warn('Failed to refresh swap sell-side assets', error)
+    })
   }, [activeAccount?.id, fromNetwork?.id, activeNetworkId, refreshActiveBalance, fetchNetworkAssets])
 
   useEffect(() => {
@@ -1005,7 +1118,7 @@ const Swap: React.FC = () => {
         const [serverRows, ecosystemRows] = await Promise.all([
           searchServerSwapAssets(toNetwork, {
             query: deferredDestinationQuery,
-            limit: 50
+            limit: 200
           }),
           loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
         ])
@@ -1404,19 +1517,12 @@ const Swap: React.FC = () => {
                       Enter the amount you want to swap from {fromNetwork?.name || 'the selected chain'}.
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <SwapAssetButton
+                    option={fromItem}
+                    networkName={fromNetwork?.name}
+                    placeholder="Choose token"
                     onClick={() => setTokenSelectorSide('from')}
-                    className="min-w-[164px] rounded-[22px] border border-white/10 bg-white/5 px-3 py-3 text-right transition-colors hover:border-white/20 hover:bg-white/10"
-                  >
-                    <div className="text-sm font-semibold text-slate-900">
-                      {fromItem?.symbol || 'Select'}
-                    </div>
-                    <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
-                      <span>{fromItem?.label || 'Choose token'}</span>
-                      <IoChevronDownOutline className="h-3.5 w-3.5" />
-                    </div>
-                  </button>
+                  />
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-3 text-[11px] text-slate-400">
@@ -1436,9 +1542,9 @@ const Swap: React.FC = () => {
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
                       <span className="text-[10px] text-slate-500">Wallet balances</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                       {fromQuickPicks.map((item) => (
-                        <AssetLogoTile
+                        <AssetCompactTab
                           key={`from-quick-${item.id}`}
                           active={item.id === fromAssetId}
                           option={item}
@@ -1478,19 +1584,12 @@ const Swap: React.FC = () => {
                       {quoteStatusText}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <SwapAssetButton
+                    option={toItem}
+                    networkName={toNetwork?.name}
+                    placeholder="Choose token"
                     onClick={() => setTokenSelectorSide('to')}
-                    className="min-w-[164px] rounded-[22px] border border-white/10 bg-white/5 px-3 py-3 text-right transition-colors hover:border-white/20 hover:bg-white/10"
-                  >
-                    <div className="text-sm font-semibold text-slate-900">
-                      {toItem?.symbol || 'Select'}
-                    </div>
-                    <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-400">
-                      <span>{toItem?.label || 'Choose token'}</span>
-                      <IoChevronDownOutline className="h-3.5 w-3.5" />
-                    </div>
-                  </button>
+                  />
                 </div>
 
                 {toQuickPicks.length > 0 ? (
@@ -1499,9 +1598,9 @@ const Swap: React.FC = () => {
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
                       <span className="text-[10px] text-slate-500">Live server catalog</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                       {toQuickPicks.map((item) => (
-                        <AssetLogoTile
+                        <AssetCompactTab
                           key={`to-quick-${item.id}`}
                           active={item.id === toAssetId}
                           option={item}
