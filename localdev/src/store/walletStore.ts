@@ -911,7 +911,7 @@ const evmTokenDiscoveryCache = new Map<string, {
   addresses: string[]
 }>()
 
-type EvmTrackedToken = {
+export type EvmTrackedToken = {
   address: string
   symbol: string
   decimals: number
@@ -1379,6 +1379,12 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   if (chainId === 43114) return DEFAULT_AVAXC_TRACKED_TOKENS
   if (chainId === 8453) return DEFAULT_BASE_TRACKED_TOKENS
   return []
+}
+
+export function getBundledTrackedEvmTokens(
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>
+): EvmTrackedToken[] {
+  return mergeTrackedEvmTokens(resolveTrackedEvmTokensBase(network))
 }
 
 function resolveEvmChainId(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): number | null {

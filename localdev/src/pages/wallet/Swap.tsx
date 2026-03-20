@@ -20,14 +20,17 @@ import { isSwapSupportedNetwork } from '../../lib/swapEligibility'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
 import {
   createServerExecutionRpcConfig,
+  fetchServerSwapChainPairs,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
   requestServerSwapQuote,
   resolveServerSwapAssetDecimals,
   resolveSwapServerNetworkId,
+  searchServerSwapPairAssets,
   searchServerSwapAssets,
   submitServerSwap,
   type ServerSwapCatalogAsset,
+  type ServerSwapChainPair,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
@@ -35,7 +38,12 @@ import {
   type WalletSwapRoutePreference
 } from '../../lib/swapClient'
 import { getTokenLogoForAsset } from '../../coins/tokenlogos'
-import { useWalletStore, type SendableItem } from '../../store/walletStore'
+import {
+  getBundledTrackedEvmTokens,
+  useWalletStore,
+  type EvmTrackedToken,
+  type SendableItem
+} from '../../store/walletStore'
 
 function compactError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
@@ -217,6 +225,11 @@ function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string)
   return `${item.symbol} - ${item.label}`
 }
 
+function formatAssetSummaryLabel(item: SwapAssetOption | null, networkName?: string, fallbackSymbol?: string): string {
+  const base = formatAssetLabel(item, fallbackSymbol)
+  return networkName ? `${base} on ${networkName}` : base
+}
+
 type SwapAssetOption = {
   id: string
   source: 'wallet' | 'server'
@@ -369,6 +382,25 @@ function normalizeSwapCatalogContractReference(value: unknown): string {
   return SOLANA_SWAP_MINT_RE.test(raw) ? raw.toLowerCase() : ''
 }
 
+function mergeTrackedEvmAssetRows(...groups: EvmTrackedToken[][]): EvmTrackedToken[] {
+  const out: EvmTrackedToken[] = []
+  const seen = new Set<string>()
+
+  for (const group of groups) {
+    for (const item of group) {
+      const address = normalizeContractAddress(item.address)
+      if (!address || seen.has(address)) continue
+      seen.add(address)
+      out.push({
+        ...item,
+        address
+      })
+    }
+  }
+
+  return out
+}
+
 async function loadTrackedDestinationAssets(
   network: Pick<Network, 'id' | 'runtimeModelId' | 'coinType'> | null | undefined,
   query: string
@@ -381,7 +413,10 @@ async function loadTrackedDestinationAssets(
   if (network.coinType === 'EVM') {
     const modelId = resolveSwapCatalogModelId(network)
     if (!modelId) return []
-    const tracked = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
+    const tracked = mergeTrackedEvmAssetRows(
+      await readCatalogTrackedEvmTokens(modelId).catch(() => []),
+      getBundledTrackedEvmTokens(network)
+    )
 
     for (const token of tracked) {
       const address = normalizeContractAddress(token.address)
@@ -619,6 +654,37 @@ function buildQuotePreviewKey(input: {
   ].join('|')
 }
 
+function matchesSwapChainPairNetwork(
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null | undefined,
+  pairNetworkId: string,
+  pairChainId?: number
+): boolean {
+  if (!network) return false
+  if (resolveSwapServerNetworkId(network) !== pairNetworkId) return false
+  if (!Number.isFinite(pairChainId)) return true
+  return Number(network.chainId) === Number(pairChainId)
+}
+
+function filterNetworksBySwapChainPairs(
+  networks: Network[],
+  pairs: ServerSwapChainPair[],
+  side: 'source' | 'destination',
+  selectedSource?: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null
+): Network[] {
+  if (pairs.length === 0) return networks
+  const relevantPairs = side === 'destination' && selectedSource
+    ? pairs.filter((pair) => matchesSwapChainPairNetwork(selectedSource, pair.sourceNetworkId, pair.sourceChainId))
+    : pairs
+  if (relevantPairs.length === 0) return networks
+
+  const filtered = networks.filter((network) => relevantPairs.some((pair) => (
+    side === 'source'
+      ? matchesSwapChainPairNetwork(network, pair.sourceNetworkId, pair.sourceChainId)
+      : matchesSwapChainPairNetwork(network, pair.destinationNetworkId, pair.destinationChainId)
+  )))
+  return filtered.length > 0 ? filtered : networks
+}
+
 function DetailRow({ label, value, subdued = false }: { label: string; value: React.ReactNode; subdued?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 text-[11px]">
@@ -663,12 +729,14 @@ function AssetCompactTab({
   active,
   option,
   onClick,
-  emphasis = 'default'
+  emphasis = 'default',
+  contextLabel
 }: {
   active: boolean
   option: SwapAssetOption
   onClick: () => void
   emphasis?: 'default' | 'soft'
+  contextLabel?: string
 }) {
   const amountText = formatSelectorAmount(option)
 
@@ -706,6 +774,11 @@ function AssetCompactTab({
         <div className={`mt-0.5 truncate text-[10px] ${active ? 'text-white/80' : 'text-slate-400'}`}>
           {option.label || option.symbol}
         </div>
+        {contextLabel ? (
+          <div className={`mt-0.5 truncate text-[9px] ${active ? 'text-white/72' : 'text-slate-400'}`}>
+            On {contextLabel}
+          </div>
+        ) : null}
         <div className={`mt-1 text-[10px] font-semibold ${active ? 'text-white/88' : 'text-slate-500'}`}>
           {amountText}
         </div>
@@ -717,11 +790,13 @@ function AssetCompactTab({
 function AssetListRowButton({
   active,
   option,
-  onClick
+  onClick,
+  contextLabel
 }: {
   active: boolean
   option: SwapAssetOption
   onClick: () => void
+  contextLabel?: string
 }) {
   return (
     <button
@@ -750,6 +825,11 @@ function AssetListRowButton({
         <div className="mt-0.5 truncate text-[11px] text-slate-500">
           {option.label || option.symbol}
         </div>
+        {contextLabel ? (
+          <div className="mt-1 truncate text-[10px] font-medium text-slate-400">
+            On {contextLabel}
+          </div>
+        ) : null}
       </div>
       <div className="text-right">
         <div className="text-[11px] font-semibold text-slate-700">{formatSelectorAmount(option)}</div>
@@ -815,7 +895,8 @@ function TokenSelectorModal({
   onFilterChange,
   emptyText,
   onSelect,
-  onClose
+  onClose,
+  optionContextLabel
 }: {
   title: string
   networkName?: string
@@ -829,6 +910,7 @@ function TokenSelectorModal({
   emptyText: string
   onSelect: (optionId: string) => void
   onClose: () => void
+  optionContextLabel?: string
 }) {
   const counts = useMemo(() => countOptionsByFilter(options), [options])
   const visibleOptions = useMemo(
@@ -906,6 +988,7 @@ function TokenSelectorModal({
                       active={item.id === selectedOptionId}
                       option={item}
                       emphasis="soft"
+                      contextLabel={optionContextLabel}
                       onClick={() => onSelect(item.id)}
                     />
                   ))}
@@ -925,6 +1008,7 @@ function TokenSelectorModal({
                       key={`selector-option-${item.id}`}
                       active={item.id === selectedOptionId}
                       option={item}
+                      contextLabel={optionContextLabel}
                       onClick={() => onSelect(item.id)}
                     />
                   ))}
@@ -979,6 +1063,7 @@ const Swap: React.FC = () => {
   const [destinationQuery, setDestinationQuery] = useState('')
   const [sourceSelectorFilter, setSourceSelectorFilter] = useState<AssetSelectorFilter>('all')
   const [destinationSelectorFilter, setDestinationSelectorFilter] = useState<AssetSelectorFilter>('all')
+  const [serverChainPairs, setServerChainPairs] = useState<ServerSwapChainPair[]>([])
   const [sourceServerAssets, setSourceServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [isSearchingDestinationAssets, setIsSearchingDestinationAssets] = useState(false)
@@ -995,11 +1080,23 @@ const Swap: React.FC = () => {
 
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
 
-  const sourceNetworkOptions = useMemo(
+  const supportedSwapNetworks = useMemo(
     () => enabledNetworks.filter((network) => isSwapSupportedNetwork(network)),
     [enabledNetworks]
   )
-  const destinationNetworkOptions = sourceNetworkOptions
+  const selectedFromNetwork = supportedSwapNetworks.find((network) => network.id === fromNetworkId)
+    || enabledNetworks.find((network) => network.id === fromNetworkId)
+    || supportedSwapNetworks[0]
+    || enabledNetworks[0]
+    || null
+  const sourceNetworkOptions = useMemo(
+    () => filterNetworksBySwapChainPairs(supportedSwapNetworks, serverChainPairs, 'source'),
+    [supportedSwapNetworks, serverChainPairs]
+  )
+  const destinationNetworkOptions = useMemo(
+    () => filterNetworksBySwapChainPairs(supportedSwapNetworks, serverChainPairs, 'destination', selectedFromNetwork),
+    [supportedSwapNetworks, serverChainPairs, selectedFromNetwork]
+  )
 
   const fromNetwork = sourceNetworkOptions.find((network) => network.id === fromNetworkId)
     || enabledNetworks.find((network) => network.id === fromNetworkId)
@@ -1137,6 +1234,24 @@ const Swap: React.FC = () => {
   }, [enabledNetworks, activeNetworkId, fromNetworkId, toNetworkId])
 
   useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const pairs = await fetchServerSwapChainPairs()
+        if (cancelled) return
+        setServerChainPairs(pairs)
+      } catch (error) {
+        if (cancelled) return
+        console.warn('Failed to load swap chain pairs from server', error)
+        setServerChainPairs([])
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
     if (!sourceNetworkOptions.length) return
     if (!sourceNetworkOptions.some((network) => network.id === fromNetworkId)) {
       setFromNetworkId(sourceNetworkOptions[0].id)
@@ -1150,6 +1265,11 @@ const Swap: React.FC = () => {
       setToNetworkId(fallback.id)
     }
   }, [destinationNetworkOptions, toNetworkId, fromNetworkId])
+
+  useEffect(() => {
+    setDestinationQuery('')
+    setToAssetId('')
+  }, [toNetworkId])
 
   useEffect(() => {
     if (fromOptions.length === 0) {
@@ -1219,10 +1339,17 @@ const Swap: React.FC = () => {
       setDestinationSearchError('')
       try {
         const [serverRows, ecosystemRows] = await Promise.all([
-          searchServerSwapAssets(toNetwork, {
-            query: deferredDestinationQuery,
-            limit: 500
-          }),
+          fromNetwork
+            ? searchServerSwapPairAssets({
+              sourceNetwork: fromNetwork,
+              destinationNetwork: toNetwork,
+              query: deferredDestinationQuery,
+              limit: 500
+            })
+            : searchServerSwapAssets(toNetwork, {
+              query: deferredDestinationQuery,
+              limit: 500
+            }),
           loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
         ])
         if (cancelled) return
@@ -1240,7 +1367,7 @@ const Swap: React.FC = () => {
     })()
 
     return () => { cancelled = true }
-  }, [deferredDestinationQuery, toNetwork])
+  }, [deferredDestinationQuery, fromNetwork, toNetwork])
 
   useEffect(() => {
     setQuote(null)
@@ -1678,6 +1805,7 @@ const Swap: React.FC = () => {
                           key={`from-quick-${item.id}`}
                           active={item.id === fromAssetId}
                           option={item}
+                          contextLabel={fromNetwork?.name}
                           onClick={() => setFromAssetId(item.id)}
                         />
                       ))}
@@ -1734,6 +1862,7 @@ const Swap: React.FC = () => {
                           key={`to-quick-${item.id}`}
                           active={item.id === toAssetId}
                           option={item}
+                          contextLabel={toNetwork?.name}
                           onClick={() => setToAssetId(item.id)}
                         />
                       ))}
@@ -1861,7 +1990,7 @@ const Swap: React.FC = () => {
             <div className="min-w-0 flex-1">
               <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">Swap Summary</p>
               <p className="mt-1 truncate text-sm font-semibold text-slate-900">
-                {formatAssetLabel(fromItem, fromNetwork?.symbol)} {'->'} {formatAssetLabel(toItem, toNetwork?.symbol)}
+                {formatAssetSummaryLabel(fromItem, fromNetwork?.name, fromNetwork?.symbol)} {'->'} {formatAssetSummaryLabel(toItem, toNetwork?.name, toNetwork?.symbol)}
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
                 <span className="text-slate-400">{summaryRouteText}</span>
@@ -1919,6 +2048,7 @@ const Swap: React.FC = () => {
         <TokenSelectorModal
           title="Select sell token"
           networkName={fromNetwork?.name}
+          optionContextLabel={fromNetwork?.name}
           query={sourceQuery}
           onQueryChange={setSourceQuery}
           quickPicks={fromQuickPicks}
@@ -1939,6 +2069,7 @@ const Swap: React.FC = () => {
         <TokenSelectorModal
           title="Select receive token"
           networkName={toNetwork?.name}
+          optionContextLabel={toNetwork?.name}
           query={destinationQuery}
           onQueryChange={setDestinationQuery}
           quickPicks={toQuickPicks}

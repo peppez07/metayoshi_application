@@ -6,8 +6,6 @@ import { getBuildFeatureFlag } from '../buildConfig'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-const DEFAULT_LEGACY_UNISWAP_API_BASE = 'https://trade-api.gateway.uniswap.org/v1'
-const UNISWAP_NATIVE_ADDRESS = '0x0000000000000000000000000000000000000000'
 const ERC20_METADATA_IFACE = new ethers.Interface(['function decimals() view returns (uint8)'])
 const TX_RECEIPT_POLL_MS = 4_000
 const TX_RECEIPT_MAX_POLLS = 30
@@ -134,6 +132,8 @@ type BridgeNetworkInput = Pick<
   'id' | 'symbol' | 'chainId' | 'rpcUrl' | 'bridgeUrl' | 'bridgeUsername' | 'bridgePassword' | 'explorerUrl'
 >
 
+type ConfiguredSwapApiVersion = 'legacy' | 'v1'
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
@@ -163,29 +163,6 @@ function compactErrorText(value: string, maxLen = 220): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
-function formatDisplayAmount(value: string): string {
-  const normalized = String(value || '').trim()
-  if (!normalized) return '0'
-  if (!normalized.includes('.')) return normalized
-  return normalized.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
-}
-
-function formatRawTokenAmount(amountRaw: string, decimals: number): string {
-  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
-  return formatDisplayAmount(ethers.formatUnits(BigInt(readString(amountRaw) || '0'), safeDecimals))
-}
-
-function uiAmountToRaw(amount: string, decimals: number): string {
-  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 && decimals <= 30 ? decimals : 18
-  return ethers.parseUnits(readString(amount) || '0', safeDecimals).toString()
-}
-
-function computeMinOutputRaw(amountRaw: string, slippageBps: number): string {
-  const raw = BigInt(readString(amountRaw) || '0')
-  const safeBps = Math.max(0, Math.min(10_000, Math.trunc(slippageBps)))
-  return ((raw * BigInt(10_000 - safeBps)) / 10_000n).toString()
-}
-
 function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
   switch (readString(value).toUpperCase()) {
     case 'SUCCESS':
@@ -203,12 +180,9 @@ function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
   }
 }
 
-function getLegacyUniswapApiBase(): string {
-  const explicit = readString((import.meta as any)?.env?.VITE_UNISWAP_API_BASE_URL).replace(/\/+$/, '')
-  if (explicit) return explicit
-  const legacy = readString((import.meta as any)?.env?.VITE_SECURE_BRIDGE_API_BASE_URL).replace(/\/+$/, '')
-  if (legacy) return resolveSwapApiBaseUrl(legacy)
-  return resolveSwapApiBaseUrl(DEFAULT_LEGACY_UNISWAP_API_BASE)
+function getConfiguredSwapApiVersion(): ConfiguredSwapApiVersion {
+  const raw = readString((import.meta as any)?.env?.VITE_SWAP_API_VERSION).toLowerCase()
+  return raw === 'v1' ? 'v1' : 'legacy'
 }
 
 function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {
@@ -264,55 +238,6 @@ async function fetchJsonWithStatus(url: string, init: RequestInit): Promise<Json
     status: response.status,
     json,
     text
-  }
-}
-
-async function executeUniswapJsonRequest(
-  config: ServerExecutionRpcConfig,
-  path: string,
-  init: RequestInit,
-  action: ServerExecutionAction
-): Promise<any> {
-  if (!APP_API_KEY) {
-    throw new Error('VITE_APP_API_KEY is required for Uniswap swap execution')
-  }
-
-  const url = `${getLegacyUniswapApiBase()}${path}`
-  const monitorRequestId = beginServerExecutionMonitor(config, action, url)
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'X-API-Key': APP_API_KEY,
-      ...(init.headers as Record<string, string> | undefined)
-    }
-    if (action === 'quote' || action === 'submit' || action === 'approval') {
-      headers['x-permit2-enabled'] = 'false'
-    }
-
-    const response = await fetchJsonWithStatus(url, {
-      ...init,
-      headers
-    })
-
-    if (!response.ok) {
-      const detail = readString(
-        response.json?.detail
-        || response.json?.error
-        || response.json?.message
-        || response.text
-        || `HTTP ${response.status}`
-      )
-      if (action === 'quote' && response.status === 404) {
-        throw new Error('No route is available for the selected swap')
-      }
-      throw new Error(`Server execution request failed: ${compactErrorText(detail) || `HTTP ${response.status}`}`)
-    }
-
-    completeServerExecutionMonitor(monitorRequestId, response.status)
-    return response.json ?? {}
-  } catch (error) {
-    failServerExecutionMonitor(monitorRequestId, error)
-    throw error
   }
 }
 
@@ -410,15 +335,6 @@ async function executeServerManagedJsonRequest(
   }
 }
 
-function resolveUniswapTokenAddress(asset: ServerSwapAssetRef | undefined, networkId: string, label: string): string {
-  if (!asset || asset.kind === 'native') return UNISWAP_NATIVE_ADDRESS
-  const contractAddress = readString(asset.contractAddress)
-  if (!ethers.isAddress(contractAddress)) {
-    throw new Error(`${label} requires a valid token contract address`)
-  }
-  return contractAddress
-}
-
 function buildExplorerTxUrl(baseUrl: string | undefined, txid: string): string | undefined {
   const base = readString(baseUrl).replace(/\/+$/, '')
   const hash = readString(txid)
@@ -456,62 +372,7 @@ function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSw
       }
     }
   }
-
-  const response = asRecord(raw)
-  const quote = asRecord(response.quote)
-  const output = asRecord(quote.output)
-  const routing = readString(response.routing).toUpperCase()
-  const quoteId = readString(quote.quoteId || response.requestId)
-  if (!quoteId) throw new Error('Swap quote response is missing quoteId')
-  if (!['CLASSIC', 'WRAP', 'UNWRAP', 'BRIDGE'].includes(routing)) {
-    throw new Error(`Uniswap routing "${routing || 'unknown'}" is not supported by this swap flow`)
-  }
-
-  const sourceDecimals = request.source.asset?.decimals ?? 18
-  const destinationDecimals = request.destination.asset?.decimals ?? 18
-  const destinationAmountRaw = readString(output.amount)
-  const minDestinationAmountRaw = computeMinOutputRaw(destinationAmountRaw, request.slippageBps)
-  const portionAmountRaw = readString(quote.portionAmount)
-  const warnings = readStringArray(quote.txFailureReasons)
-  const expiresAt = (() => {
-    const fillDeadline = readNumber(quote.fillDeadline)
-    if (fillDeadline) return fillDeadline * 1000
-    const exclusivityDeadline = readNumber(quote.exclusivityDeadline)
-    if (exclusivityDeadline) return exclusivityDeadline * 1000
-    return Date.now() + 60_000
-  })()
-
-  return {
-    quoteId,
-    mode: 'standard',
-    sourceSymbol: request.source.symbol,
-    destinationSymbol: request.destination.symbol,
-    sourceAmount: request.source.amount,
-    destinationAmount: formatRawTokenAmount(destinationAmountRaw, destinationDecimals),
-    minDestinationAmount: formatRawTokenAmount(minDestinationAmountRaw, destinationDecimals),
-    expiresAt,
-    routeSummary: readString(quote.routeString) || `${routing} via Uniswap`,
-    sponsorCoversNetworkFee: false,
-    estimatedNetworkFee: readString(quote.gasFee)
-      ? formatRawTokenAmount(readString(quote.gasFee), sourceDecimals)
-      : undefined,
-    estimatedNetworkFeeSymbol: request.source.symbol,
-    estimatedServerFee: portionAmountRaw
-      ? `${formatRawTokenAmount(portionAmountRaw, destinationDecimals)} ${request.destination.symbol}`.trim()
-      : undefined,
-    priceImpactPct: readNumber(quote.priceImpact) ?? null,
-    warnings,
-    metadata: {
-      provider: 'uniswap',
-      routing,
-      requestId: readString(response.requestId),
-      quote,
-      permitData: response.permitData ?? null,
-      permitTransaction: response.permitTransaction ?? null,
-      sourceChainId: request.source.chainId,
-      destinationChainId: request.destination.chainId
-    }
-  }
+  throw new Error('Swap quote response did not come from the MetaYoshi server swap service')
 }
 
 function hasTransactionRequest(value: unknown): boolean {
@@ -854,6 +715,10 @@ export async function requestServerSwapQuote(
   config: ServerExecutionRpcConfig,
   request: ServerSwapQuoteRequest
 ): Promise<ServerSwapQuote> {
+  if (getConfiguredSwapApiVersion() === 'legacy') {
+    throw new Error('Legacy swap mode is configured, but this wallet build only allows MetaYoshi server swap endpoints. Set VITE_SWAP_API_VERSION=v1.')
+  }
+
   let raw: unknown
   try {
     raw = await executeServerManagedJsonRequest(config, '/v1/swap/quote', {

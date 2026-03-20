@@ -38,6 +38,13 @@ export type ServerSwapCatalogAsset = {
   canonicalGroupId?: string
 }
 
+export type ServerSwapChainPair = {
+  sourceNetworkId: string
+  destinationNetworkId: string
+  sourceChainId?: number
+  destinationChainId?: number
+}
+
 export type WalletSwapReadiness = {
   state: WalletSwapReadinessState
   tone: WalletSwapReadinessTone
@@ -66,10 +73,183 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
+function getSwapApiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)
+  if (appApiKey) headers['X-API-Key'] = appApiKey
+  return headers
+}
+
+function extractSwapCatalogRows(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload
+  const record = asRecord(payload)
+  const candidates = [
+    record.assets,
+    record.items,
+    record.tokens,
+    record.pairs,
+    record.receive,
+    record.receiveAssets,
+    record.receiveTokens,
+    record.destinationAssets,
+    record.destinationTokens,
+    record.results,
+    record.data
+  ]
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate
+  }
+  return []
+}
+
 export function resolveSwapServerNetworkId(network?: Pick<Network, 'id' | 'runtimeModelId'> | null): string {
   const normalized = readString(network?.runtimeModelId || network?.id).toLowerCase()
   if (normalized === 'sol') return 'solana'
   return normalized
+}
+
+function normalizeSwapServerNetworkId(value: unknown): string {
+  const raw = readString(value).toLowerCase().replace(/[_\s]+/g, '-')
+  if (!raw) return ''
+  switch (raw) {
+    case 'sol':
+    case 'solana-mainnet':
+    case 'solana-mainnet-beta':
+    case 'mainnet-beta':
+      return 'solana'
+    case 'ethereum':
+    case '1':
+      return 'eth'
+    case 'arbitrum':
+    case 'arbitrum-one':
+    case '42161':
+      return 'arb'
+    case 'optimism':
+    case '10':
+      return 'op'
+    case '8453':
+      return 'base'
+    case 'tron-mainnet':
+      return 'tron'
+    case 'cosmoshub-4':
+      return 'cosmoshub'
+    case 'osmosis-1':
+      return 'osmosis'
+    default:
+      return raw
+  }
+}
+
+function extractSwapAssetNetworkId(value: unknown): string {
+  const raw = readString(value).toLowerCase()
+  if (!raw.includes(':')) return ''
+  const [, networkId = ''] = raw.split(':')
+  return normalizeSwapServerNetworkId(networkId)
+}
+
+function matchesRequestedSwapNetwork(item: Record<string, unknown>, requestedNetworkId: string): boolean {
+  const requested = normalizeSwapServerNetworkId(requestedNetworkId)
+  if (!requested) return false
+
+  const candidates = [
+    normalizeSwapServerNetworkId(item.networkId),
+    normalizeSwapServerNetworkId(item.chainKey),
+    normalizeSwapServerNetworkId(item.chainId),
+    extractSwapAssetNetworkId(item.assetId),
+    extractSwapAssetNetworkId(item.wrapsAssetId)
+  ].filter(Boolean)
+
+  if (candidates.length === 0) return false
+  return candidates.includes(requested)
+}
+
+function parseServerSwapCatalogAssetRows(
+  rows: unknown[],
+  requestedNetworkId: string,
+  options: {
+    allowNetworkFallback?: boolean
+  } = {}
+): ServerSwapCatalogAsset[] {
+  const out: ServerSwapCatalogAsset[] = []
+  const requested = normalizeSwapServerNetworkId(requestedNetworkId)
+
+  for (const row of rows) {
+    const item = asRecord(row)
+    const hasScopedNetwork =
+      Boolean(
+        normalizeSwapServerNetworkId(item.networkId)
+        || normalizeSwapServerNetworkId(item.chainKey)
+        || normalizeSwapServerNetworkId(item.chainId)
+        || extractSwapAssetNetworkId(item.assetId)
+        || extractSwapAssetNetworkId(item.wrapsAssetId)
+      )
+    const matchesRequested = matchesRequestedSwapNetwork(item, requested)
+    if (requested && !matchesRequested) {
+      if (!(options.allowNetworkFallback && !hasScopedNetwork)) continue
+    }
+
+    const networkId = normalizeSwapServerNetworkId(item.networkId) || requested
+    const contractAddress = readString(item.contractAddress || item.address || item.tokenAddress) || undefined
+    const symbol = readString(item.symbol || item.ticker).toUpperCase()
+    const label = readString(item.label || item.name) || symbol
+    const kindRaw = readString(item.kind).toLowerCase()
+    const kind: ServerSwapCatalogAssetKind =
+      kindRaw === 'native' || kindRaw === 'wrapped' || kindRaw === 'nft'
+        ? kindRaw
+        : (contractAddress ? 'fungible' : 'native')
+    const assetId = readString(item.assetId)
+      || (kind === 'native' ? `native:${networkId}` : (contractAddress || readString(item.id) || symbol))
+    if (!assetId || !networkId || !symbol) continue
+
+    out.push({
+      networkId,
+      assetId,
+      symbol,
+      label,
+      kind,
+      contractAddress,
+      logoUrl: readString(item.logoUrl || item.logoURI || item.logoUri || item.iconUrl) || undefined,
+      decimals: readNumber(item.decimals),
+      aliases: readStringArray(item.aliases),
+      isWrapped: Boolean(item.isWrapped),
+      wrapsAssetId: readString(item.wrapsAssetId) || undefined,
+      canonicalGroupId: readString(item.canonicalGroupId) || undefined
+    })
+  }
+
+  return out
+}
+
+function resolveSwapPairSide(
+  item: Record<string, unknown>,
+  side: 'source' | 'destination'
+): { networkId: string; chainId?: number } {
+  const prefix = side === 'source' ? 'source' : 'destination'
+  const aliasPrefix = side === 'source' ? 'from' : 'to'
+  const labelPrefix = side === 'source' ? 'sell' : 'buy'
+  const direct = item[side] || item[aliasPrefix]
+  const nested = asRecord(direct)
+  const networkId = normalizeSwapServerNetworkId(
+    direct
+    || nested.networkId
+    || nested.chainKey
+    || nested.chain
+    || nested.id
+    || item[`${prefix}NetworkId`]
+    || item[`${aliasPrefix}NetworkId`]
+    || item[`${labelPrefix}NetworkId`]
+    || item[`${prefix}Network`]
+    || item[`${aliasPrefix}Network`]
+    || item[`${prefix}ChainKey`]
+    || item[`${aliasPrefix}ChainKey`]
+  )
+  const chainId = readNumber(
+    nested.chainId
+    || item[`${prefix}ChainId`]
+    || item[`${aliasPrefix}ChainId`]
+    || item[`${labelPrefix}ChainId`]
+  )
+  return { networkId, chainId }
 }
 
 export function getWalletSwapApiVersion(): WalletSwapApiVersion {
@@ -153,19 +333,16 @@ export async function searchServerSwapAssets(
 ): Promise<ServerSwapCatalogAsset[]> {
   const apiBase = resolveSwapApiBaseUrl(deriveServerApiBaseUrl(network as Network))
   if (!apiBase) throw new Error('Server API base URL is not configured for swap asset search')
+  const requestedNetworkId = resolveSwapServerNetworkId(network)
 
   const params = new URLSearchParams()
-  params.set('networkId', resolveSwapServerNetworkId(network))
+  params.set('networkId', requestedNetworkId)
   if (readString(input.query)) params.set('q', readString(input.query))
   params.set('limit', String(Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))))
 
-  const headers: Record<string, string> = {}
-  const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)
-  if (appApiKey) headers['X-API-Key'] = appApiKey
-
   const response = await fetch(`${apiBase}/v1/assets/search?${params.toString()}`, {
     method: 'GET',
-    headers
+    headers: getSwapApiHeaders()
   })
   const text = await response.text().catch(() => '')
   let json: unknown = null
@@ -185,37 +362,136 @@ export async function searchServerSwapAssets(
   }
 
   const payload = asRecord(json)
-  const rows = Array.isArray(payload.assets)
-    ? payload.assets
-    : (Array.isArray(payload.items) ? payload.items : [])
+  return parseServerSwapCatalogAssetRows(extractSwapCatalogRows(payload), requestedNetworkId)
+}
 
-  const out: ServerSwapCatalogAsset[] = []
+export async function fetchServerSwapChainPairs(): Promise<ServerSwapChainPair[]> {
+  if (getWalletSwapApiVersion() !== 'v1') return []
+  const apiBase = resolveSwapApiBaseUrl()
+  if (!apiBase) throw new Error('Server API base URL is not configured for swap chain pairs')
+
+  const response = await fetch(`${apiBase}/v1/chains/swap/pairs`, {
+    method: 'GET',
+    headers: getSwapApiHeaders()
+  })
+  const text = await response.text().catch(() => '')
+  let json: unknown = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+
+  if (!response.ok) {
+    const body = asRecord(json)
+    const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
+    if (response.status === 404) {
+      throw new Error('Server swap chain pairs endpoint is unavailable')
+    }
+    throw new Error(`Server swap chain pairs request failed: ${detail || `HTTP ${response.status}`}`)
+  }
+
+  const payload = asRecord(json)
+  const rows = extractSwapCatalogRows(payload)
+  const out: ServerSwapChainPair[] = []
+  const seen = new Set<string>()
+
   for (const row of rows) {
     const item = asRecord(row)
-    const assetId = readString(item.assetId)
-    const networkId = readString(item.networkId) || readString(network.id)
-    const symbol = readString(item.symbol)
-    const label = readString(item.label) || symbol
-    const kindRaw = readString(item.kind).toLowerCase()
-    const kind: ServerSwapCatalogAssetKind =
-      kindRaw === 'native' || kindRaw === 'wrapped' || kindRaw === 'nft' ? kindRaw : 'fungible'
-    if (!assetId || !networkId || !symbol) continue
+    const source = resolveSwapPairSide(item, 'source')
+    const destination = resolveSwapPairSide(item, 'destination')
+    if (!source.networkId || !destination.networkId) continue
+    const key = `${source.networkId}:${source.chainId ?? ''}->${destination.networkId}:${destination.chainId ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push({
-      networkId,
-      assetId,
-      symbol,
-      label,
-      kind,
-      contractAddress: readString(item.contractAddress) || undefined,
-      logoUrl: readString(item.logoUrl || item.logoURI || item.logoUri) || undefined,
-      decimals: readNumber(item.decimals),
-      aliases: readStringArray(item.aliases),
-      isWrapped: Boolean(item.isWrapped),
-      wrapsAssetId: readString(item.wrapsAssetId) || undefined,
-      canonicalGroupId: readString(item.canonicalGroupId) || undefined
+      sourceNetworkId: source.networkId,
+      destinationNetworkId: destination.networkId,
+      sourceChainId: source.chainId,
+      destinationChainId: destination.chainId
     })
   }
+
   return out
+}
+
+export async function searchServerSwapPairAssets(
+  input: {
+    sourceNetwork: Pick<Network, 'id' | 'runtimeModelId' | 'chainId' | 'bridgeUrl' | 'rpcUrl'>
+    destinationNetwork: Pick<Network, 'id' | 'runtimeModelId' | 'chainId' | 'bridgeUrl' | 'rpcUrl'>
+    query?: string
+    limit?: number
+  }
+): Promise<ServerSwapCatalogAsset[]> {
+  if (getWalletSwapApiVersion() !== 'v1') {
+    return await searchServerSwapAssets(input.destinationNetwork, {
+      query: input.query,
+      limit: input.limit
+    })
+  }
+
+  const apiBase = resolveSwapApiBaseUrl(
+    deriveServerApiBaseUrl(input.sourceNetwork as Network)
+    || deriveServerApiBaseUrl(input.destinationNetwork as Network)
+  )
+  if (!apiBase) {
+    return await searchServerSwapAssets(input.destinationNetwork, {
+      query: input.query,
+      limit: input.limit
+    })
+  }
+
+  const sourceNetworkId = resolveSwapServerNetworkId(input.sourceNetwork)
+  const destinationNetworkId = resolveSwapServerNetworkId(input.destinationNetwork)
+  const params = new URLSearchParams()
+  params.set('sourceNetworkId', sourceNetworkId)
+  params.set('destinationNetworkId', destinationNetworkId)
+  params.set('networkId', destinationNetworkId)
+  if (Number.isFinite(Number(input.sourceNetwork.chainId))) {
+    params.set('sourceChainId', String(input.sourceNetwork.chainId))
+  }
+  if (Number.isFinite(Number(input.destinationNetwork.chainId))) {
+    params.set('destinationChainId', String(input.destinationNetwork.chainId))
+  }
+  if (readString(input.query)) params.set('q', readString(input.query))
+  params.set('limit', String(Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))))
+
+  const response = await fetch(`${apiBase}/v1/token-registry/swap/pair?${params.toString()}`, {
+    method: 'GET',
+    headers: getSwapApiHeaders()
+  })
+  const text = await response.text().catch(() => '')
+  let json: unknown = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+
+  if (!response.ok) {
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+      return await searchServerSwapAssets(input.destinationNetwork, {
+        query: input.query,
+        limit: input.limit
+      })
+    }
+    const body = asRecord(json)
+    const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
+    throw new Error(`Server swap pair token registry request failed: ${detail || `HTTP ${response.status}`}`)
+  }
+
+  const payload = asRecord(json)
+  const parsed = parseServerSwapCatalogAssetRows(
+    extractSwapCatalogRows(payload),
+    destinationNetworkId,
+    { allowNetworkFallback: true }
+  )
+  if (parsed.length > 0) return parsed
+
+  return await searchServerSwapAssets(input.destinationNetwork, {
+    query: input.query,
+    limit: input.limit
+  })
 }
 
 export {
