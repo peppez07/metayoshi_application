@@ -802,7 +802,7 @@ async function openExtensionSurface(
 
 async function openApprovalSurface(target?: ExtensionSurfaceTarget): Promise<void> {
   await openExtensionSurface(buildApprovalRoutePath(), target, {
-    fallbackToTabOnSidePanelFailure: false
+    fallbackToTabOnSidePanelFailure: true
   })
 }
 
@@ -812,13 +812,36 @@ async function openRequestSurface(
   target?: ExtensionSurfaceTarget
 ): Promise<void> {
   await openExtensionSurface(buildRequestRoutePath(requestId, method), target, {
-    fallbackToTabOnSidePanelFailure: false
+    fallbackToTabOnSidePanelFailure: true
   })
 }
 
 async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void> {
-  await openExtensionSurface('/wallet/assets', target, {
-    fallbackToTabOnSidePanelFailure: false
+  const now = Date.now()
+  const [pendingRequest, pendingApproval] = await Promise.all([
+    getPendingRequest(),
+    getPendingApproval()
+  ])
+  const routePath = (() => {
+    if (
+      pendingRequest
+      && (pendingRequest.status === 'pending' || pendingRequest.status === 'approved')
+      && pendingRequest.expiresAt > now
+    ) {
+      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
+    }
+    if (
+      pendingApproval
+      && pendingApproval.status === 'pending'
+      && pendingApproval.expiresAt > now
+    ) {
+      return buildApprovalRoutePath()
+    }
+    return '/wallet/assets'
+  })()
+
+  await openExtensionSurface(routePath, target, {
+    fallbackToTabOnSidePanelFailure: true
   })
 }
 
@@ -1415,9 +1438,13 @@ async function requestDappActionApproval(
 
   try {
     await openRequestSurface(requestId, method, surfaceTarget)
-  } catch {
-    await clearPendingRequestIfMatch(requestId)
-    throw { code: 4001, message: 'Unable to open wallet approval view' }
+  } catch (err) {
+    void recordRuntimeError('background-sw', err, {
+      kind: 'open-request-surface',
+      requestId,
+      origin: normalizedOrigin,
+      method
+    })
   }
 
   const decision = await waitForRequestDecision(requestId, DAPP_APPROVAL_TIMEOUT_MS)
@@ -1506,9 +1533,14 @@ async function requestScopes(
 
   try {
     await openApprovalSurface(options?.surfaceTarget)
-  } catch {
-    await clearPendingApprovalIfMatch(approvalId)
-    return false
+  } catch (err) {
+    void recordRuntimeError('background-sw', err, {
+      kind: 'open-approval-surface',
+      approvalId,
+      origin: normalizedOrigin,
+      scopes: nextPending.scopes,
+      networkId: nextPending.networkId
+    })
   }
 
   const decision = await waitForApprovalDecision(
