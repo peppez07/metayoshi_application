@@ -138,6 +138,9 @@ type EventPortRecord = {
 
 // Track the page origin behind each event bridge so account-bearing events stay permission-scoped.
 const eventPorts = new Map<chrome.runtime.Port, EventPortRecord>()
+const inFlightScopeRequests = new Map<string, Promise<boolean>>()
+const inFlightActionApprovals = new Map<string, Promise<unknown>>()
+const scheduledWalletSurfaceOpens = new Map<string, number>()
 
 interface WalletState {
   isInitialized?: boolean
@@ -585,6 +588,27 @@ function getSidePanelApi(): {
   return api || null
 }
 
+function getSidebarActionApi(): {
+  open?: () => Promise<void>
+  setPanel?: (details: { panel: string }) => Promise<void>
+} | null {
+  const chromeApi = chrome as typeof chrome & {
+    sidebarAction?: {
+      open?: () => Promise<void>
+      setPanel?: (details: { panel: string }) => Promise<void>
+    }
+  }
+  const browserApi = globalThis as typeof globalThis & {
+    browser?: {
+      sidebarAction?: {
+        open?: () => Promise<void>
+        setPanel?: (details: { panel: string }) => Promise<void>
+      }
+    }
+  }
+  return chromeApi.sidebarAction || browserApi.browser?.sidebarAction || null
+}
+
 function buildApprovalRoutePath(): string {
   return '/dapp/connect/1'
 }
@@ -726,8 +750,24 @@ async function openExtensionSurface(
 ): Promise<void> {
   const resolvedTarget = await resolveExtensionSurfaceTarget(target)
   const sidePanel = getSidePanelApi()
+  const sidebarAction = getSidebarActionApi()
   const fallbackToTabOnSidePanelFailure = options?.fallbackToTabOnSidePanelFailure ?? true
+  let sidePanelFailure: Error | null = null
   await setExtensionSurfaceRoute(routePath)
+
+  if (!sidePanel && sidebarAction) {
+    try {
+      await sidebarAction.setPanel?.({ panel: buildExtensionRouteUrl(routePath) })
+      await sidebarAction.open?.()
+      return
+    } catch (err) {
+      sidePanelFailure = createExtensionSurfaceError('sidebar action open failed')
+      void recordRuntimeError('background-sw', err, {
+        kind: 'open-extension-surface-sidebar-action',
+        routePath
+      })
+    }
+  }
 
   if (!sidePanel) {
     if (!fallbackToTabOnSidePanelFailure) {
@@ -736,8 +776,6 @@ async function openExtensionSurface(
     await openOrFocusExtensionTab(routePath, resolvedTarget)
     return
   }
-
-  let sidePanelFailure: Error | null = null
 
   if (sidePanel.setOptions) {
     try {
@@ -843,6 +881,65 @@ async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void>
   await openExtensionSurface(routePath, target, {
     fallbackToTabOnSidePanelFailure: true
   })
+}
+
+async function openWalletSurfaceWithoutTabFallback(target?: ExtensionSurfaceTarget): Promise<void> {
+  const now = Date.now()
+  const [pendingRequest, pendingApproval] = await Promise.all([
+    getPendingRequest(),
+    getPendingApproval()
+  ])
+  const routePath = (() => {
+    if (
+      pendingRequest
+      && (pendingRequest.status === 'pending' || pendingRequest.status === 'approved')
+      && pendingRequest.expiresAt > now
+    ) {
+      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
+    }
+    if (
+      pendingApproval
+      && pendingApproval.status === 'pending'
+      && pendingApproval.expiresAt > now
+    ) {
+      return buildApprovalRoutePath()
+    }
+    return '/wallet/assets'
+  })()
+
+  await openExtensionSurface(routePath, target, {
+    fallbackToTabOnSidePanelFailure: false
+  })
+}
+
+function buildSurfaceTargetKey(target?: ExtensionSurfaceTarget): string {
+  const tabId = typeof target?.tabId === 'number' ? String(target.tabId) : 'na'
+  const windowId = typeof target?.windowId === 'number' ? String(target.windowId) : 'na'
+  return `${tabId}:${windowId}`
+}
+
+function cancelScheduledWalletSurfaceOpen(target?: ExtensionSurfaceTarget): void {
+  const key = buildSurfaceTargetKey(target)
+  const timer = scheduledWalletSurfaceOpens.get(key)
+  if (timer === undefined) return
+  clearTimeout(timer)
+  scheduledWalletSurfaceOpens.delete(key)
+}
+
+function scheduleWalletSurfaceOpen(target?: ExtensionSurfaceTarget, delayMs = 250): void {
+  cancelScheduledWalletSurfaceOpen(target)
+  const key = buildSurfaceTargetKey(target)
+  const timer = setTimeout(() => {
+    scheduledWalletSurfaceOpens.delete(key)
+    void openWalletSurfaceWithoutTabFallback(target).catch((err) => {
+      void recordRuntimeError('background-sw', err, {
+        kind: 'scheduled-open-wallet-surface',
+        tabId: target?.tabId,
+        windowId: target?.windowId
+      })
+    })
+  }, Math.max(0, delayMs))
+  scheduledWalletSurfaceOpens.set(key, timer as unknown as number)
 }
 
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
@@ -1358,6 +1455,17 @@ async function requestDappActionApproval(
   request: unknown,
   surfaceTarget?: ExtensionSurfaceTarget
 ): Promise<unknown> {
+  const actionKey = [
+    normalizeDappOrigin(origin),
+    networkId,
+    accountId,
+    method,
+    stableStringifyForComparison(request)
+  ].join('|')
+  const inFlight = inFlightActionApprovals.get(actionKey)
+  if (inFlight) return await inFlight
+
+  const pendingPromise = (async () => {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') {
     throw { code: 4001, message: 'Untrusted origin' }
@@ -1466,6 +1574,14 @@ async function requestDappActionApproval(
     code: decision.error?.code ?? -32603,
     message: decision.error?.message ?? 'Transaction failed'
   }
+  })()
+
+  inFlightActionApprovals.set(actionKey, pendingPromise)
+  try {
+    return await pendingPromise
+  } finally {
+    inFlightActionApprovals.delete(actionKey)
+  }
 }
 
 // Request scope permission(s) in a single approval view.
@@ -1474,6 +1590,15 @@ async function requestScopes(
   scopes: DappScope[],
   options?: { networkId?: string; surfaceTarget?: ExtensionSurfaceTarget }
 ): Promise<boolean> {
+  const scopeKey = [
+    normalizeDappOrigin(origin),
+    uniqDappScopes(scopes).sort().join(','),
+    String(options?.networkId || '').trim()
+  ].join('|')
+  const inFlight = inFlightScopeRequests.get(scopeKey)
+  if (inFlight) return await inFlight
+
+  const pendingPromise = (async () => {
   const normalizedOrigin = normalizeDappOrigin(origin)
   if (!normalizedOrigin || normalizedOrigin === 'unknown') return false
 
@@ -1562,6 +1687,14 @@ async function requestScopes(
   await grantScopes(normalizedOrigin, nextPending.scopes)
   await clearPendingApprovalIfMatch(approvalId)
   return true
+  })()
+
+  inFlightScopeRequests.set(scopeKey, pendingPromise)
+  try {
+    return await pendingPromise
+  } finally {
+    inFlightScopeRequests.delete(scopeKey)
+  }
 }
 
 // Request one scope helper
@@ -2384,16 +2517,8 @@ chrome.runtime.onMessage.addListener((message: DappRequest | OpenWalletSurfaceRe
       ...(typeof sender?.tab?.windowId === 'number' ? { windowId: sender.tab.windowId } : {})
     }
 
-    void openWalletSurface(surfaceTarget)
-      .then(() => sendResponse({ ok: true }))
-      .catch((err) => {
-        void recordRuntimeError('background-sw', err, {
-          kind: 'open-wallet-surface-message',
-          senderOrigin: sender?.origin || null,
-          senderUrl: sender?.url || null
-        })
-        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      })
+    scheduleWalletSurfaceOpen(surfaceTarget)
+    sendResponse({ ok: true })
     return true
   }
 
@@ -2404,6 +2529,7 @@ chrome.runtime.onMessage.addListener((message: DappRequest | OpenWalletSurfaceRe
       ...(typeof sender?.tab?.id === 'number' ? { tabId: sender.tab.id } : {}),
       ...(typeof sender?.tab?.windowId === 'number' ? { windowId: sender.tab.windowId } : {})
     }
+    cancelScheduledWalletSurfaceOpen(surfaceTarget)
 
     void recordBridgeTrace('background-sw', 'rpc-received', {
       method: request?.method,
