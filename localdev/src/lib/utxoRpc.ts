@@ -5,7 +5,8 @@ import { recordRuntimeError } from './runtimeErrorMonitor'
 import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { resolveAuthApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
-import { assertBridgeCredentialsConfigured } from './bridgeCredentials'
+import { discoverWalletBackend, getDiscoveredGatewayBase } from './backendHelp'
+import { assertBridgeCredentialsConfigured, getMissingBridgeCredentialsMessage } from './bridgeCredentials'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
@@ -119,6 +120,20 @@ function applyOptionalBridgeBasicAuthHeaders(
   const password = String(config.bridgePassword || '').trim()
   if (!username || !password) return
   headers['Authorization'] = `Basic ${btoa(`${username}:${password}`)}`
+}
+
+function hasConfiguredBridgeCredentials(config: UtxoRpcConfig): boolean {
+  const username = String(config.bridgeUsername || '').trim()
+  const password = String(config.bridgePassword || '').trim()
+  return Boolean(username && password)
+}
+
+function buildHostedReadUnavailableError(config: UtxoRpcConfig, scope: string): Error {
+  const label = String(config.networkId || config.coinSymbol || 'this network').trim() || 'this network'
+  return new Error(
+    `Hosted MetaYoshi ${scope} endpoint is unavailable for ${label}. ` +
+    'The wallet is configured for hosted metayoshi.app reads only, so bridge-password fallback was skipped.'
+  )
 }
 
 function applyOptionalServerApiKey(headers: Record<string, string>): void {
@@ -349,7 +364,9 @@ async function getSecureBridgeSession(
   config: UtxoRpcConfig,
   bridgeUrl: string
 ): Promise<{ token: string; address: string; apiBase: string }> {
-  const apiBase = resolveSecureBridgeApiBase(config, bridgeUrl)
+  const configuredApiBase = resolveSecureBridgeApiBase(config, bridgeUrl)
+  const discovery = await discoverWalletBackend(configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl)).catch(() => null)
+  const apiBase = getDiscoveredGatewayBase(discovery, configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl))
   if (!apiBase) throw asSecureUnavailable('Bridge API base URL is not available')
 
   const signer = config.secureBridgeSigner
@@ -659,6 +676,72 @@ async function fetchBridgeAddressBalance(
     }
 
     return null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchBridgeAddressAssets(
+  config: UtxoRpcConfig,
+  address: string
+): Promise<Record<string, number> | null> {
+  if (!config.bridgeUrl) return null
+  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
+  if (!apiBase) return null
+
+  const { coin, chain } = resolveBridgeCoinChainHint(config)
+  if (!coin) return null
+
+  const params = new URLSearchParams()
+  params.set('coin', coin)
+  params.set('chain', chain || 'main')
+  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets?${params.toString()}`
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  applyOptionalServerApiKey(headers)
+  applyOptionalBridgeBasicAuthHeaders(headers, config)
+
+  const controller = new AbortController()
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: controller.signal
+    })
+    if (!res.ok) return null
+    const json = await res.json().catch(() => null)
+    const rows = Array.isArray(json?.assets)
+      ? json.assets
+      : Array.isArray(json?.items)
+        ? json.items
+        : []
+    if (rows.length <= 0) return {}
+
+    const balances: Record<string, number> = {}
+    for (const row of rows) {
+      const item = row as Record<string, unknown>
+      const assetName = String(
+        item.assetName
+        || item.assetId
+        || item.name
+        || item.symbol
+        || ''
+      ).trim()
+      const rawAmount = Number(
+        item.amountSat
+        ?? item.satoshis
+        ?? item.balanceSat
+        ?? item.amount
+        ?? item.balance
+        ?? 0
+      )
+      if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
+      balances[assetName] = Math.trunc(rawAmount)
+    }
+    return balances
   } catch {
     return null
   } finally {
@@ -976,7 +1059,17 @@ export async function callBridgeMethod(
   }
 
   const bypassKey = resolveEvmBridgeBypassKey(config)
+  const missingBridgeCredentials = getMissingBridgeCredentialsMessage({
+    bridgeUrl: config.bridgeUrl,
+    bridgeUsername: config.bridgeUsername,
+    bridgePassword: config.bridgePassword,
+    name: config.networkId || config.coinSymbol || 'this network'
+  })
   if (isEvmBridgeBypassActive(bypassKey)) {
+    const directConfig = createEvmDirectRpcConfig(config)
+    return await jsonRpcCall(directConfig, method, params)
+  }
+  if (missingBridgeCredentials) {
     const directConfig = createEvmDirectRpcConfig(config)
     return await jsonRpcCall(directConfig, method, params)
   }
@@ -1041,7 +1134,8 @@ function clearEvmBridgeBypass(key: string): void {
 function isBridgeFallbackEligibleError(error: unknown): boolean {
   const message = asError(error).message
   return (
-    /rpc call failed \[bridge\]: http 5\d\d/i.test(message)
+    /bridge credentials are not configured/i.test(message)
+    || /rpc call failed \[bridge\]: http 5\d\d/i.test(message)
     || /secure bridge .*http 5\d\d/i.test(message)
     || /bad gateway/i.test(message)
     || /rpc error \[[^\]]+\]: fetch failed/i.test(message)
@@ -1518,6 +1612,13 @@ export async function getUtxoBalance(
   if (address && isDogecoinConfig(config)) {
     const dogeBridgeBalance = await fetchBridgeAddressBalance(config, address)
     if (dogeBridgeBalance) return dogeBridgeBalance
+  }
+  if (address && config.bridgeUrl) {
+    const hostedBridgeBalance = await fetchBridgeAddressBalance(config, address)
+    if (hostedBridgeBalance) return hostedBridgeBalance
+    if (!hasConfiguredBridgeCredentials(config)) {
+      throw buildHostedReadUnavailableError(config, 'balance')
+    }
   }
 
   let addressIndexFailed = false
@@ -2458,6 +2559,11 @@ export async function listAssetBalancesByAddress(
   config: UtxoRpcConfig,
   address: string
 ): Promise<Record<string, number>> {
+  const hostedAssets = await fetchBridgeAddressAssets(config, address)
+  if (hostedAssets) return hostedAssets
+  if (config.bridgeUrl && !hasConfiguredBridgeCredentials(config)) {
+    throw buildHostedReadUnavailableError(config, 'asset')
+  }
   try {
     const result = await jsonRpcCall(config, 'listassetbalancesbyaddress', [address])
     return (result ?? {}) as Record<string, number>

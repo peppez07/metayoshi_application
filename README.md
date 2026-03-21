@@ -91,7 +91,7 @@ Useful scripts in `localdev/`:
 This GitHub snapshot does not ship live operational secrets.
 
 - `VITE_API_BASE_URL` is required for runtime network loading
-- `VITE_AUTH_API_BASE_URL`, `VITE_BALANCE_API_BASE_URL`, `VITE_SEND_API_BASE_URL`, and `VITE_SWAP_API_BASE_URL` are optional wallet overrides; if omitted the wallet derives sibling hosts from `VITE_API_BASE_URL`
+- `VITE_AUTH_API_BASE_URL`, `VITE_BALANCE_API_BASE_URL`, `VITE_SEND_API_BASE_URL`, and `VITE_SWAP_API_BASE_URL` are optional wallet overrides; if omitted the wallet reuses `VITE_API_BASE_URL` as-is, or swaps between known service subdomains when that host already starts with `api.`, `balance.`, `send.`, or `swap.`
 - bridge credentials are optional, but if used both `VITE_BRIDGE_USER` and `VITE_BRIDGE_PASSWORD` must be set
 - backend-connected flows require your own environment and server support
 - production-like bridge credentials are intentionally not bundled here

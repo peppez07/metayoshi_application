@@ -285,6 +285,18 @@ async function getTronBalanceViaServer(network: Network, address: string, timeou
 
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
   try {
+    const response = await fetchServerAddressJson(network, address, 'balance', {}, {
+      timeoutMs: Number(rpcConfig.timeoutMs ?? 15000)
+    })
+    if (response.ok) {
+      const scalar = parseServerBalanceScalar(response.json)
+      if (scalar) return scalar
+    }
+  } catch {
+    // Fall through to bridge/direct RPC balance reads.
+  }
+
+  try {
     const { ethers } = await loadEthersModule()
     const balHex = await callBridgeMethod(rpcConfig, 'eth_getBalance', [address, 'latest'])
     const balanceWei = parseRpcQuantityToBigInt(balHex, 'eth_getBalance')

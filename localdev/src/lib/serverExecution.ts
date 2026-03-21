@@ -3,6 +3,7 @@ import type { Network } from '../coins'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { callBridgeMethod, getSecureBridgeSessionInfo } from './utxoRpc'
 import { getBuildFeatureFlag } from '../buildConfig'
+import { buildDiscoveredUrl, discoverWalletBackend } from './backendHelp'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
@@ -163,6 +164,25 @@ function compactErrorText(value: string, maxLen = 220): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
+function resolveDiscoveredSwapCommandUrl(
+  commands: unknown,
+  method: 'GET' | 'POST',
+  pathFragment: string
+): string | undefined {
+  if (!Array.isArray(commands)) return undefined
+  for (const entry of commands) {
+    const raw = String(entry || '').trim()
+    const match = raw.match(/^([A-Z]+)\s+(.+)$/)
+    if (!match) continue
+    const [, candidateMethod, candidateUrl] = match
+    if (candidateMethod.toUpperCase() !== method) continue
+    if (!candidateUrl.includes(pathFragment)) continue
+    const normalized = buildDiscoveredUrl(candidateUrl)
+    if (normalized) return normalized
+  }
+  return undefined
+}
+
 function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
   switch (readString(value).toUpperCase()) {
     case 'SUCCESS':
@@ -300,7 +320,15 @@ async function executeServerManagedJsonRequest(
     throw error
   }
 
-  const url = `${resolveSwapApiBaseUrl(session.apiBase)}${path}`
+  const discovery = await discoverWalletBackend(session.apiBase).catch(() => null)
+  const swapCommands = discovery?.helpIndex?.commands?.swap
+  const discoveredUrl =
+    action === 'quote'
+      ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/quote')
+      : action === 'submit'
+        ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/submit')
+        : undefined
+  const url = discoveredUrl || `${resolveSwapApiBaseUrl(session.apiBase)}${path}`
   const monitorRequestId = beginServerExecutionMonitor(config, action, url)
   try {
     const response = await fetchJsonWithStatus(url, {

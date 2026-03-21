@@ -25,6 +25,13 @@ import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
+import {
+  discoverWalletBackend,
+  fetchDiscoveredChains,
+  fetchDiscoveredCoins,
+  fetchDiscoveredProviderCapabilities,
+  fetchDiscoveredRuntimeHealth
+} from '../lib/backendHelp'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
@@ -254,6 +261,16 @@ export interface ChainModelLiveSnapshot {
   error?: string
 }
 
+type WalletBackendSnapshot = {
+  fetchedAt: number
+  discovery: Record<string, unknown> | null
+  runtimeHealth: Record<string, unknown> | null
+  coins: Record<string, unknown> | null
+  chains: Record<string, unknown> | null
+  swapChains: Record<string, unknown> | null
+  providerCapabilities: Record<string, unknown> | null
+}
+
 type FiatCurrency = 'usd' | 'eur'
 type FiatValueMap = Partial<Record<FiatCurrency, number | null>>
 
@@ -313,6 +330,8 @@ interface WalletState {
   /** Full server registry catalog, classified as main blockchain vs token/asset. */
   /** Monotonic token to refresh async catalog queries after server sync. */
   catalogQueryNonce: number
+  /** Latest backend-owned discovery and capability snapshot. */
+  backendSnapshot: WalletBackendSnapshot | null
   /** Per account+network send list preferences. Key = `${accountId}::${networkId}`. */
   sendListPreferences: Record<string, SendListPreferenceBucket>
   /** Per account+network last-opened send target for quick-send restore. */
@@ -395,6 +414,7 @@ interface WalletState {
     rpcPassword: string
     rpcWallet: string
   }) => void
+  refreshBackendSnapshot: () => Promise<void>
   syncNetworksFromServer: () => Promise<void>
 
   // RPC
@@ -2916,6 +2936,7 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkFiatNative: {},
       accountNetworkFiatAssets: {},
       catalogQueryNonce: 0,
+      backendSnapshot: null,
       sendListPreferences: {},
       rememberedSendSelection: {},
       networkModelPreferences: {},
@@ -2973,6 +2994,12 @@ export const useWalletStore = create<WalletState>()(
 
         void get().refreshActiveBalance().catch((err) => {
           console.warn('Initial balance refresh failed:', err)
+        })
+        void get().refreshBackendSnapshot().catch((err) => {
+          console.warn('Initial backend snapshot refresh failed:', err)
+        })
+        void get().syncNetworksFromServer().catch((err) => {
+          console.warn('Initial server network sync failed:', err)
         })
       },
 
@@ -3089,6 +3116,9 @@ export const useWalletStore = create<WalletState>()(
             nextAccountIndex,
             activeAccountId: safeActiveAccountId,
             lastActiveTimestamp: Date.now()
+          })
+          void get().refreshBackendSnapshot().catch((err) => {
+            console.warn('Backend snapshot refresh after unlock failed:', err)
           })
           return true
         } catch {
@@ -3329,25 +3359,14 @@ export const useWalletStore = create<WalletState>()(
 
           const requestAddress = await normalizeServerAddress(network, address)
           if (!requestAddress) return
-          const params = new URLSearchParams({
-            coin: requestMeta.coin,
-            chain: requestMeta.chain,
+          const response = await fetchServerAddressJson(network, requestAddress, 'portfolio', {
             fiat: 'usd,eur'
           })
-          const url = `${requestMeta.apiBase}/v1/address/${encodeURIComponent(requestAddress)}/portfolio?${params.toString()}`
-          const headers: Record<string, string> = {}
-          if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
-          const bridgeUsername = String(network.bridgeUsername || '').trim()
-          const bridgePassword = String(network.bridgePassword || '').trim()
-          if (bridgeUsername && bridgePassword) {
-            headers.Authorization = `Basic ${btoa(`${bridgeUsername}:${bridgePassword}`)}`
-          }
-          const response = await fetch(url, { method: 'GET', headers })
           if (!response.ok) {
             setNetworkFiatFailureCooldown(cacheKey)
             return
           }
-          const json = await response.json().catch(() => null) as Record<string, unknown> | null
+          const json = response.json
           const portfolio = (json?.portfolio && typeof json.portfolio === 'object')
             ? json.portfolio as Record<string, unknown>
             : null
@@ -6431,38 +6450,93 @@ export const useWalletStore = create<WalletState>()(
           }
         }),
 
+      refreshBackendSnapshot: async () => {
+        const apiBase = normalizeConfiguredApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
+        const discovery = await discoverWalletBackend(apiBase).catch(() => null)
+        if (!discovery) {
+          set({ backendSnapshot: null })
+          return
+        }
+
+        const runtimeHealth = await fetchDiscoveredRuntimeHealth(apiBase).catch(() => null)
+        const runtimeServices = (
+          runtimeHealth?.services
+          && typeof runtimeHealth.services === 'object'
+            ? runtimeHealth.services as Record<string, { ok?: boolean; status?: string }>
+            : null
+        )
+        const gatewayHealthy = runtimeServices?.gateway?.ok !== false
+
+        const [coins, chains, swapChains, providerCapabilities] = gatewayHealthy
+          ? await Promise.all([
+            fetchDiscoveredCoins(apiBase).catch(() => null),
+            fetchDiscoveredChains(apiBase).catch(() => null),
+            fetchDiscoveredChains(apiBase, { supportsSwap: true }).catch(() => null),
+            fetchDiscoveredProviderCapabilities(apiBase).catch(() => null)
+          ])
+          : [null, null, null, null]
+
+        set({
+          backendSnapshot: {
+            fetchedAt: Date.now(),
+            discovery: discovery as unknown as Record<string, unknown>,
+            runtimeHealth,
+            coins,
+            chains,
+            swapChains,
+            providerCapabilities
+          }
+        })
+      },
+
       syncNetworksFromServer: async () => {
+        await get().refreshBackendSnapshot().catch(() => {})
         await initializeCatalogRepository({
           bundledNetworks: normalizeNetworkListSymbols(INITIAL_NETWORKS)
         })
 
         let serverNetworks: Network[] | null = null
         let serverCatalog: ServerCoinCatalogItem[] = []
-        try {
-          const snapshot = await loadServerRegistrySnapshot()
-          serverNetworks = snapshot.networks ? normalizeNetworkListSymbols(snapshot.networks) : null
-          serverCatalog = normalizeServerCatalogSymbols(
-            Array.isArray(snapshot.catalog) ? snapshot.catalog : []
-          )
-          await cacheMetayoshiServerCatalogSnapshot({
-            networks: serverNetworks,
-            catalog: serverCatalog
-          })
-          const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
-          if (cachedSnapshot) {
-            serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : serverNetworks
-            serverCatalog = normalizeServerCatalogSymbols(
-              Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : serverCatalog
-            )
-          }
-        } catch (error) {
-          console.warn('Failed to sync networks from /v1/coins:', error)
-          const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
+        const runtimeServices = (() => {
+          const services = get().backendSnapshot?.runtimeHealth?.services
+          return services && typeof services === 'object'
+            ? services as Record<string, { ok?: boolean; status?: string }>
+            : null
+        })()
+        if (runtimeServices?.gateway?.ok === false) {
+          const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot().catch(() => null)
           if (!cachedSnapshot) return
           serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : null
           serverCatalog = normalizeServerCatalogSymbols(
             Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : []
           )
+        } else {
+          try {
+            const snapshot = await loadServerRegistrySnapshot()
+            serverNetworks = snapshot.networks ? normalizeNetworkListSymbols(snapshot.networks) : null
+            serverCatalog = normalizeServerCatalogSymbols(
+              Array.isArray(snapshot.catalog) ? snapshot.catalog : []
+            )
+            await cacheMetayoshiServerCatalogSnapshot({
+              networks: serverNetworks,
+              catalog: serverCatalog
+            })
+            const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
+            if (cachedSnapshot) {
+              serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : serverNetworks
+              serverCatalog = normalizeServerCatalogSymbols(
+                Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : serverCatalog
+              )
+            }
+          } catch (error) {
+            console.warn('Failed to sync networks from /v1/coins:', error)
+            const cachedSnapshot = await readCachedMetayoshiServerCatalogSnapshot()
+            if (!cachedSnapshot) return
+            serverNetworks = cachedSnapshot.networks ? normalizeNetworkListSymbols(cachedSnapshot.networks) : null
+            serverCatalog = normalizeServerCatalogSymbols(
+              Array.isArray(cachedSnapshot.catalog) ? cachedSnapshot.catalog : []
+            )
+          }
         }
         if ((!serverNetworks || serverNetworks.length === 0) && serverCatalog.length === 0) return
         const syncedNetworks = serverNetworks || []
@@ -7696,5 +7770,3 @@ export const useWalletStore = create<WalletState>()(
     }
   )
 )
-
-

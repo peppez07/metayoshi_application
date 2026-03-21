@@ -274,9 +274,36 @@ function setProcessEnvIfMissing(key: string, value: unknown): void {
   process.env[key] = normalized
 }
 
+function isPlaceholderEnvValue(value: unknown): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return true
+  return (
+    normalized.includes('change_me')
+    || normalized.includes('your-')
+    || normalized.includes('your_')
+    || normalized.includes('replace-with')
+    || normalized === 'your-livecoinwatch-key'
+  )
+}
+
+function isLocalHttpOrigin(value: unknown): boolean {
+  const raw = String(value ?? '').trim()
+  if (!raw || !/^https?:\/\//i.test(raw)) return false
+  try {
+    const parsed = new URL(raw)
+    const host = String(parsed.hostname || '').trim().toLowerCase()
+    if (!host) return false
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
 function loadBridgeEnvFromSiblingServerRepo(): void {
   // Local developer convenience:
-  // Pull bridge env context from sibling metayoshi_SERVER env file.
+  // Pull bridge env context from sibling server repos when available.
   // Secrets are imported only when explicitly enabled for local development.
   const localWalletEnv = loadLocalWalletEnvFiles()
   const enabled = parseBooleanLike(
@@ -295,12 +322,22 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
       ?? localWalletEnv.VITE_BRIDGE_AUTOCONFIG_INCLUDE_SECRETS,
     false
   )
+  const allowLocalBackend = parseBooleanLike(
+    process.env.VITE_ENABLE_LOCAL_BACKEND_HELP
+      ?? process.env.ENABLE_LOCAL_BACKEND_HELP
+      ?? localWalletEnv.VITE_ENABLE_LOCAL_BACKEND_HELP
+      ?? localWalletEnv.ENABLE_LOCAL_BACKEND_HELP,
+    false
+  )
 
   const candidateFiles = [
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.windows'),
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.secondary'),
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/vultr/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/.env')
+    path.resolve(__dirname, '../metayoshi_SERVER/.env'),
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/_server_support/windows/local/newserver/gateway.env'),
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/_server_support/windows/vultr/newserver/gateway.env'),
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/tools/linux/newserver.production.env.example')
   ]
 
   let selectedFile = ''
@@ -316,17 +353,41 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
   if (!selectedFile) return
 
   const secureApiBase = sourceEnv.SECURE_BRIDGE_API_BASE_URL || sourceEnv.API_BASE_URL
+  const newServerPort = String(sourceEnv.NEWSERVER_PORT || '').trim()
   const localApiPort = String(sourceEnv.LOCAL_API_PORT || '').trim()
   const localApiBase = /^\d+$/.test(localApiPort) ? `http://127.0.0.1:${localApiPort}` : ''
-  const resolvedApiBase = String(secureApiBase || localApiBase).trim()
+  const newServerApiBase = /^\d+$/.test(newServerPort) ? `http://127.0.0.1:${newServerPort}` : ''
+  const preferredSecureApiBase = (() => {
+    const candidate = String(secureApiBase || '').trim()
+    if (!candidate) return ''
+    if (isLocalHttpOrigin(candidate) && !allowLocalBackend) return ''
+    return candidate
+  })()
+  const resolvedApiBase = String(
+    preferredSecureApiBase
+    || (allowLocalBackend ? newServerApiBase : '')
+    || (allowLocalBackend ? localApiBase : '')
+  ).trim()
   setProcessEnvIfMissing('VITE_API_BASE_URL', resolvedApiBase)
   setProcessEnvIfMissing('VITE_SECURE_BRIDGE_API_BASE_URL', resolvedApiBase)
 
   if (includeSecrets) {
-    setProcessEnvIfMissing('VITE_BRIDGE_USER', sourceEnv.BRIDGE_BASIC_USER)
-    setProcessEnvIfMissing('VITE_BRIDGE_PASSWORD', sourceEnv.BRIDGE_BASIC_PASSWORD)
-    setProcessEnvIfMissing('VITE_BRIDGE_TX_AUTH_KEY', sourceEnv.BRIDGE_TX_AUTH_KEY)
-    setProcessEnvIfMissing('VITE_APP_API_KEY', sourceEnv.APP_API_KEY)
+    const bridgeUser = String(sourceEnv.BRIDGE_BASIC_USER || '').trim()
+    const bridgePassword = String(sourceEnv.BRIDGE_BASIC_PASSWORD || '').trim()
+    if (bridgeUser && bridgePassword && !isPlaceholderEnvValue(bridgeUser) && !isPlaceholderEnvValue(bridgePassword)) {
+      setProcessEnvIfMissing('VITE_BRIDGE_USER', bridgeUser)
+      setProcessEnvIfMissing('VITE_BRIDGE_PASSWORD', bridgePassword)
+    }
+
+    const bridgeTxKey = String(sourceEnv.BRIDGE_TX_AUTH_KEY || '').trim()
+    if (bridgeTxKey && !isPlaceholderEnvValue(bridgeTxKey)) {
+      setProcessEnvIfMissing('VITE_BRIDGE_TX_AUTH_KEY', bridgeTxKey)
+    }
+
+    const appApiKey = String(sourceEnv.APP_API_KEY || '').trim()
+    if (appApiKey && !isPlaceholderEnvValue(appApiKey)) {
+      setProcessEnvIfMissing('VITE_APP_API_KEY', appApiKey)
+    }
   }
 
   console.log(

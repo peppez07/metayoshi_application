@@ -32,6 +32,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
     disabledNetworkIds,
     accounts,
     activeAccountId,
+    backendSnapshot,
     setActiveAccount,
     setNetworkAccountName,
     lock
@@ -160,12 +161,28 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
 
   const isApiWaiting = apiInFlight > 0
   const isWaiting = isSyncing || isApiWaiting
-  const statusColor = isWaiting ? 'status-dot-yellow' : isConnected ? 'status-dot-green' : 'status-dot-red'
+  const runtimeServices = (backendSnapshot?.runtimeHealth?.services && typeof backendSnapshot.runtimeHealth.services === 'object')
+    ? backendSnapshot.runtimeHealth.services as Record<string, { ok?: boolean; status?: string }>
+    : null
+  const gatewayDown = runtimeServices?.gateway?.ok === false
+  const swapDown = runtimeServices?.swapEngine?.ok === false
+  const backendDegraded = Boolean(gatewayDown || swapDown)
+  const statusColor = isWaiting
+    ? 'status-dot-yellow'
+    : backendDegraded
+      ? 'status-dot-red'
+      : isConnected
+        ? 'status-dot-green'
+        : 'status-dot-red'
   const statusLabel = isWaiting
     ? 'Waiting'
-    : isConnected
-      ? 'Connected'
-      : 'Not connected'
+    : gatewayDown
+      ? 'Gateway down'
+      : swapDown
+        ? 'Swap down'
+        : isConnected
+          ? 'Connected'
+          : 'Not connected'
 
   const copyAddress = async () => {
     if (!rawAddress) return

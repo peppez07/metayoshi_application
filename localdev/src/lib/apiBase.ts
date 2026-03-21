@@ -1,5 +1,10 @@
 export const DEFAULT_PUBLIC_API_BASE_URL = 'https://api.metayoshi.app'
 type WalletApiService = 'api' | 'balance' | 'send' | 'swap'
+const SERVICE_HOST_LABELS = ['api', 'balance', 'send', 'swap', 'www', 'web', 'tokens'] as const
+
+function isLocalApiBaseEnabled(): boolean {
+  return String((import.meta as any)?.env?.VITE_ENABLE_LOCAL_BACKEND_HELP || '').trim().toLowerCase() === 'true'
+}
 
 function isLocalHostname(hostname: string): boolean {
   const host = String(hostname || '').trim().toLowerCase()
@@ -27,6 +32,7 @@ export function normalizeConfiguredApiBaseUrl(value: unknown): string {
   try {
     const parsed = new URL(raw)
     if (isPlaceholderHost(parsed.hostname)) return ''
+    if (isLocalHostname(parsed.hostname) && !isLocalApiBaseEnabled()) return ''
     return raw.replace(/\/+$/, '')
   } catch {
     return ''
@@ -39,13 +45,14 @@ function replaceServiceHost(baseUrl: string, service: WalletApiService): string 
   try {
     const parsed = new URL(normalized)
     if (isLocalHostname(parsed.hostname)) return parsed.origin
+    if (parsed.hostname === 'metayoshi.app') {
+      parsed.hostname = `${service}.metayoshi.app`
+      return parsed.origin
+    }
     const parts = parsed.hostname.split('.').filter(Boolean)
     if (parts.length < 2) return parsed.origin
-    if (['api', 'balance', 'send', 'swap', 'www'].includes(parts[0])) {
-      parts[0] = service
-    } else {
-      parts.unshift(service)
-    }
+    if (!SERVICE_HOST_LABELS.includes(parts[0] as (typeof SERVICE_HOST_LABELS)[number])) return parsed.origin
+    parts[0] = service
     parsed.hostname = parts.join('.')
     return parsed.origin
   } catch {

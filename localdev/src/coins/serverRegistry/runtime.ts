@@ -1,4 +1,5 @@
 import type { Network } from '../types'
+import { buildDiscoveredUrl, discoverWalletBackend } from '../../lib/backendHelp'
 import { buildServerCoinCatalog, isLikelyTokenServerCoin } from './catalog'
 import {
   EVM_MODEL_NETWORK_IDS,
@@ -45,7 +46,9 @@ export async function loadServerRegistrySnapshotFromApi(input: {
   if (username && password) {
     headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
   }
-  const response = await fetch(`${input.apiBaseUrl}/v1/coins`, { method: 'GET', headers })
+  const discovery = await discoverWalletBackend(input.apiBaseUrl).catch(() => null)
+  const requestUrl = buildDiscoveredUrl(discovery?.coinsUrl) || `${input.apiBaseUrl}/v1/coins`
+  const response = await fetch(requestUrl, { method: 'GET', headers })
   if (!response.ok) {
     throw new Error(`Server coin registry fetch failed: HTTP ${response.status}`)
   }

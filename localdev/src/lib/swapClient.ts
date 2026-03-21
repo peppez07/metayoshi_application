@@ -1,6 +1,7 @@
 import { getBuildFeatureFlag } from '../buildConfig'
 import type { Network } from '../coins/types'
 import { resolveSwapApiBaseUrl } from './apiBase'
+import { buildDiscoveredUrl, discoverWalletBackend } from './backendHelp'
 import { deriveServerApiBaseUrl } from './serverAddressApi'
 import {
   createServerExecutionRpcConfig,
@@ -45,6 +46,17 @@ export type ServerSwapChainPair = {
   destinationChainId?: number
 }
 
+export type ServerSwapMatrixMarket = {
+  destinationNetworkId: string
+  destinationNetworkName?: string
+  routeCount: number
+  providers: string[]
+  routeKinds: string[]
+  modes: string[]
+  pathKinds: string[]
+  destinationItems: ServerSwapCatalogAsset[]
+}
+
 export type WalletSwapReadiness = {
   state: WalletSwapReadinessState
   tone: WalletSwapReadinessTone
@@ -80,12 +92,23 @@ function getSwapApiHeaders(): Record<string, string> {
   return headers
 }
 
+async function resolveDiscoveredSwapEndpoint(
+  kind: 'assetSearchUrl' | 'chainPairsUrl' | 'pairTokenRegistryUrl' | 'swapMatrixUrl',
+  base?: unknown
+): Promise<string | undefined> {
+  const discovery = await discoverWalletBackend(base).catch(() => null)
+  return String(discovery?.[kind] || '').trim() || undefined
+}
+
 function extractSwapCatalogRows(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload
   const record = asRecord(payload)
+  const nestedItems = asRecord(record.items)
   const candidates = [
     record.assets,
     record.items,
+    nestedItems.destinationItems,
+    nestedItems.sourceItems,
     record.tokens,
     record.pairs,
     record.receive,
@@ -93,6 +116,8 @@ function extractSwapCatalogRows(payload: unknown): unknown[] {
     record.receiveTokens,
     record.destinationAssets,
     record.destinationTokens,
+    record.destinationItems,
+    record.sourceItems,
     record.results,
     record.data
   ]
@@ -252,6 +277,59 @@ function resolveSwapPairSide(
   return { networkId, chainId }
 }
 
+function parseServerSwapMatrixMarkets(
+  payload: unknown,
+  sourceNetworkId: string
+): ServerSwapMatrixMarket[] {
+  const rows = extractSwapCatalogRows(payload)
+  const out: ServerSwapMatrixMarket[] = []
+  const seen = new Set<string>()
+
+  for (const row of rows) {
+    const item = asRecord(row)
+    const destinationNetworkId = normalizeSwapServerNetworkId(
+      item.destinationNetworkId
+      || item.destinationChainKey
+      || item.destinationChain
+      || item.destination
+    )
+    if (!destinationNetworkId || seen.has(destinationNetworkId)) continue
+    seen.add(destinationNetworkId)
+
+    const destinationItems = parseServerSwapCatalogAssetRows(
+      extractSwapCatalogRows(item.destinationItems),
+      destinationNetworkId,
+      { allowNetworkFallback: true }
+    )
+
+    out.push({
+      destinationNetworkId,
+      destinationNetworkName: readString(item.destinationChainName || item.destinationName) || undefined,
+      routeCount: Math.max(0, Math.trunc(Number(item.routeCount) || 0)),
+      providers: readStringArray(item.providers),
+      routeKinds: readStringArray(item.routeKinds),
+      modes: readStringArray(item.modes),
+      pathKinds: readStringArray(item.pathKinds),
+      destinationItems
+    })
+  }
+
+  if (out.length > 0) return out
+
+  const fallbackItems = parseServerSwapCatalogAssetRows(rows, sourceNetworkId, { allowNetworkFallback: true })
+  return fallbackItems.length > 0
+    ? [{
+        destinationNetworkId: sourceNetworkId,
+        routeCount: fallbackItems.length,
+        providers: [],
+        routeKinds: [],
+        modes: [],
+        pathKinds: [],
+        destinationItems: fallbackItems
+      }]
+    : []
+}
+
 export function getWalletSwapApiVersion(): WalletSwapApiVersion {
   const raw = readString((import.meta as any)?.env?.VITE_SWAP_API_VERSION).toLowerCase()
   return raw === 'v1' ? 'v1' : 'legacy'
@@ -340,7 +418,14 @@ export async function searchServerSwapAssets(
   if (readString(input.query)) params.set('q', readString(input.query))
   params.set('limit', String(Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))))
 
-  const response = await fetch(`${apiBase}/v1/assets/search?${params.toString()}`, {
+  const discoveredEndpoint = await resolveDiscoveredSwapEndpoint('assetSearchUrl', apiBase)
+  const requestUrl = buildDiscoveredUrl(discoveredEndpoint, {
+    networkId: requestedNetworkId,
+    q: readString(input.query) || undefined,
+    limit: Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))
+  }) || `${apiBase}/v1/assets/search?${params.toString()}`
+
+  const response = await fetch(requestUrl, {
     method: 'GET',
     headers: getSwapApiHeaders()
   })
@@ -370,7 +455,8 @@ export async function fetchServerSwapChainPairs(): Promise<ServerSwapChainPair[]
   const apiBase = resolveSwapApiBaseUrl()
   if (!apiBase) throw new Error('Server API base URL is not configured for swap chain pairs')
 
-  const response = await fetch(`${apiBase}/v1/chains/swap/pairs`, {
+  const discoveredEndpoint = await resolveDiscoveredSwapEndpoint('chainPairsUrl', apiBase)
+  const response = await fetch(discoveredEndpoint || `${apiBase}/v1/chains/swap/pairs`, {
     method: 'GET',
     headers: getSwapApiHeaders()
   })
@@ -455,8 +541,25 @@ export async function searchServerSwapPairAssets(
   }
   if (readString(input.query)) params.set('q', readString(input.query))
   params.set('limit', String(Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))))
+  params.set('sourceChain', sourceNetworkId)
+  params.set('destinationChain', destinationNetworkId)
+  if (readString(input.query)) params.set('destinationQ', readString(input.query))
 
-  const response = await fetch(`${apiBase}/v1/token-registry/swap/pair?${params.toString()}`, {
+  const discoveredEndpoint = await resolveDiscoveredSwapEndpoint('pairTokenRegistryUrl', apiBase)
+  const requestUrl = buildDiscoveredUrl(discoveredEndpoint, {
+    sourceNetworkId,
+    destinationNetworkId,
+    networkId: destinationNetworkId,
+    sourceChain: sourceNetworkId,
+    destinationChain: destinationNetworkId,
+    sourceChainId: Number.isFinite(Number(input.sourceNetwork.chainId)) ? String(input.sourceNetwork.chainId) : undefined,
+    destinationChainId: Number.isFinite(Number(input.destinationNetwork.chainId)) ? String(input.destinationNetwork.chainId) : undefined,
+    q: readString(input.query) || undefined,
+    destinationQ: readString(input.query) || undefined,
+    limit: Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))
+  }) || `${apiBase}/v1/token-registry/swap/pair?${params.toString()}`
+
+  const response = await fetch(requestUrl, {
     method: 'GET',
     headers: getSwapApiHeaders()
   })
@@ -492,6 +595,52 @@ export async function searchServerSwapPairAssets(
     query: input.query,
     limit: input.limit
   })
+}
+
+export async function fetchServerSwapMatrix(input: {
+  sourceNetwork: Pick<Network, 'id' | 'runtimeModelId' | 'bridgeUrl' | 'rpcUrl'>
+  sourceAssetId: string
+}): Promise<ServerSwapMatrixMarket[]> {
+  if (getWalletSwapApiVersion() !== 'v1') return []
+
+  const apiBase = resolveSwapApiBaseUrl(deriveServerApiBaseUrl(input.sourceNetwork as Network))
+  if (!apiBase) throw new Error('Server API base URL is not configured for swap matrix')
+
+  const sourceNetworkId = resolveSwapServerNetworkId(input.sourceNetwork)
+  const sourceAssetId = readString(input.sourceAssetId)
+  if (!sourceNetworkId || !sourceAssetId) return []
+
+  const discoveredEndpoint = await resolveDiscoveredSwapEndpoint('swapMatrixUrl', apiBase)
+  const requestUrl = buildDiscoveredUrl(discoveredEndpoint, {
+    sourceChain: sourceNetworkId,
+    sourceAssetId
+  }) || `${apiBase}/v1/token-registry/swap/matrix?${new URLSearchParams({
+    sourceChain: sourceNetworkId,
+    sourceAssetId
+  }).toString()}`
+
+  const response = await fetch(requestUrl, {
+    method: 'GET',
+    headers: getSwapApiHeaders()
+  })
+  const text = await response.text().catch(() => '')
+  let json: unknown = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+
+  if (!response.ok) {
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+      return []
+    }
+    const body = asRecord(json)
+    const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
+    throw new Error(`Server swap matrix request failed: ${detail || `HTTP ${response.status}`}`)
+  }
+
+  return parseServerSwapMatrixMarkets(json, sourceNetworkId)
 }
 
 export {

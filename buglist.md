@@ -1,9 +1,9 @@
-VITE_API_BASE_URL=https://api.metayoshi.app
-VITE_AUTH_API_BASE_URL=https://api.metayoshi.app
-VITE_BALANCE_API_BASE_URL=https://api.metayoshi.app
-VITE_SEND_API_BASE_URL=https://api.metayoshi.app
-VITE_SWAP_API_BASE_URL=https://api.metayoshi.app
-VITE_SECURE_BRIDGE_API_BASE_URL=https://api.metayoshi.app
+VITE_API_BASE_URL=https://metayoshi.app
+VITE_AUTH_API_BASE_URL=https://metayoshi.app
+VITE_BALANCE_API_BASE_URL=https://metayoshi.app
+VITE_SEND_API_BASE_URL=https://metayoshi.app
+VITE_SWAP_API_BASE_URL=https://metayoshi.app
+VITE_SECURE_BRIDGE_API_BASE_URL=https://metayoshi.app
 VITE_BRIDGE_AUTOCONFIG_FROM_SERVER_ENV=true
 VITE_BRIDGE_AUTOCONFIG_INCLUDE_SECRETS=true
 VITE_UNISWAP_API_BASE_URL=https://trade-api.gateway.uniswap.org/v1

@@ -4,12 +4,17 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { IoRefresh, IoWarningOutline, IoCloseCircleOutline } from 'react-icons/io5'
 import clsx from 'clsx'
 import { normalizeConfiguredApiBaseUrl } from '../lib/apiBase'
+import { discoverWalletBackend, getDiscoveredGatewayBase, getDiscoveredRuntimeService } from '../lib/backendHelp'
 import { assertBridgeCredentialsConfigured } from '../lib/bridgeCredentials'
 import { useWalletStore } from '../store/walletStore'
 import type { Network } from '../store/walletStore'
 import { getModelIconFrameClass } from '../buildConfig'
 
 type Phase = 'connecting' | 'error' | 'bridge-warning'
+type ServerAuthConfig = {
+  walletPasswordRequired: boolean
+  legacyBasicRecommended: boolean
+}
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const HANDSHAKE_TIMEOUT_MS = 7000
 
@@ -50,24 +55,47 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
+async function fetchServerAuthConfig(authConfigUrl: string): Promise<ServerAuthConfig | null> {
+  const response = await fetchWithTimeout(authConfigUrl, {}, HANDSHAKE_TIMEOUT_MS)
+  if (!response.ok) return null
+  const json = await response.json().catch(() => null)
+  if (!json || json.ok !== true) return null
+  return {
+    walletPasswordRequired: Boolean(json.walletPasswordRequired),
+    legacyBasicRecommended: Boolean(json.legacyBasic?.walletRecommended)
+  }
+}
+
 async function runRaptoreumHandshake(network?: Network): Promise<void> {
   if (!network || network.coinSymbol !== 'RTM') return
 
   const serverBase = resolveServerBase(network)
   if (!serverBase) throw new Error('Server base URL is missing or invalid')
+  const discovery = await discoverWalletBackend(serverBase).catch(() => null)
+  const gatewayRuntime = getDiscoveredRuntimeService(discovery, 'gateway')
+  const gatewayBase = getDiscoveredGatewayBase(discovery, serverBase)
 
   const chain = 'main'
 
+  if (gatewayRuntime && gatewayRuntime.ok === false) {
+    throw new Error(`Gateway runtime is down: ${String(gatewayRuntime.error || gatewayRuntime.status || 'unavailable')}`)
+  }
+
   // 1) /health (no API key)
-  const healthRes = await fetchWithTimeout(`${serverBase}/health`)
+  const healthRes = await fetchWithTimeout(`${gatewayBase}/health`)
   if (!healthRes.ok) {
     throw new Error(`Health check failed: HTTP ${healthRes.status}`)
   }
 
-  // 2) /v1/status with optional app API key (if configured for this build)
+  // 2) /v1/auth/config for live wallet auth mode discovery
+  const authConfig = await fetchServerAuthConfig(
+    String(discovery?.authConfigUrl || `${gatewayBase}/v1/auth/config`).trim()
+  )
+
+  // 3) /v1/status with optional app API key (if configured for this build)
   const apiKey = String(import.meta.env.VITE_APP_API_KEY || '').trim()
   if (apiKey) {
-    const statusRes = await fetchWithTimeout(`${serverBase}/v1/status`, {
+    const statusRes = await fetchWithTimeout(`${gatewayBase}/v1/status`, {
       headers: { 'X-API-Key': apiKey }
     })
     if (!statusRes.ok) {
@@ -75,19 +103,23 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
     }
   }
 
-  // 3) Optional bridge smoke check
+  // 4) Optional legacy bridge smoke check
+  const auth = buildBasicAuth(network)
+  if (!auth && authConfig && !authConfig.walletPasswordRequired && !authConfig.legacyBasicRecommended) {
+    return
+  }
+
   assertBridgeCredentialsConfigured({
     bridgeUrl: network.bridgeUrl,
     bridgeUsername: network.bridgeUsername,
     bridgePassword: network.bridgePassword,
     name: network.name
   })
-  const auth = buildBasicAuth(network)
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   }
   if (auth) headers.Authorization = auth
-  const smokeRes = await fetchWithTimeout(`${serverBase}/v1/bridge/raptoreum/${chain}`, {
+  const smokeRes = await fetchWithTimeout(`${gatewayBase}/v1/bridge/raptoreum/${chain}`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
