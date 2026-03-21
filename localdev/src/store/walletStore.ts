@@ -25,6 +25,7 @@ import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
+import { getMissingBridgeCredentialsMessage } from '../lib/bridgeCredentials'
 import {
   discoverWalletBackend,
   fetchDiscoveredChains,
@@ -3532,6 +3533,12 @@ export const useWalletStore = create<WalletState>()(
               // Use a higher read timeout to reduce false AbortError failures.
               timeoutMs: Math.max(Number(baseRpcConfig.timeoutMs ?? 10000), 30000)
             }
+            const missingBridgeCredentialsMessage = getMissingBridgeCredentialsMessage({
+              bridgeUrl: rpcConfig.bridgeUrl,
+              bridgeUsername: rpcConfig.bridgeUsername,
+              bridgePassword: rpcConfig.bridgePassword,
+              name: activeNetworkId
+            })
             const bridgeCoin = String(
               net.serverCoinId
               || (activeNetworkId === 'eth' ? 'ethereum' : activeNetworkId)
@@ -3539,6 +3546,9 @@ export const useWalletStore = create<WalletState>()(
             const bridgeChain = String(net.serverChain || 'main').trim().toLowerCase() || 'main'
             let tokenBalanceEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'token-balance')
             let addressAssetsEndpointUnsupported = isUnsupportedBridgeAssetEndpointCached(activeNetworkId, 'address-assets')
+            if (missingBridgeCredentialsMessage) {
+              tokenBalanceEndpointUnsupported = true
+            }
 
             let bridgeTokenRows: BridgeTokenBalanceRow[] = []
             if (!tokenBalanceEndpointUnsupported) {
@@ -3560,6 +3570,8 @@ export const useWalletStore = create<WalletState>()(
                       error
                     )
                   }
+                } else if (missingBridgeCredentialsMessage) {
+                  tokenBalanceEndpointUnsupported = true
                 }
                 // Fall through to slower RPC/explorer scan.
               }
@@ -3950,6 +3962,8 @@ export const useWalletStore = create<WalletState>()(
                       bridgeFallbackError
                     )
                   }
+                } else if (missingBridgeCredentialsMessage) {
+                  tokenBalanceEndpointUnsupported = true
                 } else {
                   console.warn(
                     `[${net.symbol}] fetchNetworkAssets bridge token.balance read failed for ${activeNetworkId} (${address}).`,
@@ -4327,15 +4341,32 @@ export const useWalletStore = create<WalletState>()(
           })
           try {
             const cosmosCfg = resolveCosmosNetworkConfig(net)
-            const rows = await fetchBridgeTokenBalances(rpcConfig, {
-              coin: resolveCosmosBridgeCoinId(net),
-              chain: String(net.serverChain || 'main').trim() || 'main',
-              owner: address
+            const requestAddress = await normalizeServerAddress(net, address)
+            const response = await fetchServerAddressJson(net, requestAddress, 'assets')
+            const missingBridgeCredentialsMessage = getMissingBridgeCredentialsMessage({
+              bridgeUrl: rpcConfig.bridgeUrl,
+              bridgeUsername: rpcConfig.bridgeUsername,
+              bridgePassword: rpcConfig.bridgePassword,
+              name: activeNetworkId
             })
+            const rows = response.ok && Array.isArray(response.json?.assets)
+              ? response.json.assets as Array<Record<string, unknown>>
+              : missingBridgeCredentialsMessage
+                ? []
+                : await fetchBridgeTokenBalances(rpcConfig, {
+                    coin: resolveCosmosBridgeCoinId(net),
+                    chain: String(net.serverChain || 'main').trim() || 'main',
+                    owner: address
+                  }) as Array<Record<string, unknown>>
             const assets: Record<string, number> = {}
             const labels: Record<string, string> = {}
             for (const row of rows) {
-              const tokenId = String(row.tokenId || '').trim()
+              const tokenId = String(
+                row.tokenId
+                || row.assetId
+                || row.denom
+                || ''
+              ).trim()
               if (!tokenId) continue
               if (tokenId === cosmosCfg.nativeDenom) continue
 
@@ -4345,11 +4376,21 @@ export const useWalletStore = create<WalletState>()(
                 : cosmosCfg.decimals
 
               let displaySats = 0
-              const balanceRawText = String(row.balanceRaw || '').trim()
+              const balanceRawText = String(
+                row.balanceRaw
+                || row.amountRaw
+                || row.amountAtomic
+                || ''
+              ).trim()
               if (/^\d+$/.test(balanceRawText)) {
                 displaySats = toAssetDisplaySats(BigInt(balanceRawText), decimals)
               } else {
-                const balanceUiText = String(row.balance || '0').trim()
+                const balanceUiText = String(
+                  row.balance
+                  || row.amount
+                  || row.balanceUi
+                  || '0'
+                ).trim()
                 if (!/^\d+(\.\d+)?$/.test(balanceUiText)) continue
                 const qty = Number(balanceUiText)
                 if (!Number.isFinite(qty) || qty <= 0) continue
@@ -4368,6 +4409,8 @@ export const useWalletStore = create<WalletState>()(
               evmNfts: {}
             })
           } catch (err) {
+            const message = String((err as Error | undefined)?.message || '').trim()
+            if (message && message.includes('Bridge credentials are not configured')) return
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cosmos) failed:`, err)
           }
           return

@@ -81,16 +81,16 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
     throw new Error(`Gateway runtime is down: ${String(gatewayRuntime.error || gatewayRuntime.status || 'unavailable')}`)
   }
 
-  // 1) /health (no API key)
+  // 1) /v1/auth/config for live wallet auth mode discovery
+  const authConfig = await fetchServerAuthConfig(
+    String(discovery?.authConfigUrl || `${gatewayBase}/v1/auth/config`).trim()
+  )
+
+  // 2) /health (no API key)
   const healthRes = await fetchWithTimeout(`${gatewayBase}/health`)
   if (!healthRes.ok) {
     throw new Error(`Health check failed: HTTP ${healthRes.status}`)
   }
-
-  // 2) /v1/auth/config for live wallet auth mode discovery
-  const authConfig = await fetchServerAuthConfig(
-    String(discovery?.authConfigUrl || `${gatewayBase}/v1/auth/config`).trim()
-  )
 
   // 3) /v1/status with optional app API key (if configured for this build)
   const apiKey = String(import.meta.env.VITE_APP_API_KEY || '').trim()

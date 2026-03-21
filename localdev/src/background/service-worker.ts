@@ -604,6 +604,10 @@ function buildExtensionRouteUrl(routePath: string): string {
   return chrome.runtime.getURL(`${APP_ENTRY_PATH}#${routePath}`)
 }
 
+function createExtensionSurfaceError(detail: string): Error {
+  return new Error(`Failed to open MetaYoshi side panel: ${detail}`)
+}
+
 function isSidePanelEligibleTab(tab: chrome.tabs.Tab | null | undefined): tab is chrome.tabs.Tab & { id: number } {
   if (typeof tab?.id !== 'number') return false
   const url = String(tab.url || '').trim().toLowerCase()
@@ -726,6 +730,9 @@ async function openExtensionSurface(
   await setExtensionSurfaceRoute(routePath)
 
   if (!sidePanel) {
+    if (!fallbackToTabOnSidePanelFailure) {
+      throw createExtensionSurfaceError('sidePanel API unavailable')
+    }
     await openOrFocusExtensionTab(routePath, resolvedTarget)
     return
   }
@@ -746,7 +753,7 @@ async function openExtensionSurface(
           enabled: true
         })
       } catch (fallbackErr) {
-        sidePanelFailure = new Error('Failed to configure extension side panel')
+        sidePanelFailure = createExtensionSurfaceError('configuration failed')
         void recordRuntimeError('background-sw', fallbackErr, {
           kind: 'open-extension-surface-set-options',
           routePath,
@@ -773,7 +780,7 @@ async function openExtensionSurface(
           return
         }
       } catch (fallbackErr) {
-        sidePanelFailure = new Error('Failed to open extension side panel')
+        sidePanelFailure = createExtensionSurfaceError('open failed')
         void recordRuntimeError('background-sw', fallbackErr, {
           kind: 'open-extension-surface-open',
           routePath,
@@ -794,7 +801,9 @@ async function openExtensionSurface(
 }
 
 async function openApprovalSurface(target?: ExtensionSurfaceTarget): Promise<void> {
-  await openExtensionSurface(buildApprovalRoutePath(), target)
+  await openExtensionSurface(buildApprovalRoutePath(), target, {
+    fallbackToTabOnSidePanelFailure: false
+  })
 }
 
 async function openRequestSurface(
@@ -802,11 +811,15 @@ async function openRequestSurface(
   method: DappRequestMethod,
   target?: ExtensionSurfaceTarget
 ): Promise<void> {
-  await openExtensionSurface(buildRequestRoutePath(requestId, method), target)
+  await openExtensionSurface(buildRequestRoutePath(requestId, method), target, {
+    fallbackToTabOnSidePanelFailure: false
+  })
 }
 
 async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void> {
-  await openExtensionSurface('/wallet/assets', target)
+  await openExtensionSurface('/wallet/assets', target, {
+    fallbackToTabOnSidePanelFailure: false
+  })
 }
 
 type ApprovalDecision = 'approved' | 'rejected' | 'timeout'
@@ -2456,4 +2469,3 @@ chrome.commands?.onCommand.addListener((command) => {
     })
   }
 }
-

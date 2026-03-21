@@ -51,6 +51,27 @@ type EvmCoinFactoryConfig = {
   capabilities?: NetworkCapabilitiesInput
 }
 
+const EVM_DEFAULT_RPC_URLS: Record<string, string> = {
+  eth: 'https://cloudflare-eth.com',
+  ethereum: 'https://cloudflare-eth.com',
+  arb: 'https://arbitrum-one-rpc.publicnode.com',
+  'arbitrum-one': 'https://arbitrum-one-rpc.publicnode.com',
+  op: 'https://mainnet.optimism.io',
+  optimism: 'https://mainnet.optimism.io',
+  base: 'https://mainnet.base.org',
+  polygon: 'https://polygon-rpc.com',
+  'polygon-bor': 'https://polygon-rpc.com',
+  avaxc: 'https://api.avax.network/ext/bc/C/rpc',
+  'avalanche-c-chain': 'https://api.avax.network/ext/bc/C/rpc',
+  bnb: 'https://bsc-dataseed.binance.org',
+  bsc: 'https://bsc-dataseed.binance.org',
+  cronos: 'https://evm.cronos.org',
+  linea: 'https://rpc.linea.build',
+  scroll: 'https://rpc.scroll.io',
+  zksync: 'https://mainnet.era.zksync.io',
+  'zksync-era': 'https://mainnet.era.zksync.io'
+}
+
 type CosmosCoinFactoryConfig = {
   id: string
   runtimeModelId?: string
@@ -85,11 +106,20 @@ function isAllowedServerRpcUrl(candidateUrl: string, apiBaseUrl: string): boolea
   }
 }
 
-function resolveServerBackedRpcUrl(configuredUrl: unknown, apiBaseUrl: string): string {
-  const fallback = String(apiBaseUrl || '').trim().replace(/\/+$/, '')
+function resolveServerBackedRpcUrl(configuredUrl: unknown, apiBaseUrl: string, defaultRpcUrl = ''): string {
+  const preferredDefault = String(defaultRpcUrl || '').trim().replace(/\/+$/, '')
+  const fallback = preferredDefault || String(apiBaseUrl || '').trim().replace(/\/+$/, '')
   const explicit = String(configuredUrl || '').trim()
   if (!explicit) return fallback
   return isAllowedServerRpcUrl(explicit, fallback) ? explicit : fallback
+}
+
+function resolveDefaultEvmRpcUrl(config: Pick<EvmCoinFactoryConfig, 'id' | 'bridgeCoinId'>): string {
+  const direct =
+    EVM_DEFAULT_RPC_URLS[String(config.id || '').trim().toLowerCase()]
+    || EVM_DEFAULT_RPC_URLS[String(config.bridgeCoinId || '').trim().toLowerCase()]
+    || ''
+  return String(direct || '').trim()
 }
 
 export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
@@ -111,7 +141,7 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     coinType: 'EVM',
     coinSymbol: config.coinSymbol,
     chainId: config.chainId,
-    rpcUrl: resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl),
+    rpcUrl: resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl, resolveDefaultEvmRpcUrl(config)),
     rpcWallet: '',
     rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
     rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
