@@ -13,8 +13,8 @@ const mediblocModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_MEDIBLOC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_MEDIBLOC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_MEDIBLOC_EXPLORER',
-  defaultRpcUrl: 'https://medibloc-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/panacea'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const MEDIBLOC_CAPABILITIES: NetworkCapabilitiesInput = mediblocModule.capabilities

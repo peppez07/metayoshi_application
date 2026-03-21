@@ -13,8 +13,8 @@ const persistenceModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_PERSISTENCE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_PERSISTENCE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_PERSISTENCE_EXPLORER',
-  defaultRpcUrl: 'https://persistence-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/persistence'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const PERSISTENCE_CAPABILITIES: NetworkCapabilitiesInput = persistenceModule.capabilities

@@ -44,7 +44,7 @@ export function createDogeNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('dogecoin', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(import.meta.env.VITE_DOGE_EXPLORER || 'https://dogechain.info').trim(),
+    explorerUrl: String(import.meta.env.VITE_DOGE_EXPLORER || '').trim(),
     capabilities: DOGE_CAPABILITIES,
     feePerByte: DOGE_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('dogecoin')

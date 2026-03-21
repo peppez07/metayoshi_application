@@ -16,7 +16,7 @@ const irisEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_IRIS_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_IRIS_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_IRIS_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.irisnet.org'
+  defaultExplorerUrl: ''
 })
 
 export const IRIS_EVM_CAPABILITIES: NetworkCapabilitiesInput = irisEvmModule.capabilities

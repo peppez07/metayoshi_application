@@ -13,8 +13,8 @@ const babylonModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_BABYLON_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BABYLON_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BABYLON_EXPLORER',
-  defaultRpcUrl: 'https://babylon-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/babylon'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const BABYLON_CAPABILITIES: NetworkCapabilitiesInput = babylonModule.capabilities

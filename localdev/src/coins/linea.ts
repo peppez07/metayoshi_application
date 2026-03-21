@@ -16,7 +16,7 @@ const lineaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_LINEA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_LINEA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_LINEA_EXPLORER',
-  defaultExplorerUrl: 'https://lineascan.build'
+  defaultExplorerUrl: ''
 })
 
 export const LINEA_CAPABILITIES: NetworkCapabilitiesInput = lineaModule.capabilities

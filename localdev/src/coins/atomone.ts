@@ -13,8 +13,8 @@ const atomoneModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_ATOMONE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ATOMONE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ATOMONE_EXPLORER',
-  defaultRpcUrl: 'https://atomone-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/atomone'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const ATOMONE_CAPABILITIES: NetworkCapabilitiesInput = atomoneModule.capabilities

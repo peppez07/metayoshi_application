@@ -13,8 +13,8 @@ const dydxModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_DYDX_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_DYDX_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_DYDX_EXPLORER',
-  defaultRpcUrl: 'https://dydx-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/dydx'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const DYDX_CAPABILITIES: NetworkCapabilitiesInput = dydxModule.capabilities

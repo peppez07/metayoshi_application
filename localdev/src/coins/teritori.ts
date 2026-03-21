@@ -13,8 +13,8 @@ const teritoriModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_TERITORI_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_TERITORI_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_TERITORI_EXPLORER',
-  defaultRpcUrl: 'https://teritori-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/teritori'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const TERITORI_CAPABILITIES: NetworkCapabilitiesInput = teritoriModule.capabilities

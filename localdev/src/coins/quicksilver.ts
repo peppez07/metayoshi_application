@@ -13,8 +13,8 @@ const quicksilverModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_QUICKSILVER_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_QUICKSILVER_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_QUICKSILVER_EXPLORER',
-  defaultRpcUrl: 'https://quicksilver-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/quicksilver'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const QUICKSILVER_CAPABILITIES: NetworkCapabilitiesInput = quicksilverModule.capabilities

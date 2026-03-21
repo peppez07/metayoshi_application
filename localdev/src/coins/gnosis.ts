@@ -16,7 +16,7 @@ const gnosisModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_GNOSIS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_GNOSIS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_GNOSIS_EXPLORER',
-  defaultExplorerUrl: 'https://gnosisscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const GNOSIS_CAPABILITIES: NetworkCapabilitiesInput = gnosisModule.capabilities

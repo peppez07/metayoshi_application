@@ -16,7 +16,7 @@ const sonicModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_SONIC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SONIC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SONIC_EXPLORER',
-  defaultExplorerUrl: 'https://sonicscan.org'
+  defaultExplorerUrl: ''
 })
 
 export const SONIC_CAPABILITIES: NetworkCapabilitiesInput = sonicModule.capabilities

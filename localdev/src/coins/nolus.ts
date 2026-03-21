@@ -13,8 +13,8 @@ const nolusModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_NOLUS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_NOLUS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_NOLUS_EXPLORER',
-  defaultRpcUrl: 'https://nolus-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/nolus'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const NOLUS_CAPABILITIES: NetworkCapabilitiesInput = nolusModule.capabilities

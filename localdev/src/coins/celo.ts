@@ -16,7 +16,7 @@ const celoModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_CELO_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_CELO_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_CELO_EXPLORER',
-  defaultExplorerUrl: 'https://celoscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const CELO_CAPABILITIES: NetworkCapabilitiesInput = celoModule.capabilities

@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_XRP_RPC_URL = 'https://xrplcluster.com'
-const DEFAULT_XRP_EXPLORER_URL = 'https://livenet.xrpl.org'
+const DEFAULT_XRP_RPC_URL = ''
+const DEFAULT_XRP_EXPLORER_URL = ''
 
 export function createXrpNetwork(ctx: CoinRuntimeContext): Network {
   const env = (import.meta as any)?.env || {}

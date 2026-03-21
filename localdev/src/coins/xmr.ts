@@ -2,7 +2,7 @@ import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_XMR_EXPLORER_URL = 'https://xmrchain.net'
+const DEFAULT_XMR_EXPLORER_URL = ''
 
 export function createXmrNetwork(ctx: CoinRuntimeContext): Network {
   const env = (import.meta as any)?.env || {}

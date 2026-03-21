@@ -16,7 +16,7 @@ const zksyncModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ZKSYNC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ZKSYNC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ZKSYNC_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.zksync.io'
+  defaultExplorerUrl: ''
 })
 
 export const ZKSYNC_CAPABILITIES: NetworkCapabilitiesInput = zksyncModule.capabilities

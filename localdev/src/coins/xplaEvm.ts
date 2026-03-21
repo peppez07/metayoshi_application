@@ -16,7 +16,7 @@ const xplaEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_XPLA_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_XPLA_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_XPLA_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://evm.xpla.io'
+  defaultExplorerUrl: ''
 })
 
 export const XPLA_EVM_CAPABILITIES: NetworkCapabilitiesInput = xplaEvmModule.capabilities

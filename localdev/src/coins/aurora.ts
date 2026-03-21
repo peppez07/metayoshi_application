@@ -16,7 +16,7 @@ const auroraModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_AURORA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_AURORA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_AURORA_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.aurora.dev'
+  defaultExplorerUrl: ''
 })
 
 export const AURORA_CAPABILITIES: NetworkCapabilitiesInput = auroraModule.capabilities

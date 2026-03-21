@@ -16,7 +16,7 @@ const evmosEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_EVMOS_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_EVMOS_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_EVMOS_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://escan.live'
+  defaultExplorerUrl: ''
 })
 
 export const EVMOS_EVM_CAPABILITIES: NetworkCapabilitiesInput = evmosEvmModule.capabilities

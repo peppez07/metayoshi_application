@@ -19,7 +19,7 @@ const ethereumSepoliaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ETHEREUM_SEPOLIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ETHEREUM_SEPOLIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ETHEREUM_SEPOLIA_EXPLORER',
-  defaultExplorerUrl: 'https://sepolia.etherscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const ETHEREUM_SEPOLIA_CAPABILITIES: NetworkCapabilitiesInput = ethereumSepoliaModule.capabilities

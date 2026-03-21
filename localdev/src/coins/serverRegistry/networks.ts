@@ -1,6 +1,7 @@
 import type { Network } from '../types'
 import type { NetworkCandidate, ServerCoinNetworkRow, ServerCoinRow } from './types'
 import { EVM_MODEL_NETWORK_IDS, normalizeServerCoinSymbol, sanitizeServerCoinId } from './mappings'
+import { sanitizeRpcUrl } from '../../lib/serverOnly'
 
 export function resolveActiveServerNetwork(networks: ServerCoinNetworkRow[] | undefined): ServerCoinNetworkRow | null {
   const rows = Array.isArray(networks) ? networks.filter((n) => n && n.isActive !== false) : []
@@ -188,7 +189,7 @@ export function createGenericServerNetwork(input: {
     symbol,
     coinType: 'BTC',
     coinSymbol: symbol,
-    rpcUrl: String(input.selectedNetwork?.rpcUrl || '').trim() || input.apiBaseUrl,
+    rpcUrl: sanitizeRpcUrl(String(input.selectedNetwork?.rpcUrl || '').trim(), input.apiBaseUrl) || input.apiBaseUrl,
     rpcWallet: rpcWallet || '',
     rpcUsername: String(input.selectedNetwork?.rpcUser || '').trim(),
     rpcPassword: '',

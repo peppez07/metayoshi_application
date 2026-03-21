@@ -1245,10 +1245,10 @@ export interface UtxoBalance {
   total: number        // in coins
 }
 
-const BTCZ_EXPLORER_FALLBACK_BASE = 'https://explorer.btcz.rocks'
-const BTC_EXPLORER_MAINNET_BASE = 'https://mempool.space/api'
-const BTC_EXPLORER_TESTNET_BASE = 'https://mempool.space/testnet/api'
-const BTC_EXPLORER_TESTNET4_BASE = 'https://mempool.space/testnet4/api'
+const BTCZ_EXPLORER_FALLBACK_BASE = ''
+const BTC_EXPLORER_MAINNET_BASE = ''
+const BTC_EXPLORER_TESTNET_BASE = ''
+const BTC_EXPLORER_TESTNET4_BASE = ''
 
 interface BtczExplorerAddressSummary {
   balance?: number | string

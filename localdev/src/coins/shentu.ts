@@ -13,8 +13,8 @@ const shentuModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_SHENTU_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SHENTU_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SHENTU_EXPLORER',
-  defaultRpcUrl: 'https://shentu-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/shentu'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const SHENTU_CAPABILITIES: NetworkCapabilitiesInput = shentuModule.capabilities

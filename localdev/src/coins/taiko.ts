@@ -16,7 +16,7 @@ const taikoModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_TAIKO_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_TAIKO_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_TAIKO_EXPLORER',
-  defaultExplorerUrl: 'https://taikoscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const TAIKO_CAPABILITIES: NetworkCapabilitiesInput = taikoModule.capabilities

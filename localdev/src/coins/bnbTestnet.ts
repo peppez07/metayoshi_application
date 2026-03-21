@@ -19,7 +19,7 @@ const bnbTestnetModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BSC_TESTNET_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BSC_TESTNET_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BSC_TESTNET_EXPLORER',
-  defaultExplorerUrl: 'https://testnet.bscscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const BNB_TESTNET_CAPABILITIES: NetworkCapabilitiesInput = bnbTestnetModule.capabilities

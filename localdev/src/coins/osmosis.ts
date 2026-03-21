@@ -13,8 +13,8 @@ const osmosisModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_OSMOSIS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_OSMOSIS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_OSMOSIS_EXPLORER',
-  defaultRpcUrl: 'https://osmosis-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/osmosis'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const OSMOSIS_CAPABILITIES: NetworkCapabilitiesInput = osmosisModule.capabilities

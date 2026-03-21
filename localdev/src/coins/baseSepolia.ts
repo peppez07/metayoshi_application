@@ -19,7 +19,7 @@ const baseSepoliaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BASE_SEPOLIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BASE_SEPOLIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BASE_SEPOLIA_EXPLORER',
-  defaultExplorerUrl: 'https://sepolia.basescan.org'
+  defaultExplorerUrl: ''
 })
 
 export const BASE_SEPOLIA_CAPABILITIES: NetworkCapabilitiesInput = baseSepoliaModule.capabilities

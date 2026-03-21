@@ -16,7 +16,7 @@ const soneiumModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_SONEIUM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SONEIUM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SONEIUM_EXPLORER',
-  defaultExplorerUrl: 'https://soneium.blockscout.com'
+  defaultExplorerUrl: ''
 })
 
 export const SONEIUM_CAPABILITIES: NetworkCapabilitiesInput = soneiumModule.capabilities

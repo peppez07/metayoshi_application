@@ -13,8 +13,8 @@ const akashModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_AKASH_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_AKASH_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_AKASH_EXPLORER',
-  defaultRpcUrl: 'https://akash-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/akash'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const AKASH_CAPABILITIES: NetworkCapabilitiesInput = akashModule.capabilities

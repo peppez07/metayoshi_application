@@ -14,7 +14,7 @@ export const FIRO_API_INFO: CoinApiInfo = {
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
-  defaultExplorerUrl: 'https://explorer.firo.org',
+  defaultExplorerUrl: '',
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/firo`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/firo/main/:wallet',

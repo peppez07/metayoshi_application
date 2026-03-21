@@ -13,8 +13,8 @@ const passageModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_PASSAGE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_PASSAGE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_PASSAGE_EXPLORER',
-  defaultRpcUrl: 'https://passage-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/passage'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const PASSAGE_CAPABILITIES: NetworkCapabilitiesInput = passageModule.capabilities

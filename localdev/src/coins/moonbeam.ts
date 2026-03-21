@@ -16,7 +16,7 @@ const moonbeamModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_MOONBEAM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_MOONBEAM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_MOONBEAM_EXPLORER',
-  defaultExplorerUrl: 'https://moonscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const MOONBEAM_CAPABILITIES: NetworkCapabilitiesInput = moonbeamModule.capabilities

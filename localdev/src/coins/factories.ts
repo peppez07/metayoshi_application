@@ -1,5 +1,6 @@
 import { readBridgeCredentialsFromEnv } from '../lib/bridgeCredentials'
 import { resolveCosmosAddressConfig } from '../lib/cosmosAddress'
+import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const FULL_ASSET_CAPABILITIES: NetworkCapabilitiesInput = {
@@ -51,26 +52,7 @@ type EvmCoinFactoryConfig = {
   capabilities?: NetworkCapabilitiesInput
 }
 
-const EVM_DEFAULT_RPC_URLS: Record<string, string> = {
-  eth: 'https://cloudflare-eth.com',
-  ethereum: 'https://cloudflare-eth.com',
-  arb: 'https://arbitrum-one-rpc.publicnode.com',
-  'arbitrum-one': 'https://arbitrum-one-rpc.publicnode.com',
-  op: 'https://mainnet.optimism.io',
-  optimism: 'https://mainnet.optimism.io',
-  base: 'https://mainnet.base.org',
-  polygon: 'https://polygon-rpc.com',
-  'polygon-bor': 'https://polygon-rpc.com',
-  avaxc: 'https://api.avax.network/ext/bc/C/rpc',
-  'avalanche-c-chain': 'https://api.avax.network/ext/bc/C/rpc',
-  bnb: 'https://bsc-dataseed.binance.org',
-  bsc: 'https://bsc-dataseed.binance.org',
-  cronos: 'https://evm.cronos.org',
-  linea: 'https://rpc.linea.build',
-  scroll: 'https://rpc.scroll.io',
-  zksync: 'https://mainnet.era.zksync.io',
-  'zksync-era': 'https://mainnet.era.zksync.io'
-}
+const EVM_DEFAULT_RPC_URLS: Record<string, string> = {}
 
 type CosmosCoinFactoryConfig = {
   id: string
@@ -141,7 +123,10 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     coinType: 'EVM',
     coinSymbol: config.coinSymbol,
     chainId: config.chainId,
-    rpcUrl: resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl, resolveDefaultEvmRpcUrl(config)),
+    rpcUrl: sanitizeRpcUrl(
+      resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl, resolveDefaultEvmRpcUrl(config)),
+      ctx.apiBaseUrl
+    ),
     rpcWallet: '',
     rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
     rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
@@ -151,7 +136,7 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
       passEnvKey: config.bridgePasswordEnvKey,
       label: config.id
     }),
-    explorerUrl: String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim() || config.defaultExplorerUrl,
+    explorerUrl: sanitizeExplorerUrl(String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim()) || undefined,
     capabilities,
     logo: config.logo
   })
@@ -195,7 +180,7 @@ export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
       symbol: config.symbol || addressConfig.symbol,
       coinType: 'COSMOS',
       coinSymbol: config.coinSymbol || addressConfig.symbol,
-      rpcUrl: String(env[config.rpcEnvKey] || config.defaultRpcUrl).trim() || config.defaultRpcUrl,
+      rpcUrl: sanitizeRpcUrl(String(env[config.rpcEnvKey] || config.defaultRpcUrl).trim() || config.defaultRpcUrl, ctx.apiBaseUrl),
       rpcWallet: '',
       rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
       rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
@@ -205,7 +190,7 @@ export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
         passEnvKey: config.bridgePasswordEnvKey,
         label: config.id
       }),
-      explorerUrl: String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim() || config.defaultExplorerUrl,
+      explorerUrl: sanitizeExplorerUrl(String(env[config.explorerEnvKey] || config.defaultExplorerUrl).trim()) || undefined,
       capabilities,
       logo: config.logo
     }

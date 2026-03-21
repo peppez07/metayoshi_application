@@ -16,7 +16,7 @@ const avaxcModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_AVAXC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_AVAXC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_AVAXC_EXPLORER',
-  defaultExplorerUrl: 'https://snowtrace.io'
+  defaultExplorerUrl: ''
 })
 
 export const AVAXC_CAPABILITIES: NetworkCapabilitiesInput = avaxcModule.capabilities

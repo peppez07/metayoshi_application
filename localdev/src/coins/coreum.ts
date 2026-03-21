@@ -13,8 +13,8 @@ const coreumModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_COREUM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_COREUM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_COREUM_EXPLORER',
-  defaultRpcUrl: 'https://coreum-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/coreum'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const COREUM_CAPABILITIES: NetworkCapabilitiesInput = coreumModule.capabilities

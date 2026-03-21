@@ -13,8 +13,8 @@ const celestiaModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_CELESTIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_CELESTIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_CELESTIA_EXPLORER',
-  defaultRpcUrl: 'https://celestia-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/celestia'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const CELESTIA_CAPABILITIES: NetworkCapabilitiesInput = celestiaModule.capabilities

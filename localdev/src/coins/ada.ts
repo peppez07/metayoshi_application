@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_ADA_RPC_URL = 'https://api.koios.rest/api/v1'
-const DEFAULT_ADA_EXPLORER_URL = 'https://cardanoscan.io'
+const DEFAULT_ADA_RPC_URL = ''
+const DEFAULT_ADA_EXPLORER_URL = ''
 
 export function createAdaNetwork(ctx: CoinRuntimeContext): Network {
   const env = (import.meta as any)?.env || {}

@@ -13,8 +13,8 @@ const kujiraModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_KUJIRA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_KUJIRA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_KUJIRA_EXPLORER',
-  defaultRpcUrl: 'https://kujira-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/kujira'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const KUJIRA_CAPABILITIES: NetworkCapabilitiesInput = kujiraModule.capabilities

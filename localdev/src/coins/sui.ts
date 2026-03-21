@@ -20,14 +20,14 @@ export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'SUI',
     coinType: 'SUI',
     coinSymbol: 'SUI',
-    rpcUrl: String(env.VITE_SUI_RPC || 'https://fullnode.mainnet.sui.io:443').trim() || 'https://fullnode.mainnet.sui.io:443',
+    rpcUrl: String(env.VITE_SUI_RPC || '').trim() || '',
     rpcWallet: '',
     rpcUsername: String(env.VITE_SUI_RPC_USER || '').trim(),
     rpcPassword: String(env.VITE_SUI_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('sui', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(env.VITE_SUI_EXPLORER || 'https://suiscan.xyz/mainnet').trim() || 'https://suiscan.xyz/mainnet',
+    explorerUrl: String(env.VITE_SUI_EXPLORER || '').trim() || '',
     capabilities: SUI_CAPABILITIES,
     derivation: {
       status: 'supported'

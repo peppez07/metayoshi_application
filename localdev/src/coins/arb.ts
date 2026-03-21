@@ -16,7 +16,7 @@ const arbModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ARB_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ARB_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ARB_EXPLORER',
-  defaultExplorerUrl: 'https://arbiscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const ARB_CAPABILITIES: NetworkCapabilitiesInput = arbModule.capabilities

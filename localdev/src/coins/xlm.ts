@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_XLM_RPC_URL = 'https://horizon.stellar.org'
-const DEFAULT_XLM_EXPLORER_URL = 'https://stellar.expert/explorer/public'
+const DEFAULT_XLM_RPC_URL = ''
+const DEFAULT_XLM_EXPLORER_URL = ''
 
 export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
   const env = (import.meta as any)?.env || {}

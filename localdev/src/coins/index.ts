@@ -4,6 +4,7 @@ import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
 import { validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
 import { resolvePublicApiBaseUrl } from '../lib/apiBase'
 import { normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
+import { sanitizeNetworkServerOnly } from '../lib/serverOnly'
 import type { ServerCoinCatalogItem, ServerCoinCatalogKind } from './serverRegistry/types'
 import type { CoinModule, CoinRuntimeContext, Network, UtxoAddressSpec } from './types'
 
@@ -83,6 +84,7 @@ function withGlobalBridgeCredentials(network: Network): Network {
 export const ALL_NETWORKS: Network[] = ALL_COIN_MODULES
   .map((coin) => coin.createNetwork(runtimeContext))
   .map(withGlobalBridgeCredentials)
+  .map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
 
 function validateEnabledNetworkIds(enabledIds: Set<string>, knownIds: Set<string>): void {
   if (enabledIds.size <= 0) {
@@ -178,7 +180,7 @@ export async function loadServerRegistrySnapshot(): Promise<{
   networks: Network[] | null
   catalog: ServerCoinCatalogItem[]
 }> {
-  return loadServerRegistrySnapshotFromApi({
+  const snapshot = await loadServerRegistrySnapshotFromApi({
     apiBaseUrl: API_BASE_URL,
     appApiKey: APP_API_KEY,
     defaultBridgeUser: GLOBAL_BRIDGE_USER,
@@ -186,6 +188,12 @@ export async function loadServerRegistrySnapshot(): Promise<{
     allNetworks: ALL_NETWORKS,
     allCoinIds: ALL_COIN_IDS
   })
+  return {
+    ...snapshot,
+    networks: Array.isArray(snapshot.networks)
+      ? snapshot.networks.map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
+      : null
+  }
 }
 
 export async function loadNetworksFromServerRegistry(): Promise<Network[] | null> {

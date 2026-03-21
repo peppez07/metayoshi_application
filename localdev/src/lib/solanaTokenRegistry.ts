@@ -17,10 +17,10 @@ const tokenListCache = createRequestCache<Record<string, SolanaTokenRegistryEntr
 
 const SOLANA_TOKEN_REGISTRY_FALLBACK_URLS = [
   // Jupiter legacy endpoint (kept for compatibility with existing setups).
-  'https://token.jup.ag/all',
+  '',
   // Public static token list mirrors.
-  'https://raw.githubusercontent.com/solana-labs/token-list/main/src/tokens/solana.tokenlist.json',
-  'https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/src/tokens/solana.tokenlist.json'
+  '',
+  ''
 ]
 
 const STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES: Record<string, SolanaTokenRegistryEntry> = {
@@ -99,38 +99,10 @@ async function fetchRegistryFromUrl(url: string): Promise<Record<string, SolanaT
 export async function getSolanaTokenRegistry(options?: {
   allowPublicRegistry?: boolean
 }): Promise<Record<string, SolanaTokenRegistryEntry>> {
+  void options
   return await tokenListCache.get((() => {
-    const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
-    const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
-    const cacheMode = options?.allowPublicRegistry ? 'public' : 'default'
-    return `solana-token-registry:${cacheMode}:${configuredUrl || 'builtin'}`
+    return 'solana-token-registry:server-only:builtin'
   })(), async () => {
-    const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
-    const configuredUrl = String(env?.VITE_SOL_TOKEN_REGISTRY_URL || '').trim()
-    const allowPublicRegistry = options?.allowPublicRegistry || readEnvFlag('VITE_SOL_ALLOW_PUBLIC_TOKEN_REGISTRY', false)
-    // Default behavior: no external token-registry call unless explicitly allowed/configured.
-    if (!configuredUrl && !allowPublicRegistry) return { ...STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES }
-
-    const urls = configuredUrl
-      ? [configuredUrl, ...SOLANA_TOKEN_REGISTRY_FALLBACK_URLS.filter((u) => u !== configuredUrl)]
-      : [...SOLANA_TOKEN_REGISTRY_FALLBACK_URLS]
-
-    let lastError: unknown = null
-    for (const url of urls) {
-      try {
-        const out = await fetchRegistryFromUrl(url)
-        if (Object.keys(out).length > 0) {
-          return {
-            ...STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES,
-            ...out
-          }
-        }
-      } catch (error) {
-        lastError = error
-      }
-    }
-    if (lastError) throw lastError
     return { ...STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES }
   }).catch(() => ({ ...STATIC_SOLANA_TOKEN_REGISTRY_ENTRIES }))
 }
-

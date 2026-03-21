@@ -13,8 +13,8 @@ const strideModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_STRIDE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_STRIDE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_STRIDE_EXPLORER',
-  defaultRpcUrl: 'https://stride-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/stride'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const STRIDE_CAPABILITIES: NetworkCapabilitiesInput = strideModule.capabilities

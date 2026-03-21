@@ -16,7 +16,7 @@ const polygonModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_POLYGON_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_POLYGON_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_POLYGON_EXPLORER',
-  defaultExplorerUrl: 'https://polygonscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const POLYGON_CAPABILITIES: NetworkCapabilitiesInput = polygonModule.capabilities

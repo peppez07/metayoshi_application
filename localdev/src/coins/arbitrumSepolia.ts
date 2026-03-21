@@ -19,7 +19,7 @@ const arbitrumSepoliaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ARBITRUM_SEPOLIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ARBITRUM_SEPOLIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ARBITRUM_SEPOLIA_EXPLORER',
-  defaultExplorerUrl: 'https://sepolia.arbiscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const ARBITRUM_SEPOLIA_CAPABILITIES: NetworkCapabilitiesInput = arbitrumSepoliaModule.capabilities

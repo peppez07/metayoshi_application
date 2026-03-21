@@ -13,8 +13,8 @@ const sagaModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_SAGA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SAGA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SAGA_EXPLORER',
-  defaultRpcUrl: 'https://saga-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/saga'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const SAGA_CAPABILITIES: NetworkCapabilitiesInput = sagaModule.capabilities

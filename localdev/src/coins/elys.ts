@@ -13,8 +13,8 @@ const elysModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_ELYS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ELYS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ELYS_EXPLORER',
-  defaultRpcUrl: 'https://elys-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/elys'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const ELYS_CAPABILITIES: NetworkCapabilitiesInput = elysModule.capabilities

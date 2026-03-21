@@ -15,7 +15,7 @@ export const BTCZ_API_INFO: CoinApiInfo = {
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
-  defaultExplorerUrl: 'https://explorer.btcz.rocks',
+  defaultExplorerUrl: '',
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/bitcoinz`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/bitcoinz/main/:wallet',

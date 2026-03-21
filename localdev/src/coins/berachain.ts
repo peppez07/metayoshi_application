@@ -16,7 +16,7 @@ const berachainModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BERACHAIN_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BERACHAIN_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BERACHAIN_EXPLORER',
-  defaultExplorerUrl: 'https://berascan.com'
+  defaultExplorerUrl: ''
 })
 
 export const BERACHAIN_CAPABILITIES: NetworkCapabilitiesInput = berachainModule.capabilities

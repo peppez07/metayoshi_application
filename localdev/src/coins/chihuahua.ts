@@ -13,8 +13,8 @@ const chihuahuaModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_CHIHUAHUA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_CHIHUAHUA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_CHIHUAHUA_EXPLORER',
-  defaultRpcUrl: 'https://chihuahua-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/chihuahua'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const CHIHUAHUA_CAPABILITIES: NetworkCapabilitiesInput = chihuahuaModule.capabilities

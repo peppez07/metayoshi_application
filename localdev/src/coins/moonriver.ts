@@ -16,7 +16,7 @@ const moonriverModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_MOONRIVER_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_MOONRIVER_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_MOONRIVER_EXPLORER',
-  defaultExplorerUrl: 'https://moonriver.moonscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const MOONRIVER_CAPABILITIES: NetworkCapabilitiesInput = moonriverModule.capabilities

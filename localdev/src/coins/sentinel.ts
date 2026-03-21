@@ -13,8 +13,8 @@ const sentinelModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_SENTINEL_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SENTINEL_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SENTINEL_EXPLORER',
-  defaultRpcUrl: 'https://sentinel-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/sentinel'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const SENTINEL_CAPABILITIES: NetworkCapabilitiesInput = sentinelModule.capabilities

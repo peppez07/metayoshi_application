@@ -16,7 +16,7 @@ const kavaEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_KAVA_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_KAVA_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_KAVA_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://kavascan.com'
+  defaultExplorerUrl: ''
 })
 
 export const KAVA_EVM_CAPABILITIES: NetworkCapabilitiesInput = kavaEvmModule.capabilities

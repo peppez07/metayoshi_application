@@ -16,7 +16,7 @@ const wardenEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_WARDEN_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_WARDEN_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_WARDEN_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.wardenprotocol.org'
+  defaultExplorerUrl: ''
 })
 
 export const WARDEN_EVM_CAPABILITIES: NetworkCapabilitiesInput = wardenEvmModule.capabilities

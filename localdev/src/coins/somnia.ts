@@ -16,7 +16,7 @@ const somniaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_SOMNIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SOMNIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SOMNIA_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.somnia.network'
+  defaultExplorerUrl: ''
 })
 
 export const SOMNIA_CAPABILITIES: NetworkCapabilitiesInput = somniaModule.capabilities

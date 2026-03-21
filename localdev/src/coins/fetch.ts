@@ -13,8 +13,8 @@ const fetchModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_FETCH_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_FETCH_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_FETCH_EXPLORER',
-  defaultRpcUrl: 'https://fetch-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/fetchhub'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const FETCH_CAPABILITIES: NetworkCapabilitiesInput = fetchModule.capabilities

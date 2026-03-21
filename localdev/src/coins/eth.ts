@@ -16,7 +16,7 @@ const ethModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_ETH_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ETH_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ETH_EXPLORER',
-  defaultExplorerUrl: 'https://etherscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const ETH_CAPABILITIES: NetworkCapabilitiesInput = ethModule.capabilities

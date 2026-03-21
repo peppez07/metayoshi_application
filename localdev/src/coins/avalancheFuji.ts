@@ -19,7 +19,7 @@ const avalancheFujiModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_AVALANCHE_FUJI_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_AVALANCHE_FUJI_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_AVALANCHE_FUJI_EXPLORER',
-  defaultExplorerUrl: 'https://testnet.snowtrace.io'
+  defaultExplorerUrl: ''
 })
 
 export const AVALANCHE_FUJI_CAPABILITIES: NetworkCapabilitiesInput = avalancheFujiModule.capabilities

@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_TRON_RPC_URL = 'https://api.trongrid.io'
-const DEFAULT_TRON_EXPLORER_URL = 'https://tronscan.org/#/'
+const DEFAULT_TRON_RPC_URL = ''
+const DEFAULT_TRON_EXPLORER_URL = ''
 
 export function createTronNetwork(ctx: CoinRuntimeContext): Network {
   const env = (import.meta as any)?.env || {}

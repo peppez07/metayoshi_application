@@ -29,7 +29,7 @@ const SOL_ALLOW_PUBLIC_RPC_FALLBACK = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_RPC_FAL
 function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
   const primary = String(rpcUrl || '').trim()
   const defaults = SOL_ALLOW_PUBLIC_RPC_FALLBACK
-    ? ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+    ? ['', '']
     : []
   return Array.from(new Set([primary, ...defaults].filter(Boolean)))
 }
@@ -325,7 +325,7 @@ export async function listSolanaTokenBalances(rpcUrl: string, ownerAddress: stri
   // Optional public fallback for deployments that intentionally allow it.
   if (SOL_ALLOW_PUBLIC_RPC_FALLBACK) {
     try {
-      const fallbackEndpoints = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+      const fallbackEndpoints = ['', '']
       for (const endpoint of fallbackEndpoints) {
         const tokenkegRows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_PROGRAM_ID.toBase58())
         const token2022Rows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_2022_PROGRAM_ID.toBase58())

@@ -13,8 +13,8 @@ const axelarModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_AXELAR_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_AXELAR_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_AXELAR_EXPLORER',
-  defaultRpcUrl: 'https://axelar-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/axelar'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const AXELAR_CAPABILITIES: NetworkCapabilitiesInput = axelarModule.capabilities

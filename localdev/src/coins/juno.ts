@@ -13,8 +13,8 @@ const junoModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_JUNO_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_JUNO_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_JUNO_EXPLORER',
-  defaultRpcUrl: 'https://juno-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/juno'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const JUNO_CAPABILITIES: NetworkCapabilitiesInput = junoModule.capabilities

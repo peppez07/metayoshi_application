@@ -16,7 +16,7 @@ const haqqModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_HAQQ_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_HAQQ_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_HAQQ_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.haqq.network'
+  defaultExplorerUrl: ''
 })
 
 export const HAQQ_CAPABILITIES: NetworkCapabilitiesInput = haqqModule.capabilities

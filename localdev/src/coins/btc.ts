@@ -44,7 +44,7 @@ export function createBtcNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('bitcoin', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(import.meta.env.VITE_BTC_EXPLORER || 'https://mempool.space').trim(),
+    explorerUrl: String(import.meta.env.VITE_BTC_EXPLORER || '').trim(),
     capabilities: BTC_CAPABILITIES,
     feePerByte: BTC_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('bitcoin')

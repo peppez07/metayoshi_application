@@ -16,7 +16,7 @@ const unichainModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_UNICHAIN_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_UNICHAIN_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_UNICHAIN_EXPLORER',
-  defaultExplorerUrl: 'https://uniscan.xyz'
+  defaultExplorerUrl: ''
 })
 
 export const UNICHAIN_CAPABILITIES: NetworkCapabilitiesInput = unichainModule.capabilities

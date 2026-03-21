@@ -19,7 +19,7 @@ export const RTM_API_INFO: CoinApiInfo = {
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
   defaultWallet: wallet,
-  defaultExplorerUrl: 'https://explorer.raptoreum.com',
+  defaultExplorerUrl: '',
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/raptoreum`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/raptoreum/main/:wallet',

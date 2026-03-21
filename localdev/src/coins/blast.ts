@@ -16,7 +16,7 @@ const blastModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BLAST_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BLAST_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BLAST_EXPLORER',
-  defaultExplorerUrl: 'https://blastscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const BLAST_CAPABILITIES: NetworkCapabilitiesInput = blastModule.capabilities

@@ -13,8 +13,8 @@ const stargazeModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_STARGAZE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_STARGAZE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_STARGAZE_EXPLORER',
-  defaultRpcUrl: 'https://stargaze-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/stargaze'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const STARGAZE_CAPABILITIES: NetworkCapabilitiesInput = stargazeModule.capabilities

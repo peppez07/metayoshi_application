@@ -13,8 +13,8 @@ const injectiveModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_INJECTIVE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_INJECTIVE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_INJECTIVE_EXPLORER',
-  defaultRpcUrl: 'https://injective-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/injective'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const INJECTIVE_CAPABILITIES: NetworkCapabilitiesInput = injectiveModule.capabilities

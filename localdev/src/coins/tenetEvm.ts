@@ -16,7 +16,7 @@ const tenetEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_TENET_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_TENET_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_TENET_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://tenetscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const TENET_EVM_CAPABILITIES: NetworkCapabilitiesInput = tenetEvmModule.capabilities

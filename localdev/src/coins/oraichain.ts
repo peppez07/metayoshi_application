@@ -13,8 +13,8 @@ const oraichainModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_ORAICHAIN_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_ORAICHAIN_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_ORAICHAIN_EXPLORER',
-  defaultRpcUrl: 'https://oraichain-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/oraichain'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const ORAICHAIN_CAPABILITIES: NetworkCapabilitiesInput = oraichainModule.capabilities

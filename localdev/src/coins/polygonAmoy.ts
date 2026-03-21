@@ -19,7 +19,7 @@ const polygonAmoyModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_POLYGON_AMOY_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_POLYGON_AMOY_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_POLYGON_AMOY_EXPLORER',
-  defaultExplorerUrl: 'https://amoy.polygonscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const POLYGON_AMOY_CAPABILITIES: NetworkCapabilitiesInput = polygonAmoyModule.capabilities

@@ -13,8 +13,8 @@ const seiModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_SEI_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SEI_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SEI_EXPLORER',
-  defaultRpcUrl: 'https://sei-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/sei'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const SEI_CAPABILITIES: NetworkCapabilitiesInput = seiModule.capabilities

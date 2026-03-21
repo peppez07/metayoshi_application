@@ -26,6 +26,7 @@ import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { getMissingBridgeCredentialsMessage } from '../lib/bridgeCredentials'
+import { isMetayoshiHttpUrl } from '../lib/serverOnly'
 import {
   discoverWalletBackend,
   fetchDiscoveredChains,
@@ -937,6 +938,7 @@ export type EvmTrackedToken = {
   symbol: string
   decimals: number
   logoUri?: string
+  balanceRaw?: string
   discovered?: boolean
 }
 
@@ -1229,6 +1231,16 @@ const CHAIN_ID_BY_NETWORK_ID: Record<string, number> = {
   avaxc: 43114
 }
 
+const EVM_TESTNET_CHAIN_IDS = new Set<number>([
+  97,       // BSC testnet
+  43113,    // Avalanche Fuji
+  80002,    // Polygon Amoy
+  84532,    // Base Sepolia
+  11155420, // Optimism Sepolia
+  11155111, // Ethereum Sepolia
+  421614    // Arbitrum Sepolia
+])
+
 const COINGECKO_CHAIN_SLUG_BY_CHAIN_ID: Record<number, string> = {
   1: 'ethereum',
   10: 'optimism',
@@ -1315,8 +1327,11 @@ function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[
       const existingIndex = byAddress.get(address)
       if (existingIndex !== undefined) {
         const existing = out[existingIndex]
-        if (!existing.logoUri && token.logoUri) {
-          out[existingIndex] = { ...existing, logoUri: String(token.logoUri || '').trim() || undefined }
+        out[existingIndex] = {
+          ...existing,
+          logoUri: existing.logoUri || String(token.logoUri || '').trim() || undefined,
+          balanceRaw: existing.balanceRaw || String(token.balanceRaw || '').trim() || undefined,
+          discovered: existing.discovered || token.discovered
         }
         continue
       }
@@ -1324,7 +1339,9 @@ function mergeTrackedEvmTokens(...groups: EvmTrackedToken[][]): EvmTrackedToken[
         address,
         symbol: String(token.symbol || '').trim().toUpperCase() || shortAddress(address),
         decimals: Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 30 ? token.decimals : 18,
-        logoUri: String(token.logoUri || '').trim() || undefined
+        logoUri: String(token.logoUri || '').trim() || undefined,
+        balanceRaw: String(token.balanceRaw || '').trim() || undefined,
+        discovered: token.discovered
       })
       byAddress.set(address, out.length - 1)
     }
@@ -1383,15 +1400,22 @@ function resolveTrackedEvmTokensBase(network: Pick<Network, 'id' | 'runtimeModel
   const networkId = String(network?.id || '').trim()
   const modelId = String(network?.runtimeModelId || networkId).trim()
   const fromEnv = resolveTrackedTokensFromEnv(network)
+  const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
+  const normalizedNetworkId = networkId.toLowerCase()
   if (fromEnv.length > 0) return fromEnv
-  if (networkId.toLowerCase() === 'bnb-testnet') return []
+  if (
+    normalizedNetworkId === 'bnb-testnet'
+    || /(?:^|-)(testnet|sepolia|amoy|fuji)(?:$|-)/i.test(normalizedNetworkId)
+    || (chainId !== null && EVM_TESTNET_CHAIN_IDS.has(chainId))
+  ) {
+    return []
+  }
   if (modelId.toLowerCase() === 'eth') return DEFAULT_ETH_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'arb') return DEFAULT_ARB_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'op') return DEFAULT_OP_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'bnb') return DEFAULT_BNB_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'base') return DEFAULT_BASE_TRACKED_TOKENS
   if (modelId.toLowerCase() === 'avaxc') return DEFAULT_AVAXC_TRACKED_TOKENS
-  const chainId = resolveEvmChainId(network as Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>)
   if (chainId === 1) return DEFAULT_ETH_TRACKED_TOKENS
   if (chainId === 10) return DEFAULT_OP_TRACKED_TOKENS
   if (chainId === 97) return []
@@ -1458,46 +1482,12 @@ function parseRemoteTokenCandidates(payload: any): EvmTrackedToken[] {
 }
 
 function buildTrustWalletErc20LogoUri(chainId: number | null, tokenAddress: string): string | undefined {
-  if (!chainId || !ethers.isAddress(tokenAddress)) return undefined
-  const folder = TRUSTWALLET_CHAIN_FOLDER_BY_CHAIN_ID[chainId]
-  if (!folder) return undefined
-  const checksum = ethers.getAddress(tokenAddress)
-  return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${folder}/assets/${checksum}/logo.png`
+  return undefined
 }
 
 async function fetchRemoteTrackedTokensForChain(chainId: number): Promise<EvmTrackedToken[]> {
-  const cacheKey = `chain:${chainId}`
-  const cached = evmTrackedTokenCache.get(cacheKey)
-  if (cached && Date.now() - cached.checkedAt <= EVM_TRACKED_TOKEN_CACHE_TTL_MS) {
-    return cached.tokens
-  }
-
-  const urls: string[] = [
-    `https://tokens.1inch.io/v1.2/${chainId}`
-  ]
-  const cgSlug = COINGECKO_CHAIN_SLUG_BY_CHAIN_ID[chainId]
-  if (cgSlug) {
-    urls.push(`https://tokens.coingecko.com/${cgSlug}/all.json`)
-  }
-
-  let merged: EvmTrackedToken[] = []
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, { method: 'GET' })
-      if (!response.ok) continue
-      const json = await response.json().catch(() => null)
-      const parsed = parseRemoteTokenCandidates(json)
-      if (parsed.length === 0) continue
-      merged = mergeTrackedEvmTokens(merged, parsed)
-      if (merged.length >= MAX_TRACKED_EVM_TOKENS_PER_CHAIN) break
-    } catch {
-      // Try the next source.
-    }
-  }
-
-  const sliced = merged.slice(0, MAX_TRACKED_EVM_TOKENS_PER_CHAIN)
-  evmTrackedTokenCache.set(cacheKey, { checkedAt: Date.now(), tokens: sliced })
-  return sliced
+  void chainId
+  return []
 }
 
 async function resolveTrackedEvmTokens(network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'>): Promise<EvmTrackedToken[]> {
@@ -2151,25 +2141,8 @@ function clearNetworkFiatFailureCooldown(cacheKey: string): void {
 }
 
 async function fetchCoinGeckoNativeSpotPrice(coinId: string): Promise<FiatValueMap> {
-  const normalizedCoinId = String(coinId || '').trim().toLowerCase()
-  const coingeckoId = COINGECKO_NATIVE_PRICE_ID_BY_COIN_ID[normalizedCoinId]
-  if (!coingeckoId) return {}
-
-  const cacheKey = `${coingeckoId}|${SUPPORTED_FIAT_CURRENCIES.join(',')}`
-  return await nativeFiatSpotPriceCache.get(cacheKey, async () => {
-    const params = new URLSearchParams({
-      ids: coingeckoId,
-      vs_currencies: SUPPORTED_FIAT_CURRENCIES.join(',')
-    })
-    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?${params.toString()}`, {
-      method: 'GET'
-    })
-    if (!response.ok) {
-      throw new Error(`CoinGecko native price query failed [HTTP ${response.status}] for ${coingeckoId}`)
-    }
-    const json = await response.json().catch(() => null) as Record<string, unknown> | null
-    return normalizeFiatValueMap(json?.[coingeckoId])
-  })
+  void coinId
+  return {}
 }
 
 async function buildNativeFiatFallback(params: {
@@ -2504,11 +2477,19 @@ async function fetchEvmTokensFromAddressAssets(
       if (!address || out.has(address)) continue
       const symbol = String(row?.symbol || row?.ticker || row?.name || '').trim().toUpperCase() || shortAddress(address)
       const decimalsRaw = Number(row?.decimals)
+      const balanceRawCandidate = String(
+        row?.balanceRaw
+        ?? row?.rawBalance
+        ?? row?.amountRaw
+        ?? row?.rawAmount
+        ?? ''
+      ).trim()
       out.set(address, {
         address,
         symbol,
         decimals: Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18,
         logoUri: extractAssetLogoUri(row as Record<string, unknown>),
+        balanceRaw: /^\d+$/.test(balanceRawCandidate) ? balanceRawCandidate : undefined,
         discovered: true
       })
       if (out.size >= 220) break
@@ -3716,6 +3697,36 @@ export const useWalletStore = create<WalletState>()(
                 assetKeyByContract.set(tokenAddress, bridgeKey)
               }
             }
+            let addressAssetsRowsApplied = 0
+            for (const token of assetsEndpointTokens) {
+              const rawBalanceText = String(token.balanceRaw || '').trim()
+              if (!/^\d+$/.test(rawBalanceText)) continue
+              const rawBalance = BigInt(rawBalanceText)
+              if (rawBalance <= 0n) continue
+              const displaySats = toAssetDisplaySats(rawBalance, token.decimals)
+              if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+
+              let assetKey = String(assetKeyByContract.get(token.address) || '').trim()
+              if (!assetKey) {
+                const baseKey = token.discovered
+                  ? `${token.symbol}@${shortAddress(token.address)}`
+                  : token.symbol
+                assetKey = baseKey
+                let suffix = 2
+                while (usedAssetKeys.has(assetKey)) {
+                  assetKey = `${baseKey}-${suffix}`
+                  suffix += 1
+                }
+                usedAssetKeys.add(assetKey)
+                assetKeyByContract.set(token.address, assetKey)
+              }
+
+              const prev = Number(fungibleAssets[assetKey] || 0)
+              fungibleAssets[assetKey] = Math.max(prev, displaySats)
+              if (!fungibleAssetLabels[assetKey]) fungibleAssetLabels[assetKey] = token.symbol
+              if (token.logoUri && !fungibleAssetLogos[assetKey]) fungibleAssetLogos[assetKey] = token.logoUri
+              addressAssetsRowsApplied += 1
+            }
             let tokenReadSuccesses = 0
             let tokenReadErrors = 0
             const tokenRows = await mapWithConcurrency(mergedTokens, 6, async (token) => {
@@ -3984,7 +3995,13 @@ export const useWalletStore = create<WalletState>()(
             console.groupEnd()
 
             // Do not wipe visible assets on transient provider failures.
-            if (tokenReadSuccesses === 0 && tokenReadErrors > 0 && bridgeFallbackRowsApplied === 0 && Object.keys(assets).length === 0) {
+            if (
+              tokenReadSuccesses === 0
+              && tokenReadErrors > 0
+              && bridgeFallbackRowsApplied === 0
+              && addressAssetsRowsApplied === 0
+              && Object.keys(assets).length === 0
+            ) {
               console.warn(
                 `[${net.symbol}] fetchNetworkAssets skipped state update for ${activeNetworkId} (${address}) `
                 + `because all ERC20 reads failed (errors=${tokenReadErrors}).`
@@ -4612,7 +4629,7 @@ export const useWalletStore = create<WalletState>()(
           const contract = String(hint || trackedMatch?.contract || '').trim()
           const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
           const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
-          const explorerBase = String(net.explorerUrl || 'https://tronscan.org').trim().replace(/\/+$/, '')
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
           const tokenRef = contract ? `${explorerBase}/#/contract/${contract}` : undefined
           return {
             name: normalizedAssetId,
@@ -4634,7 +4651,7 @@ export const useWalletStore = create<WalletState>()(
           const [currency, issuer] = normalizedAssetId.split('|').map((v) => String(v || '').trim())
           const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
           const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
-          const explorerBase = String(net.explorerUrl || 'https://xrpscan.com').trim().replace(/\/+$/, '')
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
           const ref = issuer ? `${explorerBase}/account/${issuer}` : undefined
           return {
             name: currency || normalizedAssetId,
@@ -4728,16 +4745,9 @@ export const useWalletStore = create<WalletState>()(
           const resolveSourceUrls = (uri: string): string[] => {
             const normalized = normalizeAssetUri(uri)
             if (!normalized) return []
-            if (/^https?:\/\//i.test(normalized)) return [normalized]
+            if (/^https?:\/\//i.test(normalized)) return isMetayoshiHttpUrl(normalized) ? [normalized] : []
             if (/^data:/i.test(normalized)) return [normalized]
-            if (/^ipfs:\/\//i.test(normalized)) {
-              const cid = normalized.replace(/^ipfs:\/\//i, '').replace(/^ipfs\//i, '').replace(/^\/+/, '')
-              return [
-                `https://gateway.pinata.cloud/ipfs/${cid}`,
-                `https://ipfs.io/ipfs/${cid}`,
-                `https://cloudflare-ipfs.com/ipfs/${cid}`
-              ]
-            }
+            if (/^ipfs:\/\//i.test(normalized)) return []
             return [normalized]
           }
 
@@ -4929,7 +4939,7 @@ export const useWalletStore = create<WalletState>()(
           const [policy = '', assetName = ''] = normalizedAssetId.split('.', 2)
           const knownRaw = Number((networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0))
           const amountUi = knownRaw > 0 ? (knownRaw / 1e8) : Number(String(row?.balanceRaw || row?.balance || '0'))
-          const cardanoTokenRef = `https://cardanoscan.io/token/${encodeURIComponent(normalizedAssetId)}`
+          const cardanoTokenRef = undefined
           return {
             name: String(row?.name || row?.symbol || normalizedAssetId).trim(),
             amount: Number.isFinite(amountUi) ? amountUi : 0,
@@ -4969,7 +4979,7 @@ export const useWalletStore = create<WalletState>()(
           const row = rows.find((r) => String(r.tokenId || '').trim() === normalizedAssetId)
           const knownRaw = Number((networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0))
           const amountUi = knownRaw > 0 ? (knownRaw / 1e8) : Number(String(row?.balance || row?.balanceRaw || '0'))
-          const tokenRef = `https://stellar.expert/explorer/public/asset/${encodeURIComponent(normalizedAssetId)}`
+          const tokenRef = undefined
           return {
             name: String(row?.name || row?.symbol || normalizedAssetId).trim(),
             amount: Number.isFinite(amountUi) ? amountUi : 0,
@@ -5027,7 +5037,7 @@ export const useWalletStore = create<WalletState>()(
         if (String(net.runtimeModelId || net.id || '').trim().toLowerCase() === 'sol') {
           const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
           const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
-          const explorerBase = String(net.explorerUrl || 'https://solscan.io').trim().replace(/\/+$/, '')
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
           const mint = extractSolanaMintFromAssetId(normalizedAssetId)
           const tokenRef = mint ? `${explorerBase}/token/${encodeURIComponent(mint)}` : undefined
           const storedLabel = String(get().networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()

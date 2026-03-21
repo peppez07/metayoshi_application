@@ -16,7 +16,7 @@ const fraxtalModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_FRAXTAL_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_FRAXTAL_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_FRAXTAL_EXPLORER',
-  defaultExplorerUrl: 'https://fraxscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const FRAXTAL_CAPABILITIES: NetworkCapabilitiesInput = fraxtalModule.capabilities

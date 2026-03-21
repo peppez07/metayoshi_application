@@ -16,7 +16,7 @@ const seiEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_SEI_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SEI_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SEI_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://seistream.app'
+  defaultExplorerUrl: ''
 })
 
 export const SEI_EVM_CAPABILITIES: NetworkCapabilitiesInput = seiEvmModule.capabilities

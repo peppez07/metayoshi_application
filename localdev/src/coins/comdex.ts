@@ -13,8 +13,8 @@ const comdexModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_COMDEX_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_COMDEX_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_COMDEX_EXPLORER',
-  defaultRpcUrl: 'https://comdex-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/comdex'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const COMDEX_CAPABILITIES: NetworkCapabilitiesInput = comdexModule.capabilities

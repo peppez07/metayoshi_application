@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_CRO_RPC_URL = 'https://cronos-pos-rpc.publicnode.com'
-const DEFAULT_CRO_EXPLORER_URL = 'https://crypto.org/explorer'
+const DEFAULT_CRO_RPC_URL = ''
+const DEFAULT_CRO_EXPLORER_URL = ''
 
 export const CRO_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
 

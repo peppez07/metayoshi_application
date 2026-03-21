@@ -13,8 +13,8 @@ const terraModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_TERRA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_TERRA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_TERRA_EXPLORER',
-  defaultRpcUrl: 'https://terra-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/terra'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const TERRA_CAPABILITIES: NetworkCapabilitiesInput = terraModule.capabilities

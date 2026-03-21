@@ -19,7 +19,7 @@ const optimismSepoliaModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_OPTIMISM_SEPOLIA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_OPTIMISM_SEPOLIA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_OPTIMISM_SEPOLIA_EXPLORER',
-  defaultExplorerUrl: 'https://sepolia-optimism.etherscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const OPTIMISM_SEPOLIA_CAPABILITIES: NetworkCapabilitiesInput = optimismSepoliaModule.capabilities

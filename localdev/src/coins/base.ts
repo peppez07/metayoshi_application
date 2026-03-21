@@ -16,7 +16,7 @@ const baseModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BASE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BASE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BASE_EXPLORER',
-  defaultExplorerUrl: 'https://basescan.org'
+  defaultExplorerUrl: ''
 })
 
 export const BASE_CAPABILITIES: NetworkCapabilitiesInput = baseModule.capabilities

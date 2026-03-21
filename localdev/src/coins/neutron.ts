@@ -13,8 +13,8 @@ const neutronModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_NEUTRON_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_NEUTRON_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_NEUTRON_EXPLORER',
-  defaultRpcUrl: 'https://neutron-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/neutron'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const NEUTRON_CAPABILITIES: NetworkCapabilitiesInput = neutronModule.capabilities

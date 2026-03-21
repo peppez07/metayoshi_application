@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_COSMOS_RPC_URL = 'https://cosmos-rpc.publicnode.com'
-const DEFAULT_COSMOS_EXPLORER_URL = 'https://www.mintscan.io/cosmos'
+const DEFAULT_COSMOS_RPC_URL = ''
+const DEFAULT_COSMOS_EXPLORER_URL = ''
 
 export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
 

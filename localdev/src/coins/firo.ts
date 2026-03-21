@@ -36,7 +36,7 @@ export function createFiroNetwork(ctx: CoinRuntimeContext): Network {
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
     bridgeUrl: ctx.buildBridgeUrl('firo', 'main'),
-    explorerUrl: import.meta.env.VITE_FIRO_EXPLORER || FIRO_API_INFO.defaultExplorerUrl || 'https://explorer.firo.org',
+    explorerUrl: import.meta.env.VITE_FIRO_EXPLORER || FIRO_API_INFO.defaultExplorerUrl || '',
     capabilities: FIRO_CAPABILITIES,
     feePerByte: FIRO_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('firo')

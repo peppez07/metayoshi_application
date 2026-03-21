@@ -14,7 +14,7 @@ export const DASH_API_INFO: CoinApiInfo = {
   apiBaseUrl,
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
-  defaultExplorerUrl: 'https://insight.dash.org/insight',
+  defaultExplorerUrl: '',
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/dash`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/dash/main/:wallet',

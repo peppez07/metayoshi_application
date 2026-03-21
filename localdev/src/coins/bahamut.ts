@@ -16,7 +16,7 @@ const bahamutModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BAHAMUT_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BAHAMUT_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BAHAMUT_EXPLORER',
-  defaultExplorerUrl: 'https://ftnscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const BAHAMUT_CAPABILITIES: NetworkCapabilitiesInput = bahamutModule.capabilities

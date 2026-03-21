@@ -13,8 +13,8 @@ const terraClassicModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_TERRA_CLASSIC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_TERRA_CLASSIC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_TERRA_CLASSIC_EXPLORER',
-  defaultRpcUrl: 'https://terra-classic-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/terra-classic'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const TERRA_CLASSIC_CAPABILITIES: NetworkCapabilitiesInput = terraClassicModule.capabilities

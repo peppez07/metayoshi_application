@@ -13,8 +13,8 @@ const bitcannaModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_BITCANNA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BITCANNA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BITCANNA_EXPLORER',
-  defaultRpcUrl: 'https://bitcanna-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/bitcanna'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const BITCANNA_CAPABILITIES: NetworkCapabilitiesInput = bitcannaModule.capabilities

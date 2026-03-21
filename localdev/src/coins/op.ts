@@ -16,7 +16,7 @@ const opModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_OP_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_OP_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_OP_EXPLORER',
-  defaultExplorerUrl: 'https://optimistic.etherscan.io'
+  defaultExplorerUrl: ''
 })
 
 export const OP_CAPABILITIES: NetworkCapabilitiesInput = opModule.capabilities

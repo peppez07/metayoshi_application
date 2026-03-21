@@ -16,7 +16,7 @@ const nibiruEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_NIBIRU_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_NIBIRU_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_NIBIRU_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.nibiru.fi'
+  defaultExplorerUrl: ''
 })
 
 export const NIBIRU_EVM_CAPABILITIES: NetworkCapabilitiesInput = nibiruEvmModule.capabilities

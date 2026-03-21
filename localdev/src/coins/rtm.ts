@@ -38,7 +38,7 @@ export function createRtmNetwork(ctx: CoinRuntimeContext): Network {
     rpcUsername: 'rpcuser',
     rpcPassword: 'rpcpass',
     bridgeUrl: ctx.buildBridgeUrl('raptoreum', 'main', wallet),
-    explorerUrl: import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || 'https://explorer.raptoreum.com',
+    explorerUrl: import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || '',
     capabilities: RTM_CAPABILITIES,
     feePerByte: RTM_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('raptoreum')

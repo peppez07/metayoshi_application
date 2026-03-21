@@ -16,7 +16,7 @@ const dymensionEvmModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_DYMENSION_EVM_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_DYMENSION_EVM_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_DYMENSION_EVM_EXPLORER',
-  defaultExplorerUrl: 'https://dym.fyi'
+  defaultExplorerUrl: ''
 })
 
 export const DYMENSION_EVM_CAPABILITIES: NetworkCapabilitiesInput = dymensionEvmModule.capabilities

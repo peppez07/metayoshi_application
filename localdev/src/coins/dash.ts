@@ -33,7 +33,7 @@ export function createDashNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('dash', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: import.meta.env.VITE_DASH_EXPLORER || DASH_API_INFO.defaultExplorerUrl || 'https://insight.dash.org/insight',
+    explorerUrl: import.meta.env.VITE_DASH_EXPLORER || DASH_API_INFO.defaultExplorerUrl || '',
     capabilities: DASH_CAPABILITIES,
     feePerByte: DASH_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('dash')

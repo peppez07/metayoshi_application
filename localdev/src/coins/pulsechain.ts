@@ -16,7 +16,7 @@ const pulsechainModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_PULSECHAIN_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_PULSECHAIN_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_PULSECHAIN_EXPLORER',
-  defaultExplorerUrl: 'https://scan.pulsechain.com'
+  defaultExplorerUrl: ''
 })
 
 export const PULSECHAIN_CAPABILITIES: NetworkCapabilitiesInput = pulsechainModule.capabilities

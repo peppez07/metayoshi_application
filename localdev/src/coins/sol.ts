@@ -2,8 +2,8 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput 
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_SOL_RPC_URL = 'https://solana-rpc.publicnode.com'
-const DEFAULT_SOL_EXPLORER_URL = 'https://solscan.io'
+const DEFAULT_SOL_RPC_URL = ''
+const DEFAULT_SOL_EXPLORER_URL = ''
 
 export const SOL_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
 

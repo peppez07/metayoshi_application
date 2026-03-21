@@ -16,7 +16,7 @@ const mantleModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_MANTLE_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_MANTLE_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_MANTLE_EXPLORER',
-  defaultExplorerUrl: 'https://mantlescan.xyz'
+  defaultExplorerUrl: ''
 })
 
 export const MANTLE_CAPABILITIES: NetworkCapabilitiesInput = mantleModule.capabilities

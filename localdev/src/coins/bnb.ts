@@ -16,7 +16,7 @@ const bnbModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_BSC_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_BSC_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_BSC_EXPLORER',
-  defaultExplorerUrl: 'https://bscscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const BNB_CAPABILITIES: NetworkCapabilitiesInput = bnbModule.capabilities

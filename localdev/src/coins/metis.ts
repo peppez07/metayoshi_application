@@ -16,7 +16,7 @@ const metisModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_METIS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_METIS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_METIS_EXPLORER',
-  defaultExplorerUrl: 'https://explorer.metis.io'
+  defaultExplorerUrl: ''
 })
 
 export const METIS_CAPABILITIES: NetworkCapabilitiesInput = metisModule.capabilities

@@ -16,7 +16,7 @@ const scrollModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_SCROLL_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_SCROLL_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_SCROLL_EXPLORER',
-  defaultExplorerUrl: 'https://scrollscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const SCROLL_CAPABILITIES: NetworkCapabilitiesInput = scrollModule.capabilities

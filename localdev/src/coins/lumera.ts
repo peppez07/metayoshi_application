@@ -13,8 +13,8 @@ const lumeraModule = createCosmosCoinModule({
   bridgeUserEnvKey: 'VITE_LUMERA_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_LUMERA_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_LUMERA_EXPLORER',
-  defaultRpcUrl: 'https://lumera-rpc.publicnode.com',
-  defaultExplorerUrl: 'https://www.mintscan.io/lumera'
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
 })
 
 export const LUMERA_CAPABILITIES: NetworkCapabilitiesInput = lumeraModule.capabilities

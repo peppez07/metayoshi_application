@@ -16,7 +16,7 @@ const cronosModule = createEvmCoinModule({
   bridgeUserEnvKey: 'VITE_CRONOS_BRIDGE_USER',
   bridgePasswordEnvKey: 'VITE_CRONOS_BRIDGE_PASSWORD',
   explorerEnvKey: 'VITE_CRONOS_EXPLORER',
-  defaultExplorerUrl: 'https://cronoscan.com'
+  defaultExplorerUrl: ''
 })
 
 export const CRONOS_CAPABILITIES: NetworkCapabilitiesInput = cronosModule.capabilities
