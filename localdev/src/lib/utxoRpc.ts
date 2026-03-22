@@ -66,6 +66,11 @@ type SecureBridgeAuthConfig = {
   opTokenHeaders: string[]
 }
 
+type SecureBridgeAuthConfigFetchResult = {
+  config: SecureBridgeAuthConfig | null
+  status?: number
+}
+
 /** Build the effective direct-RPC endpoint URL (local mode). */
 export function buildRpcUrl(config: UtxoRpcConfig): string {
   const base = config.rpcUrl.trim().replace(/\/$/, '')
@@ -386,14 +391,15 @@ function resolveApiUrl(apiBase: string, pathOrUrl: string | undefined, fallbackP
 async function fetchSecureBridgeAuthConfig(
   apiBase: string,
   authConfigUrl?: string
-): Promise<SecureBridgeAuthConfig | null> {
+): Promise<SecureBridgeAuthConfigFetchResult> {
   const cacheKey = String(authConfigUrl || apiBase).trim() || apiBase
   const now = Date.now()
   const cached = secureBridgeAuthConfigCache.get(cacheKey)
-  if (cached && cached.expiresAtMs > now) return cached.config
+  if (cached && cached.expiresAtMs > now) return { config: cached.config }
 
   const url = resolveApiUrl(apiBase, authConfigUrl, '/v1/auth/config')
   let config: SecureBridgeAuthConfig | null = null
+  let status: number | undefined
   try {
     const response = await fetchJsonWithStatus(url, {
       method: 'GET',
@@ -403,6 +409,7 @@ async function fetchSecureBridgeAuthConfig(
         return headers
       })()
     })
+    status = response.status
     if (response.ok && response.json?.ok === true) {
       config = {
         preferredMode: String(response.json?.preferredMode || '').trim() || undefined,
@@ -428,7 +435,7 @@ async function fetchSecureBridgeAuthConfig(
     config,
     expiresAtMs: now + SECURE_BRIDGE_AUTH_CONFIG_CACHE_TTL_MS
   })
-  return config
+  return { config, status }
 }
 
 async function getSecureBridgeSession(
@@ -439,7 +446,11 @@ async function getSecureBridgeSession(
   const discovery = await discoverWalletBackend(configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl)).catch(() => null)
   const apiBase = getDiscoveredGatewayBase(discovery, configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl))
   if (!apiBase) throw asSecureUnavailable('Bridge API base URL is not available')
-  const authConfig = await fetchSecureBridgeAuthConfig(apiBase, discovery?.authConfigUrl)
+  const authConfigResult = await fetchSecureBridgeAuthConfig(apiBase, discovery?.authConfigUrl)
+  const authConfig = authConfigResult.config
+  if (!authConfig && typeof authConfigResult.status === 'number' && isSecureBridgeUnavailableStatus(authConfigResult.status)) {
+    throw asSecureUnavailable(`/v1/auth/config unavailable on this gateway (HTTP ${authConfigResult.status})`)
+  }
   if (
     authConfig?.preferredMode === 'session-bearer'
     && authConfig.sessionEnabled === false
@@ -587,7 +598,7 @@ async function executeSecureBridgeWriteRpc(
   params: any[]
 ): Promise<any> {
   const session = await getSecureBridgeSession(config, bridgeUrl)
-  const authConfig = await fetchSecureBridgeAuthConfig(session.apiBase)
+  const authConfig = (await fetchSecureBridgeAuthConfig(session.apiBase)).config
   if (authConfig && authConfig.secureBridgeWalletRecommended === false) {
     throw asSecureUnavailable('Secure bridge writes are disabled by /v1/auth/config on this gateway')
   }

@@ -304,6 +304,12 @@ function toServerManagedSwapUnavailableError(error: unknown): Error {
     return new Error('MetaYoshi server swap is disabled because secure bridge writes are not enabled on this gateway')
   }
   if (
+    normalized.includes('/v1/auth/config unavailable')
+    || normalized.includes('auth config unavailable')
+  ) {
+    return new Error('MetaYoshi server swap is unavailable because gateway auth discovery is down')
+  }
+  if (
     normalized.includes('auth challenge endpoint unavailable')
     || normalized.includes('auth verify endpoint unavailable')
   ) {

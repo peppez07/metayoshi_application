@@ -15,6 +15,10 @@ type ServerAuthConfig = {
   walletPasswordRequired: boolean
   legacyBasicRecommended: boolean
 }
+type ServerAuthConfigResult = {
+  config: ServerAuthConfig | null
+  status?: number
+}
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const HANDSHAKE_TIMEOUT_MS = 7000
 
@@ -55,14 +59,17 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
-async function fetchServerAuthConfig(authConfigUrl: string): Promise<ServerAuthConfig | null> {
+async function fetchServerAuthConfig(authConfigUrl: string): Promise<ServerAuthConfigResult> {
   const response = await fetchWithTimeout(authConfigUrl, {}, HANDSHAKE_TIMEOUT_MS)
-  if (!response.ok) return null
+  if (!response.ok) return { config: null, status: response.status }
   const json = await response.json().catch(() => null)
-  if (!json || json.ok !== true) return null
+  if (!json || json.ok !== true) return { config: null, status: response.status }
   return {
+    status: response.status,
+    config: {
     walletPasswordRequired: Boolean(json.walletPasswordRequired),
     legacyBasicRecommended: Boolean(json.legacyBasic?.walletRecommended)
+    }
   }
 }
 
@@ -82,9 +89,13 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
   }
 
   // 1) /v1/auth/config for live wallet auth mode discovery
-  const authConfig = await fetchServerAuthConfig(
+  const authConfigResult = await fetchServerAuthConfig(
     String(discovery?.authConfigUrl || `${gatewayBase}/v1/auth/config`).trim()
   )
+  const authConfig = authConfigResult.config
+  if (!authConfig && authConfigResult.status && authConfigResult.status >= 500) {
+    throw new Error(`Gateway auth discovery is unavailable (HTTP ${authConfigResult.status} on /v1/auth/config)`)
+  }
 
   // 2) /health (no API key)
   const healthRes = await fetchWithTimeout(`${gatewayBase}/health`)
@@ -183,7 +194,7 @@ const Connecting: React.FC = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBridgeWarning(
-        `Server handshake warning: ${msg}\nProceeding with bridge balance sync.`
+        `Server handshake warning: ${msg}\nThis is a backend availability problem, not a wallet approval rejection.\nProceeding with bridge balance sync.`
       )
       setPhase('bridge-warning')
       await sleep(1500)
