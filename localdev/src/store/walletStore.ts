@@ -1097,22 +1097,26 @@ function buildScopedAssetProjection(
   networkId: string
 ): Pick<WalletState, 'networkAssets' | 'networkAssetLogos' | 'networkAssetLabels' | 'evmNftAssets'> {
   const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  const hasScopedAssets = Object.prototype.hasOwnProperty.call(state.accountNetworkAssets, scopeKey)
+  const hasScopedLogos = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLogos, scopeKey)
+  const hasScopedLabels = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLabels, scopeKey)
+  const hasScopedNfts = Object.prototype.hasOwnProperty.call(state.accountNetworkEvmNftAssets, scopeKey)
   return {
     networkAssets: {
       ...state.networkAssets,
-      [networkId]: state.accountNetworkAssets[scopeKey] || {}
+      [networkId]: hasScopedAssets ? (state.accountNetworkAssets[scopeKey] || {}) : (state.networkAssets[networkId] || {})
     },
     networkAssetLogos: {
       ...state.networkAssetLogos,
-      [networkId]: state.accountNetworkAssetLogos[scopeKey] || {}
+      [networkId]: hasScopedLogos ? (state.accountNetworkAssetLogos[scopeKey] || {}) : (state.networkAssetLogos[networkId] || {})
     },
     networkAssetLabels: {
       ...state.networkAssetLabels,
-      [networkId]: state.accountNetworkAssetLabels[scopeKey] || {}
+      [networkId]: hasScopedLabels ? (state.accountNetworkAssetLabels[scopeKey] || {}) : (state.networkAssetLabels[networkId] || {})
     },
     evmNftAssets: {
       ...state.evmNftAssets,
-      [networkId]: state.accountNetworkEvmNftAssets[scopeKey] || {}
+      [networkId]: hasScopedNfts ? (state.accountNetworkEvmNftAssets[scopeKey] || {}) : (state.evmNftAssets[networkId] || {})
     }
   }
 }

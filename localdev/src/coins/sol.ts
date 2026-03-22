@@ -3,7 +3,7 @@ import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
 
-const DEFAULT_SOL_RPC_URL = ''
+const DEFAULT_SOL_RPC_URL = 'https://solana-rpc.publicnode.com'
 const DEFAULT_SOL_EXPLORER_URL = ''
 
 export const SOL_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
@@ -26,7 +26,7 @@ export function createSolNetwork(ctx: CoinRuntimeContext): Network {
     coinType: 'SOL',
     coinSymbol: 'SOL',
     rpcUrl: sanitizeRpcUrl(
-      String(env.VITE_SOL_RPC || env.VITE_SOLANA_RPC || DEFAULT_SOL_RPC_URL).trim() || ctx.apiBaseUrl,
+      String(env.VITE_SOL_RPC || env.VITE_SOLANA_RPC || DEFAULT_SOL_RPC_URL).trim() || DEFAULT_SOL_RPC_URL,
       ctx.apiBaseUrl
     ),
     rpcWallet: '',

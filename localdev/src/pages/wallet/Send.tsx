@@ -1345,17 +1345,9 @@ const Send: React.FC = () => {
             )
             if (shouldCancel()) throw new Error('[cancelled]')
 
-            useWalletStore.setState((state) => ({
-              networkAssets: { ...state.networkAssets, [network.id]: {} },
-              networkAssetLogos: { ...state.networkAssetLogos, [network.id]: {} },
-              networkAssetLabels: { ...state.networkAssetLabels, [network.id]: {} },
-              evmNftAssets: { ...state.evmNftAssets, [network.id]: {} }
-            }))
-            if (shouldCancel()) throw new Error('[cancelled]')
-
             if (resolveNetworkCapabilities(network).features.assetLayer) {
               await withTimeout(
-                fetchNetworkAssets({ force: forceAssetRefresh }),
+                fetchNetworkAssets({ force: forceAssetRefresh, staleWhileRefresh: true }),
                 SEND_HUB_SCAN_STEP_TIMEOUT_MS,
                 `[${network.symbol}] asset refresh`
               )
