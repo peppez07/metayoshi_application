@@ -1135,7 +1135,7 @@ const Swap: React.FC = () => {
   const [execution, setExecution] = useState<ServerExecutionStatus | null>(null)
   const [isQuoting, setIsQuoting] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errorText, setErrorText] = useState('')
+  const [, setErrorText] = useState('')
 
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
 
@@ -2096,22 +2096,6 @@ const Swap: React.FC = () => {
             </section>
           ) : null}
 
-          {errorText ? (
-            <section className={`rounded-2xl border p-3 ${
-              swapReadiness.state === 'active'
-                ? 'border-red-500/30 bg-red-500/10'
-                : 'border-amber-500/30 bg-amber-500/10'
-            }`}>
-              <p className={`text-[10px] font-black uppercase tracking-[0.14em] ${
-                swapReadiness.state === 'active' ? 'text-red-300' : 'text-amber-200'
-              }`}>
-                {swapReadiness.state === 'active' ? 'Could Not Continue' : 'Route Not Live Yet'}
-              </p>
-              <p className={`mt-1 text-[11px] ${
-                swapReadiness.state === 'active' ? 'text-red-100' : 'text-amber-100'
-              }`}>{errorText}</p>
-            </section>
-          ) : null}
         </div>
       </div>
 
