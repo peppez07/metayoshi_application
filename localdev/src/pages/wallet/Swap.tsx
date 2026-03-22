@@ -1828,38 +1828,6 @@ const Swap: React.FC = () => {
   const summaryAmountText = quote
     ? `${quote.sourceAmount} ${quote.sourceSymbol || fromItem?.symbol} -> ${quote.destinationAmount} ${quote.destinationSymbol || toItem?.symbol}`
     : null
-  const runtimeServices = (backendSnapshot?.runtimeHealth?.services && typeof backendSnapshot.runtimeHealth.services === 'object')
-    ? backendSnapshot.runtimeHealth.services as Record<string, { ok?: boolean; status?: string }>
-    : null
-  const availabilityTitle = runtimeServices?.gateway?.ok === false
-    ? 'Swaps are temporarily unavailable'
-    : swapReadiness.canRequestQuotes
-      ? 'Ready to get a quote'
-      : 'Choose what you want to swap'
-  const availabilityText = runtimeServices?.gateway?.ok === false
-    ? 'Swap service is reconnecting. Your wallet is safe, and you can try again shortly.'
-    : quote
-      ? 'Your quote is ready. Review the amount and confirm when you are ready.'
-      : swapUnavailable
-        ? swapReadiness.detail
-        : 'Pick the asset you want to sell and the one you want to receive to continue.'
-  const sellSummaryText = !fromNetwork
-    ? 'Choose the network and asset you want to sell.'
-    : fromChainCapabilities?.supportsSwap === false
-      ? `${fromNetwork.name} is not available for swaps right now.`
-      : fromItem
-        ? `Selling ${fromItem.symbol} from ${fromNetwork.name}.`
-        : `Choose what you want to sell from ${fromNetwork.name}.`
-  const receiveSummaryText = !toNetwork
-    ? 'Choose where you want to receive funds.'
-    : fromItem?.assetId
-      ? selectedMatrixMarket
-        ? `Receiving on ${toNetwork.name}. Available options are ready for this destination.`
-        : destinationMatrixMarkets.length > 0
-          ? `Choose where to receive your swap. We found available destinations for this asset.`
-          : `This asset is not available on ${toNetwork.name} right now.`
-      : `Choose where you want the swap to arrive on ${toNetwork.name}.`
-
   return (
     <div className="swap-dark-page flex h-full flex-col bg-[#f5f7fb] text-slate-900">
       <header className="flex items-center justify-between border-b border-white/10 bg-white/70 px-4 py-4 backdrop-blur-xl">
@@ -1910,26 +1878,6 @@ const Swap: React.FC = () => {
                   ))}
                 </select>
               </label>
-            </div>
-          </section>
-
-          <section className="wallet-surface p-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Status</div>
-                <p className="mt-2 text-sm font-semibold text-slate-900">{availabilityTitle}</p>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">{availabilityText}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">You Send</div>
-                <p className="mt-2 text-sm font-semibold text-slate-900">{fromNetwork?.name || 'Select a network'}</p>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">{sellSummaryText}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">You Receive</div>
-                <p className="mt-2 text-sm font-semibold text-slate-900">{toNetwork?.name || 'Select a network'}</p>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">{receiveSummaryText}</p>
-              </div>
             </div>
           </section>
 

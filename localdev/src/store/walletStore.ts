@@ -2415,6 +2415,51 @@ function deriveApiBaseFromBridgeUrl(bridgeUrl: string): string {
   return resolveBalanceApiBaseUrl(raw)
 }
 
+function urlsShareOriginAndPath(a: string, b: string): boolean {
+  const left = String(a || '').trim().replace(/\/+$/, '')
+  const right = String(b || '').trim().replace(/\/+$/, '')
+  if (!left || !right) return false
+  try {
+    const leftUrl = new URL(left)
+    const rightUrl = new URL(right)
+    const leftPath = leftUrl.pathname.replace(/\/+$/, '') || '/'
+    const rightPath = rightUrl.pathname.replace(/\/+$/, '') || '/'
+    return leftUrl.origin === rightUrl.origin && leftPath === rightPath
+  } catch {
+    return left === right
+  }
+}
+
+function isLikelyHostedApiBaseRpcUrl(rpcUrl: string, bridgeUrl?: string): boolean {
+  const direct = String(rpcUrl || '').trim()
+  if (!direct) return false
+
+  const derivedApiBase = deriveApiBaseFromBridgeUrl(String(bridgeUrl || ''))
+  if (derivedApiBase && urlsShareOriginAndPath(direct, derivedApiBase)) return true
+
+  try {
+    const parsed = new URL(direct)
+    const host = parsed.hostname.toLowerCase()
+    const path = parsed.pathname.replace(/\/+$/, '') || '/'
+    if (
+      ['metayoshi.app', 'api.metayoshi.app', 'balance.metayoshi.app', 'send.metayoshi.app', 'swap.metayoshi.app', 'web.metayoshi.app', 'www.metayoshi.app'].includes(host)
+      && (path === '/' || path === '/v1')
+    ) {
+      return true
+    }
+  } catch {
+    // Ignore malformed URLs and let the caller handle them downstream.
+  }
+
+  return false
+}
+
+function hasUsableDirectRpcUrl(rpcUrl: string, bridgeUrl?: string): boolean {
+  const direct = String(rpcUrl || '').trim()
+  if (!direct) return false
+  return !isLikelyHostedApiBaseRpcUrl(direct, bridgeUrl)
+}
+
 async function fetchEvmTokensFromAddressAssets(
   rpcConfig: UtxoRpcConfig,
   input: { coin: string; chain: string; ownerAddress: string }
@@ -3514,6 +3559,7 @@ export const useWalletStore = create<WalletState>()(
               // Use a higher read timeout to reduce false AbortError failures.
               timeoutMs: Math.max(Number(baseRpcConfig.timeoutMs ?? 10000), 30000)
             }
+            const hasDirectEvmRpc = hasUsableDirectRpcUrl(rpcConfig.rpcUrl, rpcConfig.bridgeUrl)
             const missingBridgeCredentialsMessage = getMissingBridgeCredentialsMessage({
               bridgeUrl: rpcConfig.bridgeUrl,
               bridgeUsername: rpcConfig.bridgeUsername,
@@ -3729,55 +3775,58 @@ export const useWalletStore = create<WalletState>()(
             }
             let tokenReadSuccesses = 0
             let tokenReadErrors = 0
-            const tokenRows = await mapWithConcurrency(mergedTokens, 6, async (token) => {
-              try {
-                const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
-                let rawHex: unknown = null
-                let lastError: unknown = null
-                for (let attempt = 0; attempt < 3; attempt += 1) {
+            const tokenRows = hasDirectEvmRpc
+              ? await mapWithConcurrency(mergedTokens, 6, async (token) => {
                   try {
-                    rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
-                    lastError = null
-                    break
-                  } catch (err) {
-                    lastError = err
-                    if (attempt < 2) await waitMs(120 * (attempt + 1))
+                    const balanceCallData = EVM_ERC20_BALANCE_IFACE.encodeFunctionData('balanceOf', [address])
+                    let rawHex: unknown = null
+                    let lastError: unknown = null
+                    for (let attempt = 0; attempt < 3; attempt += 1) {
+                      try {
+                        rawHex = await callBridgeMethod(rpcConfig, 'eth_call', [{ to: token.address, data: balanceCallData }, 'latest'])
+                        lastError = null
+                        break
+                      } catch (err) {
+                        lastError = err
+                        if (attempt < 2) await waitMs(120 * (attempt + 1))
+                      }
+                    }
+                    if (lastError) throw lastError
+                    tokenReadSuccesses += 1
+                    const rawBalance = BigInt(String(rawHex || '0x0'))
+                    if (rawBalance <= 0n) return null
+
+                    let symbol = String(token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
+                    let decimals = token.decimals
+                    if (token.discovered) {
+                      const discoveredMeta = await readEvmTokenMetadata(rpcConfig, token.address).catch(() => null)
+                      if (discoveredMeta) {
+                        symbol = String(discoveredMeta.symbol || symbol).trim().toUpperCase()
+                        decimals = discoveredMeta.decimals
+                      }
+                    }
+
+                    const displaySats = toAssetDisplaySats(rawBalance, decimals)
+                    if (!Number.isFinite(displaySats) || displaySats <= 0) return null
+
+                    return {
+                      token,
+                      symbol,
+                      displaySats,
+                      logoUri: String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim() || undefined
+                    }
+                  } catch {
+                    // Ignore non-standard/non-ERC20 contracts discovered from Transfer logs.
+                    tokenReadErrors += 1
+                    return null
                   }
-                }
-                if (lastError) throw lastError
-                tokenReadSuccesses += 1
-                const rawBalance = BigInt(String(rawHex || '0x0'))
-                if (rawBalance <= 0n) return null
-
-                let symbol = String(token.symbol || token.address.slice(0, 6)).trim().toUpperCase()
-                let decimals = token.decimals
-                if (token.discovered) {
-                  const discoveredMeta = await readEvmTokenMetadata(rpcConfig, token.address).catch(() => null)
-                  if (discoveredMeta) {
-                    symbol = String(discoveredMeta.symbol || symbol).trim().toUpperCase()
-                    decimals = discoveredMeta.decimals
-                  }
-                }
-
-                const displaySats = toAssetDisplaySats(rawBalance, decimals)
-                if (!Number.isFinite(displaySats) || displaySats <= 0) return null
-
-                return {
-                  token,
-                  symbol,
-                  displaySats,
-                  logoUri: String(token.logoUri || buildTrustWalletErc20LogoUri(chainId, token.address) || '').trim() || undefined
-                }
-              } catch {
-                // Ignore non-standard/non-ERC20 contracts discovered from Transfer logs.
-                tokenReadErrors += 1
-                return null
-              }
-            })
+                })
+              : []
             console.groupCollapsed(`[EVM assets][${activeNetworkId}] token read results for ${address}`)
             console.log('tokenRows', tokenRows.filter(Boolean))
             console.log('tokenReadSuccesses', tokenReadSuccesses)
             console.log('tokenReadErrors', tokenReadErrors)
+            console.log('hasDirectEvmRpc', hasDirectEvmRpc)
             console.groupEnd()
 
             for (const row of tokenRows) {
@@ -3996,11 +4045,14 @@ export const useWalletStore = create<WalletState>()(
 
             // Do not wipe visible assets on transient provider failures.
             if (
+              hasDirectEvmRpc
+              && (
               tokenReadSuccesses === 0
               && tokenReadErrors > 0
               && bridgeFallbackRowsApplied === 0
               && addressAssetsRowsApplied === 0
               && Object.keys(assets).length === 0
+              )
             ) {
               console.warn(
                 `[${net.symbol}] fetchNetworkAssets skipped state update for ${activeNetworkId} (${address}) `
@@ -4089,6 +4141,9 @@ export const useWalletStore = create<WalletState>()(
           const rpcConfig = await createUtxoRpcConfig(net, {
             secureBridgeSigner: get().signBackendAuthMessage
           })
+          if (!hasUsableDirectRpcUrl(rpcConfig.rpcUrl, rpcConfig.bridgeUrl)) {
+            return
+          }
           try {
             const response = await fetchServerAddressJson(
               net,
@@ -6892,6 +6947,17 @@ export const useWalletStore = create<WalletState>()(
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
+            if (!hasUsableDirectRpcUrl(rpcConfig.rpcUrl, rpcConfig.bridgeUrl)) {
+              await waitForUiStabilize()
+              if (isStaleRequest()) return
+              set((state) => ({
+                isSyncing: false,
+                isConnected: false,
+                syncPercent: 0,
+                lowSyncStreak: state.lowSyncStreak
+              }))
+              return
+            }
             const snapshot = await fetchChainBalanceAndSync({
               network: net,
               address,

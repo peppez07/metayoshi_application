@@ -4,9 +4,59 @@ import type { SendableItem } from '../store/walletStore'
 import { resolveNetworkCapabilities } from './networkCapabilities'
 
 const EVM_CONTRACT_RE = /^0x[a-f0-9]{40}$/i
+const SWAP_TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze|chiado|agung|preview|preprod)/i
+const SWAP_TESTNET_EVM_CHAIN_IDS = new Set<number>([
+  97,
+  43113,
+  80002,
+  84532,
+  11155420,
+  11155111,
+  421614
+])
 
 function normalizeText(value: unknown): string {
   return String(value || '').trim().toLowerCase()
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function normalizeSwapCapabilityNetworkId(value: unknown): string {
+  const raw = normalizeText(value).replace(/[_\s]+/g, '-')
+  if (!raw) return ''
+  switch (raw) {
+    case 'sol':
+    case 'solana-mainnet':
+    case 'solana-mainnet-beta':
+    case 'mainnet-beta':
+      return 'solana'
+    case 'ethereum':
+    case '1':
+      return 'eth'
+    case 'arbitrum':
+    case 'arbitrum-one':
+    case '42161':
+      return 'arb'
+    case 'optimism':
+    case '10':
+      return 'op'
+    case '8453':
+      return 'base'
+    case 'tron-mainnet':
+      return 'tron'
+    case 'bnb':
+    case 'binance-smart-chain':
+      return 'bsc'
+    case 'cosmos':
+    case 'cosmoshub-4':
+      return 'cosmoshub'
+    case 'osmosis-1':
+      return 'osmosis'
+    default:
+      return raw
+  }
 }
 
 export function extractSwapContractAddress(assetId?: string): string | undefined {
@@ -23,10 +73,56 @@ export function isSwapActionEnabledNetwork(
   return capabilities.features.swap || capabilities.ui.showSwapAction
 }
 
-export function isSwapSupportedNetwork(
-  network?: Pick<Network, 'coinType' | 'id' | 'capabilities' | 'supportsAssets'> | null
+export function isSwapTestnetNetwork(
+  network?: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null
 ): boolean {
-  return Boolean(network?.id) && isSwapActionEnabledNetwork(network)
+  if (!network) return false
+  const id = normalizeText(network.id)
+  const runtimeModelId = normalizeText(network.runtimeModelId)
+  if (SWAP_TESTNET_ID_MARKERS.test(id) || SWAP_TESTNET_ID_MARKERS.test(runtimeModelId)) {
+    return true
+  }
+  const chainId = typeof network.chainId === 'number' ? network.chainId : Number(network.chainId)
+  return Number.isFinite(chainId) && SWAP_TESTNET_EVM_CHAIN_IDS.has(chainId)
+}
+
+export function isSwapSupportedNetwork(
+  network?: Pick<Network, 'coinType' | 'id' | 'runtimeModelId' | 'chainId' | 'capabilities' | 'supportsAssets'> | null
+): boolean {
+  return Boolean(network?.id) && !isSwapTestnetNetwork(network) && isSwapActionEnabledNetwork(network)
+}
+
+export function extractServerSwapEnabledNetworkIds(payload: unknown): Set<string> {
+  const items = Array.isArray(asRecord(payload).items) ? asRecord(payload).items as unknown[] : []
+  const out = new Set<string>()
+
+  for (const row of items) {
+    const item = asRecord(row)
+    const networkId = normalizeSwapCapabilityNetworkId(
+      item.chainKey
+      || item.networkId
+      || item.sourceNetworkId
+      || item.destinationNetworkId
+      || ''
+    )
+    if (!networkId) continue
+    if (item.supportsSwap === false) continue
+    out.add(networkId)
+  }
+
+  return out
+}
+
+export function isServerSwapEnabledNetwork(
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null | undefined,
+  payload: unknown
+): boolean {
+  if (!network?.id) return false
+  if (isSwapTestnetNetwork(network)) return false
+  const enabledIds = extractServerSwapEnabledNetworkIds(payload)
+  const directId = normalizeSwapCapabilityNetworkId(network.id)
+  const modelId = normalizeSwapCapabilityNetworkId(network.runtimeModelId)
+  return enabledIds.has(directId) || (modelId ? enabledIds.has(modelId) : false)
 }
 
 export function isCatalogAssetSwappable(

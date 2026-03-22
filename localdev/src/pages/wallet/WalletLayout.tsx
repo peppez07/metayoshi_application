@@ -19,7 +19,7 @@ import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../..
 import { coinModelFamilyToRouteKey, compareNetworksByModelFamily, resolveCoinModelFamily } from '../../lib/coinModel'
 import { getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
-import { isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
+import { isServerSwapEnabledNetwork, isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
@@ -57,6 +57,7 @@ const WalletLayout: React.FC = () => {
     accountNetworkFiatTotals,
     accountNetworkFiatNative,
     activity,
+    backendSnapshot,
     setActiveNetwork,
     refreshActiveBalance,
     fetchNetworkFiat,
@@ -95,7 +96,12 @@ const WalletLayout: React.FC = () => {
       includeZeroBalance: false
     })
   }, [activeAccount?.id, activeNetwork?.id, getSendableItems])
-  const showSwapAction = Boolean(activeNetwork && isSwapActionEnabledNetwork(activeNetwork) && activeNetworkSwapItems.length > 0)
+  const showSwapAction = Boolean(
+    activeNetwork
+    && isSwapActionEnabledNetwork(activeNetwork)
+    && isServerSwapEnabledNetwork(activeNetwork, backendSnapshot?.swapChains)
+    && activeNetworkSwapItems.length > 0
+  )
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
