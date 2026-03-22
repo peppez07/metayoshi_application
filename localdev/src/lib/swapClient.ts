@@ -411,7 +411,7 @@ function parseServerSwapMatrixMarkets(
 
 export function getWalletSwapApiVersion(): WalletSwapApiVersion {
   const raw = readString((import.meta as any)?.env?.VITE_SWAP_API_VERSION).toLowerCase()
-  return raw === 'v1' ? 'v1' : 'legacy'
+  return raw === 'legacy' ? 'legacy' : 'v1'
 }
 
 export function isSolanaSwapPreviewEnabled(): boolean {

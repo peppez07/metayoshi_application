@@ -138,16 +138,10 @@ function resolveHelpOriginCandidates(base?: unknown): string[] {
         return false
       }
     })()
+    const apiHelpOrigin = toApiHelpOrigin(configuredOrigin)
     if (!configuredIsLocal || allowLocalHelp) {
+      if (apiHelpOrigin) candidates.push(apiHelpOrigin)
       candidates.push(configuredOrigin)
-    }
-    try {
-      const parsed = new URL(configuredOrigin)
-      if (!isLocalHostname(parsed.hostname)) {
-        candidates.push(toApiHelpOrigin(configuredOrigin))
-      }
-    } catch {
-      // ignore invalid configured origin
     }
   } else {
     candidates.push(DEFAULT_PUBLIC_HELP_ORIGIN)

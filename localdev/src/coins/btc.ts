@@ -7,6 +7,7 @@ import type {
 } from './types'
 import { resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const BTC_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -34,6 +35,9 @@ export function createBtcNetwork(ctx: CoinRuntimeContext): Network {
   return {
     id: 'srv--bitcoin',
     runtimeModelId: 'srv--bitcoin',
+    serverCoinId: 'bitcoin',
+    serverChain: 'main',
+    displayChain: 'main',
     name: 'Bitcoin',
     symbol: 'BTC',
     coinType: 'UTXO',
@@ -44,7 +48,7 @@ export function createBtcNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('bitcoin', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(import.meta.env.VITE_BTC_EXPLORER || '').trim(),
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_BTC_EXPLORER || '').trim()) || undefined,
     capabilities: BTC_CAPABILITIES,
     feePerByte: BTC_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('bitcoin')

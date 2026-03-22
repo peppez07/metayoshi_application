@@ -5,8 +5,10 @@ import type {
   NetworkCapabilitiesInput,
   UtxoAddressSpec
 } from './types'
+import { resolveBridgeCredentials } from './factories'
 import { BTCZ_API_INFO } from './interceptors'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const BTCZ_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: false, assetSend: false, activity: true },
@@ -25,17 +27,30 @@ export function estimateBtczFee(txBytes: number): number {
 }
 
 export function createBtczNetwork(ctx: CoinRuntimeContext): Network {
+  const env = (import.meta as any)?.env || {}
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
+    userEnvKey: 'VITE_BTCZ_BRIDGE_USER',
+    passEnvKey: 'VITE_BTCZ_BRIDGE_PASSWORD'
+  })
+
   return {
     id: 'btcz',
+    runtimeModelId: 'btcz',
+    serverCoinId: 'bitcoinz',
+    serverChain: 'main',
+    displayChain: 'main',
     name: 'BitcoinZ',
     symbol: 'BTCZ',
     coinType: 'UTXO',
     coinSymbol: 'BTCZ',
     rpcUrl: ctx.apiBaseUrl,
-    rpcUsername: 'rpcuser',
-    rpcPassword: 'rpcpass',
+    rpcWallet: '',
+    rpcUsername: String(env.VITE_BTCZ_RPC_USER || '').trim(),
+    rpcPassword: String(env.VITE_BTCZ_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('bitcoinz', 'main'),
-    explorerUrl: import.meta.env.VITE_BTCZ_EXPLORER || BTCZ_API_INFO.defaultExplorerUrl || '',
+    bridgeUsername,
+    bridgePassword,
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_BTCZ_EXPLORER || BTCZ_API_INFO.defaultExplorerUrl || '').trim()) || undefined,
     capabilities: BTCZ_CAPABILITIES,
     feePerByte: BTCZ_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('bitcoinz')

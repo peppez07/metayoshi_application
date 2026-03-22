@@ -1,43 +1,24 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
+import { createCosmosCoinModule } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_COSMOS_RPC_URL = ''
-const DEFAULT_COSMOS_EXPLORER_URL = ''
-
-export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
-
-export function createCosmosNetwork(ctx: CoinRuntimeContext): Network {
-  const env = (import.meta as any)?.env || {}
-  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
-    userEnvKey: 'VITE_COSMOS_BRIDGE_USER',
-    passEnvKey: 'VITE_COSMOS_BRIDGE_PASSWORD'
-  })
-
-  return {
-    id: 'cosmos',
-    runtimeModelId: 'cosmos',
-    name: 'Cosmos Hub',
-    symbol: 'ATOM',
-    coinType: 'COSMOS',
-    coinSymbol: 'ATOM',
-    rpcUrl: String(env.VITE_COSMOS_RPC || DEFAULT_COSMOS_RPC_URL).trim() || DEFAULT_COSMOS_RPC_URL,
-    rpcWallet: '',
-    rpcUsername: String(env.VITE_COSMOS_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_COSMOS_RPC_PASSWORD || '').trim(),
-    bridgeUrl: ctx.buildBridgeUrl('cosmos', 'main'),
-    bridgeUsername,
-    bridgePassword,
-    explorerUrl: String(env.VITE_COSMOS_EXPLORER || DEFAULT_COSMOS_EXPLORER_URL).trim() || DEFAULT_COSMOS_EXPLORER_URL,
-    capabilities: COSMOS_CAPABILITIES,
-    logo: getUnifiedLogoByName('cosmos')
-  }
-}
-
-export const cosmosCoin: CoinModule = {
+const cosmosModule = createCosmosCoinModule({
   id: 'cosmos',
+  name: 'Cosmos Hub',
   symbol: 'ATOM',
   coinSymbol: 'ATOM',
-  capabilities: COSMOS_CAPABILITIES,
-  createNetwork: createCosmosNetwork
-}
+  bridgeCoinId: 'cosmos',
+  logo: getUnifiedLogoByName('cosmos'),
+  rpcEnvKey: 'VITE_COSMOS_RPC',
+  rpcUserEnvKey: 'VITE_COSMOS_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_COSMOS_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_COSMOS_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_COSMOS_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_COSMOS_EXPLORER',
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
+})
+
+export const COSMOS_CAPABILITIES: NetworkCapabilitiesInput = cosmosModule.capabilities
+export const createCosmosNetwork: (ctx: CoinRuntimeContext) => Network = cosmosModule.createNetwork
+export const cosmosCoin: CoinModule = cosmosModule.coin

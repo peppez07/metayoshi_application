@@ -1,6 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
 
 export const SUI_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -16,18 +17,21 @@ export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
   return {
     id: 'sui',
     runtimeModelId: 'sui',
+    serverCoinId: 'sui',
+    serverChain: 'main',
+    displayChain: 'main',
     name: 'Sui',
     symbol: 'SUI',
     coinType: 'SUI',
     coinSymbol: 'SUI',
-    rpcUrl: String(env.VITE_SUI_RPC || '').trim() || '',
+    rpcUrl: sanitizeRpcUrl(String(env.VITE_SUI_RPC || '').trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
     rpcWallet: '',
     rpcUsername: String(env.VITE_SUI_RPC_USER || '').trim(),
     rpcPassword: String(env.VITE_SUI_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('sui', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(env.VITE_SUI_EXPLORER || '').trim() || '',
+    explorerUrl: sanitizeExplorerUrl(String(env.VITE_SUI_EXPLORER || '').trim()) || undefined,
     capabilities: SUI_CAPABILITIES,
     derivation: {
       status: 'supported'

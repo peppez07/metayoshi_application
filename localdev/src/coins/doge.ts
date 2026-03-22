@@ -7,6 +7,7 @@ import type {
 } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const DOGE_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
 export const DOGE_ADDRESS_SPEC: UtxoAddressSpec = {
@@ -33,6 +34,7 @@ export function createDogeNetwork(ctx: CoinRuntimeContext): Network {
     runtimeModelId: 'doge',
     serverCoinId: 'dogecoin',
     serverChain: 'main',
+    displayChain: 'main',
     name: 'Dogecoin',
     symbol: 'DOGE',
     coinType: 'UTXO',
@@ -44,7 +46,7 @@ export function createDogeNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUrl: ctx.buildBridgeUrl('dogecoin', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(import.meta.env.VITE_DOGE_EXPLORER || '').trim(),
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_DOGE_EXPLORER || '').trim()) || undefined,
     capabilities: DOGE_CAPABILITIES,
     feePerByte: DOGE_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('dogecoin')

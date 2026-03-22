@@ -1307,6 +1307,18 @@ const Swap: React.FC = () => {
         canRequestQuotes: false
       }
     }
+    if (preferredAuthMode === 'session-bearer' && signatureVerifierConfigured === false) {
+      return {
+        state: 'planned' as const,
+        tone: 'amber' as const,
+        engineLabel: 'Verifier unavailable',
+        title: 'Server-backed swaps are not ready on this gateway',
+        detail: sessionEnabled === false
+          ? 'The live /v1/auth/config response reports session.enabled=false and signatureVerifier.configured=false. On this server those values share the same verifier-backed readiness path, so signed session auth and swap execution must stay disabled.'
+          : 'The live /v1/auth/config response reports signatureVerifier.configured=false, so the wallet cannot open the signed session required for swap execution.',
+        canRequestQuotes: false
+      }
+    }
     if (preferredAuthMode === 'session-bearer' && sessionEnabled === false) {
       return {
         state: 'planned' as const,
@@ -1314,16 +1326,6 @@ const Swap: React.FC = () => {
         engineLabel: 'Session auth disabled',
         title: 'Server-backed swaps are disabled on this gateway',
         detail: 'The live /v1/auth/config response reports session.enabled=false, so the wallet must keep bearer-gated swap flows disabled.',
-        canRequestQuotes: false
-      }
-    }
-    if (preferredAuthMode === 'session-bearer' && signatureVerifierConfigured === false) {
-      return {
-        state: 'planned' as const,
-        tone: 'amber' as const,
-        engineLabel: 'Verifier unavailable',
-        title: 'Server-backed swaps are not ready on this gateway',
-        detail: 'The live /v1/auth/config response reports signatureVerifier.configured=false, so the wallet cannot open the signed session required for swap execution.',
         canRequestQuotes: false
       }
     }
@@ -1915,9 +1917,12 @@ const Swap: React.FC = () => {
   const rateText = quote
     ? `1 ${quote.sourceSymbol || fromItem?.symbol || fromNetwork?.symbol || 'FROM'} = ${formatQuoteRate(quote)} ${quote.destinationSymbol || toItem?.symbol || toNetwork?.symbol || 'TO'}`
     : 'Rate appears here after the server returns a quote'
-  const summaryStatusText = swapReadiness.state === 'active'
-    ? 'Server-backed search'
-    : 'Selection incomplete'
+  const hasSwapSelection = Boolean(fromNetwork && toNetwork && fromItem && toItem)
+  const summaryStatusText = !hasSwapSelection
+    ? 'Selection incomplete'
+    : swapReadiness.state === 'active'
+      ? 'Server-backed search'
+      : swapReadiness.engineLabel
   const summaryRouteText = `${fromNetwork?.name || 'Source'} -> ${toNetwork?.name || 'Destination'}`
   const summaryAmountText = quote
     ? `${quote.sourceAmount} ${quote.sourceSymbol || fromItem?.symbol} -> ${quote.destinationAmount} ${quote.destinationSymbol || toItem?.symbol}`
@@ -1940,7 +1945,7 @@ const Swap: React.FC = () => {
             ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
             : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
         }`}>
-          {swapReadiness.state === 'active' ? 'Ready' : 'Limited'}
+          {swapReadiness.state === 'active' ? 'Ready' : (hasSwapSelection ? 'Limited' : 'Select')}
         </span>
       </header>
 

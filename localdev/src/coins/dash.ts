@@ -2,6 +2,7 @@ import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput,
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { DASH_API_INFO } from './interceptors/dash'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const DASH_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
 export const DASH_ADDRESS_SPEC: UtxoAddressSpec = {
@@ -16,24 +17,29 @@ export function estimateDashFee(txBytes: number): number {
 }
 
 export function createDashNetwork(ctx: CoinRuntimeContext): Network {
-  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
+  const env = (import.meta as any)?.env || {}
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
+    userEnvKey: 'VITE_DASH_BRIDGE_USER',
+    passEnvKey: 'VITE_DASH_BRIDGE_PASSWORD'
+  })
   return {
     id: 'dash',
     runtimeModelId: 'dash',
     serverCoinId: 'dash',
     serverChain: 'main',
+    displayChain: 'main',
     name: 'Dash',
     symbol: 'DASH',
     coinType: 'UTXO',
     coinSymbol: 'DASH',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
-    rpcUsername: '',
-    rpcPassword: '',
+    rpcUsername: String(env.VITE_DASH_RPC_USER || '').trim(),
+    rpcPassword: String(env.VITE_DASH_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('dash', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: import.meta.env.VITE_DASH_EXPLORER || DASH_API_INFO.defaultExplorerUrl || '',
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_DASH_EXPLORER || DASH_API_INFO.defaultExplorerUrl || '').trim()) || undefined,
     capabilities: DASH_CAPABILITIES,
     feePerByte: DASH_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('dash')

@@ -7,6 +7,7 @@ import type {
 } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const ZEC_CAPABILITIES: NetworkCapabilitiesInput = NATIVE_ONLY_CAPABILITIES
 export const ZEC_ADDRESS_SPEC: UtxoAddressSpec = {
@@ -21,24 +22,29 @@ export function estimateZecFee(txBytes: number): number {
 }
 
 export function createZecNetwork(ctx: CoinRuntimeContext): Network {
-  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials()
+  const env = (import.meta as any)?.env || {}
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
+    userEnvKey: 'VITE_ZEC_BRIDGE_USER',
+    passEnvKey: 'VITE_ZEC_BRIDGE_PASSWORD'
+  })
   return {
     id: 'zec',
     runtimeModelId: 'zec',
     serverCoinId: 'zcash',
     serverChain: 'main',
+    displayChain: 'main',
     name: 'Zcash',
     symbol: 'ZEC',
     coinType: 'UTXO',
     coinSymbol: 'ZEC',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: '',
-    rpcUsername: '',
-    rpcPassword: '',
+    rpcUsername: String(env.VITE_ZEC_RPC_USER || '').trim(),
+    rpcPassword: String(env.VITE_ZEC_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('zcash', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(import.meta.env.VITE_ZEC_EXPLORER || '').trim(),
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_ZEC_EXPLORER || '').trim()) || undefined,
     capabilities: ZEC_CAPABILITIES,
     feePerByte: ZEC_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('zcash')

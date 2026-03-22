@@ -1,43 +1,24 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
-import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
+import { createCosmosCoinModule } from './factories'
 import { getUnifiedLogoByName } from './logos'
 
-const DEFAULT_CRO_RPC_URL = ''
-const DEFAULT_CRO_EXPLORER_URL = ''
-
-export const CRO_CAPABILITIES: NetworkCapabilitiesInput = FULL_ASSET_CAPABILITIES
-
-export function createCroNetwork(ctx: CoinRuntimeContext): Network {
-  const env = (import.meta as any)?.env || {}
-  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
-    userEnvKey: 'VITE_CRO_BRIDGE_USER',
-    passEnvKey: 'VITE_CRO_BRIDGE_PASSWORD'
-  })
-
-  return {
-    id: 'cro',
-    runtimeModelId: 'cro',
-    name: 'Cronos POS',
-    symbol: 'CRO',
-    coinType: 'COSMOS',
-    coinSymbol: 'CRO',
-    rpcUrl: String(env.VITE_CRO_RPC || DEFAULT_CRO_RPC_URL).trim() || DEFAULT_CRO_RPC_URL,
-    rpcWallet: '',
-    rpcUsername: String(env.VITE_CRO_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_CRO_RPC_PASSWORD || '').trim(),
-    bridgeUrl: ctx.buildBridgeUrl('cronos-pos', 'main'),
-    bridgeUsername,
-    bridgePassword,
-    explorerUrl: String(env.VITE_CRO_EXPLORER || DEFAULT_CRO_EXPLORER_URL).trim() || DEFAULT_CRO_EXPLORER_URL,
-    capabilities: CRO_CAPABILITIES,
-    logo: getUnifiedLogoByName('cronos')
-  }
-}
-
-export const croCoin: CoinModule = {
+const croModule = createCosmosCoinModule({
   id: 'cro',
+  name: 'Cronos POS',
   symbol: 'CRO',
   coinSymbol: 'CRO',
-  capabilities: CRO_CAPABILITIES,
-  createNetwork: createCroNetwork
-}
+  bridgeCoinId: 'cronos-pos',
+  logo: getUnifiedLogoByName('cronos'),
+  rpcEnvKey: 'VITE_CRO_RPC',
+  rpcUserEnvKey: 'VITE_CRO_RPC_USER',
+  rpcPasswordEnvKey: 'VITE_CRO_RPC_PASSWORD',
+  bridgeUserEnvKey: 'VITE_CRO_BRIDGE_USER',
+  bridgePasswordEnvKey: 'VITE_CRO_BRIDGE_PASSWORD',
+  explorerEnvKey: 'VITE_CRO_EXPLORER',
+  defaultRpcUrl: '',
+  defaultExplorerUrl: ''
+})
+
+export const CRO_CAPABILITIES: NetworkCapabilitiesInput = croModule.capabilities
+export const createCroNetwork: (ctx: CoinRuntimeContext) => Network = croModule.createNetwork
+export const croCoin: CoinModule = croModule.coin

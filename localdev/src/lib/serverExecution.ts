@@ -202,7 +202,7 @@ function normalizeExecutionStatus(value: unknown): ServerExecutionStatusState {
 
 function getConfiguredSwapApiVersion(): ConfiguredSwapApiVersion {
   const raw = readString((import.meta as any)?.env?.VITE_SWAP_API_VERSION).toLowerCase()
-  return raw === 'v1' ? 'v1' : 'legacy'
+  return raw === 'legacy' ? 'legacy' : 'v1'
 }
 
 function getServerExecutionMonitorMethod(action: ServerExecutionAction): string {

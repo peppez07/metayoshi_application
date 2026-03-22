@@ -1,6 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
 
 const DEFAULT_SOL_RPC_URL = ''
 const DEFAULT_SOL_EXPLORER_URL = ''
@@ -16,18 +17,27 @@ export function createSolNetwork(ctx: CoinRuntimeContext): Network {
 
   return {
     id: 'sol',
+    runtimeModelId: 'sol',
+    serverCoinId: 'solana',
+    serverChain: 'main',
+    displayChain: 'main',
     name: 'Solana',
     symbol: 'SOL',
     coinType: 'SOL',
     coinSymbol: 'SOL',
-    rpcUrl: String(env.VITE_SOL_RPC || env.VITE_SOLANA_RPC || DEFAULT_SOL_RPC_URL).trim() || DEFAULT_SOL_RPC_URL,
+    rpcUrl: sanitizeRpcUrl(
+      String(env.VITE_SOL_RPC || env.VITE_SOLANA_RPC || DEFAULT_SOL_RPC_URL).trim() || ctx.apiBaseUrl,
+      ctx.apiBaseUrl
+    ),
     rpcWallet: '',
     rpcUsername: String(env.VITE_SOL_RPC_USER || env.VITE_SOLANA_RPC_USER || '').trim(),
     rpcPassword: String(env.VITE_SOL_RPC_PASSWORD || env.VITE_SOLANA_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('solana', 'main'),
     bridgeUsername,
     bridgePassword,
-    explorerUrl: String(env.VITE_SOL_EXPLORER || env.VITE_SOLANA_EXPLORER || DEFAULT_SOL_EXPLORER_URL).trim() || DEFAULT_SOL_EXPLORER_URL,
+    explorerUrl: sanitizeExplorerUrl(
+      String(env.VITE_SOL_EXPLORER || env.VITE_SOLANA_EXPLORER || DEFAULT_SOL_EXPLORER_URL).trim()
+    ) || undefined,
     capabilities: SOL_CAPABILITIES,
     logo: getUnifiedLogoByName('solana')
   }

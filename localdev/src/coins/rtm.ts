@@ -5,8 +5,10 @@ import type {
   NetworkCapabilitiesInput,
   UtxoAddressSpec
 } from './types'
+import { resolveBridgeCredentials } from './factories'
 import { RTM_API_INFO } from './interceptors'
 import { getUnifiedLogoByName } from './logos'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const RTM_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -26,19 +28,30 @@ export function estimateRtmFee(txBytes: number): number {
 }
 
 export function createRtmNetwork(ctx: CoinRuntimeContext): Network {
-  const wallet = import.meta.env.VITE_RTM_WALLET || RTM_API_INFO.defaultWallet || 'mainwallet'
+  const env = (import.meta as any)?.env || {}
+  const wallet = String(env.VITE_RTM_WALLET || RTM_API_INFO.defaultWallet || 'mainwallet').trim() || 'mainwallet'
+  const { bridgeUsername, bridgePassword } = resolveBridgeCredentials({
+    userEnvKey: 'VITE_RTM_BRIDGE_USER',
+    passEnvKey: 'VITE_RTM_BRIDGE_PASSWORD'
+  })
   return {
     id: 'rtm',
+    runtimeModelId: 'rtm',
+    serverCoinId: 'raptoreum',
+    serverChain: 'main',
+    displayChain: 'main',
     name: 'Raptoreum',
     symbol: 'RTM',
     coinType: 'UTXO',
     coinSymbol: 'RTM',
     rpcUrl: ctx.apiBaseUrl,
     rpcWallet: wallet,
-    rpcUsername: 'rpcuser',
-    rpcPassword: 'rpcpass',
+    rpcUsername: String(env.VITE_RTM_RPC_USER || '').trim(),
+    rpcPassword: String(env.VITE_RTM_RPC_PASSWORD || '').trim(),
     bridgeUrl: ctx.buildBridgeUrl('raptoreum', 'main', wallet),
-    explorerUrl: import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || '',
+    bridgeUsername,
+    bridgePassword,
+    explorerUrl: sanitizeExplorerUrl(String(import.meta.env.VITE_RTM_EXPLORER || RTM_API_INFO.defaultExplorerUrl || '').trim()) || undefined,
     capabilities: RTM_CAPABILITIES,
     feePerByte: RTM_FEE_PER_BYTE,
     logo: getUnifiedLogoByName('raptoreum')
