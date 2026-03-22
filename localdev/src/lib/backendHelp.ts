@@ -160,9 +160,21 @@ function flattenCommandGroups(index: WalletHelpIndex | null): string[] {
   return out.filter((value) => typeof value === 'string' && value.trim().length > 0)
 }
 
+function scoreCommandPath(candidatePath: string, wantedPath: string): number {
+  const candidate = String(candidatePath || '').trim()
+  const wanted = String(wantedPath || '').trim()
+  if (!candidate || !wanted) return 0
+  if (candidate === wanted) return 3
+  if (candidate.startsWith(`${wanted}/`)) return 2
+  if (candidate.includes(wanted)) return 1
+  return 0
+}
+
 function extractCommandUrl(commands: string[], method: string, pathFragment: string, baseOrigin: string): string | undefined {
   const wantedMethod = String(method || '').trim().toUpperCase()
   const wantedPath = String(pathFragment || '').trim()
+  let bestUrl: string | undefined
+  let bestScore = 0
   for (const command of commands) {
     const match = String(command || '').trim().match(/^([A-Z]+)\s+(.+)$/)
     if (!match) continue
@@ -170,12 +182,16 @@ function extractCommandUrl(commands: string[], method: string, pathFragment: str
     if (candidateMethod.toUpperCase() !== wantedMethod) continue
     try {
       const candidateUrl = new URL(candidateUrlRaw, baseOrigin)
-      if (candidateUrl.pathname.includes(wantedPath)) return candidateUrl.toString()
+      const score = scoreCommandPath(candidateUrl.pathname, wantedPath)
+      if (score > bestScore) {
+        bestScore = score
+        bestUrl = candidateUrl.toString()
+      }
     } catch {
       continue
     }
   }
-  return undefined
+  return bestUrl
 }
 
 async function probeWalletHelp(origin: string): Promise<WalletBackendDiscovery | null> {
@@ -231,14 +247,30 @@ export function buildDiscoveredUrl(
   value: string | undefined,
   params?: Record<string, string | number | undefined>
 ): string | null {
-  const raw = String(value || '').trim()
+  let raw = String(value || '').trim()
   if (!raw) return null
+  if (params) {
+    for (const [key, entry] of Object.entries(params)) {
+      if (entry === undefined || entry === null) continue
+      raw = raw.replace(
+        new RegExp(`\\{${String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'),
+        encodeURIComponent(String(entry))
+      )
+    }
+  }
   try {
     const url = new URL(raw)
     if (params) {
       for (const [key, entry] of Object.entries(params)) {
         if (entry === undefined || entry === null || String(entry).trim() === '') continue
         url.searchParams.set(key, String(entry))
+      }
+    }
+    const unresolvedKeys = [...url.searchParams.keys()]
+    for (const key of unresolvedKeys) {
+      const value = url.searchParams.get(key)
+      if (/^\{[^{}]+\}$/.test(String(value || '').trim())) {
+        url.searchParams.delete(key)
       }
     }
     return url.toString()

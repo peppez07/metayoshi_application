@@ -93,7 +93,7 @@ function getSwapApiHeaders(): Record<string, string> {
 }
 
 async function resolveDiscoveredSwapEndpoint(
-  kind: 'assetSearchUrl' | 'chainPairsUrl' | 'pairTokenRegistryUrl' | 'swapMatrixUrl',
+  kind: 'assetSearchUrl' | 'chainPairsUrl' | 'pairTokenRegistryUrl' | 'swapMatrixUrl' | 'tokenRegistryUrl',
   base?: unknown
 ): Promise<string | undefined> {
   const discovery = await discoverWalletBackend(base).catch(() => null)
@@ -217,11 +217,17 @@ function parseServerSwapCatalogAssetRows(
     const contractAddress = readString(item.contractAddress || item.address || item.tokenAddress) || undefined
     const symbol = readString(item.symbol || item.ticker).toUpperCase()
     const label = readString(item.label || item.name) || symbol
-    const kindRaw = readString(item.kind).toLowerCase()
+    const kindRaw = readString(item.kind || item.type || item.tokenType).toLowerCase()
     const kind: ServerSwapCatalogAssetKind =
-      kindRaw === 'native' || kindRaw === 'wrapped' || kindRaw === 'nft'
-        ? kindRaw
-        : (contractAddress ? 'fungible' : 'native')
+      kindRaw === 'native'
+        ? 'native'
+        : kindRaw === 'wrapped'
+          ? 'wrapped'
+          : kindRaw.includes('nft')
+            ? 'nft'
+            : kindRaw
+              ? 'fungible'
+              : (contractAddress ? 'fungible' : 'native')
     const assetId = readString(item.assetId)
       || (kind === 'native' ? `native:${networkId}` : (contractAddress || readString(item.id) || symbol))
     if (!assetId || !networkId || !symbol) continue
@@ -243,6 +249,68 @@ function parseServerSwapCatalogAssetRows(
   }
 
   return out
+}
+
+async function searchServerTokenRegistryAssets(
+  apiBase: string,
+  requestedNetworkId: string,
+  input: {
+    query?: string
+    limit?: number
+  } = {}
+): Promise<ServerSwapCatalogAsset[]> {
+  const query = readString(input.query)
+  const limit = Math.max(1, Math.min(500, Math.trunc(Number(input.limit) || 100)))
+  const discoveredEndpoint = await resolveDiscoveredSwapEndpoint('tokenRegistryUrl', apiBase)
+
+  const requestUrl = (() => {
+    const discoveredUrl = buildDiscoveredUrl(discoveredEndpoint, {
+      chain: requestedNetworkId,
+      swapEnabled: 'true',
+      q: query || undefined,
+      limit
+    })
+    if (discoveredUrl) return discoveredUrl
+
+    const params = new URLSearchParams({
+      swapEnabled: 'true',
+      limit: String(limit)
+    })
+    if (query) params.set('q', query)
+
+    return query
+      ? `${apiBase}/v1/token-registry/${encodeURIComponent(requestedNetworkId)}?${params.toString()}`
+      : `${apiBase}/v1/token-registry?${new URLSearchParams({
+          chain: requestedNetworkId,
+          swapEnabled: 'true',
+          limit: String(limit)
+        }).toString()}`
+  })()
+
+  const response = await fetch(requestUrl, {
+    method: 'GET',
+    headers: getSwapApiHeaders()
+  })
+  const text = await response.text().catch(() => '')
+  let json: unknown = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+
+  if (!response.ok) {
+    const body = asRecord(json)
+    const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+      throw new Error('Server swap token registry endpoint is unavailable')
+    }
+    throw new Error(`Server swap token registry request failed: ${detail || `HTTP ${response.status}`}`)
+  }
+
+  return parseServerSwapCatalogAssetRows(extractSwapCatalogRows(json), requestedNetworkId, {
+    allowNetworkFallback: true
+  })
 }
 
 function resolveSwapPairSide(
@@ -412,6 +480,21 @@ export async function searchServerSwapAssets(
   const apiBase = resolveSwapApiBaseUrl(deriveServerApiBaseUrl(network as Network))
   if (!apiBase) throw new Error('Server API base URL is not configured for swap asset search')
   const requestedNetworkId = resolveSwapServerNetworkId(network)
+
+  if (getWalletSwapApiVersion() === 'v1') {
+    try {
+      return await searchServerTokenRegistryAssets(apiBase, requestedNetworkId, input)
+    } catch (error) {
+      const message = readString(error instanceof Error ? error.message : error)
+      if (
+        message
+        && !message.includes('token registry endpoint is unavailable')
+        && !message.includes('token registry request failed')
+      ) {
+        throw error
+      }
+    }
+  }
 
   const params = new URLSearchParams()
   params.set('networkId', requestedNetworkId)

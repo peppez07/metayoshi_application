@@ -52,6 +52,18 @@ type SecureBridgeSession = {
   expiresAtMs: number
 }
 
+type SecureBridgeAuthConfig = {
+  preferredMode?: string
+  walletPasswordRequired: boolean
+  legacyBasicRecommended: boolean
+  sessionEnabled: boolean
+  challengePath?: string
+  verifyPath?: string
+  opTokenPath?: string
+  secureBridgeRpcPath?: string
+  opTokenHeaders: string[]
+}
+
 /** Build the effective direct-RPC endpoint URL (local mode). */
 export function buildRpcUrl(config: UtxoRpcConfig): string {
   const base = config.rpcUrl.trim().replace(/\/$/, '')
@@ -299,8 +311,10 @@ const BRIDGE_WRITE_METHODS = new Set([
 ])
 
 const secureBridgeSessionCache = new Map<string, SecureBridgeSession>()
+const secureBridgeAuthConfigCache = new Map<string, { config: SecureBridgeAuthConfig | null; expiresAtMs: number }>()
 const EVM_BRIDGE_READ_BYPASS_TTL_MS = 2 * 60 * 1000
 const evmBridgeReadBypassUntil = new Map<string, number>()
+const SECURE_BRIDGE_AUTH_CONFIG_CACHE_TTL_MS = 60 * 1000
 
 function parseBoolWithDefault(value: unknown, fallback: boolean): boolean {
   const normalized = String(value ?? '').trim().toLowerCase()
@@ -360,6 +374,59 @@ async function fetchJsonWithStatus(
   return { ok: res.ok, status: res.status, json, text }
 }
 
+function resolveApiUrl(apiBase: string, pathOrUrl: string | undefined, fallbackPath: string): string {
+  const raw = String(pathOrUrl || '').trim() || fallbackPath
+  if (/^https?:\/\//i.test(raw)) return raw
+  const normalizedPath = raw.startsWith('/') ? raw : `/${raw}`
+  return `${apiBase}${normalizedPath}`
+}
+
+async function fetchSecureBridgeAuthConfig(
+  apiBase: string,
+  authConfigUrl?: string
+): Promise<SecureBridgeAuthConfig | null> {
+  const cacheKey = String(authConfigUrl || apiBase).trim() || apiBase
+  const now = Date.now()
+  const cached = secureBridgeAuthConfigCache.get(cacheKey)
+  if (cached && cached.expiresAtMs > now) return cached.config
+
+  const url = resolveApiUrl(apiBase, authConfigUrl, '/v1/auth/config')
+  let config: SecureBridgeAuthConfig | null = null
+  try {
+    const response = await fetchJsonWithStatus(url, {
+      method: 'GET',
+      headers: (() => {
+        const headers: Record<string, string> = { Accept: 'application/json' }
+        applyOptionalServerApiKey(headers)
+        return headers
+      })()
+    })
+    if (response.ok && response.json?.ok === true) {
+      config = {
+        preferredMode: String(response.json?.preferredMode || '').trim() || undefined,
+        walletPasswordRequired: Boolean(response.json?.walletPasswordRequired),
+        legacyBasicRecommended: Boolean(response.json?.legacyBasic?.walletRecommended),
+        sessionEnabled: Boolean(response.json?.session?.enabled),
+        challengePath: String(response.json?.session?.challengePath || '').trim() || undefined,
+        verifyPath: String(response.json?.session?.verifyPath || '').trim() || undefined,
+        opTokenPath: String(response.json?.secureBridge?.opTokenPath || '').trim() || undefined,
+        secureBridgeRpcPath: String(response.json?.secureBridge?.preferredWritePath || '').trim() || undefined,
+        opTokenHeaders: Array.isArray(response.json?.secureBridge?.opTokenHeaders)
+          ? response.json.secureBridge.opTokenHeaders.map((value: unknown) => String(value || '').trim()).filter(Boolean)
+          : []
+      }
+    }
+  } catch {
+    config = null
+  }
+
+  secureBridgeAuthConfigCache.set(cacheKey, {
+    config,
+    expiresAtMs: now + SECURE_BRIDGE_AUTH_CONFIG_CACHE_TTL_MS
+  })
+  return config
+}
+
 async function getSecureBridgeSession(
   config: UtxoRpcConfig,
   bridgeUrl: string
@@ -368,6 +435,14 @@ async function getSecureBridgeSession(
   const discovery = await discoverWalletBackend(configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl)).catch(() => null)
   const apiBase = getDiscoveredGatewayBase(discovery, configuredApiBase || deriveBridgeApiBaseUrl(bridgeUrl))
   if (!apiBase) throw asSecureUnavailable('Bridge API base URL is not available')
+  const authConfig = await fetchSecureBridgeAuthConfig(apiBase, discovery?.authConfigUrl)
+  if (
+    authConfig?.preferredMode === 'session-bearer'
+    && authConfig.sessionEnabled === false
+  ) {
+    throw asSecureUnavailable('Signed wallet login is disabled by /v1/auth/config on this gateway')
+  }
+  const shouldSendLegacyBasicOnAuth = Boolean(authConfig?.walletPasswordRequired)
 
   const signer = config.secureBridgeSigner
   if (!signer) {
@@ -404,12 +479,12 @@ async function getSecureBridgeSession(
     throw new Error('Secure bridge signer returned an invalid EVM address')
   }
 
-  const challengeRes = await fetchJsonWithStatus(`${apiBase}/v1/auth/challenge`, {
+  const challengeRes = await fetchJsonWithStatus(resolveApiUrl(apiBase, authConfig?.challengePath, '/v1/auth/challenge'), {
     method: 'POST',
     headers: (() => {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       applyOptionalServerApiKey(headers)
-      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      if (shouldSendLegacyBasicOnAuth) applyOptionalBridgeBasicAuthHeaders(headers, config)
       return headers
     })(),
     body: JSON.stringify({ address })
@@ -430,7 +505,7 @@ async function getSecureBridgeSession(
 
   const nonce = String(challengeRes.json?.nonce || '').trim()
   const message = String(challengeRes.json?.message || '').trim()
-  if (!nonce || !message) throw new Error('Secure bridge auth challenge response is invalid')
+  if (!message) throw new Error('Secure bridge auth challenge response is invalid')
 
   let signatureResult: { address: string; signature: string }
   try {
@@ -444,18 +519,19 @@ async function getSecureBridgeSession(
     throw new Error('Secure bridge signer address mismatch during challenge verification')
   }
 
-  const verifyRes = await fetchJsonWithStatus(`${apiBase}/v1/auth/verify`, {
+  const verifyRes = await fetchJsonWithStatus(resolveApiUrl(apiBase, authConfig?.verifyPath, '/v1/auth/verify'), {
     method: 'POST',
     headers: (() => {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       applyOptionalServerApiKey(headers)
-      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      if (shouldSendLegacyBasicOnAuth) applyOptionalBridgeBasicAuthHeaders(headers, config)
       return headers
     })(),
     body: JSON.stringify({
       address,
-      nonce,
-      signature: signatureResult.signature
+      signature: signatureResult.signature,
+      message,
+      ...(nonce ? { nonce } : {})
     })
   }).catch((error) => {
     throw asSecureUnavailable(`Auth verify request failed: ${asError(error).message}`)
@@ -501,6 +577,7 @@ async function executeSecureBridgeWriteRpc(
   params: any[]
 ): Promise<any> {
   const session = await getSecureBridgeSession(config, bridgeUrl)
+  const authConfig = await fetchSecureBridgeAuthConfig(session.apiBase)
   const { coin, chain } = resolveBridgeCoinChainHint(config)
   const operation: Record<string, unknown> = {
     coin: coin || 'raptoreum',
@@ -511,7 +588,7 @@ async function executeSecureBridgeWriteRpc(
   const wallet = resolveBridgeWalletHint(config)
   if (wallet) operation.wallet = wallet
 
-  const opTokenRes = await fetchJsonWithStatus(`${session.apiBase}/v1/auth/op-token`, {
+  const opTokenRes = await fetchJsonWithStatus(resolveApiUrl(session.apiBase, authConfig?.opTokenPath, '/v1/auth/op-token'), {
     method: 'POST',
     headers: (() => {
       const headers: Record<string, string> = {
@@ -540,16 +617,24 @@ async function executeSecureBridgeWriteRpc(
   const opToken = String(opTokenRes.json?.opToken || '').trim()
   if (!opToken) throw new Error('Secure bridge operation token response is invalid')
 
-  const rpcRes = await fetchJsonWithStatus(`${session.apiBase}/v1/secure/bridge/rpc`, {
+  const rpcHeaders = (() => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`
+    }
+    applyOptionalServerApiKey(headers)
+    const opTokenHeaderNames = authConfig?.opTokenHeaders?.length
+      ? authConfig.opTokenHeaders
+      : ['X-Bridge-Op-Token', 'X-Operation-Token']
+    for (const headerName of opTokenHeaderNames) {
+      headers[headerName] = opToken
+    }
+    return headers
+  })()
+
+  const rpcRes = await fetchJsonWithStatus(resolveApiUrl(session.apiBase, authConfig?.secureBridgeRpcPath, '/v1/secure/bridge/rpc'), {
     method: 'POST',
-    headers: (() => {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.token}`
-      }
-      applyOptionalServerApiKey(headers)
-      return headers
-    })(),
+    headers: rpcHeaders,
     body: JSON.stringify({ operation, opToken })
   }).catch((error) => {
     throw asSecureUnavailable(`Secure bridge execute request failed: ${asError(error).message}`)
@@ -721,6 +806,16 @@ async function fetchBridgeAddressAssets(
     if (rows.length <= 0) return {}
 
     const balances: Record<string, number> = {}
+    const scaleDisplayAmountToSats = (value: unknown, decimals = 8): number => {
+      const raw = String(value ?? '').trim()
+      if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return 0
+      const [whole = '0', fraction = ''] = raw.split('.')
+      const scaledText = `${whole}${fraction.padEnd(decimals, '0').slice(0, decimals)}`
+        .replace(/^0+(?=\d)/, '')
+      if (!/^\d+$/.test(scaledText)) return 0
+      const scaled = BigInt(scaledText || '0')
+      return scaled > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(scaled)
+    }
     for (const row of rows) {
       const item = row as Record<string, unknown>
       const assetName = String(
@@ -730,14 +825,18 @@ async function fetchBridgeAddressAssets(
         || item.symbol
         || ''
       ).trim()
-      const rawAmount = Number(
+
+      let rawAmount = Number(
         item.amountSat
         ?? item.satoshis
         ?? item.balanceSat
-        ?? item.amount
-        ?? item.balance
         ?? 0
       )
+      if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+        // The hosted address-assets endpoint may only expose human-readable
+        // amount/balance fields. The RTM UI store expects sat-like raw units.
+        rawAmount = scaleDisplayAmountToSats(item.amount ?? item.balance, 8)
+      }
       if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
       balances[assetName] = Math.trunc(rawAmount)
     }
