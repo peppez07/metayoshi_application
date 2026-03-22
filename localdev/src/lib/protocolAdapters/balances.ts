@@ -299,7 +299,8 @@ async function getTronBalanceViaServer(network: Network, address: string, timeou
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
   try {
     const response = await fetchServerAddressJson(network, address, 'balance', {}, {
-      timeoutMs: Number(rpcConfig.timeoutMs ?? 15000)
+      timeoutMs: Number(rpcConfig.timeoutMs ?? 15000),
+      rpcConfig
     })
     if (response.ok) {
       const scalar = parseServerBalanceScalar(response.json)

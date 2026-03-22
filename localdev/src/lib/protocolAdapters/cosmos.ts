@@ -1,5 +1,6 @@
 import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
+import { getSecureBridgeSessionInfo } from '../utxoRpc'
 import { getCoinRuntimeProfile } from '../../coins'
 import { resolveBalanceApiBaseUrl } from '../apiBase'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../cosmosAddress'
@@ -50,10 +51,23 @@ function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { ap
   return { apiBase, coin, chain }
 }
 
-function buildCosmosServerHeaders(network: Network, rpcConfig?: UtxoRpcConfig): Record<string, string> {
+async function buildCosmosServerHeaders(network: Network, rpcConfig?: UtxoRpcConfig): Promise<Record<string, string>> {
   const headers: Record<string, string> = {}
+  const canTryBearer = Boolean(
+    rpcConfig?.bridgeUrl
+    && typeof rpcConfig?.secureBridgeSigner === 'function'
+  )
+  if (canTryBearer) {
+    try {
+      const session = await getSecureBridgeSessionInfo(rpcConfig!)
+      if (session.token) headers.Authorization = `Bearer ${session.token}`
+    } catch {
+      // Fall back to API key / legacy Basic auth.
+    }
+  }
   const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
   if (apiKey) headers['X-API-Key'] = apiKey
+  if (String(headers.Authorization || '').trim().toLowerCase().startsWith('bearer ')) return headers
   const username = String(rpcConfig?.bridgeUsername || network.bridgeUsername || '').trim()
   const password = String(rpcConfig?.bridgePassword || network.bridgePassword || '').trim()
   if (username && password) {
@@ -69,7 +83,7 @@ async function fetchCosmosStatus(network: Network, rpcConfig?: UtxoRpcConfig): P
     const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
     const response = await fetch(`${meta.apiBase}/v1/status?${params.toString()}`, {
       method: 'GET',
-      headers: buildCosmosServerHeaders(network, rpcConfig)
+      headers: await buildCosmosServerHeaders(network, rpcConfig)
     })
     if (!response.ok) return { syncPercent: null, isSyncing: false }
     const json = await response.json().catch(() => null) as Record<string, unknown> | null
@@ -104,7 +118,7 @@ async function fetchCosmosAddressBalance(network: Network, address: string, rpcC
   const params = new URLSearchParams({ coin: meta.coin, chain: meta.chain })
   const response = await fetch(`${meta.apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`, {
     method: 'GET',
-    headers: buildCosmosServerHeaders(network, rpcConfig)
+    headers: await buildCosmosServerHeaders(network, rpcConfig)
   })
   if (!response.ok) {
     throw new Error(`Cosmos balance endpoint failed: HTTP ${response.status}`)

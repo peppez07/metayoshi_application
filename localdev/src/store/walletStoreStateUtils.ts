@@ -109,7 +109,7 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'zksync'
 ]
 
-export const MAX_ACTIVE_REFRESH_NETWORKS = 10
+export const MAX_ACTIVE_REFRESH_NETWORKS = 20
 
 export function shouldForceCanonicalUtxoAddress(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()

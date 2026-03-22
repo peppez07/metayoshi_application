@@ -3455,8 +3455,14 @@ export const useWalletStore = create<WalletState>()(
 
           const requestAddress = await normalizeServerAddress(network, address)
           if (!requestAddress) return
+          const rpcConfig = await createUtxoRpcConfig(network, {
+            useLocalRpc: false,
+            secureBridgeSigner: get().signBackendAuthMessage
+          }).catch(() => null)
           const response = await fetchServerAddressJson(network, requestAddress, 'portfolio', {
             fiat: 'usd,eur'
+          }, {
+            rpcConfig: rpcConfig || undefined
           })
           if (!response.ok) {
             setNetworkFiatFailureCooldown(cacheKey)
@@ -4483,7 +4489,7 @@ export const useWalletStore = create<WalletState>()(
           try {
             const cosmosCfg = resolveCosmosNetworkConfig(net)
             const requestAddress = await normalizeServerAddress(net, address)
-            const response = await fetchServerAddressJson(net, requestAddress, 'assets')
+            const response = await fetchServerAddressJson(net, requestAddress, 'assets', {}, { rpcConfig })
             const missingBridgeCredentialsMessage = getMissingBridgeCredentialsMessage({
               bridgeUrl: rpcConfig.bridgeUrl,
               bridgeUsername: rpcConfig.bridgeUsername,

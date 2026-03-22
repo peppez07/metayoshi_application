@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { IoRefresh, IoWarningOutline, IoCloseCircleOutline } from 'react-icons/io5'
 import clsx from 'clsx'
-import { normalizeConfiguredApiBaseUrl } from '../lib/apiBase'
+import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { discoverWalletBackend, getDiscoveredGatewayBase, getDiscoveredRuntimeService } from '../lib/backendHelp'
 import { assertBridgeCredentialsConfigured } from '../lib/bridgeCredentials'
 import { useWalletStore } from '../store/walletStore'
@@ -81,6 +81,8 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
   const discovery = await discoverWalletBackend(serverBase).catch(() => null)
   const gatewayRuntime = getDiscoveredRuntimeService(discovery, 'gateway')
   const gatewayBase = getDiscoveredGatewayBase(discovery, serverBase)
+  const balanceBase = resolveBalanceApiBaseUrl(gatewayBase)
+  const runtimeHealthUrl = String(discovery?.runtimeHealthUrl || `${gatewayBase}/v1/runtime/health`).trim()
 
   const chain = 'main'
 
@@ -97,16 +99,16 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
     throw new Error(`Gateway auth discovery is unavailable (HTTP ${authConfigResult.status} on /v1/auth/config)`)
   }
 
-  // 2) /health (no API key)
-  const healthRes = await fetchWithTimeout(`${gatewayBase}/health`)
+  // 2) Runtime health on the published wallet help surface.
+  const healthRes = await fetchWithTimeout(runtimeHealthUrl)
   if (!healthRes.ok) {
-    throw new Error(`Health check failed: HTTP ${healthRes.status}`)
+    throw new Error(`Runtime health check failed: HTTP ${healthRes.status}`)
   }
 
-  // 3) /v1/status with optional app API key (if configured for this build)
+  // 3) /v1/status on the balance host with optional app API key.
   const apiKey = String(import.meta.env.VITE_APP_API_KEY || '').trim()
   if (apiKey) {
-    const statusRes = await fetchWithTimeout(`${gatewayBase}/v1/status`, {
+    const statusRes = await fetchWithTimeout(`${balanceBase}/v1/status`, {
       headers: { 'X-API-Key': apiKey }
     })
     if (!statusRes.ok) {

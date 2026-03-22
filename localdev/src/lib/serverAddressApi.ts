@@ -1,11 +1,32 @@
 import type { Network } from '../coins'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from './apiBase'
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
+import type { UtxoRpcConfig } from './utxoRpc'
+import { getSecureBridgeSessionInfo } from './utxoRpc'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
-function appendOptionalServerAuthHeaders(headers: Record<string, string>, network: Network): void {
+async function appendOptionalServerAuthHeaders(
+  headers: Record<string, string>,
+  network: Network,
+  rpcConfig?: UtxoRpcConfig
+): Promise<void> {
+  const canTryBearer = Boolean(
+    rpcConfig?.bridgeUrl
+    && typeof rpcConfig?.secureBridgeSigner === 'function'
+  )
+  if (canTryBearer) {
+    try {
+      const session = await getSecureBridgeSessionInfo(rpcConfig!)
+      if (session.token) headers.Authorization = `Bearer ${session.token}`
+    } catch {
+      // Fall back to API key / legacy Basic auth when bearer session is unavailable.
+    }
+  }
+
   if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
+
+  if (String(headers.Authorization || '').trim().toLowerCase().startsWith('bearer ')) return
 
   const username = String(network.bridgeUsername || '').trim()
   const password = String(network.bridgePassword || '').trim()
@@ -71,7 +92,7 @@ export async function fetchServerAddressJson(
   address: string,
   route: 'balance' | 'assets' | 'history' | 'portfolio' | 'price',
   extraParams: Record<string, string> = {},
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; rpcConfig?: UtxoRpcConfig } = {}
 ): Promise<{
   address: string
   url: string
@@ -100,7 +121,7 @@ export async function fetchServerAddressJson(
 
   const url = `${apiBase}/v1/address/${encodeURIComponent(requestAddress)}/${route}?${params.toString()}`
   const headers: Record<string, string> = {}
-  appendOptionalServerAuthHeaders(headers, network)
+  await appendOptionalServerAuthHeaders(headers, network, options.rpcConfig)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? 15000))
