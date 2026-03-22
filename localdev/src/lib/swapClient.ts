@@ -85,6 +85,17 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
+function buildSwapServiceFailure(endpointLabel: string, responseStatus: number, detail: string): Error {
+  const compactDetail = readString(detail) || `HTTP ${responseStatus}`
+  if (responseStatus === 401) {
+    return new Error(`${endpointLabel} requires wallet auth on the MetaYoshi server`)
+  }
+  if (responseStatus === 502 || responseStatus === 503) {
+    return new Error(`${endpointLabel} is temporarily unavailable on the MetaYoshi server`)
+  }
+  return new Error(`${endpointLabel} failed: ${compactDetail}`)
+}
+
 function getSwapApiHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const appApiKey = readString((import.meta as any)?.env?.VITE_APP_API_KEY)
@@ -526,7 +537,7 @@ export async function searchServerSwapAssets(
     if (response.status === 404) {
       throw new Error('Server swap asset search endpoint is unavailable')
     }
-    throw new Error(`Server swap asset search failed: ${detail || `HTTP ${response.status}`}`)
+    throw buildSwapServiceFailure('Server swap asset search', response.status, detail)
   }
 
   const payload = asRecord(json)
@@ -557,7 +568,7 @@ export async function fetchServerSwapChainPairs(): Promise<ServerSwapChainPair[]
     if (response.status === 404) {
       throw new Error('Server swap chain pairs endpoint is unavailable')
     }
-    throw new Error(`Server swap chain pairs request failed: ${detail || `HTTP ${response.status}`}`)
+    throw buildSwapServiceFailure('Server swap chain pairs', response.status, detail)
   }
 
   const payload = asRecord(json)
@@ -663,7 +674,7 @@ export async function searchServerSwapPairAssets(
     }
     const body = asRecord(json)
     const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
-    throw new Error(`Server swap pair token registry request failed: ${detail || `HTTP ${response.status}`}`)
+    throw buildSwapServiceFailure('Server swap pair token registry', response.status, detail)
   }
 
   const payload = asRecord(json)
@@ -720,7 +731,7 @@ export async function fetchServerSwapMatrix(input: {
     }
     const body = asRecord(json)
     const detail = readString(body.error || body.message || text || `HTTP ${response.status}`)
-    throw new Error(`Server swap matrix request failed: ${detail || `HTTP ${response.status}`}`)
+    throw buildSwapServiceFailure('Server swap matrix', response.status, detail)
   }
 
   return parseServerSwapMatrixMarkets(json, sourceNetworkId)

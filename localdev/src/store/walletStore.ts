@@ -29,6 +29,7 @@ import { getMissingBridgeCredentialsMessage } from '../lib/bridgeCredentials'
 import { isMetayoshiHttpUrl } from '../lib/serverOnly'
 import {
   discoverWalletBackend,
+  fetchDiscoveredAuthConfig,
   fetchDiscoveredChains,
   fetchDiscoveredCoins,
   fetchDiscoveredProviderCapabilities,
@@ -266,6 +267,7 @@ export interface ChainModelLiveSnapshot {
 type WalletBackendSnapshot = {
   fetchedAt: number
   discovery: Record<string, unknown> | null
+  authConfig: Record<string, unknown> | null
   runtimeHealth: Record<string, unknown> | null
   coins: Record<string, unknown> | null
   chains: Record<string, unknown> | null
@@ -6566,7 +6568,10 @@ export const useWalletStore = create<WalletState>()(
           return
         }
 
-        const runtimeHealth = await fetchDiscoveredRuntimeHealth(apiBase).catch(() => null)
+        const [authConfig, runtimeHealth] = await Promise.all([
+          fetchDiscoveredAuthConfig(apiBase).catch(() => null),
+          fetchDiscoveredRuntimeHealth(apiBase).catch(() => null)
+        ])
         const runtimeServices = (
           runtimeHealth?.services
           && typeof runtimeHealth.services === 'object'
@@ -6588,6 +6593,7 @@ export const useWalletStore = create<WalletState>()(
           backendSnapshot: {
             fetchedAt: Date.now(),
             discovery: discovery as unknown as Record<string, unknown>,
+            authConfig: authConfig as Record<string, unknown> | null,
             runtimeHealth,
             coins,
             chains,

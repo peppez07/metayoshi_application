@@ -291,6 +291,27 @@ function isLegacySwapFallbackError(error: unknown): boolean {
   return compactErrorText(error instanceof Error ? error.message : String(error || '')).includes('[legacy-swap-fallback]')
 }
 
+function toServerManagedSwapUnavailableError(error: unknown): Error {
+  const detail = compactErrorText(error instanceof Error ? error.message : String(error || ''))
+  const normalized = detail.toLowerCase()
+  if (normalized.includes('signed wallet login is disabled by /v1/auth/config')) {
+    return new Error('MetaYoshi server swap is disabled because signed session login is unavailable on this gateway')
+  }
+  if (normalized.includes('signature verifier is not configured')) {
+    return new Error('MetaYoshi server swap is disabled because the gateway signature verifier is not configured')
+  }
+  if (normalized.includes('secure bridge writes are disabled by /v1/auth/config')) {
+    return new Error('MetaYoshi server swap is disabled because secure bridge writes are not enabled on this gateway')
+  }
+  if (
+    normalized.includes('auth challenge endpoint unavailable')
+    || normalized.includes('auth verify endpoint unavailable')
+  ) {
+    return new Error('MetaYoshi server swap is unavailable because the gateway auth endpoints are not ready')
+  }
+  return new Error('MetaYoshi server swap service is unavailable')
+}
+
 function isServerManagedQuoteResponse(raw: unknown): boolean {
   const response = asRecord(raw)
   return Boolean(readString(response.quoteId) && readString(response.mode) && readString(response.destinationAmount))
@@ -755,7 +776,7 @@ export async function requestServerSwapQuote(
     }, 'quote')
   } catch (error) {
     if (isLegacySwapFallbackError(error)) {
-      throw new Error('MetaYoshi server swap service is unavailable')
+      throw toServerManagedSwapUnavailableError(error)
     }
     throw error
   }
@@ -778,7 +799,7 @@ export async function submitServerSwap(
     return await submitServerManagedSwap(config, request)
   } catch (error) {
     if (isLegacySwapFallbackError(error)) {
-      throw new Error('MetaYoshi server swap service is unavailable')
+      throw toServerManagedSwapUnavailableError(error)
     }
     throw error
   }
@@ -832,7 +853,7 @@ export async function fetchServerExecutionStatus(
     )
   } catch (error) {
     if (isLegacySwapFallbackError(error)) {
-      throw new Error('MetaYoshi server swap service is unavailable')
+      throw toServerManagedSwapUnavailableError(error)
     }
     throw error
   }

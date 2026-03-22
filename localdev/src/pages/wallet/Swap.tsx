@@ -56,6 +56,14 @@ function readString(value: unknown): string {
   return String(value ?? '').trim()
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  const normalized = readString(value).toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  return undefined
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
@@ -148,6 +156,35 @@ function formatSwapUiError(error: unknown): string {
 
   if (normalized.includes('vite_app_api_key is required')) {
     return 'Swap is not configured yet. Set VITE_APP_API_KEY for the server API and reload the wallet.'
+  }
+
+  if (
+    normalized.includes('signed wallet login is disabled by /v1/auth/config')
+    || normalized.includes('server swap is disabled because signed session login is unavailable')
+  ) {
+    return 'Server-managed swaps are disabled on this gateway until signed session login is enabled.'
+  }
+
+  if (
+    normalized.includes('signature verifier is not configured')
+    || normalized.includes('server swap is disabled because the gateway signature verifier is not configured')
+  ) {
+    return 'Server-managed swaps are disabled because this gateway is not configured to verify wallet signatures.'
+  }
+
+  if (
+    normalized.includes('secure bridge writes are disabled by /v1/auth/config')
+    || normalized.includes('server swap is disabled because secure bridge writes are not enabled')
+  ) {
+    return 'Server-managed swaps are disabled because secure bridge writes are not enabled on this gateway.'
+  }
+
+  if (
+    normalized.includes('server swap asset search is temporarily unavailable')
+    || normalized.includes('server swap pair token registry is temporarily unavailable')
+    || normalized.includes('server swap matrix is temporarily unavailable')
+  ) {
+    return 'The live MetaYoshi swap catalog is temporarily unavailable. Retry in a moment.'
   }
 
   if (
@@ -1220,6 +1257,15 @@ const Swap: React.FC = () => {
   const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
   const fromChainCapabilities = swapCapabilityChainById.get(fromServerNetworkId) || null
   const toChainCapabilities = swapCapabilityChainById.get(toServerNetworkId) || null
+  const runtimeServices = asRecord(asRecord(backendSnapshot?.runtimeHealth).services)
+  const gatewayRuntime = asRecord(runtimeServices.gateway)
+  const authConfig = asRecord(backendSnapshot?.authConfig)
+  const authSession = asRecord(authConfig.session)
+  const authSignatureVerifier = asRecord(authSession.signatureVerifier)
+  const preferredAuthMode = readString(authConfig.preferredMode).toLowerCase()
+  const gatewayRuntimeOk = readBoolean(gatewayRuntime.ok)
+  const sessionEnabled = readBoolean(authSession.enabled)
+  const signatureVerifierConfigured = readBoolean(authSignatureVerifier.configured)
   const swapReadiness = useMemo(() => {
     if (!fromNetwork || !toNetwork) {
       return {
@@ -1241,6 +1287,46 @@ const Swap: React.FC = () => {
         canRequestQuotes: false
       }
     }
+    if (gatewayRuntimeOk === false) {
+      return {
+        state: 'planned' as const,
+        tone: 'amber' as const,
+        engineLabel: 'Gateway unavailable',
+        title: 'Server-backed swaps are paused',
+        detail: 'The MetaYoshi gateway runtime is currently unavailable, so wallet-authenticated swap actions are blocked.',
+        canRequestQuotes: false
+      }
+    }
+    if (!backendSnapshot?.authConfig) {
+      return {
+        state: 'planned' as const,
+        tone: 'amber' as const,
+        engineLabel: 'Checking auth',
+        title: 'Confirming live swap readiness',
+        detail: 'The wallet is waiting for /v1/auth/config before enabling server-managed swap requests.',
+        canRequestQuotes: false
+      }
+    }
+    if (preferredAuthMode === 'session-bearer' && sessionEnabled === false) {
+      return {
+        state: 'planned' as const,
+        tone: 'amber' as const,
+        engineLabel: 'Session auth disabled',
+        title: 'Server-backed swaps are disabled on this gateway',
+        detail: 'The live /v1/auth/config response reports session.enabled=false, so the wallet must keep bearer-gated swap flows disabled.',
+        canRequestQuotes: false
+      }
+    }
+    if (preferredAuthMode === 'session-bearer' && signatureVerifierConfigured === false) {
+      return {
+        state: 'planned' as const,
+        tone: 'amber' as const,
+        engineLabel: 'Verifier unavailable',
+        title: 'Server-backed swaps are not ready on this gateway',
+        detail: 'The live /v1/auth/config response reports signatureVerifier.configured=false, so the wallet cannot open the signed session required for swap execution.',
+        canRequestQuotes: false
+      }
+    }
     return {
       state: 'active' as const,
       tone: 'emerald' as const,
@@ -1249,7 +1335,15 @@ const Swap: React.FC = () => {
       detail: 'Sell tokens come from wallet balances. Destination chains, token lists, provider coverage, and route availability come from the MetaYoshi server.',
       canRequestQuotes: true
     }
-  }, [fromNetwork, toNetwork])
+  }, [
+    fromNetwork,
+    toNetwork,
+    backendSnapshot?.authConfig,
+    gatewayRuntimeOk,
+    preferredAuthMode,
+    sessionEnabled,
+    signatureVerifierConfigured
+  ])
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
     fromNetwork?.id

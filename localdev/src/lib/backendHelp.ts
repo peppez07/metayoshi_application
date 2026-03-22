@@ -47,6 +47,31 @@ export type WalletBackendDiscovery = {
   providersHelpUrl?: string
 }
 
+export type WalletAuthConfig = {
+  ok?: boolean
+  preferredMode?: string
+  walletPasswordRequired?: boolean
+  session?: {
+    enabled?: boolean
+    challengePath?: string
+    verifyPath?: string
+    signatureVerifier?: {
+      configured?: boolean
+      url?: string
+    }
+  }
+  secureBridge?: {
+    preferredWritePath?: string
+    opTokenPath?: string
+    walletRecommended?: boolean
+    secureBridgeWritesReady?: boolean
+  }
+  legacyBasic?: {
+    enabled?: boolean
+    walletRecommended?: boolean
+  }
+}
+
 const discoveryCache = new Map<string, Promise<WalletBackendDiscovery | null>>()
 
 function isLocalHostname(hostname: string): boolean {
@@ -313,6 +338,16 @@ export async function fetchBackendJson(
 export async function fetchDiscoveredRuntimeHealth(base?: unknown): Promise<Record<string, unknown> | null> {
   const discovery = await discoverWalletBackend(base)
   return await fetchBackendJson(discovery?.runtimeHealthUrl)
+}
+
+export async function fetchDiscoveredAuthConfig(base?: unknown): Promise<WalletAuthConfig | null> {
+  const discovery = await discoverWalletBackend(base)
+  const configuredBase = resolveConfiguredBase(base)
+  const gatewayBase = getDiscoveredGatewayBase(discovery, configuredBase || DEFAULT_PUBLIC_HELP_ORIGIN)
+  const authConfigUrl = String(discovery?.authConfigUrl || `${gatewayBase}/v1/auth/config`).trim()
+  if (!authConfigUrl) return null
+  const payload = await fetchBackendJson(authConfigUrl)
+  return payload as WalletAuthConfig | null
 }
 
 export async function fetchDiscoveredCoins(base?: unknown): Promise<Record<string, unknown> | null> {

@@ -57,10 +57,12 @@ type SecureBridgeAuthConfig = {
   walletPasswordRequired: boolean
   legacyBasicRecommended: boolean
   sessionEnabled: boolean
+  signatureVerifierConfigured: boolean
   challengePath?: string
   verifyPath?: string
   opTokenPath?: string
   secureBridgeRpcPath?: string
+  secureBridgeWalletRecommended: boolean
   opTokenHeaders: string[]
 }
 
@@ -407,10 +409,12 @@ async function fetchSecureBridgeAuthConfig(
         walletPasswordRequired: Boolean(response.json?.walletPasswordRequired),
         legacyBasicRecommended: Boolean(response.json?.legacyBasic?.walletRecommended),
         sessionEnabled: Boolean(response.json?.session?.enabled),
+        signatureVerifierConfigured: Boolean(response.json?.session?.signatureVerifier?.configured),
         challengePath: String(response.json?.session?.challengePath || '').trim() || undefined,
         verifyPath: String(response.json?.session?.verifyPath || '').trim() || undefined,
         opTokenPath: String(response.json?.secureBridge?.opTokenPath || '').trim() || undefined,
         secureBridgeRpcPath: String(response.json?.secureBridge?.preferredWritePath || '').trim() || undefined,
+        secureBridgeWalletRecommended: response.json?.secureBridge?.walletRecommended !== false,
         opTokenHeaders: Array.isArray(response.json?.secureBridge?.opTokenHeaders)
           ? response.json.secureBridge.opTokenHeaders.map((value: unknown) => String(value || '').trim()).filter(Boolean)
           : []
@@ -441,6 +445,12 @@ async function getSecureBridgeSession(
     && authConfig.sessionEnabled === false
   ) {
     throw asSecureUnavailable('Signed wallet login is disabled by /v1/auth/config on this gateway')
+  }
+  if (
+    authConfig?.preferredMode === 'session-bearer'
+    && authConfig.signatureVerifierConfigured === false
+  ) {
+    throw asSecureUnavailable('Signature verifier is not configured on this gateway')
   }
   const shouldSendLegacyBasicOnAuth = Boolean(authConfig?.walletPasswordRequired)
 
@@ -578,6 +588,9 @@ async function executeSecureBridgeWriteRpc(
 ): Promise<any> {
   const session = await getSecureBridgeSession(config, bridgeUrl)
   const authConfig = await fetchSecureBridgeAuthConfig(session.apiBase)
+  if (authConfig && authConfig.secureBridgeWalletRecommended === false) {
+    throw asSecureUnavailable('Secure bridge writes are disabled by /v1/auth/config on this gateway')
+  }
   const { coin, chain } = resolveBridgeCoinChainHint(config)
   const operation: Record<string, unknown> = {
     coin: coin || 'raptoreum',
