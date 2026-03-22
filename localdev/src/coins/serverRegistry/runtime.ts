@@ -1,5 +1,5 @@
 import type { Network } from '../types'
-import { buildDiscoveredUrl, discoverWalletBackend } from '../../lib/backendHelp'
+import { buildDiscoveredUrl, discoverWalletBackend, fetchDiscoveredChains } from '../../lib/backendHelp'
 import { buildServerCoinCatalog, isLikelyTokenServerCoin } from './catalog'
 import {
   EVM_MODEL_NETWORK_IDS,
@@ -29,6 +29,113 @@ import {
   type ServerCoinRow
 } from './types'
 
+type DiscoveredChainRow = {
+  chainKey?: unknown
+  isEnabled?: unknown
+  supportsBalances?: unknown
+  supportsSend?: unknown
+  supportsSwap?: unknown
+}
+
+function asDiscoveredChainItems(payload: Record<string, unknown> | null): DiscoveredChainRow[] {
+  const items = payload?.items
+  return Array.isArray(items) ? items as DiscoveredChainRow[] : []
+}
+
+function normalizeDiscoveredChainKey(value: unknown): string {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return ''
+  switch (normalized) {
+    case 'ethereum':
+      return 'eth'
+    case 'arbitrum-one':
+      return 'arb'
+    case 'optimism':
+      return 'op'
+    case 'sol':
+    case 'solana-mainnet':
+      return 'solana'
+    case 'bnb':
+      return 'bsc'
+    case 'cosmos':
+    case 'cosmoshub-4':
+      return 'cosmoshub'
+    case 'osmosis-1':
+      return 'osmosis'
+    case 'tron-mainnet':
+      return 'tron'
+    default:
+      return normalized
+  }
+}
+
+function resolveExpectedChainRegistryKey(coinId: string, modelNetworkId: string | null): string {
+  const normalizedCoinId = String(coinId || '').trim().toLowerCase()
+  const normalizedModelId = String(modelNetworkId || '').trim().toLowerCase()
+
+  if (normalizedCoinId === 'ethereum' || normalizedModelId === 'eth') return 'eth'
+  if (normalizedCoinId === 'arbitrum-one' || normalizedModelId === 'arb') return 'arb'
+  if (normalizedCoinId === 'optimism' || normalizedModelId === 'op') return 'op'
+  if (normalizedCoinId === 'base' || normalizedModelId === 'base') return 'base'
+  if (normalizedCoinId === 'bsc' || normalizedModelId === 'bnb') return 'bsc'
+  if (normalizedCoinId === 'solana' || normalizedModelId === 'sol') return 'solana'
+  if (normalizedCoinId === 'cosmos' || normalizedModelId === 'cosmos') return 'cosmoshub'
+  if (normalizedCoinId === 'osmosis' || normalizedModelId === 'osmosis') return 'osmosis'
+  if (normalizedCoinId === 'tron' || normalizedModelId === 'tron') return 'tron'
+  if (normalizedCoinId === 'sui' || normalizedModelId === 'sui') return 'sui'
+  return ''
+}
+
+function requiresDiscoveredChainContract(coinId: string, modelNetworkId: string | null): boolean {
+  return Boolean(resolveExpectedChainRegistryKey(coinId, modelNetworkId))
+}
+
+function resolveDiscoveredChainRecord(
+  items: DiscoveredChainRow[],
+  coinId: string,
+  modelNetworkId: string | null
+): DiscoveredChainRow | null {
+  const expectedKey = resolveExpectedChainRegistryKey(coinId, modelNetworkId)
+  if (!expectedKey) return null
+  return items.find((item) => normalizeDiscoveredChainKey(item.chainKey) === expectedKey) || null
+}
+
+function applyDiscoveredChainCapabilities(
+  capabilities: Network['capabilities'],
+  chainRecord: DiscoveredChainRow | null
+): Network['capabilities'] {
+  const baseFeatures = capabilities?.features || {}
+  const baseUi = capabilities?.ui || {}
+  if (!chainRecord) {
+    return {
+      features: { ...baseFeatures },
+      ui: { ...baseUi }
+    }
+  }
+
+  const supportsBalances = chainRecord.supportsBalances === true
+  const supportsSend = chainRecord.supportsSend === true
+  const supportsSwap = chainRecord.supportsSwap === true
+
+  return {
+    features: {
+      ...baseFeatures,
+      nativeSend: Boolean(baseFeatures.nativeSend) && supportsSend,
+      assetSend: Boolean(baseFeatures.assetSend) && supportsSend,
+      activity: Boolean(baseFeatures.activity) && supportsBalances,
+      swap: Boolean(baseFeatures.swap) && supportsSwap
+    },
+    ui: {
+      ...baseUi,
+      showAssetsTab: Boolean(baseUi.showAssetsTab) && supportsBalances,
+      showAssetsAction: Boolean(baseUi.showAssetsAction) && supportsBalances,
+      showSendAction: Boolean(baseUi.showSendAction) && supportsSend,
+      showActivityTab: Boolean(baseUi.showActivityTab) && supportsBalances,
+      showSwapAction: Boolean(baseUi.showSwapAction) && supportsSwap
+    }
+  }
+}
+
 export async function loadServerRegistrySnapshotFromApi(input: {
   apiBaseUrl: string
   appApiKey: string
@@ -55,9 +162,14 @@ export async function loadServerRegistrySnapshotFromApi(input: {
   }
   const json = await response.json().catch(() => null)
   const coins = Array.isArray(json?.coins) ? (json.coins as ServerCoinRow[]) : []
+  const discoveredChains = await fetchDiscoveredChains(input.apiBaseUrl).catch(() => null)
+  const discoveredChainItems = asDiscoveredChainItems(discoveredChains)
   if (coins.length === 0) return { networks: null, catalog: [] }
 
-  const catalog = buildServerCoinCatalog(coins)
+  const catalog = buildServerCoinCatalog(coins).filter((item) => {
+    if (!requiresDiscoveredChainContract(item.coinId, item.runtimeModelId)) return true
+    return Boolean(resolveDiscoveredChainRecord(discoveredChainItems, item.coinId, item.runtimeModelId))
+  })
   const moduleById = new Map<string, Network>(input.allNetworks.map((n) => [n.id, n]))
   const candidatesByAppNetworkId = new Map<string, NetworkCandidate[]>()
 
@@ -94,6 +206,10 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         || modernBridgeReady
       )
     )
+    const discoveredChainRecord = resolveDiscoveredChainRecord(discoveredChainItems, coinId, modelNetworkId)
+    if (requiresDiscoveredChainContract(coinId, modelNetworkId) && !discoveredChainRecord) {
+      continue
+    }
 
     if (canUseMappedModel && modelNetworkId) {
       const base = moduleById.get(modelNetworkId)!
@@ -105,6 +221,7 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         coin.capabilities
       )
       const mergedCapabilities = mergeCapabilityInputs(base.capabilities, inferredCapabilities)
+      const normalizedCapabilities = applyDiscoveredChainCapabilities(mergedCapabilities, discoveredChainRecord)
       const mappedNetwork: Network = {
         ...base,
         id: appNetworkId,
@@ -122,7 +239,7 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         bridgeUrl: resolveBridgeUrlForNetwork(input.apiBaseUrl, modelNetworkId, coinId, chain, rpcWallet),
         bridgeUsername: input.defaultBridgeUser || undefined,
         bridgePassword: input.defaultBridgePassword || undefined,
-        capabilities: mergedCapabilities
+        capabilities: normalizedCapabilities
       }
       if (!isNetworkSpendable(mappedNetwork)) continue
       const row = candidatesByAppNetworkId.get(appNetworkId) || []
