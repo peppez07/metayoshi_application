@@ -177,8 +177,8 @@ async function main() {
   rewriteManifestForTarget(resolve(chromeDir, 'manifest.json'), 'chrome')
   rewriteManifestForTarget(resolve(firefoxDir, 'manifest.json'), 'firefox')
 
-  await createZipFromDir(chromeDir, resolve(releasesDir, 'metayoshi-chrome-0.2.0.zip'))
-  await createZipFromDir(firefoxDir, resolve(releasesDir, 'metayoshi-firefox-0.2.0.zip'))
+  await createZipFromDir(chromeDir, resolve(releasesDir, 'metayoshi-chrome-0.2.1.zip'))
+  await createZipFromDir(firefoxDir, resolve(releasesDir, 'metayoshi-firefox-0.2.1.zip'))
   rmSync(tmpDir, { recursive: true, force: true })
 
   console.log('Release archives rebuilt without directory entries and with browser-specific manifests.')

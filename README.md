@@ -15,7 +15,7 @@ MetaYoshi is currently a non-custodial multi-chain browser wallet with:
 - backup and restore flows for full backup, recovery phrase, and encrypted vault JSON
 - browser packaging for Chrome, Brave, Chromium, and Firefox
 
-Current public source version: `0.2.0`
+Current public source version: `0.2.1`
 
 ## Configured network coverage
 
