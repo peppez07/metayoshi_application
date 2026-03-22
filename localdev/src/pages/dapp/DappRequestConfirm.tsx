@@ -83,7 +83,7 @@ const DappRequestConfirm: React.FC = () => {
     sendTronTransaction,
     sendUtxoTransaction,
     sendAssetTransfer,
-    refreshActiveBalance,
+    collectActiveNetworkData,
     addActivity,
     trackActivityTransactionStatus,
     isConnected,
@@ -568,7 +568,7 @@ const DappRequestConfirm: React.FC = () => {
           })
           trackActivityTransactionStatus({ txid: txHash, networkId: networkForActivity.id })
         }
-        await refreshActiveBalance()
+        await collectActiveNetworkData({ force: true, includeFiat: false })
       }
 
       await chrome.storage.local.set({

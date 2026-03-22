@@ -11,12 +11,14 @@ const TOKEN_MARKERS = new Set([
 
 const TESTNET_ID_MARKERS = /(testnet|sepolia|hoodi|fuji|amoy|minato|blaze|chiado|agung)/i
 const BLOCKED_SERVER_COIN_IDS = new Set<string>([
+  'arr',
   'defichain',
   'manta-atlantic',
   'pivx',
   'syscoin',
   'syscoin-evm',
-  'syscoin-tanenbaum-evm'
+  'syscoin-tanenbaum-evm',
+  'tidecoin'
 ])
 
 const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
@@ -65,11 +67,9 @@ const SERVER_COIN_TO_NETWORK_ID: Record<string, string> = {
   terra: 'terra',
   teritori: 'teritori',
   'terra-classic': 'terra-classic',
-  tidecoin: 'tide',
   firo: 'firo',
   gnosis: 'gnosis',
   xrp: 'xrp',
-  arr: 'arr',
   cardano: 'ada',
   monero: 'xmr',
   stellar: 'xlm',

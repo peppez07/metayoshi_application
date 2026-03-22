@@ -59,8 +59,7 @@ const WalletLayout: React.FC = () => {
     activity,
     backendSnapshot,
     setActiveNetwork,
-    refreshActiveBalance,
-    fetchNetworkFiat,
+    collectActiveNetworkData,
     getSendableItems
   } = useWalletStore()
 
@@ -149,16 +148,12 @@ const WalletLayout: React.FC = () => {
   const showWalletSummary = !isFocusedFlowRoute
 
   useEffect(() => {
-    void fetchNetworkFiat()
-  }, [activeNetworkId, fetchNetworkFiat])
-
-  useEffect(() => {
     if (isFocusedFlowRoute) return
 
     const tick = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-      void refreshActiveBalance()
+      void collectActiveNetworkData()
     }
 
     tick()
@@ -177,7 +172,7 @@ const WalletLayout: React.FC = () => {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [refreshActiveBalance, activeNetworkId, isFocusedFlowRoute])
+  }, [collectActiveNetworkData, activeNetworkId, activeAccountId, isFocusedFlowRoute])
 
   useEffect(() => {
     if (!hasActiveNetwork || !isModelRoute) return

@@ -21,6 +21,7 @@ const AssetsPage: React.FC = () => {
     catalogQueryNonce,
     activeAccountId,
     activeNetworkId,
+    collectActiveNetworkData,
     getSendableItems,
     setSendListPreferences
   } = useWalletStore()
@@ -41,9 +42,7 @@ const AssetsPage: React.FC = () => {
     previewByAsset,
     resolveAssetDisplayName,
     isPreviewableAssetName,
-    ensurePreviewAvailability,
-    fetchNetworkAssets,
-    fetchNetworkFiat
+    ensurePreviewAvailability
   } = useAssetListModel()
 
   const [search, setSearch] = useState('')
@@ -120,10 +119,7 @@ const AssetsPage: React.FC = () => {
     if (refreshing) return
     setRefreshing(true)
     try {
-      await Promise.allSettled([
-        fetchNetworkAssets({ force: true }),
-        fetchNetworkFiat({ force: true })
-      ])
+      await collectActiveNetworkData({ force: true, includeBalance: false })
     } finally {
       setRefreshing(false)
     }

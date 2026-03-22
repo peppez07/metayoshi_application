@@ -67,8 +67,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     networks,
     activeNetworkId,
     donationPercent,
-    fetchNetworkAssets,
-    fetchNetworkFiat,
+    collectActiveNetworkData,
     getNetworkModelPreferences,
     accountNetworkFiatNative,
     accountNetworkFiatAssets,
@@ -133,15 +132,16 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     let cancelled = false
     const hydrateFiat = async () => {
       if (cancelled) return
-      if (item.requestType === 'asset') {
-        await fetchNetworkAssets().catch(() => {})
-      }
-      if (cancelled) return
-      await fetchNetworkFiat({ force: item.requestType === 'asset' }).catch(() => {})
+      await collectActiveNetworkData({
+        force: item.requestType === 'asset',
+        includeBalance: false,
+        includeAssets: item.requestType === 'asset',
+        includeFiat: true
+      }).catch(() => {})
     }
     void hydrateFiat()
     return () => { cancelled = true }
-  }, [item.id, item.requestType, fetchNetworkAssets, fetchNetworkFiat])
+  }, [item.id, item.requestType, collectActiveNetworkData])
 
   useEffect(() => {
     let cancelled = false

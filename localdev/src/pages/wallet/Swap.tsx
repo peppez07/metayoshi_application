@@ -1135,8 +1135,7 @@ const Swap: React.FC = () => {
     activeNetworkId,
     ensureNetworkAddress,
     addActivity,
-    refreshActiveBalance,
-    fetchNetworkAssets,
+    collectActiveNetworkData,
     getSendableItems,
     sendPreparedEvmTransaction,
     resolveBackendAuthAddress,
@@ -1524,13 +1523,10 @@ const Swap: React.FC = () => {
   useEffect(() => {
     if (!activeAccount?.id || !fromNetwork?.id || activeNetworkId !== fromNetwork.id) return
 
-    void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((error) => {
-      console.warn('Failed to refresh swap sell-side native balance', error)
+    void collectActiveNetworkData({ force: true }).catch((error) => {
+      console.warn('Failed to refresh swap sell-side data', error)
     })
-    void fetchNetworkAssets({ force: true, staleWhileRefresh: true }).catch((error) => {
-      console.warn('Failed to refresh swap sell-side assets', error)
-    })
-  }, [activeAccount?.id, fromNetwork?.id, activeNetworkId, refreshActiveBalance, fetchNetworkAssets])
+  }, [activeAccount?.id, fromNetwork?.id, activeNetworkId, collectActiveNetworkData])
 
   useEffect(() => {
     let cancelled = false
@@ -1657,7 +1653,7 @@ const Swap: React.FC = () => {
       })
       showToast('Swap confirmed by server execution', 'success')
       if (activeNetworkId === fromNetworkId || activeNetworkId === toNetworkId) {
-        void refreshActiveBalance()
+        void collectActiveNetworkData({ force: true })
       }
       return
     }
@@ -1689,7 +1685,7 @@ const Swap: React.FC = () => {
     activeNetworkId,
     fromNetworkId,
     toNetworkId,
-    refreshActiveBalance
+    collectActiveNetworkData
   ])
 
   const buildSwapContext = async () => {

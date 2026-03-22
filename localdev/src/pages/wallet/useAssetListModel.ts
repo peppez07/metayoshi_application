@@ -34,8 +34,7 @@ export function useAssetListModel() {
     accountNetworkAssetLabels,
     accountNetworkEvmNftAssets,
     accountNetworkFiatAssets,
-    fetchNetworkAssets,
-    fetchNetworkFiat,
+    collectActiveNetworkData,
     fetchAssetDetails,
     activity
   } = useWalletStore()
@@ -98,8 +97,6 @@ export function useAssetListModel() {
     [allEntries, byUsageThenName]
   )
   const sorted = useMemo(() => [...roots, ...subs], [roots, subs])
-  const assetSignature = useMemo(() => sorted.map(([name]) => name).join('|'), [sorted])
-
   const isPreviewableAssetName = useCallback((name: string): boolean => {
     if (!supportsPreview) return false
     if (isSolanaEcosystem) return parseSolanaAssetType(name) !== 'spl-token'
@@ -111,9 +108,12 @@ export function useAssetListModel() {
   ), [assetLabels, nftLookup])
 
   useEffect(() => {
-    if (caps.features.assetLayer) void fetchNetworkAssets()
-    void fetchNetworkFiat()
-  }, [activeNetworkId, activeAccountId, caps.features.assetLayer, assetSignature, fetchNetworkAssets, fetchNetworkFiat])
+    void collectActiveNetworkData({
+      includeBalance: false,
+      includeAssets: caps.features.assetLayer,
+      includeFiat: true
+    })
+  }, [activeNetworkId, activeAccountId, caps.features.assetLayer, collectActiveNetworkData])
 
   const setPreviewState = useCallback((assetName: string, hasPreview: boolean) => {
     setPreviewByAsset((previous) => {
@@ -177,9 +177,6 @@ export function useAssetListModel() {
     previewByAsset,
     resolveAssetDisplayName,
     isPreviewableAssetName,
-    ensurePreviewAvailability,
-    fetchNetworkAssets,
-    fetchNetworkFiat
+    ensurePreviewAvailability
   }
 }
-

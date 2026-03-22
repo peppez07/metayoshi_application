@@ -423,6 +423,12 @@ interface WalletState {
 
   // RPC
   refreshActiveBalance: (options?: RefreshActiveBalanceOptions) => Promise<void>
+  collectActiveNetworkData: (options?: {
+    force?: boolean
+    includeBalance?: boolean
+    includeAssets?: boolean
+    includeFiat?: boolean
+  }) => Promise<void>
   probeActiveChainModel: () => Promise<ChainModelLiveSnapshot>
   sendEvmTransaction: (params: {
     to?: string
@@ -546,8 +552,15 @@ const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
   firo: 45_000
 }
 const DEFAULT_UNSUPPORTED_BRIDGE_ASSET_ENDPOINT_TTL_MS = 30 * 60 * 1000
+const ACTIVE_NETWORK_BALANCE_REFRESH_INTERVAL_MS = 15_000
+const ACTIVE_NETWORK_ASSET_REFRESH_INTERVAL_MS = 45_000
+const ACTIVE_NETWORK_FIAT_REFRESH_INTERVAL_MS = 90_000
+const ACTIVE_NETWORK_COLLECTION_MIN_GAP_MS = 4_000
 const transientBridgeCooldownUntilByNetwork = new Map<string, number>()
 const unsupportedBridgeAssetEndpointUntilByKey = new Map<string, number>()
+const activeNetworkCollectionTouchedAtByKey = new Map<string, number>()
+const activeNetworkCollectionCompletedAtByKey = new Map<string, number>()
+const activeNetworkCollectionInFlightByScope = new Map<string, Promise<void>>()
 let sendOperationRateLimiterQueue: Promise<void> = Promise.resolve()
 let sendOperationNextAllowedAtMs = 0
 let refreshActiveBalanceInFlight: Promise<void> | null = null
@@ -780,6 +793,7 @@ function isTransientBridgeFailure(error: unknown): boolean {
 }
 
 type BridgeAssetEndpointKind = 'token-balance' | 'address-assets'
+type ActiveNetworkCollectionKind = 'balance' | 'assets' | 'fiat'
 
 function compactBridgeAssetErrorText(value: string, maxLen = 220): string {
   const compact = String(value || '').replace(/\s+/g, ' ').trim()
@@ -843,6 +857,58 @@ function setTransientBridgeCooldown(networkId?: string): void {
   const key = String(networkId || '').trim().toLowerCase()
   if (!key) return
   transientBridgeCooldownUntilByNetwork.set(key, Date.now() + resolveTransientBridgeCooldownMs(key))
+}
+
+function buildActiveNetworkCollectionScopeKey(accountId: string, networkId: string): string {
+  const normalizedAccountId = String(accountId || '').trim().toLowerCase()
+  const normalizedNetworkId = String(networkId || '').trim().toLowerCase()
+  if (!normalizedAccountId || !normalizedNetworkId) return ''
+  return `${normalizedAccountId}::${normalizedNetworkId}`
+}
+
+function buildActiveNetworkCollectionKey(
+  accountId: string,
+  networkId: string,
+  kind: ActiveNetworkCollectionKind
+): string {
+  const scopeKey = buildActiveNetworkCollectionScopeKey(accountId, networkId)
+  return scopeKey ? `${scopeKey}::${kind}` : ''
+}
+
+function activeNetworkCollectionIntervalMs(kind: ActiveNetworkCollectionKind): number {
+  switch (kind) {
+    case 'balance':
+      return ACTIVE_NETWORK_BALANCE_REFRESH_INTERVAL_MS
+    case 'assets':
+      return ACTIVE_NETWORK_ASSET_REFRESH_INTERVAL_MS
+    case 'fiat':
+      return ACTIVE_NETWORK_FIAT_REFRESH_INTERVAL_MS
+    default:
+      return ACTIVE_NETWORK_BALANCE_REFRESH_INTERVAL_MS
+  }
+}
+
+function shouldCollectActiveNetworkKind(
+  accountId: string,
+  networkId: string,
+  kind: ActiveNetworkCollectionKind,
+  force: boolean
+): boolean {
+  if (force) return true
+  const key = buildActiveNetworkCollectionKey(accountId, networkId, kind)
+  if (!key) return false
+  const completedAt = Number(activeNetworkCollectionCompletedAtByKey.get(key) || 0)
+  return !Number.isFinite(completedAt) || (Date.now() - completedAt) >= activeNetworkCollectionIntervalMs(kind)
+}
+
+function markActiveNetworkCollectionCompleted(
+  accountId: string,
+  networkId: string,
+  kind: ActiveNetworkCollectionKind
+): void {
+  const key = buildActiveNetworkCollectionKey(accountId, networkId, kind)
+  if (!key) return
+  activeNetworkCollectionCompletedAtByKey.set(key, Date.now())
 }
 
 async function createUtxoRpcConfig(
@@ -3218,10 +3284,7 @@ export const useWalletStore = create<WalletState>()(
         }))
         void (async () => {
           await get().ensureNetworkAddress(activeNetworkId)
-          await Promise.allSettled([
-            get().refreshActiveBalance(),
-            get().fetchNetworkAssets()
-          ])
+          await get().collectActiveNetworkData({ force: true })
         })()
       },
 
@@ -3316,7 +3379,7 @@ export const useWalletStore = create<WalletState>()(
         })
         await get().ensureNetworkAddress(normalizedId)
         if (options?.skipRefresh !== true) {
-          await get().refreshActiveBalance()
+          await get().collectActiveNetworkData({ force: true })
         }
       },
 
@@ -5608,7 +5671,7 @@ export const useWalletStore = create<WalletState>()(
             amountRaw,
             privateKeyHex: derived.privHex
           })
-          await get().fetchNetworkAssets()
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: sent.hash }
         }
 
@@ -5724,7 +5787,7 @@ export const useWalletStore = create<WalletState>()(
                 maxPriorityFeePerGas: feeQuote.maxPriorityFeePerGas,
                 type: feeQuote.type
               })
-              await get().fetchNetworkAssets()
+              await get().collectActiveNetworkData({ force: true, includeFiat: false })
               return { txid: sent.hash }
             }
 
@@ -5754,7 +5817,7 @@ export const useWalletStore = create<WalletState>()(
             })
             const sentHash = String(sent.txid || '').trim()
             if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
-            await get().fetchNetworkAssets()
+            await get().collectActiveNetworkData({ force: true, includeFiat: false })
             return { txid: sentHash }
           }
 
@@ -5821,7 +5884,7 @@ export const useWalletStore = create<WalletState>()(
               maxPriorityFeePerGas: feeQuote.maxPriorityFeePerGas,
               type: feeQuote.type
             })
-            await get().fetchNetworkAssets()
+            await get().collectActiveNetworkData({ force: true, includeFiat: false })
             return { txid: sent.hash }
           }
 
@@ -5851,7 +5914,7 @@ export const useWalletStore = create<WalletState>()(
           })
           const sentHash = String(sent.txid || '').trim()
           if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
-          await get().fetchNetworkAssets()
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: sentHash }
         }
 
@@ -5883,7 +5946,7 @@ export const useWalletStore = create<WalletState>()(
               toAddress: recipient,
               objectId: nft.objectId
             })
-            await get().fetchNetworkAssets()
+            await get().collectActiveNetworkData({ force: true, includeFiat: false })
             return { txid: sent.hash }
           }
 
@@ -5907,7 +5970,7 @@ export const useWalletStore = create<WalletState>()(
             coinType: normalizedAssetId,
             amountRaw: amountRaw.toString()
           })
-          await get().fetchNetworkAssets()
+            await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: sent.hash }
         }
 
@@ -5932,7 +5995,7 @@ export const useWalletStore = create<WalletState>()(
             amount: String(qty || '').trim(),
             privateKeyHex: derived.privHex
           })
-          await get().fetchNetworkAssets()
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: tx.hash }
         }
 
@@ -5955,7 +6018,7 @@ export const useWalletStore = create<WalletState>()(
             tokenAmountRaw,
             walletId: String(net.rpcWallet || '').trim() || undefined
           })
-          await get().fetchNetworkAssets()
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: tx.hash }
         }
 
@@ -6055,7 +6118,7 @@ export const useWalletStore = create<WalletState>()(
             signedTxHex: signedTxBase64,
             signedFormat: 'cosmos-tx-base64'
           })
-          await get().fetchNetworkAssets()
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: sent.txid }
         }
 
@@ -6080,7 +6143,7 @@ export const useWalletStore = create<WalletState>()(
           assetChangeAddress,
           feePerByteSats
         })
-        await get().fetchNetworkAssets()
+        await get().collectActiveNetworkData({ force: true, includeFiat: false })
         return { txid }
       },
 
@@ -6538,8 +6601,7 @@ export const useWalletStore = create<WalletState>()(
         if (shouldRefreshActive && nextActiveNetworkId) {
           void (async () => {
             await get().ensureNetworkAddress(nextActiveNetworkId)
-            await get().refreshActiveBalance()
-            await get().fetchNetworkAssets().catch(() => {})
+            await get().collectActiveNetworkData({ force: true }).catch(() => {})
           })()
         }
       },
@@ -7068,6 +7130,88 @@ export const useWalletStore = create<WalletState>()(
           await runner
         } finally {
           if (refreshActiveBalanceInFlight === runner) refreshActiveBalanceInFlight = null
+        }
+      },
+
+      collectActiveNetworkData: async (options) => {
+        const state = get()
+        const activeAccount = state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0]
+        const activeNetwork = state.networks.find((network) => network.id === state.activeNetworkId) || state.networks[0]
+        if (!activeAccount || !activeNetwork) return
+
+        const accountId = String(activeAccount.id || '').trim()
+        const networkId = String(activeNetwork.id || '').trim()
+        const scopeKey = buildActiveNetworkCollectionScopeKey(accountId, networkId)
+        if (!scopeKey) return
+
+        const existingInFlight = activeNetworkCollectionInFlightByScope.get(scopeKey)
+        if (existingInFlight) {
+          await existingInFlight
+          return
+        }
+
+        const force = options?.force === true
+        const includeBalance = options?.includeBalance !== false
+        const includeAssets = options?.includeAssets !== false
+        const includeFiat = options?.includeFiat !== false
+        const capabilities = resolveNetworkCapabilities(activeNetwork)
+        const now = Date.now()
+        const lastTouchedAt = Number(activeNetworkCollectionTouchedAtByKey.get(scopeKey) || 0)
+        if (!force && Number.isFinite(lastTouchedAt) && (now - lastTouchedAt) < ACTIVE_NETWORK_COLLECTION_MIN_GAP_MS) {
+          return
+        }
+
+        const shouldRefreshBalance = includeBalance && shouldCollectActiveNetworkKind(accountId, networkId, 'balance', force)
+        const shouldRefreshAssets =
+          includeAssets
+          && capabilities.features.assetLayer
+          && shouldCollectActiveNetworkKind(accountId, networkId, 'assets', force)
+        const shouldRefreshFiat = includeFiat && shouldCollectActiveNetworkKind(accountId, networkId, 'fiat', force)
+
+        if (!shouldRefreshBalance && !shouldRefreshAssets && !shouldRefreshFiat) return
+
+        activeNetworkCollectionTouchedAtByKey.set(scopeKey, now)
+
+        const runner = (async () => {
+          const tasks: Array<Promise<void>> = []
+
+          if (shouldRefreshBalance) {
+            tasks.push(
+              get().refreshActiveBalance(force ? { fast: true } : undefined)
+                .then(() => {
+                  markActiveNetworkCollectionCompleted(accountId, networkId, 'balance')
+                })
+            )
+          }
+
+          if (shouldRefreshAssets) {
+            tasks.push(
+              get().fetchNetworkAssets(force ? { force: true } : undefined)
+                .then(() => {
+                  markActiveNetworkCollectionCompleted(accountId, networkId, 'assets')
+                })
+            )
+          }
+
+          if (shouldRefreshFiat) {
+            tasks.push(
+              get().fetchNetworkFiat(force ? { force: true } : undefined)
+                .then(() => {
+                  markActiveNetworkCollectionCompleted(accountId, networkId, 'fiat')
+                })
+            )
+          }
+
+          await Promise.allSettled(tasks)
+        })()
+
+        activeNetworkCollectionInFlightByScope.set(scopeKey, runner)
+        try {
+          await runner
+        } finally {
+          if (activeNetworkCollectionInFlightByScope.get(scopeKey) === runner) {
+            activeNetworkCollectionInFlightByScope.delete(scopeKey)
+          }
         }
       },
 
