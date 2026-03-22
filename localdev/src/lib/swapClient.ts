@@ -141,6 +141,7 @@ function extractSwapCatalogRows(payload: unknown): unknown[] {
 export function resolveSwapServerNetworkId(network?: Pick<Network, 'id' | 'runtimeModelId'> | null): string {
   const normalized = readString(network?.runtimeModelId || network?.id).toLowerCase()
   if (normalized === 'sol') return 'solana'
+  if (normalized === 'cosmos' || normalized === 'cosmoshub-4') return 'cosmoshub'
   return normalized
 }
 

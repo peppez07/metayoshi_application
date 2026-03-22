@@ -2,6 +2,7 @@ import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
 import { callBridgeMethod } from '../utxoRpc'
 import { fetchServerAddressJson, normalizeServerAddress } from '../serverAddressApi'
+import { isMetayoshiHttpUrl } from '../serverOnly'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
 let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
@@ -75,6 +76,18 @@ function isBlockedDirectEvmRpcUrl(url: string): boolean {
     lower.includes('ethereum-rpc.publicnode.com')
     || lower.includes('base-rpc.publicnode.com')
   )
+}
+
+function isHostedBridgeRootRpcUrl(url: string): boolean {
+  const raw = String(url || '').trim()
+  if (!raw || !isMetayoshiHttpUrl(raw)) return false
+  try {
+    const parsed = new URL(raw)
+    const path = parsed.pathname.replace(/\/+$/, '') || '/'
+    return path === '/' || path === '/v1'
+  } catch {
+    return false
+  }
 }
 
 function isEvmBridgePayloadIncompatibleError(error: unknown): boolean {
@@ -304,7 +317,14 @@ async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoR
   } catch (error) {
     if (!isEvmBridgePayloadIncompatibleError(error)) throw error
     const rpcUrl = String(network.rpcUrl || '').trim()
-    if (!rpcUrl || isLikelyExplorerApiUrl(rpcUrl) || isBlockedDirectEvmRpcUrl(rpcUrl)) throw error
+    if (
+      !rpcUrl
+      || isLikelyExplorerApiUrl(rpcUrl)
+      || isBlockedDirectEvmRpcUrl(rpcUrl)
+      || isHostedBridgeRootRpcUrl(rpcUrl)
+    ) {
+      throw error
+    }
     const { ethers } = await loadEthersModule()
     const provider = new ethers.JsonRpcProvider(rpcUrl)
     const wei = await provider.getBalance(address)

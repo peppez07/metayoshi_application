@@ -16,7 +16,7 @@ import type { Network } from '../../coins/types'
 import { readCatalogTrackedEvmTokens } from '../../lib/catalogDb/repository'
 import { signEvmTransaction, signSolanaTransaction } from '../../lib/dappSigning'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-import { isSwapSupportedNetwork } from '../../lib/swapEligibility'
+import { isServerSwapEnabledNetwork, isSwapSupportedNetwork, isSwapTestnetNetwork } from '../../lib/swapEligibility'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
 import {
   createServerExecutionRpcConfig,
@@ -1174,10 +1174,14 @@ const Swap: React.FC = () => {
   const [, setErrorText] = useState('')
 
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
+  const isSwapSelectableNetwork = (network: Network | null | undefined): boolean => {
+    if (!network?.id || isSwapTestnetNetwork(network)) return false
+    return isSwapSupportedNetwork(network) || isServerSwapEnabledNetwork(network, backendSnapshot?.swapChains)
+  }
 
   const supportedSwapNetworks = useMemo(
-    () => enabledNetworks.filter((network) => isSwapSupportedNetwork(network)),
-    [enabledNetworks]
+    () => enabledNetworks.filter((network) => isSwapSelectableNetwork(network)),
+    [enabledNetworks, backendSnapshot?.swapChains]
   )
   const swapCapabilityChains = useMemo(
     () => parseSwapCapabilityChains(backendSnapshot?.swapChains),
@@ -1276,7 +1280,7 @@ const Swap: React.FC = () => {
         canRequestQuotes: false
       }
     }
-    if (!isSwapSupportedNetwork(fromNetwork) || !isSwapSupportedNetwork(toNetwork)) {
+    if (!isSwapSelectableNetwork(fromNetwork) || !isSwapSelectableNetwork(toNetwork)) {
       return {
         state: 'unsupported' as const,
         tone: 'slate' as const,
@@ -1475,7 +1479,7 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!fromNetwork?.id || !isSwapSupportedNetwork(fromNetwork)) {
+    if (!fromNetwork?.id || !isSwapSelectableNetwork(fromNetwork)) {
       setSourceServerAssets([])
       return
     }
@@ -1497,7 +1501,7 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!fromNetwork?.id || !fromItem?.assetId || !isSwapSupportedNetwork(fromNetwork)) {
+    if (!fromNetwork?.id || !fromItem?.assetId || !isSwapSelectableNetwork(fromNetwork)) {
       setDestinationMatrixMarkets([])
       return
     }
@@ -1530,7 +1534,7 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!toNetwork?.id || !isSwapSupportedNetwork(toNetwork)) {
+    if (!toNetwork?.id || !isSwapSelectableNetwork(toNetwork)) {
       setDestinationServerAssets([])
       setDestinationSearchError('')
       setIsSearchingDestinationAssets(false)

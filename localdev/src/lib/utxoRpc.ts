@@ -1178,10 +1178,16 @@ export async function callBridgeMethod(
     name: config.networkId || config.coinSymbol || 'this network'
   })
   if (isEvmBridgeBypassActive(bypassKey)) {
+    if (!canUseDirectEvmRpcFallback(config)) {
+      throw buildHostedReadUnavailableError(config, 'RPC read')
+    }
     const directConfig = createEvmDirectRpcConfig(config)
     return await jsonRpcCall(directConfig, method, params)
   }
   if (missingBridgeCredentials) {
+    if (!canUseDirectEvmRpcFallback(config)) {
+      throw buildHostedReadUnavailableError(config, 'RPC read')
+    }
     const directConfig = createEvmDirectRpcConfig(config)
     return await jsonRpcCall(directConfig, method, params)
   }
@@ -1192,6 +1198,9 @@ export async function callBridgeMethod(
     return result
   } catch (bridgeError) {
     if (!isBridgeFallbackEligibleError(bridgeError)) throw bridgeError
+    if (!canUseDirectEvmRpcFallback(config)) {
+      throw buildHostedReadUnavailableError(config, 'RPC read')
+    }
     const directConfig = createEvmDirectRpcConfig(config)
     try {
       const result = await jsonRpcCall(directConfig, method, params)
@@ -1300,6 +1309,15 @@ function isBlockedDirectEvmRpcUrl(url: string): boolean {
     lower.includes('ethereum-rpc.publicnode.com')
     || lower.includes('base-rpc.publicnode.com')
   )
+}
+
+function canUseDirectEvmRpcFallback(config: UtxoRpcConfig): boolean {
+  const rpcUrl = String(config.rpcUrl || '').trim()
+  if (!rpcUrl) return false
+  if (isLikelyBridgeApiBaseUrl(rpcUrl, config.bridgeUrl)) return false
+  if (isBlockedDirectEvmRpcUrl(rpcUrl)) return false
+  if (isLikelyExplorerApiUrl(rpcUrl)) return false
+  return true
 }
 
 function createEvmDirectRpcConfig(config: UtxoRpcConfig): UtxoRpcConfig {
