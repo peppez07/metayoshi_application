@@ -27,6 +27,7 @@ import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } fr
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { getMissingBridgeCredentialsMessage } from '../lib/bridgeCredentials'
 import { isMetayoshiHttpUrl } from '../lib/serverOnly'
+import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../lib/serverTimeouts'
 import {
   discoverWalletBackend,
   fetchDiscoveredAuthConfig,
@@ -2556,7 +2557,7 @@ async function fetchEvmTokensFromAddressAssets(
   }
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? 10000))
+  const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   try {
     let res: Response
     try {

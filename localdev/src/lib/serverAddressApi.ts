@@ -3,6 +3,7 @@ import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApi
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { getSecureBridgeSessionInfo } from './utxoRpc'
+import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from './serverTimeouts'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
@@ -142,7 +143,7 @@ export async function fetchServerAddressJson(
     const apiBase = apiBases[i]
     const url = `${apiBase}/v1/address/${encodeURIComponent(requestAddress)}/${route}?${params.toString()}`
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? 15000))
+    const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
     try {
       const response = await fetch(url, {
         method: 'GET',

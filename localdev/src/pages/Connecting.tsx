@@ -6,6 +6,7 @@ import clsx from 'clsx'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { discoverWalletBackend, getDiscoveredGatewayBase, getDiscoveredRuntimeService } from '../lib/backendHelp'
 import { assertBridgeCredentialsConfigured } from '../lib/bridgeCredentials'
+import { DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS } from '../lib/serverTimeouts'
 import { useWalletStore } from '../store/walletStore'
 import type { Network } from '../store/walletStore'
 import { getModelIconFrameClass } from '../buildConfig'
@@ -20,7 +21,7 @@ type ServerAuthConfigResult = {
   status?: number
 }
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-const HANDSHAKE_TIMEOUT_MS = 7000
+const HANDSHAKE_TIMEOUT_MS = DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS
 
 function getBridgeOrigin(network?: Network): string | null {
   if (!network?.bridgeUrl) return null

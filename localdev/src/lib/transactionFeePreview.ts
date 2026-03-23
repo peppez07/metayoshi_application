@@ -13,10 +13,14 @@ import {
 import { resolveRuntimeModelId } from './runtimeModel'
 
 export type TransactionFeePreviewSource = 'live' | 'fallback'
+export type TransactionFeePreviewKind = 'estimate' | 'max-cap'
 
 export interface TransactionFeePreviewResult {
   fee: number
   source: TransactionFeePreviewSource
+  kind: TransactionFeePreviewKind
+  isFinal: false
+  statusLabel: string
   debugLabel: string
   debugDetails?: string
 }
@@ -325,7 +329,7 @@ function estimateFeeFromResolvedEvmQuote(
     EstimateTransactionFeePreviewInput,
     'gasLimit' | 'gasPrice' | 'maxFeePerGas' | 'maxPriorityFeePerGas' | 'type'
   >
-): bigint {
+): { feeWei: bigint; kind: TransactionFeePreviewKind; statusLabel: string } {
   const manualGasLimit = parseOptionalRpcQuantity(input.gasLimit, 'gasLimit')
   const manualGasPrice = parseOptionalRpcQuantity(input.gasPrice, 'gasPrice')
   const manualMaxFeePerGas = parseOptionalRpcQuantity(input.maxFeePerGas, 'maxFeePerGas')
@@ -346,14 +350,24 @@ function estimateFeeFromResolvedEvmQuote(
     if (effectiveMaxFeePerGas === undefined || effectiveMaxPriorityFeePerGas === undefined) {
       throw new Error('Missing EIP-1559 fee quote for type 2 transaction')
     }
-    return resolvedGasLimit * effectiveMaxFeePerGas
+    return {
+      feeWei: resolvedGasLimit * effectiveMaxFeePerGas,
+      kind: 'max-cap',
+      statusLabel: 'Live max fee cap'
+    }
   }
 
   const effectiveGasPrice = manualGasPrice ?? quote.gasPrice ?? 1_000_000_000n
-  return resolvedGasLimit * effectiveGasPrice
+  return {
+    feeWei: resolvedGasLimit * effectiveGasPrice,
+    kind: 'estimate',
+    statusLabel: 'Live network estimate'
+  }
 }
 
-async function estimateEvmAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<bigint> {
+async function estimateEvmAssetTransferFee(
+  input: EstimateTransactionFeePreviewInput
+): Promise<{ feeWei: bigint; kind: TransactionFeePreviewKind; statusLabel: string }> {
   const rpcConfig = buildRpcPreviewConfig(input.network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
@@ -419,7 +433,9 @@ async function estimateEvmAssetTransferFee(input: EstimateTransactionFeePreviewI
   return estimateFeeFromResolvedEvmQuote(quote, input)
 }
 
-async function estimateEvmNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<bigint> {
+async function estimateEvmNativeTransferFee(
+  input: EstimateTransactionFeePreviewInput
+): Promise<{ feeWei: bigint; kind: TransactionFeePreviewKind; statusLabel: string }> {
   const rpcConfig = buildRpcPreviewConfig(input.network)
   const amount = String(input.amount || '0').trim() || '0'
   const valueWei = ethers.parseEther(amount)
@@ -446,6 +462,9 @@ export async function estimateTransactionFeePreview(
     return {
       fee: fallback,
       source: 'fallback',
+      kind: 'estimate',
+      isFinal: false,
+      statusLabel: 'Fallback estimate',
       debugLabel: 'Fallback estimate',
       debugDetails: 'Missing sender address for fee preview.'
     }
@@ -453,12 +472,15 @@ export async function estimateTransactionFeePreview(
 
   try {
     if (input.network.coinType === 'EVM' && (toAddress || String(input.dataHex || '').trim())) {
-      const estimatedFeeWei = input.isAssetTransfer
+      const resolvedPreview = input.isAssetTransfer
         ? await estimateEvmAssetTransferFee(input)
         : await estimateEvmNativeTransferFee(input)
       return {
-        fee: Number(ethers.formatEther(estimatedFeeWei)),
+        fee: Number(ethers.formatEther(resolvedPreview.feeWei)),
         source: 'live',
+        kind: resolvedPreview.kind,
+        isFinal: false,
+        statusLabel: resolvedPreview.statusLabel,
         debugLabel: input.isAssetTransfer ? 'EVM live asset quote' : 'EVM live native quote',
         debugDetails: `${input.network.symbol} | lane=${String(input.gasLane || 'balanced')}`
       }
@@ -466,12 +488,23 @@ export async function estimateTransactionFeePreview(
 
     if (input.network.coinType === 'UTXO' && !input.isAssetTransfer && toAddress) {
       const preview = await estimateUtxoNativeTransferFee(input)
-      return { fee: preview.fee, source: 'live', debugLabel: preview.debugLabel, debugDetails: preview.debugDetails }
+      return {
+        fee: preview.fee,
+        source: 'live',
+        kind: 'estimate',
+        isFinal: false,
+        statusLabel: 'Live network estimate',
+        debugLabel: preview.debugLabel,
+        debugDetails: preview.debugDetails
+      }
     }
 
     return {
       fee: fallback,
       source: 'fallback',
+      kind: 'estimate',
+      isFinal: false,
+      statusLabel: 'Fallback estimate',
       debugLabel: 'Fallback estimate',
       debugDetails: `No live preview path for ${input.network.coinType}${input.isAssetTransfer ? ' asset send' : ' native send'}.`
     }
@@ -479,6 +512,9 @@ export async function estimateTransactionFeePreview(
     return {
       fee: fallback,
       source: 'fallback',
+      kind: 'estimate',
+      isFinal: false,
+      statusLabel: 'Fallback estimate',
       debugLabel: 'Fallback estimate',
       debugDetails: compactPreviewError(error)
     }

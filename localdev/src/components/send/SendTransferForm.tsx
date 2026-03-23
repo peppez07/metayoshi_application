@@ -10,7 +10,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins/donationPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
-import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
+import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
 import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
 
 function formatUnits(value: number, maxDecimals = 8): string {
@@ -107,6 +107,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const [estimatedNativeFee, setEstimatedNativeFee] = useState(fallbackEstimatedNativeFee)
   const [isEstimatingFee, setIsEstimatingFee] = useState(false)
   const [isFeeReady, setIsFeeReady] = useState(false)
+  const [feePreviewMeta, setFeePreviewMeta] = useState<Pick<TransactionFeePreviewResult, 'source' | 'kind' | 'statusLabel'> | null>(null)
 
   const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
@@ -171,6 +172,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             setEstimatedNativeFee(fallback)
             setIsEstimatingFee(false)
             setIsFeeReady(false)
+            setFeePreviewMeta(null)
           }
           return
         }
@@ -180,6 +182,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             setEstimatedNativeFee(fallback)
             setIsEstimatingFee(false)
             setIsFeeReady(true)
+            setFeePreviewMeta({ source: 'fallback', kind: 'estimate', statusLabel: 'Fallback estimate' })
           }
           return
         }
@@ -204,10 +207,16 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           if (cancelled) return
           setEstimatedNativeFee(preview.fee || fallback)
           setIsFeeReady(true)
+          setFeePreviewMeta({
+            source: preview.source,
+            kind: preview.kind,
+            statusLabel: preview.statusLabel
+          })
         } catch {
           if (cancelled) return
           setEstimatedNativeFee(fallback)
           setIsFeeReady(true)
+          setFeePreviewMeta({ source: 'fallback', kind: 'estimate', statusLabel: 'Fallback estimate' })
         } finally {
           if (!cancelled) setIsEstimatingFee(false)
         }
@@ -513,6 +522,15 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             {isNative
               ? `Estimated required fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}${displayEstimatedNativeFeeFiat ? ` (${displayEstimatedNativeFeeFiat})` : ''}.`
               : `Estimated network fee: ~${formatUnits(estimatedNativeFee, nativeInputDecimals)} ${activeNetwork.symbol}${displayEstimatedNativeFeeFiat ? ` (${displayEstimatedNativeFeeFiat})` : ''}. Asset transfer fee is paid in native ${activeNetwork.symbol}.`}
+            {!isEstimatingFee && feePreviewMeta && (
+              <span className="block mt-1">
+                {feePreviewMeta.statusLabel}. {feePreviewMeta.kind === 'max-cap'
+                  ? 'This is a maximum possible fee, not the final paid fee.'
+                  : feePreviewMeta.source === 'live'
+                    ? 'This is still an estimate until the transaction is mined.'
+                    : 'Live pricing was unavailable, so this uses fallback defaults.'}
+              </span>
+            )}
             {isEstimatingFee && (
               <span className="block mt-1">Updating from network...</span>
             )}

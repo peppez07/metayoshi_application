@@ -7,6 +7,7 @@ import { getBuildFeatureFlag } from '../buildConfig'
 import { resolveAuthApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 import { discoverWalletBackend, getDiscoveredGatewayBase } from './backendHelp'
 import { assertBridgeCredentialsConfigured, getMissingBridgeCredentialsMessage } from './bridgeCredentials'
+import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from './serverTimeouts'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
@@ -36,7 +37,7 @@ export interface UtxoRpcConfig {
   secureBridgeWritesEnabled?: boolean
   secureBridgeAddressResolver?: () => Promise<string>
   secureBridgeSigner?: (message: string) => Promise<{ address: string; signature: string }>
-  timeoutMs?: number      // request timeout (default 10000ms)
+  timeoutMs?: number      // request timeout (default 30000ms)
   apiInterceptor?: CoinApiInterceptor
 
   /**
@@ -768,7 +769,7 @@ async function fetchBridgeAddressBalance(
   const params = new URLSearchParams()
   params.set('coin', coin)
   params.set('chain', chain || 'main')
-  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
 
   for (let i = 0; i < apiBases.length; i += 1) {
     const url = `${apiBases[i]}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`
@@ -847,7 +848,7 @@ async function fetchBridgeAddressAssets(
   applyOptionalServerApiKey(headers)
   applyOptionalBridgeBasicAuthHeaders(headers, config)
 
-  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   const scaleDisplayAmountToSats = (value: unknown, decimals = 8): number => {
     const raw = String(value ?? '').trim()
     if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return 0
@@ -936,7 +937,7 @@ async function fetchBridgeAddressUtxos(
   const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos?${params.toString()}`
 
   const controller = new AbortController()
-  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(url, {
@@ -1003,7 +1004,7 @@ async function jsonRpcCall(
   const { url, username, password, isBridge } = resolveConnection(config)
   const interceptor = resolveApiInterceptor(config)
   if (!url) throw new Error('RPC URL is required')
-  const timeoutMs = Number(config.timeoutMs ?? 10000)
+  const timeoutMs = Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
 
   const headers: Record<string, string> = {
     // Bitcoin nodes need text/plain for direct; bridge accepts application/json
@@ -1551,7 +1552,7 @@ function buildBtczExplorerAddressUrls(address: string, suffix = ''): string[] {
 
 async function fetchBtczExplorerJson(config: UtxoRpcConfig, url: string): Promise<any | null> {
   const controller = new AbortController()
-  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(url, {
@@ -1592,7 +1593,7 @@ function buildBitcoinExplorerTxUrls(config: UtxoRpcConfig, txid: string): string
 
 async function fetchBitcoinExplorerJson(config: UtxoRpcConfig, url: string): Promise<any | null> {
   const controller = new AbortController()
-  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
+  const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(url, {
@@ -2132,7 +2133,7 @@ export async function scanAddressUnspent(
   // Chainstate scans can be slow on large datasets; use a longer timeout.
   const scanConfig: UtxoRpcConfig = {
     ...config,
-    timeoutMs: Math.max(Number(config.timeoutMs ?? 10000), 45000)
+    timeoutMs: Math.max(Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS), 45000)
   }
 
   const parseScanResult = (res: any): UtxoUnspent[] => {
@@ -3057,7 +3058,7 @@ export async function sendRtmAsset(
         if (txKey) headers['X-Bridge-Tx-Key'] = txKey
 
         const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), Number(assetConfig.timeoutMs ?? 15000))
+        const timer = setTimeout(() => controller.abort(), Number(assetConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
         let res: Response
         try {
           res = await fetch(sendUrl, { method: 'POST', headers, body: candidateBody, signal: controller.signal })
@@ -3249,7 +3250,7 @@ export async function sendBridgeTokenTransfer(
     if (txKey) headers['X-Bridge-Tx-Key'] = txKey
 
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
     let res: Response
     try {
       const requestBody = signedFormat === 'evm-raw-hex'
@@ -3367,7 +3368,7 @@ export async function sendBridgeEvmSignedRelay(
     if (txKey) headers['X-Bridge-Tx-Key'] = txKey
 
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
     let res: Response
     try {
       res = await fetch(url, {
@@ -3474,7 +3475,7 @@ export async function sendBridgeSuiSignedRelay(
     if (txKey) headers['X-Bridge-Tx-Key'] = txKey
 
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
     let res: Response
     try {
       res = await fetch(url, {
@@ -3581,7 +3582,7 @@ export async function fetchBridgeTokenBalances(
   if (tokenId) body.tokenId = tokenId
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 15000))
+  const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   let res: Response
   try {
     res = await fetch(url, {

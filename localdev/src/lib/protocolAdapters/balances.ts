@@ -2,6 +2,7 @@ import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
 import { callBridgeMethod } from '../utxoRpc'
 import { fetchServerAddressJson, normalizeServerAddress } from '../serverAddressApi'
+import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../serverTimeouts'
 import { isMetayoshiHttpUrl } from '../serverOnly'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
@@ -299,7 +300,7 @@ async function getTronBalanceViaServer(network: Network, address: string, timeou
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
   try {
     const response = await fetchServerAddressJson(network, address, 'balance', {}, {
-      timeoutMs: Number(rpcConfig.timeoutMs ?? 15000),
+      timeoutMs: Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS),
       rpcConfig
     })
     if (response.ok) {
@@ -408,7 +409,7 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
   }
   if (modelId === 'tron') {
     try {
-      return await getTronBalanceViaServer(network, address, Number(rpcConfig?.timeoutMs ?? 15000))
+      return await getTronBalanceViaServer(network, address, Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
     } catch {
       // Fall through to alternate reads.
     }

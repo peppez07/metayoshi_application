@@ -10,7 +10,7 @@ import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyn
 import { getAccountDisplayName } from '../../lib/accountName'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
-import { estimateTransactionFeePreview } from '../../lib/transactionFeePreview'
+import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
 import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import {
@@ -263,6 +263,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
   const [isNetworkFeeReady, setIsNetworkFeeReady] = useState(false)
+  const [feePreviewMeta, setFeePreviewMeta] = useState<Pick<TransactionFeePreviewResult, 'source' | 'kind' | 'statusLabel'> | null>(null)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
   const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
   const dappEvmRequest = isDappTxRoute && isDappEvmTransactionRequest(currentDappRequest?.request)
@@ -328,6 +329,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
             setEstimatedNetworkFee(fallback)
             setIsEstimatingNetworkFee(false)
             setIsNetworkFeeReady(false)
+            setFeePreviewMeta(null)
           }
           return
         }
@@ -336,6 +338,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
             setEstimatedNetworkFee(fallback)
             setIsEstimatingNetworkFee(false)
             setIsNetworkFeeReady(true)
+            setFeePreviewMeta({ source: 'fallback', kind: 'estimate', statusLabel: 'Fallback estimate' })
           }
           return
         }
@@ -363,11 +366,17 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           if (!cancelled) {
             setEstimatedNetworkFee(preview.fee || fallback)
             setIsNetworkFeeReady(true)
+            setFeePreviewMeta({
+              source: preview.source,
+              kind: preview.kind,
+              statusLabel: preview.statusLabel
+            })
           }
         } catch {
           if (!cancelled) {
             setEstimatedNetworkFee(fallback)
             setIsNetworkFeeReady(true)
+            setFeePreviewMeta({ source: 'fallback', kind: 'estimate', statusLabel: 'Fallback estimate' })
           }
         } finally {
           if (!cancelled) setIsEstimatingNetworkFee(false)
@@ -828,7 +837,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
               <div className="flex justify-between items-start">
                  <div className="space-y-0.5">
                     <p className="text-[11px] font-bold">Network fee estimate</p>
-                    <p className="text-[10px] text-gray-500">Based on current wallet defaults</p>
+                    <p className="text-[10px] text-gray-500">
+                      {feePreviewMeta?.statusLabel || 'Waiting for fee quote'}
+                    </p>
                  </div>
                  <div className="text-right">
                     <p className="text-xs font-bold">{formatCoinAmount(estimatedNetworkFee)}</p>
@@ -837,7 +848,13 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                       <p className="text-[10px] text-gray-400">{formatFiatValue(estimatedNetworkFeeFiat)}</p>
                     )}
                     <p className="text-[9px] text-gray-500">
-                      {isEstimatingNetworkFee ? 'Updating from network...' : 'Live quote when available'}
+                      {isEstimatingNetworkFee
+                        ? 'Updating from network...'
+                        : feePreviewMeta?.kind === 'max-cap'
+                          ? 'Maximum possible fee before submission. Final paid fee may be lower.'
+                          : feePreviewMeta?.source === 'live'
+                            ? 'Live network estimate. Final paid fee is known only after execution.'
+                            : 'Fallback estimate. Live pricing unavailable.'}
                     </p>
                     {!isEstimatingNetworkFee && hasFeePreviewInputs && !isNetworkFeeReady && (
                       <p className="text-[9px] text-gray-500">Fee must be resolved before confirmation.</p>

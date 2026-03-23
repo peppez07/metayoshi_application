@@ -1,6 +1,7 @@
 import { normalizeConfiguredApiBaseUrl } from './apiBase'
+import { DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS } from './serverTimeouts'
 
-const HELP_TIMEOUT_MS = 6000
+const HELP_TIMEOUT_MS = DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS
 const DEFAULT_PUBLIC_HELP_ORIGIN = 'https://api.metayoshi.app'
 
 type HelpCommands = Record<string, string[]>

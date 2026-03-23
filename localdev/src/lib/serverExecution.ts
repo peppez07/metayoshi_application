@@ -5,6 +5,7 @@ import { callBridgeMethod, getSecureBridgeSessionInfo } from './utxoRpc'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { buildDiscoveredUrl, discoverWalletBackend } from './backendHelp'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
+import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from './serverTimeouts'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 const ERC20_METADATA_IFACE = new ethers.Interface(['function decimals() view returns (uint8)'])
@@ -244,20 +245,38 @@ function failServerExecutionMonitor(requestId: string, error: unknown, httpStatu
   })
 }
 
-async function fetchJsonWithStatus(url: string, init: RequestInit): Promise<JsonResponse> {
-  const response = await fetch(url, init)
-  const text = await response.text().catch(() => '')
-  let json: any = null
+async function fetchJsonWithStatus(
+  url: string,
+  init: RequestInit,
+  timeoutMs = DEFAULT_WALLET_SERVER_TIMEOUT_MS
+): Promise<JsonResponse> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    json = text ? JSON.parse(text) : null
-  } catch {
-    json = null
-  }
-  return {
-    ok: response.ok,
-    status: response.status,
-    json,
-    text
+    const response = await fetch(url, {
+      ...init,
+      signal: init.signal ?? controller.signal
+    })
+    const text = await response.text().catch(() => '')
+    let json: any = null
+    try {
+      json = text ? JSON.parse(text) : null
+    } catch {
+      json = null
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      json,
+      text
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Server execution request timed out after ${timeoutMs}ms: ${url}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -366,7 +385,7 @@ async function executeServerManagedJsonRequest(
         ...(APP_API_KEY ? { 'X-API-Key': APP_API_KEY } : {}),
         ...(init.headers as Record<string, string> | undefined)
       }
-    })
+    }, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
 
     if (!response.ok) {
       const detail = readString(
