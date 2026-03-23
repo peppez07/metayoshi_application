@@ -19,6 +19,7 @@ import { getEnabledNetworks } from '../../lib/networkVisibility'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
 import {
   createServerExecutionRpcConfig,
+  fetchServerSwapChainPairs,
   fetchServerSwapMatrix,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
@@ -29,6 +30,7 @@ import {
   searchServerSwapAssets,
   submitServerSwap,
   type ServerSwapCatalogAsset,
+  type ServerSwapChainPair,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
@@ -1104,6 +1106,7 @@ const Swap: React.FC = () => {
   const [sourceSelectorFilter, setSourceSelectorFilter] = useState<AssetSelectorFilter>('all')
   const [destinationSelectorFilter, setDestinationSelectorFilter] = useState<AssetSelectorFilter>('all')
   const [sourceServerAssets, setSourceServerAssets] = useState<ServerSwapCatalogAsset[]>([])
+  const [serverChainPairs, setServerChainPairs] = useState<ServerSwapChainPair[]>([])
   const [destinationMatrixMarkets, setDestinationMatrixMarkets] = useState<ServerSwapMatrixMarket[]>([])
   const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [isSearchingDestinationAssets, setIsSearchingDestinationAssets] = useState(false)
@@ -1119,8 +1122,24 @@ const Swap: React.FC = () => {
   const [, setErrorText] = useState('')
 
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
-  const sourceNetworkOptions = enabledNetworks
-  const destinationNetworkOptions = enabledNetworks
+  const selectedSourceNetwork = enabledNetworks.find((network) => network.id === fromNetworkId) || enabledNetworks[0] || null
+  const selectedSourceServerNetworkId = resolveSwapServerNetworkId(selectedSourceNetwork)
+  const sourceNetworkOptions = useMemo(() => {
+    if (serverChainPairs.length <= 0) return enabledNetworks
+    const allowedSourceIds = new Set(serverChainPairs.map((pair) => pair.sourceNetworkId))
+    const filtered = enabledNetworks.filter((network) => allowedSourceIds.has(resolveSwapServerNetworkId(network)))
+    return filtered.length > 0 ? filtered : enabledNetworks
+  }, [enabledNetworks, serverChainPairs])
+  const destinationNetworkOptions = useMemo(() => {
+    if (serverChainPairs.length <= 0) return enabledNetworks
+    const filtered = enabledNetworks.filter((network) => (
+      serverChainPairs.some((pair) => (
+        pair.sourceNetworkId === selectedSourceServerNetworkId
+        && pair.destinationNetworkId === resolveSwapServerNetworkId(network)
+      ))
+    ))
+    return filtered.length > 0 ? filtered : enabledNetworks
+  }, [enabledNetworks, selectedSourceServerNetworkId, serverChainPairs])
 
   const fromNetwork = sourceNetworkOptions.find((network) => network.id === fromNetworkId)
     || enabledNetworks.find((network) => network.id === fromNetworkId)
@@ -1197,7 +1216,7 @@ const Swap: React.FC = () => {
       title: 'Swap search is available',
       detail: gatewayRuntimeOk === false
         ? 'The gateway reports degraded health, but the wallet will still let the backend decide which routes are available.'
-        : 'The wallet exposes all enabled networks and lets the backend decide which combinations, token lists, and routes are available.',
+        : 'The wallet exposes chain-to-chain routes returned by the backend and limits destination chains to the selected source chain.',
       canRequestQuotes: true
     }
   }, [
@@ -1260,6 +1279,22 @@ const Swap: React.FC = () => {
       : (toOptions.length > 0
     ? `No receive tokens match "${destinationQuery}". Try a symbol like ${toOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
     : 'No receive tokens were returned by the live MetaYoshi server for this route.')
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const pairs = await fetchServerSwapChainPairs()
+        if (cancelled) return
+        setServerChainPairs(pairs)
+      } catch (error) {
+        if (cancelled) return
+        console.warn('Failed to load swap chain pairs from server', error)
+        setServerChainPairs([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!enabledNetworks.length) return

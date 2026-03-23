@@ -1,0 +1,8 @@
+{
+  "coins": {
+    "disabled": ["sol", "sui", "doge"]
+  },
+  "features": {
+    "swapSolanaV1Enabled": false
+  }
+}

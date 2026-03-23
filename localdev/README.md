@@ -79,6 +79,11 @@ npm run build
 
 To use local environment values, copy `.env.example` to `.env.local` and fill in your own settings.
 
+To hide or deactivate specific blockchains before building, use either:
+
+- `.env.local` with `VITE_DISABLED_COINS`
+- `metayoshi.build.json` for a more explicit build profile
+
 Important:
 
 - this public repo does not include live server credentials
@@ -158,6 +163,38 @@ Important behavior detail:
 ## Configuration notes
 
 For local use, create a `.env.local` file from `.env.example` and provide your own values.
+
+### Hide networks before build
+
+If you want a wallet build that does not show specific blockchains in the app at all, you can exclude them before `npm run build`.
+
+Simple option in `.env.local`:
+
+```bash
+VITE_DISABLED_COINS=sol,sui,doge
+```
+
+You can also whitelist only the networks you want:
+
+```bash
+VITE_ENABLED_COINS=eth,base,arb,polygon
+```
+
+For a dedicated build profile, create `metayoshi.build.json` in the `localdev` folder:
+
+```json
+{
+  "coins": {
+    "disabled": ["sol", "sui", "doge"]
+  }
+}
+```
+
+Notes:
+
+- hidden coins are removed from the built wallet network list, not just visually toggled off
+- `metayoshi.build.json` takes precedence over `VITE_ENABLED_COINS` and `VITE_DISABLED_COINS`
+- the build config also supports `"enabled": "tested"` or an explicit list such as `"enabled": ["eth", "base", "arb"]`
 
 The public repository does not include:
 

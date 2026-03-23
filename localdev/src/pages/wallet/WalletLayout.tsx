@@ -141,6 +141,10 @@ const WalletLayout: React.FC = () => {
   const isSendRoute = location.pathname.startsWith('/wallet/send')
   const isSwapRoute = location.pathname.startsWith('/wallet/swap')
   const isFocusedFlowRoute = isSendRoute || isSwapRoute
+  const isBalanceSurfaceRoute =
+    location.pathname === '/assets'
+    || location.pathname.startsWith('/wallet/assets')
+    || location.pathname.startsWith('/wallet/model/')
   const coinModel = activeNetwork ? resolveCoinModelFamily(activeNetwork) : 'generic'
   const coinModelRouteKey = coinModelFamilyToRouteKey(coinModel)
   const isModelRoute = location.pathname.startsWith('/wallet/model/')
@@ -173,6 +177,18 @@ const WalletLayout: React.FC = () => {
       }
     }
   }, [collectActiveNetworkData, activeNetworkId, activeAccountId, isFocusedFlowRoute])
+
+  useEffect(() => {
+    if (!hasActiveNetwork || !isBalanceSurfaceRoute) return
+    void collectActiveNetworkData({ force: true })
+  }, [
+    collectActiveNetworkData,
+    hasActiveNetwork,
+    isBalanceSurfaceRoute,
+    location.pathname,
+    activeNetworkId,
+    activeAccountId
+  ])
 
   useEffect(() => {
     if (!hasActiveNetwork || !isModelRoute) return
