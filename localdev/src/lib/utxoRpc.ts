@@ -161,6 +161,12 @@ function applyOptionalServerApiKey(headers: Record<string, string>): void {
   headers['X-API-Key'] = APP_API_KEY
 }
 
+function shouldUseBalanceHostOnly(config: UtxoRpcConfig): boolean {
+  const networkId = String(config.networkId || '').trim().toLowerCase()
+  const coinSymbol = String(config.coinSymbol || '').trim().toUpperCase()
+  return networkId === 'rtm' || coinSymbol === 'RTM'
+}
+
 function asError(error: unknown): Error {
   if (error instanceof Error) return error
   return new Error(String(error ?? 'Unknown error'))
@@ -760,7 +766,9 @@ async function fetchBridgeAddressBalance(
   const bridgeBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
   const primaryApiBase = (options?.preferSendApiBase ? resolveSendApiBaseUrl : resolveBalanceApiBaseUrl)(bridgeBase)
   const fallbackApiBase = (options?.preferSendApiBase ? resolveBalanceApiBaseUrl : resolveSendApiBaseUrl)(bridgeBase)
-  const apiBases = [...new Set([primaryApiBase, fallbackApiBase].filter(Boolean))]
+  const apiBases = shouldUseBalanceHostOnly(config)
+    ? [...new Set([resolveBalanceApiBaseUrl(bridgeBase)].filter(Boolean))]
+    : [...new Set([primaryApiBase, fallbackApiBase].filter(Boolean))]
   if (apiBases.length <= 0) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -832,10 +840,12 @@ async function fetchBridgeAddressAssets(
 ): Promise<Record<string, number> | null> {
   if (!config.bridgeUrl) return null
   const bridgeBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
-  const apiBases = [...new Set([
-    resolveBalanceApiBaseUrl(bridgeBase),
-    resolveSendApiBaseUrl(bridgeBase)
-  ].filter(Boolean))]
+  const apiBases = shouldUseBalanceHostOnly(config)
+    ? [...new Set([resolveBalanceApiBaseUrl(bridgeBase)].filter(Boolean))]
+    : [...new Set([
+        resolveBalanceApiBaseUrl(bridgeBase),
+        resolveSendApiBaseUrl(bridgeBase)
+      ].filter(Boolean))]
   if (apiBases.length <= 0) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
