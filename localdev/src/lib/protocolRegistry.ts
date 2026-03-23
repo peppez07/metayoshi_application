@@ -587,7 +587,8 @@ export async function sendUtxoNonCustodialNetworkTransaction(input: SendUtxoNonC
   }
   if (unspent.length === 0) {
     const balanceHint = await getUtxoBalance(rpcConfig, senderAddress, {
-      preferAddressIndex: supportsAddressIndex(net.coinSymbol)
+      preferAddressIndex: supportsAddressIndex(net.coinSymbol),
+      preferSendApiBase: true
     }).catch(() => null)
     if (balanceHint && balanceHint.total > 0 && balanceHint.confirmed <= 0) {
       throw new Error(`Funds are present but not yet spendable (unconfirmed). Confirmed: ${balanceHint.confirmed}, total: ${balanceHint.total}`)

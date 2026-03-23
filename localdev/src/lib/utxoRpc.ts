@@ -693,7 +693,9 @@ async function fetchBridgeAddressAssetUtxos(
   address: string
 ): Promise<RtmUnspentAsset[]> {
   if (!config.bridgeUrl) return []
-  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
+  // Spend-path reads must stay on the send host so send/spend flows do not
+  // depend on the balance subdomain being in sync or even enabled.
+  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) return []
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -706,9 +708,26 @@ async function fetchBridgeAddressAssetUtxos(
   applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'asset UTXO lookup')
 
   const res = await fetch(url, { method: 'GET', headers })
-  if (!res.ok) return []
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let detail = text.trim()
+    if (detail) {
+      try {
+        const parsed = JSON.parse(detail)
+        detail = String(parsed?.error || parsed?.message || parsed?.detail || detail)
+      } catch {}
+    }
+    throw new Error(
+      `Bridge asset UTXO lookup failed for ${address} ` +
+      `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
+      `${compactErrorText(detail || 'Unexpected gateway error')}`
+    )
+  }
   const json = await res.json().catch(() => null)
-  if (!json?.ok) return []
+  if (!json?.ok) {
+    const detail = compactErrorText(String(json?.error || json?.message || 'Bridge asset UTXO lookup failed'))
+    throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
+  }
   const assets = Array.isArray(json?.assets) ? json.assets : []
 
   return assets.map((row: any) => ({
@@ -733,11 +752,15 @@ async function fetchBridgeAddressAssetUtxos(
 
 async function fetchBridgeAddressBalance(
   config: UtxoRpcConfig,
-  address: string
+  address: string,
+  options?: { preferSendApiBase?: boolean }
 ): Promise<UtxoBalance | null> {
   if (!config.bridgeUrl) return null
-  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
-  if (!apiBase) return null
+  const bridgeBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const primaryApiBase = (options?.preferSendApiBase ? resolveSendApiBaseUrl : resolveBalanceApiBaseUrl)(bridgeBase)
+  const fallbackApiBase = (options?.preferSendApiBase ? resolveBalanceApiBaseUrl : resolveSendApiBaseUrl)(bridgeBase)
+  const apiBases = [...new Set([primaryApiBase, fallbackApiBase].filter(Boolean))]
+  if (apiBases.length <= 0) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
   if (!coin) return null
@@ -745,51 +768,61 @@ async function fetchBridgeAddressBalance(
   const params = new URLSearchParams()
   params.set('coin', coin)
   params.set('chain', chain || 'main')
-  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`
-
-  const controller = new AbortController()
   const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal
-    })
-    if (!res.ok) return null
-    const json = await res.json().catch(() => null)
-    if (!json?.ok) return null
 
-    const balanceSat = Number(json?.balanceSat)
-    const unconfirmedBalanceSat = Number(json?.unconfirmedBalanceSat)
-    if (Number.isFinite(balanceSat) || Number.isFinite(unconfirmedBalanceSat)) {
-      const confirmed = Number(((Number.isFinite(balanceSat) ? balanceSat : 0) / 1e8).toFixed(8))
-      const unconfirmed = Number(((Number.isFinite(unconfirmedBalanceSat) ? unconfirmedBalanceSat : 0) / 1e8).toFixed(8))
-      return {
-        confirmed,
-        unconfirmed,
-        total: Number((confirmed + unconfirmed).toFixed(8))
+  for (let i = 0; i < apiBases.length; i += 1) {
+    const url = `${apiBases[i]}/v1/address/${encodeURIComponent(address)}/balance?${params.toString()}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        if (res.status >= 500 && i < apiBases.length - 1) continue
+        return null
       }
-    }
-
-    const confirmed = Number(json?.balance)
-    const unconfirmed = Number(json?.unconfirmedBalance)
-    if (Number.isFinite(confirmed) || Number.isFinite(unconfirmed)) {
-      const safeConfirmed = Number.isFinite(confirmed) ? Number(confirmed.toFixed(8)) : 0
-      const safeUnconfirmed = Number.isFinite(unconfirmed) ? Number(unconfirmed.toFixed(8)) : 0
-      return {
-        confirmed: safeConfirmed,
-        unconfirmed: safeUnconfirmed,
-        total: Number((safeConfirmed + safeUnconfirmed).toFixed(8))
+      const json = await res.json().catch(() => null)
+      if (!json?.ok) {
+        if (i < apiBases.length - 1) continue
+        return null
       }
-    }
 
-    return null
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
+      const balanceSat = Number(json?.balanceSat)
+      const unconfirmedBalanceSat = Number(json?.unconfirmedBalanceSat)
+      if (Number.isFinite(balanceSat) || Number.isFinite(unconfirmedBalanceSat)) {
+        const confirmed = Number(((Number.isFinite(balanceSat) ? balanceSat : 0) / 1e8).toFixed(8))
+        const unconfirmed = Number(((Number.isFinite(unconfirmedBalanceSat) ? unconfirmedBalanceSat : 0) / 1e8).toFixed(8))
+        return {
+          confirmed,
+          unconfirmed,
+          total: Number((confirmed + unconfirmed).toFixed(8))
+        }
+      }
+
+      const confirmed = Number(json?.balance)
+      const unconfirmed = Number(json?.unconfirmedBalance)
+      if (Number.isFinite(confirmed) || Number.isFinite(unconfirmed)) {
+        const safeConfirmed = Number.isFinite(confirmed) ? Number(confirmed.toFixed(8)) : 0
+        const safeUnconfirmed = Number.isFinite(unconfirmed) ? Number(unconfirmed.toFixed(8)) : 0
+        return {
+          confirmed: safeConfirmed,
+          unconfirmed: safeUnconfirmed,
+          total: Number((safeConfirmed + safeUnconfirmed).toFixed(8))
+        }
+      }
+
+      return null
+    } catch {
+      if (i >= apiBases.length - 1) return null
+    } finally {
+      clearTimeout(timer)
+    }
   }
+
+  return null
 }
 
 async function fetchBridgeAddressAssets(
@@ -797,8 +830,12 @@ async function fetchBridgeAddressAssets(
   address: string
 ): Promise<Record<string, number> | null> {
   if (!config.bridgeUrl) return null
-  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
-  if (!apiBase) return null
+  const bridgeBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBases = [...new Set([
+    resolveBalanceApiBaseUrl(bridgeBase),
+    resolveSendApiBaseUrl(bridgeBase)
+  ].filter(Boolean))]
+  if (apiBases.length <= 0) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
   if (!coin) return null
@@ -806,70 +843,78 @@ async function fetchBridgeAddressAssets(
   const params = new URLSearchParams()
   params.set('coin', coin)
   params.set('chain', chain || 'main')
-  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets?${params.toString()}`
   const headers: Record<string, string> = { Accept: 'application/json' }
   applyOptionalServerApiKey(headers)
   applyOptionalBridgeBasicAuthHeaders(headers, config)
 
-  const controller = new AbortController()
   const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? 10000))
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal: controller.signal
-    })
-    if (!res.ok) return null
-    const json = await res.json().catch(() => null)
-    const rows = Array.isArray(json?.assets)
-      ? json.assets
-      : Array.isArray(json?.items)
-        ? json.items
-        : []
-    if (rows.length <= 0) return {}
-
-    const balances: Record<string, number> = {}
-    const scaleDisplayAmountToSats = (value: unknown, decimals = 8): number => {
-      const raw = String(value ?? '').trim()
-      if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return 0
-      const [whole = '0', fraction = ''] = raw.split('.')
-      const scaledText = `${whole}${fraction.padEnd(decimals, '0').slice(0, decimals)}`
-        .replace(/^0+(?=\d)/, '')
-      if (!/^\d+$/.test(scaledText)) return 0
-      const scaled = BigInt(scaledText || '0')
-      return scaled > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(scaled)
-    }
-    for (const row of rows) {
-      const item = row as Record<string, unknown>
-      const assetName = String(
-        item.assetName
-        || item.assetId
-        || item.name
-        || item.symbol
-        || ''
-      ).trim()
-
-      let rawAmount = Number(
-        item.amountSat
-        ?? item.satoshis
-        ?? item.balanceSat
-        ?? 0
-      )
-      if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
-        // The hosted address-assets endpoint may only expose human-readable
-        // amount/balance fields. The RTM UI store expects sat-like raw units.
-        rawAmount = scaleDisplayAmountToSats(item.amount ?? item.balance, 8)
-      }
-      if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
-      balances[assetName] = Math.trunc(rawAmount)
-    }
-    return balances
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
+  const scaleDisplayAmountToSats = (value: unknown, decimals = 8): number => {
+    const raw = String(value ?? '').trim()
+    if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return 0
+    const [whole = '0', fraction = ''] = raw.split('.')
+    const scaledText = `${whole}${fraction.padEnd(decimals, '0').slice(0, decimals)}`
+      .replace(/^0+(?=\d)/, '')
+    if (!/^\d+$/.test(scaledText)) return 0
+    const scaled = BigInt(scaledText || '0')
+    return scaled > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(scaled)
   }
+
+  for (let i = 0; i < apiBases.length; i += 1) {
+    const url = `${apiBases[i]}/v1/address/${encodeURIComponent(address)}/assets?${params.toString()}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        if (res.status >= 500 && i < apiBases.length - 1) continue
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      const rows = Array.isArray(json?.assets)
+        ? json.assets
+        : Array.isArray(json?.items)
+          ? json.items
+          : []
+      if (rows.length <= 0) return {}
+
+      const balances: Record<string, number> = {}
+      for (const row of rows) {
+        const item = row as Record<string, unknown>
+        const assetName = String(
+          item.assetName
+          || item.assetId
+          || item.name
+          || item.symbol
+          || ''
+        ).trim()
+
+        let rawAmount = Number(
+          item.amountSat
+          ?? item.satoshis
+          ?? item.balanceSat
+          ?? 0
+        )
+        if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+          // The hosted address-assets endpoint may only expose human-readable
+          // amount/balance fields. The RTM UI store expects sat-like raw units.
+          rawAmount = scaleDisplayAmountToSats(item.amount ?? item.balance, 8)
+        }
+        if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
+        balances[assetName] = Math.trunc(rawAmount)
+      }
+      return balances
+    } catch {
+      if (i >= apiBases.length - 1) return null
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  return null
 }
 
 async function fetchBridgeAddressUtxos(
@@ -878,7 +923,8 @@ async function fetchBridgeAddressUtxos(
   minConf = 0
 ): Promise<UtxoUnspent[] | null> {
   if (!config.bridgeUrl) return null
-  const apiBase = resolveBalanceApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
+  // UTXO selection for spend/send flows must read from the send host.
+  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
   if (!apiBase) return null
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
@@ -1738,7 +1784,7 @@ async function fetchBtczExplorerUtxos(
 export async function getUtxoBalance(
   config: UtxoRpcConfig,
   address?: string,
-  options?: { preferAddressIndex?: boolean }
+  options?: { preferAddressIndex?: boolean; preferSendApiBase?: boolean }
 ): Promise<UtxoBalance> {
   // BTCZ bridge often has address-index RPC disabled; use explorer first to avoid
   // a slow failing probe on every balance refresh.
@@ -1751,11 +1797,11 @@ export async function getUtxoBalance(
     if (btcExplorerBalance) return btcExplorerBalance
   }
   if (address && isDogecoinConfig(config)) {
-    const dogeBridgeBalance = await fetchBridgeAddressBalance(config, address)
+    const dogeBridgeBalance = await fetchBridgeAddressBalance(config, address, options)
     if (dogeBridgeBalance) return dogeBridgeBalance
   }
   if (address && config.bridgeUrl) {
-    const hostedBridgeBalance = await fetchBridgeAddressBalance(config, address)
+    const hostedBridgeBalance = await fetchBridgeAddressBalance(config, address, options)
     if (hostedBridgeBalance) return hostedBridgeBalance
     if (!hasConfiguredBridgeCredentials(config)) {
       throw buildHostedReadUnavailableError(config, 'balance')
@@ -2456,7 +2502,7 @@ export async function sendRtmAssetNonCustodial(
 
   let allAssetUtxos = await listUnspentAssets(config, fromAddress).catch(() => [])
   if (allAssetUtxos.length === 0 && !config.useLocalRpc) {
-    const byAddressApi = await fetchBridgeAddressAssetUtxos(config, fromAddress).catch(() => [])
+    const byAddressApi = await fetchBridgeAddressAssetUtxos(config, fromAddress)
     if (byAddressApi.length > 0) allAssetUtxos = byAddressApi
   }
   const spendableAssetUtxos: NonCustodialAssetSpendInput[] = []
@@ -2499,7 +2545,7 @@ export async function sendRtmAssetNonCustodial(
   if (spendableAssetUtxos.length === 0) {
     throw new Error(
       `No spendable asset UTXOs found for ${assetIdentity.canonicalName} on ${fromAddress}. ` +
-      'Bridge listunspentassets is empty for this address; import key on server (Path A) or enable asset UTXO exposure for strict Option B.'
+      'The non-custodial asset UTXO read path returned no confirmed spendable outputs for this address.'
     )
   }
 

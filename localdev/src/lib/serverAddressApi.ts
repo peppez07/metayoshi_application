@@ -1,5 +1,5 @@
 import type { Network } from '../coins'
-import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from './apiBase'
+import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { getSecureBridgeSessionInfo } from './utxoRpc'
@@ -59,6 +59,12 @@ export function deriveServerApiBaseUrl(network: Network): string {
   return resolveBalanceApiBaseUrl(String(network.rpcUrl || '').trim().replace(/\/+$/, ''))
 }
 
+function deriveServerApiBaseCandidates(network: Network): string[] {
+  const primary = deriveServerApiBaseUrl(network)
+  const secondary = resolveSendApiBaseUrl(primary)
+  return [...new Set([primary, secondary].filter(Boolean))]
+}
+
 export function resolveServerCoinChain(network: Network): { coin: string; chain: string } | null {
   const coin = String(network.serverCoinId || network.id || '').trim().toLowerCase()
   if (!coin) return null
@@ -101,9 +107,6 @@ export async function fetchServerAddressJson(
   json: Record<string, unknown> | null
   text: string
 }> {
-  const apiBase = deriveServerApiBaseUrl(network)
-  if (!apiBase) throw new Error('Server API base URL is not configured')
-
   const coinChain = resolveServerCoinChain(network)
   if (!coinChain) throw new Error('Server coin id is not configured')
 
@@ -119,36 +122,65 @@ export async function fetchServerAddressJson(
     if (normalized) params.set(key, normalized)
   }
 
-  const url = `${apiBase}/v1/address/${encodeURIComponent(requestAddress)}/${route}?${params.toString()}`
   const headers: Record<string, string> = {}
   await appendOptionalServerAuthHeaders(headers, network, options.rpcConfig)
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? 15000))
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal: controller.signal
-    })
-    const text = await response.text().catch(() => '')
-    const json = (() => {
-      try { return text ? JSON.parse(text) as Record<string, unknown> : null } catch { return null }
-    })()
-    return {
-      address: requestAddress,
-      url,
-      ok: response.ok,
-      status: response.status,
-      json,
-      text
+  const apiBases = deriveServerApiBaseCandidates(network)
+  if (apiBases.length <= 0) throw new Error('Server API base URL is not configured')
+
+  let lastError: Error | null = null
+  let lastResponse: {
+    address: string
+    url: string
+    ok: boolean
+    status: number
+    json: Record<string, unknown> | null
+    text: string
+  } | null = null
+
+  for (let i = 0; i < apiBases.length; i += 1) {
+    const apiBase = apiBases[i]
+    const url = `${apiBase}/v1/address/${encodeURIComponent(requestAddress)}/${route}?${params.toString()}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs ?? 15000))
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal
+      })
+      const text = await response.text().catch(() => '')
+      const json = (() => {
+        try { return text ? JSON.parse(text) as Record<string, unknown> : null } catch { return null }
+      })()
+      const result = {
+        address: requestAddress,
+        url,
+        ok: response.ok,
+        status: response.status,
+        json,
+        text
+      }
+      if (!response.ok && response.status >= 500 && i < apiBases.length - 1) {
+        lastResponse = result
+        continue
+      }
+      return result
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        lastError = new Error(`Server ${route} request timed out: ${url}`)
+        if (i < apiBases.length - 1) continue
+        throw lastError
+      }
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (i < apiBases.length - 1) continue
+      throw lastError
+    } finally {
+      clearTimeout(timer)
     }
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(`Server ${route} request timed out: ${url}`)
-    }
-    throw error
-  } finally {
-    clearTimeout(timer)
   }
+
+  if (lastResponse) return lastResponse
+  if (lastError) throw lastError
+  throw new Error(`Server ${route} request failed before a response was returned`)
 }

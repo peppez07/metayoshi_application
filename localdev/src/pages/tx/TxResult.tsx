@@ -59,8 +59,8 @@ const TxResult: React.FC = () => {
   const returnLabel = String(txState.returnLabel || '').trim() || 'Home'
 
   return (
-    <div className="flex flex-col h-full bg-dark-800">
-      <header className="px-4 py-3 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
+    <div className="flex min-h-0 h-full flex-col bg-dark-800">
+      <header className="shrink-0 px-4 py-3 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-gray-200">Transaction Details</p>
           <p className="text-[10px] text-gray-500 uppercase tracking-widest">{network?.name || txState.networkId}</p>
@@ -68,7 +68,7 @@ const TxResult: React.FC = () => {
         <IoCheckmarkCircle className="w-6 h-6 text-green-400" />
       </header>
 
-      <div className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 min-h-0 p-4 space-y-4 overflow-y-auto custom-scrollbar">
         <div className="rounded-2xl border border-green-500/25 bg-green-500/10 p-4 space-y-1">
           <p className="text-[11px] font-black uppercase tracking-[0.2em] text-green-300">Submitted</p>
           <p className="text-sm font-bold text-white">
@@ -120,7 +120,7 @@ const TxResult: React.FC = () => {
         ) : null}
       </div>
 
-      <footer className="p-4 border-t border-dark-600 flex gap-3">
+      <footer className="shrink-0 p-4 border-t border-dark-600 flex gap-3">
         <Button
           variant="outline"
           className="flex-1 btn-outline"

@@ -262,6 +262,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const fallbackEstimatedNetworkFee = estimateNetworkFeeUi(activeNetwork)
   const [estimatedNetworkFee, setEstimatedNetworkFee] = useState<number>(fallbackEstimatedNetworkFee)
   const [isEstimatingNetworkFee, setIsEstimatingNetworkFee] = useState(false)
+  const [isNetworkFeeReady, setIsNetworkFeeReady] = useState(false)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
   const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
   const dappEvmRequest = isDappTxRoute && isDappEvmTransactionRequest(currentDappRequest?.request)
@@ -281,6 +282,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     : (safeAmount > 0 ? `${safeAmount} ${isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}` : 'No amount provided')
   const modelPreferences = getNetworkModelPreferences(displayNetworkId)
   const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
+  const hasFeePreviewInputs = Boolean(fromAddress && hasTxState)
   const availableNativeBalance = useMemo(() => {
     const scoped = parseCoinAmount(activeAccount?.networkBalances?.[displayNetworkId])
     if (scoped > 0) return scoped
@@ -321,35 +323,54 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
             || (activeNetwork.coinType === 'UTXO' && !isAssetTransfer && feePreviewRecipient && Number(amount) > 0)
           )
         )
+        if (!hasFeePreviewInputs) {
+          if (!cancelled) {
+            setEstimatedNetworkFee(fallback)
+            setIsEstimatingNetworkFee(false)
+            setIsNetworkFeeReady(false)
+          }
+          return
+        }
         if (!canFetchLivePreview) {
           if (!cancelled) {
             setEstimatedNetworkFee(fallback)
             setIsEstimatingNetworkFee(false)
+            setIsNetworkFeeReady(true)
           }
           return
         }
+        if (!cancelled) setIsNetworkFeeReady(false)
         setIsEstimatingNetworkFee(true)
-        const preview = await estimateTransactionFeePreview({
-          network: activeNetwork,
-          fromAddress,
-          toAddress: feePreviewRecipient,
-          amount,
-          assetId: assetId || undefined,
-          assetLogos: activeNetworkLogos,
-          isAssetTransfer,
-          dataHex: dappEvmRequest?.data,
-          gasLimit: dappEvmRequest?.gasLimit,
-          gasPrice: dappEvmRequest?.gasPrice,
-          maxFeePerGas: dappEvmRequest?.maxFeePerGas,
-          maxPriorityFeePerGas: dappEvmRequest?.maxPriorityFeePerGas,
-          type: dappEvmRequest?.type,
-          gasLane: modelPreferences.evmGasLane,
-          utxoFeePreset: modelPreferences.utxoFeePreset,
-          utxoInputStrategy: modelPreferences.utxoInputStrategy
-        })
-        if (!cancelled) {
-          setEstimatedNetworkFee(preview.fee || fallback)
-          setIsEstimatingNetworkFee(false)
+        try {
+          const preview = await estimateTransactionFeePreview({
+            network: activeNetwork,
+            fromAddress,
+            toAddress: feePreviewRecipient,
+            amount,
+            assetId: assetId || undefined,
+            assetLogos: activeNetworkLogos,
+            isAssetTransfer,
+            dataHex: dappEvmRequest?.data,
+            gasLimit: dappEvmRequest?.gasLimit,
+            gasPrice: dappEvmRequest?.gasPrice,
+            maxFeePerGas: dappEvmRequest?.maxFeePerGas,
+            maxPriorityFeePerGas: dappEvmRequest?.maxPriorityFeePerGas,
+            type: dappEvmRequest?.type,
+            gasLane: modelPreferences.evmGasLane,
+            utxoFeePreset: modelPreferences.utxoFeePreset,
+            utxoInputStrategy: modelPreferences.utxoInputStrategy
+          })
+          if (!cancelled) {
+            setEstimatedNetworkFee(preview.fee || fallback)
+            setIsNetworkFeeReady(true)
+          }
+        } catch {
+          if (!cancelled) {
+            setEstimatedNetworkFee(fallback)
+            setIsNetworkFeeReady(true)
+          }
+        } finally {
+          if (!cancelled) setIsEstimatingNetworkFee(false)
         }
       }
       void run()
@@ -370,6 +391,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
     modelPreferences.utxoInputStrategy,
+    hasFeePreviewInputs,
     feePreviewRecipient
   ])
 
@@ -704,8 +726,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   }
 
   const content = (
-    <div className="flex flex-col h-full bg-dark-800">
-      <header className="px-4 py-2 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
+    <div className="flex min-h-0 h-full flex-col bg-dark-800">
+      <header className="shrink-0 px-4 py-2 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
         <button
           type="button"
           onClick={handleBack}
@@ -727,7 +749,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         </button>
       </header>
 
-      <div className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 min-h-0 p-4 space-y-4 overflow-y-auto custom-scrollbar">
         {isDappTxRoute && loadingDappRequest && (
           <div className="p-3 bg-dark-900/60 border border-dark-600 rounded-xl text-xs text-gray-300">
             Loading dapp transaction request...
@@ -817,6 +839,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                     <p className="text-[9px] text-gray-500">
                       {isEstimatingNetworkFee ? 'Updating from network...' : 'Live quote when available'}
                     </p>
+                    {!isEstimatingNetworkFee && hasFeePreviewInputs && !isNetworkFeeReady && (
+                      <p className="text-[9px] text-gray-500">Fee must be resolved before confirmation.</p>
+                    )}
                  </div>
               </div>
 
@@ -944,7 +969,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
 
       </div>
 
-      <footer className="p-4 border-t border-dark-600 flex gap-4 mt-auto">
+      <footer className="shrink-0 p-4 border-t border-dark-600 flex gap-4 mt-auto">
         <Button 
           variant="outline" 
           className="flex-1 btn-outline"
@@ -958,6 +983,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           disabled={
             isRejectMode
             || isSubmitting
+            || (hasFeePreviewInputs && (!isNetworkFeeReady || isEstimatingNetworkFee))
             || loadingDappRequest
             || (isDappTxRoute && !pendingDappRequest)
             || !(isAssetTransfer ? caps.features.assetSend : caps.features.nativeSend)

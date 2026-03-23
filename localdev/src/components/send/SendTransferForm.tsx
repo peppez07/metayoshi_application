@@ -106,6 +106,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const [error, setError] = useState('')
   const [estimatedNativeFee, setEstimatedNativeFee] = useState(fallbackEstimatedNativeFee)
   const [isEstimatingFee, setIsEstimatingFee] = useState(false)
+  const [isFeeReady, setIsFeeReady] = useState(false)
 
   const fromAddress = activeAccount?.networkAddresses?.[activeNetworkId]
     || (activeNetwork.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
@@ -120,6 +121,15 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     : null
   const displayEstimatedNativeFeeFiat = formatFiatValue(estimatedNativeFeeFiat)
   const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
+  const previewAmount = isFixedOneMode ? '1' : amount
+  const hasFeePreviewInputs = Boolean(
+    fromAddress
+    && feePreviewRecipient
+    && (
+      isFixedOneMode
+      || (isIntegerMode ? /^\d+$/.test(String(previewAmount || '').trim()) : Number(previewAmount) > 0)
+    )
+  )
 
   useEffect(() => {
     setToAddress('')
@@ -147,7 +157,6 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     let cancelled = false
     const timer = window.setTimeout(() => {
       const run = async () => {
-        const previewAmount = isFixedOneMode ? '1' : amount
         const fallback = estimateNetworkFeeUi(activeNetwork)
         const canFetchLivePreview = Boolean(
           fromAddress
@@ -157,32 +166,51 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           )
         )
 
-        if (!canFetchLivePreview) {
+        if (!hasFeePreviewInputs) {
           if (!cancelled) {
             setEstimatedNativeFee(fallback)
             setIsEstimatingFee(false)
+            setIsFeeReady(false)
           }
           return
         }
 
+        if (!canFetchLivePreview) {
+          if (!cancelled) {
+            setEstimatedNativeFee(fallback)
+            setIsEstimatingFee(false)
+            setIsFeeReady(true)
+          }
+          return
+        }
+
+        if (!cancelled) setIsFeeReady(false)
         setIsEstimatingFee(true)
 
-        const preview = await estimateTransactionFeePreview({
-          network: activeNetwork,
-          fromAddress,
-          toAddress: feePreviewRecipient,
-          amount: previewAmount,
-          assetId: String(item.assetId || '').trim() || undefined,
-          assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
-          isAssetTransfer: !isNative,
-          gasLane: modelPreferences.evmGasLane,
-          utxoFeePreset: modelPreferences.utxoFeePreset,
-          utxoInputStrategy: modelPreferences.utxoInputStrategy
-        })
+        try {
+          const preview = await estimateTransactionFeePreview({
+            network: activeNetwork,
+            fromAddress,
+            toAddress: feePreviewRecipient,
+            amount: previewAmount,
+            assetId: String(item.assetId || '').trim() || undefined,
+            assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
+            isAssetTransfer: !isNative,
+            gasLane: modelPreferences.evmGasLane,
+            utxoFeePreset: modelPreferences.utxoFeePreset,
+            utxoInputStrategy: modelPreferences.utxoInputStrategy
+          })
 
-        if (cancelled) return
-        setEstimatedNativeFee(preview.fee || fallback)
-        setIsEstimatingFee(false)
+          if (cancelled) return
+          setEstimatedNativeFee(preview.fee || fallback)
+          setIsFeeReady(true)
+        } catch {
+          if (cancelled) return
+          setEstimatedNativeFee(fallback)
+          setIsFeeReady(true)
+        } finally {
+          if (!cancelled) setIsEstimatingFee(false)
+        }
       }
 
       void run()
@@ -201,6 +229,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
     modelPreferences.utxoInputStrategy,
+    hasFeePreviewInputs,
+    previewAmount,
     feePreviewRecipient
   ])
 
@@ -486,6 +516,9 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             {isEstimatingFee && (
               <span className="block mt-1">Updating from network...</span>
             )}
+            {!isEstimatingFee && hasFeePreviewInputs && !isFeeReady && (
+              <span className="block mt-1">Fee must be resolved before you can continue.</span>
+            )}
           </p>
         </div>
 
@@ -501,7 +534,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
         )}
 
         <div className="mt-auto pt-4">
-          <Button type="submit" className="w-full btn-primary">
+          <Button
+            type="submit"
+            className="w-full btn-primary"
+            disabled={hasFeePreviewInputs && (!isFeeReady || isEstimatingFee)}
+            isLoading={hasFeePreviewInputs && isEstimatingFee}
+          >
             Continue
           </Button>
         </div>
