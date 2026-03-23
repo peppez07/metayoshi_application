@@ -885,12 +885,24 @@ async function fetchBridgeAddressAssets(
         return null
       }
       const json = await res.json().catch(() => null)
+      if (json && typeof json === 'object' && 'ok' in json && json.ok !== true) {
+        if (i < apiBases.length - 1) continue
+        return null
+      }
       const rows = Array.isArray(json?.assets)
         ? json.assets
         : Array.isArray(json?.items)
           ? json.items
           : []
-      if (rows.length <= 0) return {}
+      if (rows.length <= 0) {
+        const hasExplicitEmptyPayload =
+          Boolean(json && typeof json === 'object' && (
+            Array.isArray(json?.assets)
+            || Array.isArray(json?.items)
+          ))
+        if (!hasExplicitEmptyPayload && i < apiBases.length - 1) continue
+        return {}
+      }
 
       const balances: Record<string, number> = {}
       for (const row of rows) {
@@ -1797,6 +1809,10 @@ export async function getUtxoBalance(
   address?: string,
   options?: { preferAddressIndex?: boolean; preferSendApiBase?: boolean }
 ): Promise<UtxoBalance> {
+  const shouldPreferBridgeAddressIndex =
+    Boolean(address)
+    && (options?.preferAddressIndex || String(config.networkId || '').trim().toLowerCase() === 'rtm' || String(config.coinSymbol || '').trim().toUpperCase() === 'RTM')
+
   // BTCZ bridge often has address-index RPC disabled; use explorer first to avoid
   // a slow failing probe on every balance refresh.
   if (address && isBtczConfig(config)) {
@@ -1811,18 +1827,10 @@ export async function getUtxoBalance(
     const dogeBridgeBalance = await fetchBridgeAddressBalance(config, address, options)
     if (dogeBridgeBalance) return dogeBridgeBalance
   }
-  if (address && config.bridgeUrl) {
-    const hostedBridgeBalance = await fetchBridgeAddressBalance(config, address, options)
-    if (hostedBridgeBalance) return hostedBridgeBalance
-    if (!hasConfiguredBridgeCredentials(config)) {
-      throw buildHostedReadUnavailableError(config, 'balance')
-    }
-  }
-
   let addressIndexFailed = false
   // Address-indexed balance path (Raptoreum family): works for non-wallet addresses.
   // Response fields are typically in satoshi-like integer units (8 decimals).
-  if (address && options?.preferAddressIndex) {
+  if (shouldPreferBridgeAddressIndex) {
     try {
       const byAddress = await jsonRpcCall(config, 'getaddressbalance', [{ addresses: [address] }])
       const spendableRaw = Number(byAddress?.balance_spendable ?? byAddress?.balance ?? 0)
@@ -1836,6 +1844,14 @@ export async function getUtxoBalance(
     } catch {
       addressIndexFailed = true
       // fall through to wallet/listunspent path
+    }
+  }
+
+  if (address && config.bridgeUrl) {
+    const hostedBridgeBalance = await fetchBridgeAddressBalance(config, address, options)
+    if (hostedBridgeBalance) return hostedBridgeBalance
+    if (!hasConfiguredBridgeCredentials(config)) {
+      throw buildHostedReadUnavailableError(config, 'balance')
     }
   }
 
@@ -2757,14 +2773,43 @@ export async function listAssetBalancesByAddress(
   config: UtxoRpcConfig,
   address: string
 ): Promise<Record<string, number>> {
+  const shouldPreferBridgeAssetRpc =
+    String(config.networkId || '').trim().toLowerCase() === 'rtm'
+    || String(config.coinSymbol || '').trim().toUpperCase() === 'RTM'
+
+  if (shouldPreferBridgeAssetRpc) {
+    try {
+      const result = await jsonRpcCall(config, 'listassetbalancesbyaddress', [address])
+      const normalized = (result ?? {}) as Record<string, number>
+      if (Object.keys(normalized).length > 0) return normalized
+    } catch (error) {
+      if (!isBridgeAssetMetadataNotFoundError(error)) {
+        // keep falling through to hosted and UTXO-based recovery
+      } else {
+        const unspent = await listUnspentAssets(config, address).catch(() => [])
+        const balances: Record<string, number> = {}
+        for (const row of unspent) {
+          const assetName = String(row?.assetName ?? '').trim()
+          const rawAmount = Number(row?.amount ?? row?.satoshis ?? 0)
+          if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
+          balances[assetName] = (balances[assetName] ?? 0) + Math.trunc(rawAmount)
+        }
+        if (Object.keys(balances).length > 0) return balances
+      }
+    }
+  }
+
   const hostedAssets = await fetchBridgeAddressAssets(config, address)
-  if (hostedAssets) return hostedAssets
+  if (hostedAssets && Object.keys(hostedAssets).length > 0) return hostedAssets
   if (config.bridgeUrl && !hasConfiguredBridgeCredentials(config)) {
+    if (hostedAssets) return hostedAssets
     throw buildHostedReadUnavailableError(config, 'asset')
   }
   try {
     const result = await jsonRpcCall(config, 'listassetbalancesbyaddress', [address])
-    return (result ?? {}) as Record<string, number>
+    const normalized = (result ?? {}) as Record<string, number>
+    if (Object.keys(normalized).length > 0 || !hostedAssets) return normalized
+    return hostedAssets
   } catch (error) {
     // Some bridge nodes return 502 "Asset metadata not found" for this method
     // when one asset in the set has broken metadata. Recover balances from UTXOs.
@@ -2777,6 +2822,7 @@ export async function listAssetBalancesByAddress(
       if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
       balances[assetName] = (balances[assetName] ?? 0) + Math.trunc(rawAmount)
     }
+    if (Object.keys(balances).length === 0 && hostedAssets) return hostedAssets
     return balances
   }
 }
@@ -2834,6 +2880,7 @@ export async function sendRtmAsset(
   assetChangeAddr = ''
 ): Promise<string> {
   const assetConfig: UtxoRpcConfig = config
+  let preHelperError = ''
 
   const qtyNum = parseRpcDecimalAmount(qty, 8, 'Asset quantity')
   const normalizedAssetId = assetId.trim()
@@ -2951,7 +2998,7 @@ export async function sendRtmAsset(
       }
     }
     if (secureLastErr) {
-      throw new Error(secureLastErr)
+      preHelperError = secureLastErr
     }
   }
 
@@ -3045,7 +3092,7 @@ export async function sendRtmAsset(
   ])
   const txKeyAttempts = bridgeTxKeyCandidates.length > 0 ? bridgeTxKeyCandidates : ['']
 
-  let lastError = ''
+  let lastError = preHelperError
   for (const sendUrl of dedupedSendUrls) {
     for (const candidateAssetId of sendAssetCandidates) {
       const hasWalletInPath =

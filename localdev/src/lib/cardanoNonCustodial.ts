@@ -1,6 +1,7 @@
 import * as bip39 from 'bip39'
 import type { Network } from '../coins'
 import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
+import { appendOptionalServerAuthHeaders } from './serverRequestAuth'
 
 type CardanoLib = typeof import('@emurgo/cardano-serialization-lib-browser')
 
@@ -60,26 +61,9 @@ function resolveApiBaseUrl(network: Network): string {
   return resolveSendApiBaseUrl(DEFAULT_PUBLIC_API_BASE_URL)
 }
 
-function resolveApiHeaders(): Record<string, string> {
+async function resolveApiHeaders(network: Network): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const apiKey = String(import.meta.env.VITE_APP_API_KEY || '').trim()
-  if (apiKey) headers['X-API-Key'] = apiKey
-  return headers
-}
-
-function appendOptionalBridgeBasicAuth(
-  headers: Record<string, string>,
-  network: Network
-): void {
-  const username = String(network.bridgeUsername || '').trim()
-  const password = String(network.bridgePassword || '').trim()
-  if (!username || !password) return
-  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
-}
-
-function resolveAuthorizedApiHeaders(network: Network): Record<string, string> {
-  const headers = resolveApiHeaders()
-  appendOptionalBridgeBasicAuth(headers, network)
+  await appendOptionalServerAuthHeaders(headers, { network })
   return headers
 }
 
@@ -127,7 +111,7 @@ async function requestCardanoConstruct(
   const chain = /testnet|preprod|preview/i.test(String(network.rpcUrl || '')) ? 'test' : 'main'
   const res = await fetch(`${apiBase}/v1/cardano/${chain}/tx/construct`, {
     method: 'POST',
-    headers: resolveAuthorizedApiHeaders(network),
+    headers: await resolveApiHeaders(network),
     body: JSON.stringify(payload)
   })
   const json = await res.json().catch(() => ({}))
@@ -160,7 +144,7 @@ async function submitCardanoSignedTx(
   const chain = /testnet|preprod|preview/i.test(String(network.rpcUrl || '')) ? 'test' : 'main'
   const res = await fetch(`${apiBase}/v1/cardano/${chain}/tx/submit`, {
     method: 'POST',
-    headers: resolveAuthorizedApiHeaders(network),
+    headers: await resolveApiHeaders(network),
     body: JSON.stringify(payload)
   })
   const json = await res.json().catch(() => ({}))

@@ -1,39 +1,9 @@
 import type { Network } from '../coins'
-import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
+import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from './apiBase'
 import { resolveRuntimeModelId as resolveNetworkModelId } from './runtimeModel'
 import type { UtxoRpcConfig } from './utxoRpc'
-import { getSecureBridgeSessionInfo } from './utxoRpc'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from './serverTimeouts'
-
-const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-
-async function appendOptionalServerAuthHeaders(
-  headers: Record<string, string>,
-  network: Network,
-  rpcConfig?: UtxoRpcConfig
-): Promise<void> {
-  const canTryBearer = Boolean(
-    rpcConfig?.bridgeUrl
-    && typeof rpcConfig?.secureBridgeSigner === 'function'
-  )
-  if (canTryBearer) {
-    try {
-      const session = await getSecureBridgeSessionInfo(rpcConfig!)
-      if (session.token) headers.Authorization = `Bearer ${session.token}`
-    } catch {
-      // Fall back to API key / legacy Basic auth when bearer session is unavailable.
-    }
-  }
-
-  if (APP_API_KEY) headers['X-API-Key'] = APP_API_KEY
-
-  if (String(headers.Authorization || '').trim().toLowerCase().startsWith('bearer ')) return
-
-  const username = String(network.bridgeUsername || '').trim()
-  const password = String(network.bridgePassword || '').trim()
-  if (!username || !password) return
-  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
-}
+import { appendOptionalServerAuthHeaders } from './serverRequestAuth'
 
 let tronWebModulePromise: Promise<typeof import('tronweb')> | null = null
 
@@ -62,8 +32,7 @@ export function deriveServerApiBaseUrl(network: Network): string {
 
 function deriveServerApiBaseCandidates(network: Network): string[] {
   const primary = deriveServerApiBaseUrl(network)
-  const secondary = resolveSendApiBaseUrl(primary)
-  return [...new Set([primary, secondary].filter(Boolean))]
+  return [...new Set([primary].filter(Boolean))]
 }
 
 export function resolveServerCoinChain(network: Network): { coin: string; chain: string } | null {
@@ -124,7 +93,7 @@ export async function fetchServerAddressJson(
   }
 
   const headers: Record<string, string> = {}
-  await appendOptionalServerAuthHeaders(headers, network, options.rpcConfig)
+  await appendOptionalServerAuthHeaders(headers, { network, rpcConfig: options.rpcConfig })
 
   const apiBases = deriveServerApiBaseCandidates(network)
   if (apiBases.length <= 0) throw new Error('Server API base URL is not configured')

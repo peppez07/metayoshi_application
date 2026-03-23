@@ -1,10 +1,10 @@
 import type { Network } from '../../coins'
 import type { UtxoRpcConfig } from '../utxoRpc'
-import { getSecureBridgeSessionInfo } from '../utxoRpc'
 import { getCoinRuntimeProfile } from '../../coins'
 import { resolveBalanceApiBaseUrl } from '../apiBase'
 import { isCosmosAddressForHrp, resolveCosmosAddressConfig } from '../cosmosAddress'
 import { resolveRuntimeModelId } from '../runtimeModel'
+import { appendOptionalServerAuthHeaders } from '../serverRequestAuth'
 
 function resolveModelId(network: Network): string {
   return resolveRuntimeModelId(network)
@@ -53,26 +53,7 @@ function resolveCosmosApiMeta(network: Network, rpcConfig?: UtxoRpcConfig): { ap
 
 async function buildCosmosServerHeaders(network: Network, rpcConfig?: UtxoRpcConfig): Promise<Record<string, string>> {
   const headers: Record<string, string> = {}
-  const canTryBearer = Boolean(
-    rpcConfig?.bridgeUrl
-    && typeof rpcConfig?.secureBridgeSigner === 'function'
-  )
-  if (canTryBearer) {
-    try {
-      const session = await getSecureBridgeSessionInfo(rpcConfig!)
-      if (session.token) headers.Authorization = `Bearer ${session.token}`
-    } catch {
-      // Fall back to API key / legacy Basic auth.
-    }
-  }
-  const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-  if (apiKey) headers['X-API-Key'] = apiKey
-  if (String(headers.Authorization || '').trim().toLowerCase().startsWith('bearer ')) return headers
-  const username = String(rpcConfig?.bridgeUsername || network.bridgeUsername || '').trim()
-  const password = String(rpcConfig?.bridgePassword || network.bridgePassword || '').trim()
-  if (username && password) {
-    headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
-  }
+  await appendOptionalServerAuthHeaders(headers, { network, rpcConfig })
   return headers
 }
 

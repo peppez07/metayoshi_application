@@ -25,7 +25,7 @@ import { getSolanaTokenRegistry } from '../lib/solanaTokenRegistry'
 import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress'
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
-import { getMissingBridgeCredentialsMessage } from '../lib/bridgeCredentials'
+import { getMissingBridgeCredentialsMessage, normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import { isMetayoshiHttpUrl } from '../lib/serverOnly'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../lib/serverTimeouts'
 import {
@@ -37,6 +37,7 @@ import {
   fetchDiscoveredRuntimeHealth
 } from '../lib/backendHelp'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
+import { appendOptionalServerAuthHeaders } from '../lib/serverRequestAuth'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { isCosmosLikeModelId, isCroCosmosModelId, requiresMnemonicForNetwork, resolveRuntimeModelId as resolveNetworkModelId } from '../lib/runtimeModel'
@@ -924,10 +925,17 @@ async function createUtxoRpcConfig(
   const override = opts.localRpcOverride
   const bridgeTxKeyCandidates = await resolveBridgeTxKeyCandidates()
   const bridgeTxKey = bridgeTxKeyCandidates[0]
+  const env = (import.meta as any)?.env || {}
   const secureBridgeWritesEnabled = (() => {
     return getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)
   })()
   const secureBridgeApiBaseUrl = String(import.meta.env.VITE_SECURE_BRIDGE_API_BASE_URL || '').trim()
+  const bridgeUsername =
+    normalizeBridgeCredentialValue(net.bridgeUsername)
+    || normalizeBridgeCredentialValue(env.VITE_BRIDGE_USER)
+  const bridgePassword =
+    normalizeBridgeCredentialValue(net.bridgePassword)
+    || normalizeBridgeCredentialValue(env.VITE_BRIDGE_PASSWORD)
 
   return {
     networkId: net.id,
@@ -940,8 +948,8 @@ async function createUtxoRpcConfig(
     rpcPassword: (override?.rpcPassword?.trim()) || net.rpcPassword,
     // Bridge fields
     bridgeUrl:      net.bridgeUrl,
-    bridgeUsername: net.bridgeUsername,
-    bridgePassword: net.bridgePassword,
+    bridgeUsername,
+    bridgePassword,
     bridgeTxKey,
     bridgeTxKeyCandidates,
     secureBridgeApiBaseUrl: secureBridgeApiBaseUrl || undefined,
@@ -1215,7 +1223,24 @@ function buildScopedAssetStateUpdate(
   }
 
   if (state.activeAccountId === accountId && state.activeNetworkId === networkId) {
-    Object.assign(next, buildScopedAssetProjection(state, accountId, networkId))
+    Object.assign(next, {
+      networkAssets: {
+        ...state.networkAssets,
+        [networkId]: payload.assets
+      },
+      networkAssetLogos: {
+        ...state.networkAssetLogos,
+        [networkId]: payload.logos
+      },
+      networkAssetLabels: {
+        ...state.networkAssetLabels,
+        [networkId]: payload.labels
+      },
+      evmNftAssets: {
+        ...state.evmNftAssets,
+        [networkId]: payload.evmNfts
+      }
+    })
   }
 
   return next
@@ -2548,13 +2573,7 @@ async function fetchEvmTokensFromAddressAssets(
   const url = `${apiBase}/v1/address/${encodeURIComponent(ownerAddress)}`
     + `/assets?coin=${encodeURIComponent(coin)}&chain=${encodeURIComponent(chain)}&multichain=1`
   const headers: Record<string, string> = {}
-  const apiKey = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
-  if (apiKey) headers['X-API-Key'] = apiKey
-  const bridgeUsername = String(rpcConfig.bridgeUsername || '').trim()
-  const bridgePassword = String(rpcConfig.bridgePassword || '').trim()
-  if (bridgeUsername && bridgePassword) {
-    headers.Authorization = `Basic ${btoa(`${bridgeUsername}:${bridgePassword}`)}`
-  }
+  await appendOptionalServerAuthHeaders(headers, { rpcConfig })
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))

@@ -1,6 +1,7 @@
 import type { Network } from '../coins'
 import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 import { deriveMoneroAddress } from './moneroAddress'
+import { appendOptionalServerAuthHeaders } from './serverRequestAuth'
 
 type MoneroSignerRuntime = {
   selfTest?: () => Promise<{ ok: boolean; details?: string }>
@@ -50,27 +51,11 @@ function resolveApiBaseUrl(network: Network): string {
   return resolveSendApiBaseUrl(DEFAULT_PUBLIC_API_BASE_URL)
 }
 
-function resolveApiHeaders(): Record<string, string> {
+async function resolveApiHeaders(network: Network): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const apiKey = String(import.meta.env.VITE_APP_API_KEY || '').trim()
   if (!apiKey) throw new Error('VITE_APP_API_KEY is required for Monero non-custodial submit flow')
-  headers['X-API-Key'] = apiKey
-  return headers
-}
-
-function appendOptionalBridgeBasicAuth(
-  headers: Record<string, string>,
-  network: Network
-): void {
-  const username = String(network.bridgeUsername || '').trim()
-  const password = String(network.bridgePassword || '').trim()
-  if (!username || !password) return
-  headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
-}
-
-function resolveAuthorizedApiHeaders(network: Network): Record<string, string> {
-  const headers = resolveApiHeaders()
-  appendOptionalBridgeBasicAuth(headers, network)
+  await appendOptionalServerAuthHeaders(headers, { network })
   return headers
 }
 
@@ -141,7 +126,7 @@ async function submitSignedMoneroTx(params: {
   const apiBase = resolveApiBaseUrl(params.network)
   const res = await fetch(`${apiBase}/v1/monero/${chain}/tx/submit`, {
     method: 'POST',
-    headers: resolveAuthorizedApiHeaders(params.network),
+    headers: await resolveApiHeaders(params.network),
     body: JSON.stringify({
       signedTxBlobHex: params.signedTxBlobHex,
       txHash: params.txHash || ''

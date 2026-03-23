@@ -9,6 +9,7 @@ const UtxoAssetsModelPage: React.FC = () => {
     activeAccountId,
     activeNetworkId,
     networkAssets,
+    accountNetworkAssets,
     fetchNetworkAssets,
     networks,
     getNetworkModelPreferences,
@@ -19,7 +20,8 @@ const UtxoAssetsModelPage: React.FC = () => {
   const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0]
   const composer = getNetworkModelPreferences(activeNetworkId).utxoTransferComposer || 'single'
   const controls = activeNetwork ? resolveNetworkModelControls(activeNetwork) : []
-  const assetsMap = networkAssets?.[activeNetworkId] || {}
+  const assetScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
+  const assetsMap = accountNetworkAssets?.[assetScopeKey] || networkAssets?.[activeNetworkId] || {}
   const assetRows = useMemo(
     () => Object.entries(assetsMap).map(([symbol, rawAmount]) => ({ symbol, amount: Number(rawAmount) })),
     [assetsMap]

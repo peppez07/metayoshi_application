@@ -46,8 +46,8 @@ function replaceServiceHost(baseUrl: string, service: WalletApiService): string 
     const parsed = new URL(normalized)
     if (isLocalHostname(parsed.hostname)) return parsed.origin
     const host = String(parsed.hostname || '').trim().toLowerCase()
-    if ((host === 'metayoshi.app' || host === 'metayoshi.com') && service === 'swap') {
-      parsed.hostname = `swap.${host}`
+    if (host === 'metayoshi.app' || host === 'metayoshi.com') {
+      parsed.hostname = `${service}.${host}`
       return parsed.origin
     }
     const parts = parsed.hostname.split('.').filter(Boolean)

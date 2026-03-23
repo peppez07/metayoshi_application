@@ -751,6 +751,7 @@ export function createServerExecutionRpcConfig(
     bridgeUrl: network.bridgeUrl,
     bridgeUsername: network.bridgeUsername,
     bridgePassword: network.bridgePassword,
+    secureBridgeApiBaseUrl: String((import.meta as any)?.env?.VITE_SECURE_BRIDGE_API_BASE_URL || '').trim() || undefined,
     chainId: network.chainId,
     explorerUrl: network.explorerUrl,
     sendTransaction: options?.sendTransaction,
