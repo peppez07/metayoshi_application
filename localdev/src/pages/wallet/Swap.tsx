@@ -16,11 +16,9 @@ import type { Network } from '../../coins/types'
 import { readCatalogTrackedEvmTokens } from '../../lib/catalogDb/repository'
 import { signEvmTransaction, signSolanaTransaction } from '../../lib/dappSigning'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
-import { isServerSwapEnabledNetwork, isSwapSupportedNetwork, isSwapTestnetNetwork } from '../../lib/swapEligibility'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
 import {
   createServerExecutionRpcConfig,
-  fetchServerSwapChainPairs,
   fetchServerSwapMatrix,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
@@ -31,7 +29,6 @@ import {
   searchServerSwapAssets,
   submitServerSwap,
   type ServerSwapCatalogAsset,
-  type ServerSwapChainPair,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
@@ -298,14 +295,26 @@ type LiveServerAssetIndex = {
   byContract: Map<string, LiveServerAssetMetadata>
 }
 
-type SwapCapabilityChain = {
-  networkId: string
-  name: string
-  nativeSymbol: string
-  supportsBalances: boolean
-  supportsSend: boolean
-  supportsSwap: boolean
-  swapProviders: string[]
+function createNativeChainOption(
+  network: Pick<Network, 'id' | 'runtimeModelId' | 'symbol' | 'name'> | null | undefined,
+  source: 'wallet' | 'server',
+  amount?: string,
+  rawAmount?: number
+): SwapAssetOption | null {
+  if (!network?.id) return null
+  const networkId = resolveSwapServerNetworkId(network)
+  const symbol = String(network.symbol || '').trim().toUpperCase() || String(network.name || 'NATIVE').trim().toUpperCase()
+  const label = String(network.name || network.symbol || 'Native asset').trim() || symbol
+  return {
+    id: `${source}:native:${network.id}`,
+    source,
+    assetId: `native:${networkId}`,
+    kind: 'native',
+    symbol,
+    label,
+    amount,
+    rawAmount
+  }
 }
 
 const POPULAR_SWAP_SYMBOLS = [
@@ -703,69 +712,6 @@ function buildQuotePreviewKey(input: {
   ].join('|')
 }
 
-function matchesSwapChainPairNetwork(
-  network: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null | undefined,
-  pairNetworkId: string,
-  pairChainId?: number
-): boolean {
-  if (!network) return false
-  if (resolveSwapServerNetworkId(network) !== pairNetworkId) return false
-  if (!Number.isFinite(pairChainId)) return true
-  return Number(network.chainId) === Number(pairChainId)
-}
-
-function filterNetworksBySwapChainPairs(
-  networks: Network[],
-  pairs: ServerSwapChainPair[],
-  side: 'source' | 'destination',
-  selectedSource?: Pick<Network, 'id' | 'runtimeModelId' | 'chainId'> | null
-): Network[] {
-  if (pairs.length === 0) return networks
-  const relevantPairs = side === 'destination' && selectedSource
-    ? pairs.filter((pair) => matchesSwapChainPairNetwork(selectedSource, pair.sourceNetworkId, pair.sourceChainId))
-    : pairs
-  if (relevantPairs.length === 0) return networks
-
-  const filtered = networks.filter((network) => relevantPairs.some((pair) => (
-    side === 'source'
-      ? matchesSwapChainPairNetwork(network, pair.sourceNetworkId, pair.sourceChainId)
-      : matchesSwapChainPairNetwork(network, pair.destinationNetworkId, pair.destinationChainId)
-  )))
-  return filtered.length > 0 ? filtered : networks
-}
-
-function parseSwapCapabilityChains(payload: unknown): SwapCapabilityChain[] {
-  const items = Array.isArray(asRecord(payload).items) ? asRecord(payload).items as unknown[] : []
-  const out: SwapCapabilityChain[] = []
-  const seen = new Set<string>()
-
-  for (const row of items) {
-    const item = asRecord(row)
-    const networkId = String(
-      item.chainKey
-      || item.networkId
-      || item.sourceNetworkId
-      || item.destinationNetworkId
-      || ''
-    ).trim().toLowerCase()
-    if (!networkId || seen.has(networkId)) continue
-    seen.add(networkId)
-    out.push({
-      networkId,
-      name: String(item.name || networkId).trim() || networkId,
-      nativeSymbol: String(item.nativeSymbol || '').trim().toUpperCase(),
-      supportsBalances: Boolean(item.supportsBalances),
-      supportsSend: Boolean(item.supportsSend),
-      supportsSwap: Boolean(item.supportsSwap),
-      swapProviders: Array.isArray(item.swapProviders)
-        ? item.swapProviders.map((entry) => String(entry || '').trim()).filter(Boolean)
-        : []
-    })
-  }
-
-  return out
-}
-
 function matchesSwapCatalogQuery(item: ServerSwapCatalogAsset, query: string): boolean {
   const normalized = String(query || '').trim().toLowerCase()
   if (!normalized) return true
@@ -1157,7 +1103,6 @@ const Swap: React.FC = () => {
   const [destinationQuery, setDestinationQuery] = useState('')
   const [sourceSelectorFilter, setSourceSelectorFilter] = useState<AssetSelectorFilter>('all')
   const [destinationSelectorFilter, setDestinationSelectorFilter] = useState<AssetSelectorFilter>('all')
-  const [serverChainPairs, setServerChainPairs] = useState<ServerSwapChainPair[]>([])
   const [sourceServerAssets, setSourceServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [destinationMatrixMarkets, setDestinationMatrixMarkets] = useState<ServerSwapMatrixMarket[]>([])
   const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
@@ -1174,47 +1119,8 @@ const Swap: React.FC = () => {
   const [, setErrorText] = useState('')
 
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
-  const isSwapSelectableNetwork = (network: Network | null | undefined): boolean => {
-    if (!network?.id || isSwapTestnetNetwork(network)) return false
-    return isSwapSupportedNetwork(network) || isServerSwapEnabledNetwork(network, backendSnapshot?.swapChains)
-  }
-
-  const supportedSwapNetworks = useMemo(
-    () => enabledNetworks.filter((network) => isSwapSelectableNetwork(network)),
-    [enabledNetworks, backendSnapshot?.swapChains]
-  )
-  const swapCapabilityChains = useMemo(
-    () => parseSwapCapabilityChains(backendSnapshot?.swapChains),
-    [backendSnapshot?.swapChains]
-  )
-  const swapCapabilityChainById = useMemo(
-    () => new Map(swapCapabilityChains.map((item) => [item.networkId, item])),
-    [swapCapabilityChains]
-  )
-  const selectedFromNetwork = supportedSwapNetworks.find((network) => network.id === fromNetworkId)
-    || enabledNetworks.find((network) => network.id === fromNetworkId)
-    || supportedSwapNetworks[0]
-    || enabledNetworks[0]
-    || null
-  const matrixDestinationNetworkIds = useMemo(
-    () => new Set(destinationMatrixMarkets.map((item) => item.destinationNetworkId)),
-    [destinationMatrixMarkets]
-  )
-  const sourceNetworkOptions = useMemo(
-    () => filterNetworksBySwapChainPairs(supportedSwapNetworks, serverChainPairs, 'source'),
-    [supportedSwapNetworks, serverChainPairs]
-  )
-  const destinationNetworkOptions = useMemo(
-    () => {
-      const pairFiltered = filterNetworksBySwapChainPairs(supportedSwapNetworks, serverChainPairs, 'destination', selectedFromNetwork)
-      if (matrixDestinationNetworkIds.size <= 0) return pairFiltered
-      const matrixFiltered = pairFiltered.filter((network) => (
-        matrixDestinationNetworkIds.has(resolveSwapServerNetworkId(network))
-      ))
-      return matrixFiltered.length > 0 ? matrixFiltered : pairFiltered
-    },
-    [supportedSwapNetworks, serverChainPairs, selectedFromNetwork, matrixDestinationNetworkIds]
-  )
+  const sourceNetworkOptions = enabledNetworks
+  const destinationNetworkOptions = enabledNetworks
 
   const fromNetwork = sourceNetworkOptions.find((network) => network.id === fromNetworkId)
     || enabledNetworks.find((network) => network.id === fromNetworkId)
@@ -1245,7 +1151,11 @@ const Swap: React.FC = () => {
     () => fromItems.map((item) => createWalletAssetOptionWithServer(item, sourceServerIndex)),
     [fromItems, sourceServerIndex]
   )
-  const fromItem = fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
+  const nativeFromOption = useMemo(
+    () => fromOptions.find((item) => item.kind === 'native') || null,
+    [fromOptions]
+  )
+  const fromItem = nativeFromOption || fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
   const fromServerNetworkId = resolveSwapServerNetworkId(fromNetwork)
   const toServerNetworkId = resolveSwapServerNetworkId(toNetwork)
   const selectedMatrixMarket = useMemo(
@@ -1254,21 +1164,21 @@ const Swap: React.FC = () => {
   )
 
   const toOptions = useMemo(
-    () => destinationServerAssets.map((item) => createServerAssetOption(item)),
-    [destinationServerAssets]
+    () => {
+      const nativeOption = createNativeChainOption(toNetwork, 'server')
+      const dynamicOptions = destinationServerAssets.map((item) => createServerAssetOption(item))
+      return nativeOption ? [nativeOption, ...dynamicOptions] : dynamicOptions
+    },
+    [destinationServerAssets, toNetwork]
   )
-  const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
-  const fromChainCapabilities = swapCapabilityChainById.get(fromServerNetworkId) || null
-  const toChainCapabilities = swapCapabilityChainById.get(toServerNetworkId) || null
+  const nativeToOption = useMemo(
+    () => toOptions.find((item) => item.kind === 'native') || null,
+    [toOptions]
+  )
+  const toItem = nativeToOption || toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
   const runtimeServices = asRecord(asRecord(backendSnapshot?.runtimeHealth).services)
   const gatewayRuntime = asRecord(runtimeServices.gateway)
-  const authConfig = asRecord(backendSnapshot?.authConfig)
-  const authSession = asRecord(authConfig.session)
-  const authSignatureVerifier = asRecord(authSession.signatureVerifier)
-  const preferredAuthMode = readString(authConfig.preferredMode).toLowerCase()
   const gatewayRuntimeOk = readBoolean(gatewayRuntime.ok)
-  const sessionEnabled = readBoolean(authSession.enabled)
-  const signatureVerifierConfigured = readBoolean(authSignatureVerifier.configured)
   const swapReadiness = useMemo(() => {
     if (!fromNetwork || !toNetwork) {
       return {
@@ -1280,74 +1190,20 @@ const Swap: React.FC = () => {
         canRequestQuotes: false
       }
     }
-    if (!isSwapSelectableNetwork(fromNetwork) || !isSwapSelectableNetwork(toNetwork)) {
-      return {
-        state: 'unsupported' as const,
-        tone: 'slate' as const,
-        engineLabel: 'Not supported',
-        title: 'This network is outside the current swap scope',
-        detail: 'This network does not currently expose the swap flow needed by the wallet.',
-        canRequestQuotes: false
-      }
-    }
-    if (gatewayRuntimeOk === false) {
-      return {
-        state: 'planned' as const,
-        tone: 'amber' as const,
-        engineLabel: 'Gateway unavailable',
-        title: 'Server-backed swaps are paused',
-        detail: 'The MetaYoshi gateway runtime is currently unavailable, so wallet-authenticated swap actions are blocked.',
-        canRequestQuotes: false
-      }
-    }
-    if (!backendSnapshot?.authConfig) {
-      return {
-        state: 'planned' as const,
-        tone: 'amber' as const,
-        engineLabel: 'Checking auth',
-        title: 'Confirming live swap readiness',
-        detail: 'The wallet is waiting for /v1/auth/config before enabling server-managed swap requests.',
-        canRequestQuotes: false
-      }
-    }
-    if (preferredAuthMode === 'session-bearer' && signatureVerifierConfigured === false) {
-      return {
-        state: 'planned' as const,
-        tone: 'amber' as const,
-        engineLabel: 'Verifier unavailable',
-        title: 'Server-backed swaps are not ready on this gateway',
-        detail: sessionEnabled === false
-          ? 'The live /v1/auth/config response reports session.enabled=false and signatureVerifier.configured=false. On this server those values share the same verifier-backed readiness path, so signed session auth and swap execution must stay disabled.'
-          : 'The live /v1/auth/config response reports signatureVerifier.configured=false, so the wallet cannot open the signed session required for swap execution.',
-        canRequestQuotes: false
-      }
-    }
-    if (preferredAuthMode === 'session-bearer' && sessionEnabled === false) {
-      return {
-        state: 'planned' as const,
-        tone: 'amber' as const,
-        engineLabel: 'Session auth disabled',
-        title: 'Server-backed swaps are disabled on this gateway',
-        detail: 'The live /v1/auth/config response reports session.enabled=false, so the wallet must keep bearer-gated swap flows disabled.',
-        canRequestQuotes: false
-      }
-    }
     return {
       state: 'active' as const,
       tone: 'emerald' as const,
       engineLabel: 'Live server routing',
-      title: 'Server-backed swap search is available',
-      detail: 'Sell tokens come from wallet balances. Destination chains, token lists, provider coverage, and route availability come from the MetaYoshi server.',
+      title: 'Swap search is available',
+      detail: gatewayRuntimeOk === false
+        ? 'The gateway reports degraded health, but the wallet will still let the backend decide which routes are available.'
+        : 'The wallet exposes all enabled networks and lets the backend decide which combinations, token lists, and routes are available.',
       canRequestQuotes: true
     }
   }, [
     fromNetwork,
     toNetwork,
-    backendSnapshot?.authConfig,
-    gatewayRuntimeOk,
-    preferredAuthMode,
-    sessionEnabled,
-    signatureVerifierConfigured
+    gatewayRuntimeOk
   ])
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
@@ -1366,7 +1222,6 @@ const Swap: React.FC = () => {
     && !isSameAssetPair
     && fromNetwork
     && toNetwork
-    && swapReadiness.canRequestQuotes
   )
   const quotePreviewKey = useMemo(() => buildQuotePreviewKey({
     amount: fromAmount,
@@ -1419,24 +1274,6 @@ const Swap: React.FC = () => {
   }, [enabledNetworks, activeNetworkId, fromNetworkId, toNetworkId])
 
   useEffect(() => {
-    let cancelled = false
-
-    void (async () => {
-      try {
-        const pairs = await fetchServerSwapChainPairs()
-        if (cancelled) return
-        setServerChainPairs(pairs)
-      } catch (error) {
-        if (cancelled) return
-        console.warn('Failed to load swap chain pairs from server', error)
-        setServerChainPairs([])
-      }
-    })()
-
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => {
     if (!sourceNetworkOptions.length) return
     if (!sourceNetworkOptions.some((network) => network.id === fromNetworkId)) {
       setFromNetworkId(sourceNetworkOptions[0].id)
@@ -1461,25 +1298,37 @@ const Swap: React.FC = () => {
       setFromAssetId('')
       return
     }
+    if (nativeFromOption) {
+      if (fromAssetId !== nativeFromOption.id) {
+        setFromAssetId(nativeFromOption.id)
+      }
+      return
+    }
     if (!fromOptions.some((item) => item.id === fromAssetId)) {
       setFromAssetId(fromOptions[0].id)
     }
-  }, [fromOptions, fromAssetId])
+  }, [fromOptions, fromAssetId, nativeFromOption])
 
   useEffect(() => {
     if (toOptions.length === 0) {
       setToAssetId('')
       return
     }
+    if (nativeToOption) {
+      if (toAssetId !== nativeToOption.id) {
+        setToAssetId(nativeToOption.id)
+      }
+      return
+    }
     if (!toOptions.some((item) => item.id === toAssetId)) {
       const fallback = toOptions.find((item) => item.id !== fromAssetId) || toOptions[0]
       setToAssetId(fallback.id)
     }
-  }, [toOptions, toAssetId, fromAssetId])
+  }, [toOptions, toAssetId, fromAssetId, nativeToOption])
 
   useEffect(() => {
     let cancelled = false
-    if (!fromNetwork?.id || !isSwapSelectableNetwork(fromNetwork)) {
+    if (!fromNetwork?.id) {
       setSourceServerAssets([])
       return
     }
@@ -1501,7 +1350,7 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!fromNetwork?.id || !fromItem?.assetId || !isSwapSelectableNetwork(fromNetwork)) {
+    if (!fromNetwork?.id || !fromItem?.assetId) {
       setDestinationMatrixMarkets([])
       return
     }
@@ -1534,7 +1383,7 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    if (!toNetwork?.id || !isSwapSelectableNetwork(toNetwork)) {
+    if (!toNetwork?.id) {
       setDestinationServerAssets([])
       setDestinationSearchError('')
       setIsSearchingDestinationAssets(false)
@@ -1548,40 +1397,34 @@ const Swap: React.FC = () => {
         const matrixRows = (selectedMatrixMarket?.destinationItems || []).filter((item) => (
           matchesSwapCatalogQuery(item, deferredDestinationQuery)
         ))
-        const serverRows = selectedMatrixMarket
-          ? (
-              matrixRows.length > 0 || !deferredDestinationQuery
-                ? matrixRows
-                : await searchServerSwapPairAssets({
-                    sourceNetwork: fromNetwork || toNetwork,
-                    destinationNetwork: toNetwork,
-                    query: deferredDestinationQuery,
-                    limit: 500
-                  })
-            )
-          : await (
-            fromNetwork
-              ? searchServerSwapPairAssets({
-                  sourceNetwork: fromNetwork,
-                  destinationNetwork: toNetwork,
-                  query: deferredDestinationQuery,
-                  limit: 500
-                })
-              : searchServerSwapAssets(toNetwork, {
-                  query: deferredDestinationQuery,
-                  limit: 500
-                })
-          )
+        const serverRows = await (
+          fromNetwork
+            ? searchServerSwapPairAssets({
+                sourceNetwork: fromNetwork,
+                destinationNetwork: toNetwork,
+                query: deferredDestinationQuery,
+                limit: 500
+              })
+            : searchServerSwapAssets(toNetwork, {
+                query: deferredDestinationQuery,
+                limit: 500
+              })
+        )
+        const trackedRows = await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
+        const mergedServerRows = mergeServerAssetLists([
+          ...matrixRows,
+          ...serverRows,
+          ...trackedRows
+        ])
         if (cancelled) return
-        if (serverRows.length > 0) {
-          setDestinationServerAssets(mergeServerAssetLists(serverRows))
+        if (mergedServerRows.length > 0) {
+          setDestinationServerAssets(mergedServerRows)
+          setDestinationSearchError('')
           return
         }
 
-        const ecosystemRows = await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
-        if (cancelled) return
-        setDestinationServerAssets(mergeServerAssetLists(ecosystemRows))
-        setDestinationSearchError(ecosystemRows.length > 0 ? '' : 'No receive tokens were returned by the server for this pair.')
+        setDestinationServerAssets([])
+        setDestinationSearchError('No receive tokens were returned for this network combination.')
       } catch (error) {
         if (cancelled) return
         console.warn('Failed to load destination swap assets from server', error)
@@ -1882,14 +1725,12 @@ const Swap: React.FC = () => {
   const flipSwapDirection = () => {
     const prevFromNetworkId = fromNetworkId
     const prevToNetworkId = toNetworkId
-    const prevFromAssetId = fromAssetId
-    const prevToAssetId = toAssetId
     const prevToAmount = toAmount
 
     setFromNetworkId(prevToNetworkId)
     setToNetworkId(prevFromNetworkId)
-    setFromAssetId(prevToAssetId)
-    setToAssetId(prevFromAssetId)
+    setFromAssetId('')
+    setToAssetId('')
     if (prevToAmount) setFromAmount(prevToAmount)
   }
 
@@ -2007,8 +1848,8 @@ const Swap: React.FC = () => {
                   <SwapAssetButton
                     option={fromItem}
                     networkName={fromNetwork?.name}
-                    placeholder="Choose token"
-                    onClick={() => setTokenSelectorSide('from')}
+                    placeholder="Chain asset"
+                    onClick={() => {}}
                   />
                 </div>
 
@@ -2023,7 +1864,7 @@ const Swap: React.FC = () => {
                   </button>
                 </div>
 
-                {fromQuickPicks.length > 0 ? (
+                {false ? (
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
@@ -2075,12 +1916,12 @@ const Swap: React.FC = () => {
                   <SwapAssetButton
                     option={toItem}
                     networkName={toNetwork?.name}
-                    placeholder="Choose token"
-                    onClick={() => setTokenSelectorSide('to')}
+                    placeholder="Chain asset"
+                    onClick={() => {}}
                   />
                 </div>
 
-                {toQuickPicks.length > 0 ? (
+                {false ? (
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
@@ -2258,7 +2099,7 @@ const Swap: React.FC = () => {
         </Button>
       </div>
 
-      {tokenSelectorSide === 'from' ? (
+      {false ? (
         <TokenSelectorModal
           title="Select sell token"
           networkName={fromNetwork?.name}
@@ -2279,7 +2120,7 @@ const Swap: React.FC = () => {
         />
       ) : null}
 
-      {tokenSelectorSide === 'to' ? (
+      {false ? (
         <TokenSelectorModal
           title="Select receive token"
           networkName={toNetwork?.name}

@@ -3511,8 +3511,31 @@ export const useWalletStore = create<WalletState>()(
             assets: hydratedBuckets.assets
           }).catch(() => {})
         } catch (error) {
+          const scopeKey = buildAssetStateScopeKey(requestAccountId, requestNetworkId)
+          const state = get()
+          const nativeFiatFallback = await buildNativeFiatFallback({
+            balanceText: getCachedBalanceForNetwork(account, requestNetworkId, true),
+            chain: requestMeta.chain,
+            coinId: requestMeta.coin,
+            existingNative: state.accountNetworkFiatNative?.[scopeKey] || {},
+            existingTotals: state.accountNetworkFiatTotals?.[scopeKey] || {},
+            assets: state.accountNetworkFiatAssets?.[scopeKey] || {}
+          }).catch(() => null)
+
+          if (nativeFiatFallback) {
+            set((current) => ({
+              accountNetworkFiatTotals: { ...current.accountNetworkFiatTotals, [scopeKey]: nativeFiatFallback.totals },
+              accountNetworkFiatNative: { ...current.accountNetworkFiatNative, [scopeKey]: nativeFiatFallback.native },
+              accountNetworkFiatAssets: { ...current.accountNetworkFiatAssets, [scopeKey]: nativeFiatFallback.assets }
+            }))
+          }
+
           setNetworkFiatFailureCooldown(cacheKey)
-          console.warn(`[${network.symbol}] fetchNetworkFiat failed for ${requestNetworkId} (${address}).`, error)
+          const errorMessage = String((error as Error | undefined)?.message || '').trim()
+          const isTimeout = /Server portfolio request timed out/i.test(errorMessage)
+          if (!(nativeFiatFallback && isTimeout)) {
+            console.warn(`[${network.symbol}] fetchNetworkFiat failed for ${requestNetworkId} (${address}).`, error)
+          }
         } finally {
           if (networkFiatInFlightByKey.get(cacheKey) === inFlightSignal) {
             networkFiatInFlightByKey.delete(cacheKey)

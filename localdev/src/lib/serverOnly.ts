@@ -31,6 +31,16 @@ function isPlaceholderHost(hostname: string): boolean {
     || normalized.endsWith('.example.net')
 }
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (!/^https?:$/i.test(parsed.protocol)) return false
+    return !isPlaceholderHost(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
 export function sanitizeServerHttpUrl(value: string, fallback = ''): string {
   const raw = String(value || '').trim()
   if (raw && isMetayoshiHttpUrl(raw)) return raw
@@ -42,7 +52,9 @@ export function sanitizeExplorerUrl(value: string): string {
 }
 
 export function sanitizeRpcUrl(value: string, apiBaseUrl: string): string {
-  return sanitizeServerHttpUrl(value, apiBaseUrl)
+  const raw = String(value || '').trim()
+  if (raw && isValidHttpUrl(raw)) return raw
+  return String(apiBaseUrl || '').trim()
 }
 
 export function sanitizeBridgeUrl(value: string, apiBaseUrl: string): string {
