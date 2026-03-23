@@ -13,14 +13,7 @@ coverage/
 *.pem
 web-ext-artifacts/
 
-# Environment and local config
-.env
-.env.local
-.env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
-metayoshi.build.json
+
 
 # Logs and diagnostics
 *.log
