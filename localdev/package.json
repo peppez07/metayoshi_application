@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "verify:server-balances": "tsx scripts/verify-wallet-server-balances.ts",
     "package:releases": "node scripts/repack-releases.mjs",
     "release": "npm run build && npm run package:releases",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

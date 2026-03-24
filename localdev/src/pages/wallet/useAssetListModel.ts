@@ -25,10 +25,6 @@ export function useAssetListModel() {
     activeAccountId,
     networks,
     activeNetworkId,
-    networkAssets,
-    networkAssetLogos,
-    networkAssetLabels,
-    evmNftAssets,
     accountNetworkAssets,
     accountNetworkAssetLogos,
     accountNetworkAssetLabels,
@@ -63,10 +59,10 @@ export function useAssetListModel() {
   const canOpenAssetSend = caps.features.assetSend
 
   const fiatScopeKey = `${String(activeAccountId || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
-  const rawAssets = accountNetworkAssets[fiatScopeKey] ?? networkAssets[activeNetworkId] ?? {}
-  const assetLogos = accountNetworkAssetLogos[fiatScopeKey] ?? networkAssetLogos[activeNetworkId] ?? {}
-  const assetLabels = accountNetworkAssetLabels[fiatScopeKey] ?? networkAssetLabels[activeNetworkId] ?? {}
-  const nftLookup = accountNetworkEvmNftAssets[fiatScopeKey] ?? evmNftAssets[activeNetworkId] ?? {}
+  const rawAssets = accountNetworkAssets[fiatScopeKey] ?? {}
+  const assetLogos = accountNetworkAssetLogos[fiatScopeKey] ?? {}
+  const assetLabels = accountNetworkAssetLabels[fiatScopeKey] ?? {}
+  const nftLookup = accountNetworkEvmNftAssets[fiatScopeKey] ?? {}
   const fiatByAsset = accountNetworkFiatAssets[fiatScopeKey] ?? {}
   const allEntries = useMemo(() => Object.entries(rawAssets), [rawAssets])
 

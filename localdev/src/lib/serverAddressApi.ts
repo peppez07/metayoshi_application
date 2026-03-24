@@ -13,7 +13,14 @@ function loadTronWebModule() {
 }
 
 export function deriveServerApiBaseUrl(network: Network): string {
-  const envBase = normalizeConfiguredApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
+  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+  const explicitBalanceBase = resolveBalanceApiBaseUrl(normalizeConfiguredApiBaseUrl(env.VITE_BALANCE_API_BASE_URL))
+  if (explicitBalanceBase) return explicitBalanceBase
+
+  const secureBridgeBase = resolveBalanceApiBaseUrl(normalizeConfiguredApiBaseUrl(env.VITE_SECURE_BRIDGE_API_BASE_URL))
+  if (secureBridgeBase) return secureBridgeBase
+
+  const envBase = normalizeConfiguredApiBaseUrl(env.VITE_API_BASE_URL)
   if (envBase) return resolveBalanceApiBaseUrl(envBase)
 
   const bridgeUrl = String(network.bridgeUrl || '').trim().replace(/\/+$/, '')
@@ -30,9 +37,16 @@ export function deriveServerApiBaseUrl(network: Network): string {
   return resolveBalanceApiBaseUrl(String(network.rpcUrl || '').trim().replace(/\/+$/, ''))
 }
 
-function deriveServerApiBaseCandidates(network: Network): string[] {
-  const primary = deriveServerApiBaseUrl(network)
-  return [...new Set([primary].filter(Boolean))]
+function deriveServerApiBaseCandidates(network: Network, rpcConfig?: UtxoRpcConfig): string[] {
+  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
+  const candidates = [
+    resolveBalanceApiBaseUrl(normalizeConfiguredApiBaseUrl(env.VITE_BALANCE_API_BASE_URL)),
+    resolveBalanceApiBaseUrl(normalizeConfiguredApiBaseUrl(env.VITE_SECURE_BRIDGE_API_BASE_URL)),
+    resolveBalanceApiBaseUrl(normalizeConfiguredApiBaseUrl(env.VITE_API_BASE_URL)),
+    rpcConfig?.bridgeUrl ? resolveBalanceApiBaseUrl(String(rpcConfig.bridgeUrl).trim().replace(/\/+$/, '')) : '',
+    deriveServerApiBaseUrl(network)
+  ]
+  return [...new Set(candidates.filter(Boolean))]
 }
 
 export function resolveServerCoinChain(network: Network): { coin: string; chain: string } | null {
@@ -95,7 +109,7 @@ export async function fetchServerAddressJson(
   const headers: Record<string, string> = {}
   await appendOptionalServerAuthHeaders(headers, { network, rpcConfig: options.rpcConfig })
 
-  const apiBases = deriveServerApiBaseCandidates(network)
+  const apiBases = deriveServerApiBaseCandidates(network, options.rpcConfig)
   if (apiBases.length <= 0) throw new Error('Server API base URL is not configured')
 
   let lastError: Error | null = null

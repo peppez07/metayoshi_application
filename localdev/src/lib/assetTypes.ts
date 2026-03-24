@@ -8,6 +8,12 @@ export function isEvmNftAssetKey(assetId: string): boolean {
   return /^EVMNFT:(erc721|erc1155):0x[a-fA-F0-9]{40}:.+$/.test(normalizeText(assetId))
 }
 
+export function isNftAssetKey(assetId: string): boolean {
+  if (isEvmNftAssetKey(assetId)) return true
+  const solanaType = parseSolanaAssetType(assetId)
+  return solanaType === 'spl-nft' || solanaType === 'compressed-nft'
+}
+
 export function extractSolanaMintFromAssetId(assetId: string): string {
   const raw = normalizeText(assetId)
   if (!raw) return ''

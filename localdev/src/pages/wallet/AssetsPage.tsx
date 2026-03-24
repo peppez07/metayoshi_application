@@ -9,7 +9,7 @@ import {
 } from 'react-icons/io5'
 import { Input } from '../../components/Input'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
-import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { isNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import { useCatalogModelSummary } from '../../lib/catalogDb/useCatalogQueries'
 import AssetListRow from './AssetListRow'
 import { useAssetListModel } from './useAssetListModel'
@@ -162,7 +162,7 @@ const AssetsPage: React.FC = () => {
       variant="full"
       name={name}
       displayName={resolveAssetDisplayName(name)}
-      nft={isEvmNftAssetKey(name)}
+      nft={isNftAssetKey(name)}
       metaLabel={isSolanaEcosystem ? (resolveSolanaAssetTypeLabel(name) || undefined) : undefined}
       logoUrl={assetLogos[name]}
       rawAmount={rawAmount}

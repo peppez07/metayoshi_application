@@ -151,6 +151,99 @@ function resolveSolanaDisplayName(params: {
   return mint
 }
 
+type SolanaWalletAssetRow = {
+  tokenId: string
+  amountRaw: string
+  amountUi: string
+  decimals: number
+  isNft?: boolean
+  tokenType?: string
+  symbol?: string
+  name?: string
+  logoUri?: string
+}
+
+function extractSolanaAssetRowsFromServerJson(json: Record<string, unknown> | null | undefined): SolanaWalletAssetRow[] {
+  const assets = json?.assets
+  if (!assets || typeof assets !== 'object') return []
+  const tokenRows = Array.isArray((assets as any).splTokenAccounts)
+    ? (assets as any).splTokenAccounts as Array<Record<string, unknown>>
+    : []
+  const nftRows = Array.isArray((assets as any).nfts)
+    ? (assets as any).nfts as Array<Record<string, unknown>>
+    : []
+  const rows: SolanaWalletAssetRow[] = []
+
+  for (const row of tokenRows) {
+    const tokenId = String(
+      row.mint
+      || row.tokenId
+      || row.tokenAddress
+      || row.address
+      || ''
+    ).trim()
+    const amountRaw = String(
+      row.amountRaw
+      || row.balanceRaw
+      || row.rawAmount
+      || row.amount
+      || ''
+    ).trim()
+    if (!tokenId || !/^\d+$/.test(amountRaw)) continue
+    const decimals = Number(row.decimals)
+    rows.push({
+      tokenId,
+      amountRaw,
+      amountUi: String(row.amountUi || row.balance || '0').trim() || '0',
+      decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
+      tokenType: String(row.tokenType || row.type || 'spl-token').trim() || 'spl-token',
+      symbol: String(row.symbol || '').trim().toUpperCase() || undefined,
+      name: String(row.name || row.tokenName || '').trim() || undefined,
+      logoUri: String(row.logoUri || row.logoURI || row.logo || '').trim() || undefined
+    })
+  }
+
+  for (const row of nftRows) {
+    const tokenId = String(
+      row.mint
+      || row.tokenId
+      || row.address
+      || row.assetId
+      || ''
+    ).trim()
+    if (!tokenId) continue
+    const amountRaw = String(
+      row.amountRaw
+      || row.balanceRaw
+      || row.quantityRaw
+      || row.amount
+      || '1'
+    ).trim()
+    if (!/^\d+$/.test(amountRaw)) continue
+    const tokenType = String(row.tokenType || row.type || '').trim().toLowerCase()
+    rows.push({
+      tokenId,
+      amountRaw,
+      amountUi: String(row.amountUi || row.balance || amountRaw).trim() || amountRaw,
+      decimals: 0,
+      isNft: true,
+      tokenType: tokenType.includes('compressed') ? 'compressed-nft' : 'spl-nft',
+      symbol: String(row.symbol || '').trim().toUpperCase() || undefined,
+      name: String(row.name || row.title || row.collectionName || '').trim() || undefined,
+      logoUri: String(
+        row.logoUri
+        || row.logoURI
+        || row.image
+        || row.imageUrl
+        || row.preview_url
+        || ''
+      ).trim() || undefined
+    })
+  }
+
+  return rows
+}
+
 // Ã¢â€â‚¬Ã¢â€â‚¬ Full backup format Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 export interface FullBackupV1 {
@@ -4200,32 +4293,50 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const serverOwner = await normalizeServerAddress(net, address)
-            const rows = await fetchBridgeTokenBalances(rpcConfig, {
-              coin: 'tron',
-              chain: 'main',
-              owner: serverOwner || undefined,
-              wallet: String(net.rpcWallet || '').trim() || undefined
-            })
+            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
+            const rows = response.ok && Array.isArray((response.json?.assets as any)?.erc20)
+              ? (response.json?.assets as any).erc20 as Array<Record<string, unknown>>
+              : await (async () => {
+                  const serverOwner = await normalizeServerAddress(net, address)
+                  return await fetchBridgeTokenBalances(rpcConfig, {
+                    coin: 'tron',
+                    chain: 'main',
+                    owner: serverOwner || undefined,
+                    wallet: String(net.rpcWallet || '').trim() || undefined
+                  }) as Array<Record<string, unknown>>
+                })()
             const assets: Record<string, number> = {}
             const labels: Record<string, string> = {}
             const usedKeys = new Set<string>()
 
             for (const row of rows) {
-              const tokenType = String(row.tokenType || '').trim().toLowerCase()
+              const tokenType = String(row.tokenType || row.type || '').trim().toLowerCase()
               if (tokenType.includes('721') || tokenType.includes('1155') || tokenType.includes('nft')) continue
 
-              const rawBalanceText = String(row.balanceRaw || '').trim()
+              const rawBalanceText = String(
+                row.balanceRaw
+                || row.tokenBalance
+                || row.balance
+                || ''
+              ).trim()
               if (!/^\d+$/.test(rawBalanceText)) continue
               const rawBalance = BigInt(rawBalanceText)
               if (rawBalance <= 0n) continue
 
-              const decimalsRaw = Number(row.decimals)
+              const decimalsRaw = Number(row.decimals ?? row.tokenDecimal)
               const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 18
               const displaySats = toAssetDisplaySats(rawBalance, decimals)
               if (!Number.isFinite(displaySats) || displaySats <= 0) continue
 
-              const baseSymbol = String(row.symbol || row.name || row.tokenId || 'TOKEN').trim().toUpperCase()
+              const baseSymbol = String(
+                row.symbol
+                || row.tokenSymbol
+                || row.name
+                || row.tokenName
+                || row.tokenId
+                || row.contractAddress
+                || 'TOKEN'
+              ).trim().toUpperCase()
               let key = baseSymbol
               if (usedKeys.has(key)) {
                 let suffix = 2
@@ -4403,17 +4514,25 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const rows = await fetchBridgeTokenBalances(rpcConfig, {
-              coin: 'stellar',
-              chain: 'main',
-              owner: address,
-              wallet: String(net.rpcWallet || '').trim() || undefined
-            })
+            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
+            const rows = response.ok && Array.isArray((response.json?.assets as any)?.balances)
+              ? (response.json?.assets as any).balances as Array<Record<string, unknown>>
+              : await fetchBridgeTokenBalances(rpcConfig, {
+                  coin: 'stellar',
+                  chain: 'main',
+                  owner: address,
+                  wallet: String(net.rpcWallet || '').trim() || undefined
+                }) as Array<Record<string, unknown>>
             const assets: Record<string, number> = {}
             const labels: Record<string, string> = {}
             for (const row of rows) {
-              const tokenId = String(row.tokenId || '').trim()
-              const tokenType = String(row.tokenType || '').trim().toLowerCase()
+              const tokenId = String(
+                row.tokenId
+                || row.asset_code
+                || row.assetCode
+                || ''
+              ).trim()
+              const tokenType = String(row.tokenType || row.asset_type || '').trim().toLowerCase()
               if (!tokenId || tokenType === 'native' || tokenId.toLowerCase() === 'native') continue
 
               const rawBalanceText = String(row.balanceRaw || '').trim()
@@ -4431,8 +4550,10 @@ export const useWalletStore = create<WalletState>()(
               }
               if (!Number.isFinite(displaySats) || displaySats <= 0) continue
 
-              assets[tokenId] = displaySats
-              labels[tokenId] = String(row.symbol || row.name || tokenId).trim() || tokenId
+              const issuer = String(row.issuer || row.asset_issuer || '').trim()
+              const assetKey = issuer ? `${tokenId}|${issuer}` : tokenId
+              assets[assetKey] = displaySats
+              labels[assetKey] = String(row.symbol || row.asset_code || row.name || tokenId).trim() || tokenId
             }
 
             applyAssetSnapshot({
@@ -4538,8 +4659,17 @@ export const useWalletStore = create<WalletState>()(
               bridgePassword: rpcConfig.bridgePassword,
               name: activeNetworkId
             })
-            const rows = response.ok && Array.isArray(response.json?.assets)
-              ? response.json.assets as Array<Record<string, unknown>>
+            const serverAssets = response.ok && response.json?.assets && typeof response.json.assets === 'object'
+              ? response.json.assets as Record<string, unknown>
+              : null
+            const serverRows = Array.isArray(serverAssets)
+              ? serverAssets as Array<Record<string, unknown>>
+              : [
+                  ...(Array.isArray(serverAssets?.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
+                  ...(Array.isArray(serverAssets?.nfts) ? serverAssets.nfts as Array<Record<string, unknown>> : [])
+                ]
+            const rows = serverAssets
+              ? serverRows
               : missingBridgeCredentialsMessage
                 ? []
                 : await fetchBridgeTokenBalances(rpcConfig, {
@@ -4612,17 +4742,7 @@ export const useWalletStore = create<WalletState>()(
 
         if (isSolNetwork) {
           try {
-            let rows: Array<{
-              tokenId: string
-              amountRaw: string
-              amountUi: string
-              decimals: number
-              isNft?: boolean
-              tokenType?: string
-              symbol?: string
-              name?: string
-              logoUri?: string
-            }> = []
+            let rows: SolanaWalletAssetRow[] = []
 
             const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
             const solDirectFallbackFlag = String(env.VITE_SOL_ALLOW_DIRECT_ASSET_RPC_FALLBACK ?? '').trim().toLowerCase()
@@ -4634,12 +4754,22 @@ export const useWalletStore = create<WalletState>()(
               || solDirectFallbackFlag === 'off'
             const allowDirectAssetRpcFallback = Boolean(rpcUrl) && !disableDirectAssetRpcFallback
 
+            const rpcConfig = await createUtxoRpcConfig(net, {
+              useLocalRpc: ulr,
+              localRpcOverride: lro[net.id],
+              secureBridgeSigner: get().signBackendAuthMessage
+            })
+
             try {
-              const rpcConfig = await createUtxoRpcConfig(net, {
-                useLocalRpc: ulr,
-                localRpcOverride: lro[net.id],
-                secureBridgeSigner: get().signBackendAuthMessage
-              })
+              const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
+              if (response.ok) {
+                rows = extractSolanaAssetRowsFromServerJson(response.json)
+              }
+            } catch {
+              rows = []
+            }
+
+            if (rows.length === 0) {
               const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
                 coin: String(net.serverCoinId || 'solana').trim() || 'solana',
                 chain: String(net.serverChain || 'main').trim() || 'main',
@@ -4664,8 +4794,6 @@ export const useWalletStore = create<WalletState>()(
                 })
               }
               rows = normalized
-            } catch {
-              rows = []
             }
 
             if (rows.length === 0 && allowDirectAssetRpcFallback) {

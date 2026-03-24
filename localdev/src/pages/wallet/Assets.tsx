@@ -6,7 +6,7 @@ import {
   IoLayersOutline,
   IoSparklesOutline,
 } from 'react-icons/io5'
-import { isEvmNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
+import { isNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import { coinModelFamilyToRouteKey, resolveCoinModelFamily } from '../../lib/coinModel'
 import { formatFiatValue } from '../../store/walletStore'
 import { formatAssetAmount, useAssetListModel } from './useAssetListModel'
@@ -28,11 +28,11 @@ const Assets: React.FC = () => {
   const buyRouteKey = activeNetwork ? coinModelFamilyToRouteKey(resolveCoinModelFamily(activeNetwork)) : 'generic'
 
   const tokenRows = useMemo(
-    () => sorted.filter(([name]) => !isEvmNftAssetKey(name)),
+    () => sorted.filter(([name]) => !isNftAssetKey(name)),
     [sorted]
   )
   const nftRows = useMemo(
-    () => sorted.filter(([name]) => isEvmNftAssetKey(name)),
+    () => sorted.filter(([name]) => isNftAssetKey(name)),
     [sorted]
   )
   const currentRows = assetTab === 'tokens' ? tokenRows : nftRows
@@ -132,7 +132,7 @@ const Assets: React.FC = () => {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-gray-100">{resolveAssetDisplayName(name)}</p>
                         <p className="truncate text-xs text-gray-500">
-                          {isEvmNftAssetKey(name)
+                          {isNftAssetKey(name)
                             ? 'NFT asset'
                             : isSolanaEcosystem
                               ? (resolveSolanaAssetTypeLabel(name) || activeNetwork.symbol)
