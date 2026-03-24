@@ -7674,96 +7674,31 @@ export const useWalletStore = create<WalletState>()(
 
       sendXrpTransaction: async ({ to, amount }) => {
         await waitForSendOperationSlot()
-        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked, useLocalRpc, localRpcOverrides } = get()
+        const { networks, activeNetworkId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         if (!net || net.coinType !== 'XRP') throw new Error('Active network is not XRP')
-        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-        if (!acc) throw new Error('No active account')
-        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
-        const { deriveXrpAddress } = await loadXrpAddressModule()
-        const derived = await deriveXrpAddress(sessionMnemonic, accountIndex)
-        const activeAddress = String(
-          acc.networkAddresses?.[activeNetworkId]
-          || acc.addresses?.XRP
-          || derived.address
-        ).trim()
-        if (activeAddress !== derived.address) {
-          throw new Error(`Active XRP address does not match derived signer address (${activeAddress} != ${derived.address})`)
-        }
-        const rpcConfig = await createUtxoRpcConfig(net, {
-          useLocalRpc,
-          localRpcOverride: localRpcOverrides[net.id],
-          secureBridgeSigner: get().signBackendAuthMessage
-        })
-        const { sendXrpNonCustodial } = await loadXrpNonCustodialModule()
-        return await sendChainTransaction({
-          network: net,
-          to,
-          amount,
-          xrpSend: () => sendXrpNonCustodial({
-            rpcConfig,
-            fromAddress: activeAddress,
-            toAddress: to,
-            amountXrp: amount,
-            privateKeyHex: derived.privHex,
-            publicKeyHex: derived.pubHex
-          })
-        })
+        throw new Error('XRP sends are temporarily disabled')
       },
 
       sendCardanoTransaction: async ({ to, amount }) => {
         await waitForSendOperationSlot()
-        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        const { networks, activeNetworkId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         const modelId = resolveNetworkModelId(net)
         if (!net || modelId !== 'ada') throw new Error('Active network is not Cardano')
-        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
-        const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
-        if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
-        const { sendCardanoNonCustodial } = await loadCardanoNonCustodialModule()
-        return await sendChainTransaction({
-          network: net,
-          to,
-          amount,
-          cardanoSend: () => sendCardanoNonCustodial({
-            network: net,
-            mnemonic: sessionMnemonic,
-            accountIndex,
-            fromAddress,
-            toAddress: to,
-            amountAda: amount,
-            walletId: String(net.rpcWallet || '').trim() || undefined
-          })
-        })
+        throw new Error('Cardano sends are temporarily disabled')
       },
 
       sendMoneroTransaction: async ({ to, amount }) => {
         await waitForSendOperationSlot()
-        const { networks, activeNetworkId, accounts, activeAccountId, sessionMnemonic, isLocked } = get()
+        const { networks, activeNetworkId, sessionMnemonic, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const net = networks.find((n) => n.id === activeNetworkId)
         const modelId = resolveNetworkModelId(net)
         if (!net || modelId !== 'xmr') throw new Error('Active network is not Monero')
-        const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
-        const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
-        const fromAddress = acc?.networkAddresses?.[activeNetworkId] || await get().ensureNetworkAddress(activeNetworkId)
-        if (!fromAddress) throw new Error(`No address derived for ${net.name}`)
-        return await sendChainTransaction({
-          network: net,
-          to,
-          amount,
-          moneroSend: () => sendMoneroNonCustodial({
-            network: net,
-            mnemonic: sessionMnemonic,
-            accountIndex,
-            fromAddress,
-            toAddress: to,
-            amountXmr: amount
-          })
-        })
+        throw new Error('Monero sends are temporarily disabled')
       },
 
       sendSolanaTransaction: async ({ to, amount }) => {
