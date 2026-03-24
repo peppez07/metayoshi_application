@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
+import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from './evmAssetId'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
 import {
   callBridgeMethod,
@@ -120,14 +121,6 @@ function parseEvmNftAssetKey(assetId: string): { standard: 'erc721' | 'erc1155';
     address: ethers.getAddress(m[2]),
     tokenId: m[3]
   }
-}
-
-function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
-  const raw = String(logoUri || '').trim()
-  if (!raw) return ''
-  const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
-  if (!m) return ''
-  return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
 }
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
@@ -547,7 +540,7 @@ async function estimateEvmAssetTransferFee(
     return estimateFeeFromResolvedEvmQuote(quote, input)
   }
 
-  let tokenAddress = ethers.isAddress(assetId) ? ethers.getAddress(assetId) : ''
+  let tokenAddress = extractEvmTokenAddressFromAssetId(assetId)
   if (!tokenAddress) {
     tokenAddress = extractEvmTokenAddressFromLogoUri(String(assetLogos[assetId] || ''))
   }

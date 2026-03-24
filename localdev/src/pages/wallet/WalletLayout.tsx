@@ -80,7 +80,11 @@ const WalletLayout: React.FC = () => {
   const activeNetwork = enabledNetworks.find((network) => network.id === activeNetworkId) || enabledNetworks[0]
   const caps = activeNetwork ? networkCapabilities(activeNetwork) : resolveNetworkCapabilities({})
   const hasActiveNetwork = Boolean(activeNetwork)
-  const displayBalance = formatBalanceDisplay(String(activeAccount?.balance || '0'))
+  const displayBalance = formatBalanceDisplay(String(
+    activeAccount?.networkBalances?.[activeNetworkId]
+    ?? activeAccount?.balance
+    ?? '0'
+  ))
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const portfolioFiatValue =
     accountNetworkFiatTotals[fiatScopeKey]?.usd

@@ -27,6 +27,7 @@ import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/
 import { getMissingBridgeCredentialsMessage, normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import { isMetayoshiHttpUrl } from '../lib/serverOnly'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../lib/serverTimeouts'
+import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from '../lib/evmAssetId'
 import {
   discoverWalletBackend,
   fetchDiscoveredAuthConfig,
@@ -1811,14 +1812,6 @@ function parseEvmFungibleAssetAlias(assetId: string): { symbol: string; ordinal:
   return { symbol, ordinal }
 }
 
-function extractEvmTokenAddressFromLogoUri(logoUri: string): string {
-  const raw = String(logoUri || '').trim()
-  if (!raw) return ''
-  const m = raw.match(/\/assets\/(0x[a-fA-F0-9]{40})\/logo\.(?:png|svg|webp|jpg|jpeg)$/i)
-  if (!m) return ''
-  return ethers.isAddress(m[1]) ? ethers.getAddress(m[1]) : ''
-}
-
 function isBridgeEvmNftTokenType(tokenType: string): boolean {
   const normalized = String(tokenType || '').trim().toLowerCase()
   if (!normalized) return false
@@ -2214,7 +2207,8 @@ function resolveSendListAssetEntryId(input: {
   if (nft) return buildAssetSendEntryId(buildEvmNftAssetKey(nft.address, nft.tokenId, nft.standard))
 
   if (input.network.coinType === 'EVM') {
-    if (ethers.isAddress(assetId)) return buildEvmTokenSendEntryId(assetId)
+    const contractAddress = extractEvmTokenAddressFromAssetId(assetId)
+    if (contractAddress) return buildEvmTokenSendEntryId(contractAddress)
     const hinted = extractEvmTokenAddressFromLogoUri(String(input.logoUri || '').trim())
     if (hinted) return buildEvmTokenSendEntryId(hinted)
   }
@@ -4994,9 +4988,8 @@ export const useWalletStore = create<WalletState>()(
             const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
 
             let tokenAddress = ''
-            if (ethers.isAddress(normalizedAssetId)) {
-              tokenAddress = ethers.getAddress(normalizedAssetId)
-            } else {
+            tokenAddress = extractEvmTokenAddressFromAssetId(normalizedAssetId)
+            if (!tokenAddress) {
               tokenAddress = extractEvmTokenAddressFromLogoUri(logoUri)
             }
             if (!tokenAddress && alias.symbol) {
@@ -5593,7 +5586,7 @@ export const useWalletStore = create<WalletState>()(
 
                 const assetId = String(row.assetId || '').trim()
                 if (!assetId) return true
-                if (ethers.isAddress(assetId) || /0x[a-fA-F0-9]{40}/.test(assetId)) return true
+                if (extractEvmTokenAddressFromAssetId(assetId) || /0x[a-fA-F0-9]{40}/.test(assetId)) return true
                 if (parseEvmNftAssetKey(assetId)) return true
                 if (extractEvmTokenAddressFromLogoUri(String(row.logoUrl || '').trim())) return true
 
@@ -6004,10 +5997,10 @@ export const useWalletStore = create<WalletState>()(
           const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 
-          const exactAddress = ethers.isAddress(normalizedAssetId)
-            ? ethers.getAddress(normalizedAssetId)
-            : ''
-          let tokenAddress = exactAddress || extractEvmTokenAddressFromLogoUri(logoUri)
+          let tokenAddress = extractEvmTokenAddressFromAssetId(normalizedAssetId)
+          if (!tokenAddress) {
+            tokenAddress = extractEvmTokenAddressFromLogoUri(logoUri)
+          }
           if (!tokenAddress) {
             const matches = trackedTokens.filter((token) =>
               String(token.symbol || '').trim().toUpperCase() === alias.symbol
