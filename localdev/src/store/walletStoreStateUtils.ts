@@ -108,6 +108,7 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'polygon',
   'zksync'
 ]
+const FORCE_DISABLED_NETWORK_IDS = new Set<string>(['ada', 'xmr', 'xrp'])
 
 export const MAX_ACTIVE_REFRESH_NETWORKS = 20
 
@@ -225,7 +226,7 @@ export function resolveKnownNetworkId(networks: Network[], rawNetworkId: string)
 }
 
 export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown, networks: Network[]): string[] {
-  if (!Array.isArray(disabledNetworkIds) || networks.length === 0) return []
+  if (networks.length === 0) return []
   const canonicalByLower = new Map<string, string>()
   for (const network of networks) {
     const id = String(network.id || '').trim()
@@ -237,7 +238,8 @@ export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown,
 
   const out: string[] = []
   const seen = new Set<string>()
-  for (const value of disabledNetworkIds) {
+  const requestedDisabled = Array.isArray(disabledNetworkIds) ? disabledNetworkIds : []
+  for (const value of requestedDisabled) {
     const raw = String(value || '').trim()
     if (!raw) continue
     const candidates = [raw, normalizeNetworkIdAlias(raw)]
@@ -254,6 +256,12 @@ export function normalizeDisabledNetworkIdsForState(disabledNetworkIds: unknown,
     if (!resolved || seen.has(resolved)) continue
     seen.add(resolved)
     out.push(resolved)
+  }
+  for (const network of networks) {
+    const id = String(network.id || '').trim()
+    if (!id || !FORCE_DISABLED_NETWORK_IDS.has(id) || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
   }
   if (networks.length > 0 && out.length >= networks.length) {
     const firstNetworkId = String(networks[0]?.id || '').trim()

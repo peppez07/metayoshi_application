@@ -695,6 +695,19 @@ async function executeSecureBridgeWriteRpc(
   return rpcRes.json?.result
 }
 
+function normalizeSecureRelayTxid(result: any): string {
+  if (typeof result === 'string') return result.trim()
+  if (!result || typeof result !== 'object') return ''
+  return String(
+    result.txid
+    || result.hash
+    || result.digest
+    || result.txhash
+    || result.transactionHash
+    || ''
+  ).trim()
+}
+
 async function fetchBridgeAddressAssetUtxos(
   config: UtxoRpcConfig,
   address: string
@@ -3290,6 +3303,30 @@ export async function sendBridgeTokenTransfer(
     throw new Error(`Unsupported token signed format: ${signedFormat}`)
   }
 
+  try {
+    const secureMethod =
+      signedFormat === 'cosmos-tx-base64'
+        ? 'broadcast_tx_sync'
+        : (signedFormat === 'evm-raw-hex' ? 'eth_sendrawtransaction' : 'sendrawtransaction')
+    const secureResult = await executeSecureBridgeWriteRpc(
+      config,
+      config.bridgeUrl,
+      secureMethod,
+      [signedTxHex]
+    )
+    const txid = normalizeSecureRelayTxid(secureResult)
+    if (txid) {
+      return {
+        txid,
+        relayed: true
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !/secure bridge/i.test(error.message)) {
+      // Keep legacy relay compatibility for coin families not yet normalized on the secure path.
+    }
+  }
+
   const url = `${apiBase}/v1/bridge/token/transfer/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
   applyBridgeBasicAuthHeaders(baseHeaders, config, config.networkId || config.coinSymbol || 'token transfer')
@@ -3407,6 +3444,27 @@ export async function sendBridgeEvmSignedRelay(
   if (!signedTxHex) throw new Error('signedTx is required for EVM relay')
   if (!/^0x[0-9a-f]+$/i.test(signedTxHex)) throw new Error('signedTx must be 0x-prefixed hex')
 
+  try {
+    const secureResult = await executeSecureBridgeWriteRpc(
+      config,
+      config.bridgeUrl,
+      'eth_sendrawtransaction',
+      [signedTxHex]
+    )
+    const txid = normalizeSecureRelayTxid(secureResult)
+    if (txid) {
+      return {
+        txid,
+        relayed: true,
+        nonCustodial: true
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !/secure bridge/i.test(error.message)) {
+      // Preserve legacy bridge compatibility when secure write routing is not available.
+    }
+  }
+
   const baseUrl = `${apiBase}/v1/bridge/send/${input.kind}/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const url = wallet ? `${baseUrl}/${encodeURIComponent(wallet)}` : baseUrl
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -3513,6 +3571,32 @@ export async function sendBridgeSuiSignedRelay(
     throw new Error('txBytes must be base64 for SUI relay')
   }
   if (signatures.length === 0) throw new Error('At least one SUI signature is required')
+
+  try {
+    const secureResult = await executeSecureBridgeWriteRpc(
+      config,
+      config.bridgeUrl,
+      'sui_executetransactionblock',
+      [
+        txBytesBase64,
+        signatures,
+        { showEffects: true, showEvents: true, showBalanceChanges: true },
+        'WaitForLocalExecution'
+      ]
+    )
+    const txid = normalizeSecureRelayTxid(secureResult)
+    if (txid) {
+      return {
+        txid,
+        relayed: true,
+        nonCustodial: true
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !/secure bridge/i.test(error.message)) {
+      // Preserve legacy bridge compatibility when secure write routing is not available.
+    }
+  }
 
   const baseUrl = `${apiBase}/v1/bridge/send/${input.kind}/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const url = wallet ? `${baseUrl}/${encodeURIComponent(wallet)}` : baseUrl

@@ -16,6 +16,7 @@ const API_BASE_URL = resolvePublicApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 const GLOBAL_BRIDGE_USER = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_USER)
 const GLOBAL_BRIDGE_PASSWORD = normalizeBridgeCredentialValue((import.meta as any)?.env?.VITE_BRIDGE_PASSWORD)
+const TEMPORARILY_DISABLED_NETWORK_IDS = new Set<string>(['ada', 'xmr', 'xrp'])
 
 if ((GLOBAL_BRIDGE_USER && !GLOBAL_BRIDGE_PASSWORD) || (!GLOBAL_BRIDGE_USER && GLOBAL_BRIDGE_PASSWORD)) {
   throw new Error(
@@ -150,7 +151,10 @@ function validateConfiguredNetworks(networks: Network[]): void {
 
 validateEnabledNetworkIds(ENABLED_NETWORK_IDS, ALL_COIN_IDS)
 validateConfiguredNetworks(ALL_NETWORKS)
-export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => ENABLED_NETWORK_IDS.has(network.id))
+export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => (
+  ENABLED_NETWORK_IDS.has(network.id)
+  && !TEMPORARILY_DISABLED_NETWORK_IDS.has(String(network.id || '').trim())
+))
 
 export const DEFAULT_ACTIVE_NETWORK_ID =
   INITIAL_NETWORKS.find((n) => n.id === (import.meta.env.VITE_DEFAULT_NETWORK ?? DEFAULT_NETWORK_ID))?.id
@@ -191,7 +195,9 @@ export async function loadServerRegistrySnapshot(): Promise<{
   return {
     ...snapshot,
     networks: Array.isArray(snapshot.networks)
-      ? snapshot.networks.map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
+      ? snapshot.networks
+        .filter((network) => !TEMPORARILY_DISABLED_NETWORK_IDS.has(String(network?.id || '').trim()))
+        .map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
       : null
   }
 }
