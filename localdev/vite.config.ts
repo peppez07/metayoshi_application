@@ -346,13 +346,13 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
   )
 
   const candidateFiles = [
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/config/env/windows/vultr/newserver/gateway.env'),
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/config/env/windows/local/newserver/gateway.env'),
+    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/tools/linux/newserver.production.env.example'),
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.windows'),
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.secondary'),
     path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/vultr/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/.env'),
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/_server_support/windows/local/newserver/gateway.env'),
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/_server_support/windows/vultr/newserver/gateway.env'),
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/tools/linux/newserver.production.env.example')
+    path.resolve(__dirname, '../metayoshi_SERVER/.env')
   ]
 
   let selectedFile = ''
