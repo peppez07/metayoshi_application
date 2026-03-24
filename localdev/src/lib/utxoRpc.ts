@@ -708,7 +708,7 @@ function normalizeSecureRelayTxid(result: any): string {
   ).trim()
 }
 
-async function fetchBridgeAddressAssetUtxos(
+export async function fetchBridgeAddressAssetUtxos(
   config: UtxoRpcConfig,
   address: string
 ): Promise<RtmUnspentAsset[]> {
@@ -723,51 +723,68 @@ async function fetchBridgeAddressAssetUtxos(
   if (coin) params.set('coin', coin)
   if (chain) params.set('chain', chain)
 
-  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos${params.toString() ? `?${params.toString()}` : ''}`
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const routeCandidates = [
+    `${apiBase}/v1/bridge/address/${encodeURIComponent(address)}/assets/utxos${query}`,
+    `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos${query}`
+  ]
   const headers: Record<string, string> = {}
   applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'asset UTXO lookup')
 
-  const res = await fetch(url, { method: 'GET', headers })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let detail = text.trim()
-    if (detail) {
-      try {
-        const parsed = JSON.parse(detail)
-        detail = String(parsed?.error || parsed?.message || parsed?.detail || detail)
-      } catch {}
+  let lastError: Error | null = null
+  for (let i = 0; i < routeCandidates.length; i += 1) {
+    const res = await fetch(routeCandidates[i], { method: 'GET', headers })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      let detail = text.trim()
+      if (detail) {
+        try {
+          const parsed = JSON.parse(detail)
+          detail = String(parsed?.error || parsed?.message || parsed?.detail || detail)
+        } catch {}
+      }
+      const compactDetail = compactErrorText(detail || 'Unexpected gateway error')
+      const shouldTryLegacyAlias =
+        i < routeCandidates.length - 1
+        && res.status === 404
+        && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
+      if (shouldTryLegacyAlias) continue
+      lastError = new Error(
+        `Bridge asset UTXO lookup failed for ${address} ` +
+        `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
+        `${compactDetail}`
+      )
+      break
     }
-    throw new Error(
-      `Bridge asset UTXO lookup failed for ${address} ` +
-      `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
-      `${compactErrorText(detail || 'Unexpected gateway error')}`
+    const json = await res.json().catch(() => null)
+    if (!json?.ok) {
+      const detail = compactErrorText(String(json?.error || json?.message || 'Bridge asset UTXO lookup failed'))
+      throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
+    }
+    const assets = Array.isArray(json?.assets) ? json.assets : []
+
+    return assets.map((row: any) => ({
+      txid: String(row?.txid || ''),
+      vout: Number(row?.vout),
+      address: String(row?.address || address),
+      assetName: String(row?.assetName || row?.assetId || ''),
+      assetId: String(row?.assetId || ''),
+      scriptPubKey: String(row?.scriptPubKey || ''),
+      amount: Number(row?.amount ?? 0),
+      satoshis: Number(row?.amount ?? row?.satoshis ?? 0),
+      confirmations: Number(row?.confirmations ?? 0),
+      spendable: row?.spendable !== false
+    })).filter((row: RtmUnspentAsset) =>
+      Boolean(row.txid)
+      && Number.isFinite(row.vout)
+      && Boolean(row.scriptPubKey)
+      && Number.isFinite(row.amount)
+      && row.amount > 0
     )
   }
-  const json = await res.json().catch(() => null)
-  if (!json?.ok) {
-    const detail = compactErrorText(String(json?.error || json?.message || 'Bridge asset UTXO lookup failed'))
-    throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
-  }
-  const assets = Array.isArray(json?.assets) ? json.assets : []
 
-  return assets.map((row: any) => ({
-    txid: String(row?.txid || ''),
-    vout: Number(row?.vout),
-    address: String(row?.address || address),
-    assetName: String(row?.assetName || row?.assetId || ''),
-    assetId: String(row?.assetId || ''),
-    scriptPubKey: String(row?.scriptPubKey || ''),
-    amount: Number(row?.amount ?? 0),
-    satoshis: Number(row?.amount ?? row?.satoshis ?? 0),
-    confirmations: Number(row?.confirmations ?? 0),
-    spendable: row?.spendable !== false
-  })).filter((row: RtmUnspentAsset) =>
-    Boolean(row.txid)
-    && Number.isFinite(row.vout)
-    && Boolean(row.scriptPubKey)
-    && Number.isFinite(row.amount)
-    && row.amount > 0
-  )
+  if (lastError) throw lastError
+  return []
 }
 
 async function fetchBridgeAddressBalance(
@@ -969,49 +986,66 @@ async function fetchBridgeAddressUtxos(
   const params = new URLSearchParams()
   params.set('coin', coin)
   params.set('chain', chain || 'main')
-  const url = `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos?${params.toString()}`
+  const routeCandidates = [
+    `${apiBase}/v1/bridge/address/${encodeURIComponent(address)}/assets/utxos?${params.toString()}`,
+    `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos?${params.toString()}`
+  ]
 
   const controller = new AbortController()
   const timeoutMs = Math.max(3000, Number(config.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS))
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal
-    })
-    if (!res.ok) return null
-    const json = await res.json().catch(() => null)
-    if (!json?.ok) return null
+    for (let i = 0; i < routeCandidates.length; i += 1) {
+      const headers: Record<string, string> = { Accept: 'application/json' }
+      applyOptionalBridgeBasicAuthHeaders(headers, config)
+      const res = await fetch(routeCandidates[i], {
+        method: 'GET',
+        headers,
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        const compactDetail = compactErrorText(text)
+        const shouldTryLegacyAlias =
+          i < routeCandidates.length - 1
+          && res.status === 404
+          && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
+        if (shouldTryLegacyAlias) continue
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      if (!json?.ok) return null
 
-    const rows = Array.isArray(json?.assets)
-      ? json.assets
-      : Array.isArray(json?.utxos)
-        ? json.utxos
-        : []
+      const rows = Array.isArray(json?.assets)
+        ? json.assets
+        : Array.isArray(json?.utxos)
+          ? json.utxos
+          : []
 
-    const mapped = rows.map((row: any) => {
-      const satoshis = Number(row?.satoshis ?? row?.value ?? row?.amountSat ?? 0)
-      const amount = Number.isFinite(satoshis) && satoshis > 0
-        ? satoshis / 1e8
-        : Number(row?.amount ?? 0)
-      return {
-        txid: String(row?.txid || ''),
-        vout: Number(row?.vout),
-        address: String(row?.address || address),
-        scriptPubKey: String(row?.scriptPubKey || row?.script || ''),
-        amount,
-        confirmations: Number(row?.confirmations ?? 0)
-      } satisfies UtxoUnspent
-    }).filter((row: UtxoUnspent) =>
-      Boolean(row.txid)
-      && Number.isFinite(row.vout)
-      && Number.isFinite(row.amount)
-      && row.amount > 0
-      && row.confirmations >= minConf
-    )
+      const mapped = rows.map((row: any) => {
+        const satoshis = Number(row?.satoshis ?? row?.value ?? row?.amountSat ?? 0)
+        const amount = Number.isFinite(satoshis) && satoshis > 0
+          ? satoshis / 1e8
+          : Number(row?.amount ?? 0)
+        return {
+          txid: String(row?.txid || ''),
+          vout: Number(row?.vout),
+          address: String(row?.address || address),
+          scriptPubKey: String(row?.scriptPubKey || row?.script || ''),
+          amount,
+          confirmations: Number(row?.confirmations ?? 0)
+        } satisfies UtxoUnspent
+      }).filter((row: UtxoUnspent) =>
+        Boolean(row.txid)
+        && Number.isFinite(row.vout)
+        && Number.isFinite(row.amount)
+        && row.amount > 0
+        && row.confirmations >= minConf
+      )
 
-    return mapped
+      return mapped
+    }
+    return null
   } catch {
     return null
   } finally {
@@ -1490,6 +1524,32 @@ interface BtczExplorerUtxoRow {
   confirmations?: number | string
 }
 
+function parseBtczExplorerCoinValue(
+  decimalCandidate: unknown,
+  satCandidate: unknown
+): number | null {
+  const satText = String(satCandidate ?? '').trim()
+  if (/^\d+$/.test(satText)) {
+    return Number((Number(satText) / 1e8).toFixed(8))
+  }
+
+  const decimalText = String(decimalCandidate ?? '').trim()
+  if (!decimalText) return null
+  if (/^\d+\.\d+$/.test(decimalText)) {
+    return Number(Number(decimalText).toFixed(8))
+  }
+  if (/^\d+$/.test(decimalText)) {
+    const integerValue = Number(decimalText)
+    if (!Number.isFinite(integerValue)) return null
+    // BTCZ explorer responses are safer to interpret as satoshis when an integer-only
+    // amount is returned. Coin-denominated responses include a decimal point.
+    return Number((integerValue / 1e8).toFixed(8))
+  }
+
+  const parsed = Number(decimalText)
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(8)) : null
+}
+
 interface BitcoinExplorerAddressSummary {
   chain_stats?: {
     funded_txo_sum?: number | string
@@ -1750,20 +1810,9 @@ async function fetchBtczExplorerBalance(
     const json: BtczExplorerAddressSummary | null = await fetchBtczExplorerJson(config, url)
     if (!json || typeof json !== 'object') continue
 
-    const confirmedCandidate = Number(
-      json.balance ?? (
-        Number.isFinite(Number(json.balanceSat))
-          ? Number(json.balanceSat) / 1e8
-          : NaN
-      )
-    )
-    const unconfirmedCandidate = Number(
-      json.unconfirmedBalance ?? (
-        Number.isFinite(Number(json.unconfirmedBalanceSat))
-          ? Number(json.unconfirmedBalanceSat) / 1e8
-          : 0
-      )
-    )
+    const confirmedCandidate = parseBtczExplorerCoinValue(json.balance, json.balanceSat)
+    const unconfirmedCandidate = parseBtczExplorerCoinValue(json.unconfirmedBalance, json.unconfirmedBalanceSat) ?? 0
+    if (confirmedCandidate === null || unconfirmedCandidate === null) continue
     if (!Number.isFinite(confirmedCandidate) || !Number.isFinite(unconfirmedCandidate)) continue
 
     const confirmed = Number(confirmedCandidate.toFixed(8))
@@ -1786,11 +1835,7 @@ async function fetchBtczExplorerUtxos(
 
     const mapped = json
       .map((row) => {
-        const satoshis = Number(row?.satoshis)
-        const amountRaw = Number(row?.amount)
-        const amount = Number.isFinite(amountRaw)
-          ? amountRaw
-          : (Number.isFinite(satoshis) ? satoshis / 1e8 : NaN)
+        const amount = parseBtczExplorerCoinValue(row?.amount, row?.satoshis)
         const confirmations = Number(row?.confirmations ?? 0)
         return {
           txid: String(row?.txid || ''),
@@ -1799,11 +1844,12 @@ async function fetchBtczExplorerUtxos(
           scriptPubKey: String(row?.scriptPubKey || ''),
           amount,
           confirmations
-        } satisfies UtxoUnspent
+        }
       })
-      .filter((row) =>
+      .filter((row): row is UtxoUnspent =>
         Boolean(row.txid)
         && Number.isFinite(row.vout)
+        && row.amount !== null
         && Number.isFinite(row.amount)
         && row.amount > 0
         && Boolean(row.scriptPubKey)

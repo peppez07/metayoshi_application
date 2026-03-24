@@ -321,7 +321,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           fromAddress
           && (
             (activeNetwork.coinType === 'EVM' && (feePreviewRecipient || String(dappEvmRequest?.data || '').trim()))
-            || (activeNetwork.coinType === 'UTXO' && !isAssetTransfer && feePreviewRecipient && Number(amount) > 0)
+            || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(amount) > 0)
           )
         )
         if (!hasFeePreviewInputs) {

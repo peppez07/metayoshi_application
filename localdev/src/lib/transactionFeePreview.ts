@@ -5,7 +5,9 @@ import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
 import {
   callBridgeMethod,
+  fetchBridgeAddressAssetUtxos,
   getAddressUtxos,
+  listUnspentAssets,
   listUtxoUnspent,
   type UtxoRpcConfig,
   type UtxoUnspent
@@ -323,6 +325,153 @@ async function estimateUtxoNativeTransferFee(input: EstimateTransactionFeePrevie
   }
 }
 
+function normalizeAssetToken(value: string): string {
+  return String(value || '').trim().toUpperCase().replace(/[|#]/g, '/')
+}
+
+async function estimateUtxoAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcConfig = buildRpcPreviewConfig(input.network)
+  const senderAddress = String(input.fromAddress || '').trim()
+  const assetId = String(input.assetId || '').trim()
+  const amountCoins = Number(String(input.amount || '').trim())
+
+  if (!senderAddress) throw new Error('Sender address is required for asset fee estimation')
+  if (!assetId) throw new Error('Asset id is required for asset fee estimation')
+  if (!Number.isFinite(amountCoins) || amountCoins <= 0) throw new Error('Amount must be greater than 0')
+
+  const splitMatch = assetId.match(/^([^|/#:]+)[|/#:]([^|/#:]+)$/)
+  const rootPart = splitMatch?.[1]?.trim() || ''
+  const subPart = splitMatch?.[2]?.trim() || ''
+  const requestedAssetNames = new Set([
+    assetId,
+    assetId.includes('|') ? assetId.replace('|', '/') : assetId,
+    assetId.includes('/') ? assetId.replace('/', '|') : assetId,
+    assetId.includes('|') ? assetId.replace('|', '#') : assetId,
+    assetId.includes('/') ? assetId.replace('/', '#') : assetId,
+    assetId.includes('#') ? assetId.replace('#', '/') : assetId,
+    assetId.includes('#') ? assetId.replace('#', '|') : assetId,
+    (rootPart && subPart) ? `${rootPart}${subPart}` : assetId,
+    (rootPart && subPart) ? `${rootPart}/${subPart}` : assetId,
+    (rootPart && subPart) ? `${rootPart}|${subPart}` : assetId,
+    (rootPart && subPart) ? `${rootPart}#${subPart}` : assetId,
+    assetId.toUpperCase(),
+    ((rootPart && subPart) ? `${rootPart}/${subPart}` : assetId).toUpperCase(),
+    ((rootPart && subPart) ? `${rootPart}|${subPart}` : assetId).toUpperCase(),
+    ((rootPart && subPart) ? `${rootPart}#${subPart}` : assetId).toUpperCase(),
+    ((rootPart && subPart) ? `${rootPart}${subPart}` : assetId).toUpperCase()
+  ].map(normalizeAssetToken))
+
+  const qtyRawSats = Math.round(amountCoins * 1e8)
+  let allAssetUtxos = await listUnspentAssets(rpcConfig, senderAddress).catch(() => [])
+  if (allAssetUtxos.length === 0 && resolveRuntimeModelId(input.network as Network) === 'rtm') {
+    allAssetUtxos = await fetchBridgeAddressAssetUtxos(rpcConfig, senderAddress).catch(() => [])
+  }
+  const spendableAssetUtxosRaw: Array<{ amountSats: number }> = []
+  const spendableAssetUtxosCoinUnits: Array<{ amountSats: number }> = []
+
+  for (const row of allAssetUtxos) {
+    if (String((row as any)?.address ?? '').trim() !== senderAddress) continue
+    if ((row as any)?.spendable === false) continue
+    if (Number((row as any)?.confirmations ?? 0) < 1) continue
+
+    const rowAssetId = String((row as any)?.assetId ?? '').trim()
+    const rowAssetName = String((row as any)?.assetName ?? '').trim()
+    const rawAmt = Number((row as any)?.amount ?? (row as any)?.satoshis ?? 0)
+
+    const idMatches = rowAssetId && requestedAssetNames.has(normalizeAssetToken(rowAssetId))
+    const nameMatches = rowAssetName && requestedAssetNames.has(normalizeAssetToken(rowAssetName))
+    if ((!idMatches && !nameMatches) || !Number.isFinite(rawAmt) || rawAmt <= 0) continue
+
+    spendableAssetUtxosRaw.push({ amountSats: Math.trunc(rawAmt) })
+    spendableAssetUtxosCoinUnits.push({ amountSats: Math.round(rawAmt * 1e8) })
+  }
+
+  if (spendableAssetUtxosRaw.length === 0) {
+    throw new Error(`No spendable asset UTXOs found for ${assetId} on ${senderAddress}`)
+  }
+
+  const totalAsRaw = spendableAssetUtxosRaw.reduce((sum, row) => sum + row.amountSats, 0)
+  const totalAsCoinUnits = spendableAssetUtxosCoinUnits.reduce((sum, row) => sum + row.amountSats, 0)
+  const normalizedAssetUtxos =
+    totalAsRaw < qtyRawSats && totalAsCoinUnits >= qtyRawSats
+      ? spendableAssetUtxosCoinUnits
+      : spendableAssetUtxosRaw
+
+  let selectedAssetInputCount = 0
+  let assetAccumSats = 0
+  for (const utxo of normalizedAssetUtxos.sort((a, b) => b.amountSats - a.amountSats)) {
+    selectedAssetInputCount += 1
+    assetAccumSats += utxo.amountSats
+    if (assetAccumSats >= qtyRawSats) break
+  }
+  if (selectedAssetInputCount <= 0 || assetAccumSats < qtyRawSats) {
+    throw new Error(`Insufficient ${assetId} balance in spendable UTXOs`)
+  }
+
+  let feeCoins: UtxoUnspent[] = []
+  try {
+    feeCoins = await getAddressUtxos(rpcConfig, senderAddress, 1)
+  } catch {}
+  if (feeCoins.length === 0) {
+    try {
+      feeCoins = await listUtxoUnspent(rpcConfig, senderAddress, 1)
+    } catch {}
+  }
+  if (feeCoins.length === 0) {
+    throw new Error(`No confirmed ${input.network.symbol} UTXOs available to estimate network fee`)
+  }
+
+  const feeRateResolution = await resolveUtxoFeeRateSats(rpcConfig, input.network)
+  let feePerByteSats = feeRateResolution.feePerByteSats
+  if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+
+  const feePreset = String(input.utxoFeePreset || 'fast').trim().toLowerCase()
+  if (feePreset === 'cheap') feePerByteSats = Math.max(1, Math.floor((feePerByteSats * 80) / 100))
+  if (feePreset === 'premium') feePerByteSats = Math.max(1, Math.ceil((feePerByteSats * 145) / 100))
+
+  const OVERHEAD_BYTES = 10
+  const INPUT_BYTES = 148
+  const OUTPUT_BYTES = 34
+  const DUST_SATS = 1000
+  const assetOutCount = qtyRawSats < assetAccumSats ? 2 : 1
+
+  const selectedFeeInputs: UtxoUnspent[] = []
+  let feeInputAccumSats = 0
+  let finalFeeSats = 0
+  for (const utxo of [...feeCoins].sort((a, b) => b.amount - a.amount)) {
+    selectedFeeInputs.push(utxo)
+    feeInputAccumSats += Math.round(Number(utxo.amount) * 1e8)
+
+    const inputCount = selectedAssetInputCount + selectedFeeInputs.length
+    const withChangeBytes = OVERHEAD_BYTES + INPUT_BYTES * inputCount + OUTPUT_BYTES * (assetOutCount + 1)
+    const withChangeFee = withChangeBytes * feePerByteSats
+    const withChangeLeft = feeInputAccumSats - withChangeFee
+    if (withChangeLeft >= DUST_SATS) {
+      finalFeeSats = withChangeFee
+      break
+    }
+
+    const noChangeBytes = OVERHEAD_BYTES + INPUT_BYTES * inputCount + OUTPUT_BYTES * assetOutCount
+    const noChangeFee = noChangeBytes * feePerByteSats
+    if (feeInputAccumSats >= noChangeFee) {
+      finalFeeSats = noChangeFee
+      break
+    }
+
+    if (selectedFeeInputs.length >= 25) break
+  }
+
+  if (finalFeeSats <= 0) {
+    throw new Error('Insufficient confirmed UTXOs to estimate asset transfer fee')
+  }
+
+  return {
+    fee: Number((finalFeeSats / 1e8).toFixed(8)),
+    debugLabel: `UTXO live asset quote via ${feeRateResolution.source}`,
+    debugDetails: `${input.network.symbol} asset send | assetInputs=${selectedAssetInputCount} | feeInputs=${selectedFeeInputs.length} | feeRate=${feePerByteSats} sat/B | preset=${feePreset}`
+  }
+}
+
 function estimateFeeFromResolvedEvmQuote(
   quote: EvmFeeQuote,
   input: Pick<
@@ -486,8 +635,10 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (input.network.coinType === 'UTXO' && !input.isAssetTransfer && toAddress) {
-      const preview = await estimateUtxoNativeTransferFee(input)
+    if (input.network.coinType === 'UTXO' && toAddress) {
+      const preview = input.isAssetTransfer
+        ? await estimateUtxoAssetTransferFee(input)
+        : await estimateUtxoNativeTransferFee(input)
       return {
         fee: preview.fee,
         source: 'live',
