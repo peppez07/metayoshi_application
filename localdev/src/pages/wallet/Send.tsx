@@ -213,7 +213,8 @@ type SendHubPreferences = {
   pinned: string[]
 }
 
-const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v1'
+// Bump the cache version to discard malformed legacy scan snapshots.
+const SEND_HUB_SCAN_CACHE_KEY = 'metayoshi:send-hub:global-scan:v2'
 const SEND_HUB_PREFERENCES_KEY = 'metayoshi:send-hub:prefs:v1'
 const SEND_HUB_SCAN_MAX_TPS = 5
 const SEND_HUB_SCAN_STEP_DELAY_MS = Math.max(1, Math.trunc(1000 / SEND_HUB_SCAN_MAX_TPS))
