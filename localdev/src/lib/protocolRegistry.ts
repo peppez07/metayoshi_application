@@ -270,7 +270,7 @@ function assertCoinAmount(amount: string, decimals: number, symbol: string): voi
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE' || symbol === 'DASH'
 }
 
 function isClientSignerFormatError(error: unknown): boolean {
@@ -722,7 +722,7 @@ export async function sendUtxoNonCustodialNetworkTransaction(input: SendUtxoNonC
     return { hash: txid }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (/txn-mempool-conflict|\(code\s*18\)|code\s*18/i.test(message)) {
+    if (/txn-mempool-conflict|mempool conflict|mempool.*conflict/i.test(message)) {
       throw new Error('Transaction conflicts with a pending mempool transaction from this wallet. Wait for at least 1 confirmation and try again.')
     }
     throw error

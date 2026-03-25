@@ -1335,7 +1335,7 @@ async function jsonRpcCall(
     const coinDisabledHint = coinDisabled
       ? ' | Server disabled this coin. Check server env DISABLE_<COIN>=true / DISABLED_COINS, or coin registry enabled=false.'
       : ''
-    const mempoolConflict = /txn-mempool-conflict|\(code\s*18\)|code\s*18/i.test(`${rpcErrorMessage} ${bodyText}`)
+    const mempoolConflict = /txn-mempool-conflict|mempool conflict|mempool.*conflict/i.test(`${rpcErrorMessage} ${bodyText}`)
     const mempoolConflictHint = mempoolConflict
       ? ' | Inputs are already used by a pending mempool transaction. Wait for confirmation, then retry.'
       : ''
