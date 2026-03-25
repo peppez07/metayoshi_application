@@ -1,9 +1,12 @@
 import { ethers } from 'ethers'
+import { TronWeb } from 'tronweb'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
 import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from './evmAssetId'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
+import { parseTrc20UiAmountToRaw, readTrc20TokenMetadata } from './tronNonCustodial'
+import { extractTronContractFromAssetId, extractTronContractFromLogoUri } from './tronAssetId'
 import {
   callBridgeMethod,
   fetchBridgeAddressAssetUtxos,
@@ -141,6 +144,181 @@ function compactPreviewError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
   const compact = message.replace(/\s+/g, ' ').trim()
   return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact
+}
+
+function buildTronPreviewClient(rpcUrl: string): TronWeb {
+  const apiKey = String((import.meta as any)?.env?.VITE_TRON_API_KEY || '').trim()
+  return new TronWeb({
+    fullHost: rpcUrl,
+    headers: apiKey ? { 'TRON-PRO-API-KEY': apiKey } : undefined
+  } as any)
+}
+
+function parseTronAmountToSun(amount: string): number {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid TRX amount')
+  const [whole, frac = ''] = raw.split('.')
+  if (frac.length > 6) throw new Error('TRX supports up to 6 decimals')
+  const sun = Number(`${whole}${frac.padEnd(6, '0')}`)
+  if (!Number.isFinite(sun) || sun <= 0) throw new Error('Amount must be greater than 0')
+  return Math.trunc(sun)
+}
+
+function parseTronLatestUnitPrice(raw: string, fallbackSun: number): number {
+  const text = String(raw || '').trim()
+  if (!text) return fallbackSun
+  const lastEntry = text.split(',').map((v) => v.trim()).filter(Boolean).pop() || ''
+  const candidate = lastEntry.includes(':')
+    ? lastEntry.split(':').map((v) => v.trim()).filter(Boolean).pop() || ''
+    : lastEntry
+  const parsed = Number(candidate)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackSun
+}
+
+function parseTronChainParameterValue(params: Array<{ key?: string; value?: unknown }>, expectedKeys: string[]): number | null {
+  const expected = new Set(expectedKeys.map((value) => String(value || '').trim().toLowerCase()))
+  for (const row of params) {
+    const key = String((row as any)?.key || '').trim().toLowerCase()
+    if (!key || !expected.has(key)) continue
+    const parsed = Number((row as any)?.value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+function countTronTxBandwidthBytes(transaction: { raw_data_hex?: string; signature?: string[] } | null | undefined): number {
+  const rawHex = String((transaction as any)?.raw_data_hex || '').trim()
+  const rawBytes = rawHex && /^[0-9a-f]+$/i.test(rawHex) ? Math.ceil(rawHex.length / 2) : 0
+  const signatures = Array.isArray((transaction as any)?.signature) ? (transaction as any).signature : []
+  const signatureBytes = signatures.length > 0
+    ? signatures.reduce((sum: number, sig: unknown) => {
+        const hex = String(sig || '').trim()
+        return sum + ((hex && /^[0-9a-f]+$/i.test(hex)) ? Math.ceil(hex.length / 2) : 67)
+      }, 0)
+    : 67
+  return Math.max(0, rawBytes + signatureBytes)
+}
+
+function readTronAvailableEnergy(resources: Record<string, unknown> | null | undefined): number {
+  const energyLimit = Number((resources as any)?.EnergyLimit ?? 0)
+  const energyUsed = Number((resources as any)?.EnergyUsed ?? 0)
+  const available = energyLimit - energyUsed
+  return Number.isFinite(available) && available > 0 ? available : 0
+}
+
+async function resolveTronBandwidthPriceSun(tronWeb: TronWeb): Promise<number> {
+  try {
+    return parseTronLatestUnitPrice(await tronWeb.trx.getBandwidthPrices(), 1_000)
+  } catch {
+    try {
+      const params = await tronWeb.trx.getChainParameters()
+      return parseTronChainParameterValue(params as any, ['gettransactionfee', 'transactionfee']) || 1_000
+    } catch {
+      return 1_000
+    }
+  }
+}
+
+async function resolveTronEnergyPriceSun(tronWeb: TronWeb): Promise<number> {
+  try {
+    return parseTronLatestUnitPrice(await tronWeb.trx.getEnergyPrices(), 100)
+  } catch {
+    try {
+      const params = await tronWeb.trx.getChainParameters()
+      return parseTronChainParameterValue(params as any, ['getenergyfee', 'energyfee']) || 100
+    } catch {
+      return 100
+    }
+  }
+}
+
+async function estimateTronNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const amountSun = parseTronAmountToSun(String(input.amount || '').trim())
+  if (!rpcUrl) throw new Error('Missing TRON RPC URL')
+  if (!TronWeb.isAddress(fromAddress) || !TronWeb.isAddress(toAddress)) {
+    throw new Error('Sender and recipient must be valid TRON addresses')
+  }
+
+  const tronWeb = buildTronPreviewClient(rpcUrl)
+  const [unsignedTx, availableBandwidth, bandwidthPriceSun] = await Promise.all([
+    tronWeb.transactionBuilder.sendTrx(toAddress, amountSun, fromAddress),
+    tronWeb.trx.getBandwidth(fromAddress).catch(() => 0),
+    resolveTronBandwidthPriceSun(tronWeb)
+  ])
+
+  const requiredBandwidth = countTronTxBandwidthBytes(unsignedTx as any)
+  const paidBandwidth = Math.max(0, requiredBandwidth - Math.max(0, Number(availableBandwidth) || 0))
+  const feeSun = paidBandwidth * bandwidthPriceSun
+
+  return {
+    fee: Number((feeSun / 1e6).toFixed(6)),
+    debugLabel: 'TRON live native quote',
+    debugDetails: `TRX | bandwidth=${requiredBandwidth}B | free=${Math.max(0, Number(availableBandwidth) || 0)} | paid=${paidBandwidth}B | price=${bandwidthPriceSun} sun/B`
+  }
+}
+
+async function estimateTronAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const assetId = String(input.assetId || '').trim()
+  const amount = String(input.amount || '').trim()
+  const assetLogos = input.assetLogos || {}
+  if (!rpcUrl) throw new Error('Missing TRON RPC URL')
+  if (!TronWeb.isAddress(fromAddress) || !TronWeb.isAddress(toAddress)) {
+    throw new Error('Sender and recipient must be valid TRON addresses')
+  }
+
+  let contractAddress = extractTronContractFromAssetId(assetId)
+  if (!contractAddress) {
+    contractAddress = extractTronContractFromLogoUri(String(assetLogos[assetId] || ''))
+  }
+  if (!contractAddress) throw new Error('Unable to resolve TRC20 contract address for fee estimation')
+
+  const { decimals } = await readTrc20TokenMetadata(rpcUrl, contractAddress)
+  const amountRaw = parseTrc20UiAmountToRaw(amount, decimals)
+  const tronWeb = buildTronPreviewClient(rpcUrl)
+  const parameters = [
+    { type: 'address', value: toAddress },
+    { type: 'uint256', value: amountRaw.toString() }
+  ]
+
+  const [energyEstimate, trigger, resources, availableBandwidth, bandwidthPriceSun, energyPriceSun] = await Promise.all([
+    tronWeb.transactionBuilder.estimateEnergy(contractAddress, 'transfer(address,uint256)', {}, parameters, fromAddress).catch(() => null),
+    tronWeb.transactionBuilder.triggerSmartContract(contractAddress, 'transfer(address,uint256)', { feeLimit: 20_000_000 }, parameters, fromAddress),
+    tronWeb.trx.getAccountResources(fromAddress).catch(() => null),
+    tronWeb.trx.getBandwidth(fromAddress).catch(() => 0),
+    resolveTronBandwidthPriceSun(tronWeb),
+    resolveTronEnergyPriceSun(tronWeb)
+  ])
+
+  const tx = (trigger as any)?.transaction
+  if (!tx) throw new Error('Unable to build TRC20 transfer transaction for fee estimation')
+
+  const requiredBandwidth = countTronTxBandwidthBytes(tx)
+  const freeBandwidth = Math.max(0, Number(availableBandwidth) || 0)
+  const paidBandwidth = Math.max(0, requiredBandwidth - freeBandwidth)
+  const availableEnergy = readTronAvailableEnergy(resources as any)
+  const requiredEnergy = Math.max(
+    0,
+    Number((energyEstimate as any)?.energy_required ?? 0)
+      || Number((trigger as any)?.energy_required ?? 0)
+      || Number((trigger as any)?.energy_used ?? 0)
+      || 0
+  )
+  if (requiredEnergy <= 0) throw new Error('Unable to resolve TRC20 energy estimate')
+
+  const paidEnergy = Math.max(0, requiredEnergy - availableEnergy)
+  const feeSun = (paidBandwidth * bandwidthPriceSun) + (paidEnergy * energyPriceSun)
+
+  return {
+    fee: Number((feeSun / 1e6).toFixed(6)),
+    debugLabel: 'TRON live asset quote',
+    debugDetails: `TRC20 | bandwidth=${requiredBandwidth}B | paidBandwidth=${paidBandwidth}B | energy=${requiredEnergy} | paidEnergy=${paidEnergy} | energyPrice=${energyPriceSun} sun`
+  }
 }
 
 function resolveCachedUtxoFeeRate(cacheKey: string): number | null {
@@ -614,6 +792,7 @@ export async function estimateTransactionFeePreview(
   const fallback = estimateNetworkFeeUi(input.network as Network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
+  const modelId = resolveRuntimeModelId(input.network as Network)
 
   if (!fromAddress) {
     return {
@@ -640,6 +819,21 @@ export async function estimateTransactionFeePreview(
         statusLabel: resolvedPreview.statusLabel,
         debugLabel: input.isAssetTransfer ? 'EVM live asset quote' : 'EVM live native quote',
         debugDetails: `${input.network.symbol} | lane=${String(input.gasLane || 'balanced')}`
+      }
+    }
+
+    if (modelId === 'tron' && toAddress) {
+      const preview = input.isAssetTransfer
+        ? await estimateTronAssetTransferFee(input)
+        : await estimateTronNativeTransferFee(input)
+      return {
+        fee: preview.fee,
+        source: 'live',
+        kind: 'estimate',
+        isFinal: false,
+        statusLabel: 'Live network estimate',
+        debugLabel: preview.debugLabel,
+        debugDetails: preview.debugDetails
       }
     }
 

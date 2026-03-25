@@ -27,7 +27,8 @@ import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/
 import { getMissingBridgeCredentialsMessage, normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import { isMetayoshiHttpUrl } from '../lib/serverOnly'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../lib/serverTimeouts'
-import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from '../lib/evmAssetId'
+import { encodeEvmContractLogoHint, extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from '../lib/evmAssetId'
+import { buildTronAssetId, encodeTronContractLogoHint, extractTronContractFromAssetId, extractTronContractFromLogoUri, isLikelyTronContractAddress } from '../lib/tronAssetId'
 import {
   discoverWalletBackend,
   fetchDiscoveredAuthConfig,
@@ -2065,7 +2066,8 @@ function buildEvmAssetBucketsFromBridgeRows(
     if (tokenAddress) {
       const logoUri = extractAssetLogoUri(row as unknown as Record<string, unknown>)
         || buildTrustWalletErc20LogoUri(chainId, tokenAddress)
-      if (logoUri) logos[assetKey] = logoUri
+        || getTokenLogoForAsset(displaySymbol)
+      if (logoUri) logos[assetKey] = encodeEvmContractLogoHint(logoUri, tokenAddress)
     }
   }
 
@@ -2275,9 +2277,6 @@ type TrackedTronToken = {
   symbol: string
   contract: string
 }
-
-const TRON_BASE58_ADDRESS_RE = /^T[1-9A-HJ-NP-Za-km-z]{33}$/
-const TRON_HEX_ADDRESS_RE = /^41[a-fA-F0-9]{40}$/
 
 const chainBalanceSnapshotCache = createRequestCache<ChainBalanceSyncResult & { balance: string }>({
   defaultTtlMs: 10_000,
@@ -2505,44 +2504,6 @@ function resolveTrackedTronTokens(): TrackedTronToken[] {
   // Default minimal TRC20 set (extend via VITE_TRON_TRACKED_TOKENS).
   // USDT TRC20 contract is widely used and stable.
   return [{ symbol: 'USDT', contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }]
-}
-
-function isLikelyTronContractAddress(value: string): boolean {
-  const raw = String(value || '').trim()
-  return TRON_BASE58_ADDRESS_RE.test(raw) || TRON_HEX_ADDRESS_RE.test(raw)
-}
-
-function buildTronAssetId(contract: string): string {
-  const normalized = String(contract || '').trim()
-  return isLikelyTronContractAddress(normalized) ? `trc20:${normalized}` : ''
-}
-
-function extractTronContractFromAssetId(assetId: string): string {
-  const raw = String(assetId || '').trim()
-  if (!raw) return ''
-  const tagged = raw.match(/^trc20:([^:\s]+)$/i)
-  const candidate = String(tagged?.[1] || raw).trim()
-  return isLikelyTronContractAddress(candidate) ? candidate : ''
-}
-
-function encodeTronContractLogoHint(logo: string, contract: string): string {
-  const base = String(logo || '').trim()
-  const c = String(contract || '').trim()
-  if (!base || !c) return base || ''
-  // Keep the original URL intact; store the contract as a fragment hint for later extraction.
-  return `${base}#tron-contract=${encodeURIComponent(c)}`
-}
-
-function extractTronContractFromLogoHint(value: string): string {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  const idx = raw.indexOf('#tron-contract=')
-  if (idx < 0) return ''
-  try {
-    return decodeURIComponent(raw.slice(idx + '#tron-contract='.length)).trim()
-  } catch {
-    return raw.slice(idx + '#tron-contract='.length).trim()
-  }
 }
 
 async function cachedFetchChainBalanceAndSync(params: {
@@ -3767,7 +3728,10 @@ export const useWalletStore = create<WalletState>()(
         if (net.coinType === 'EVM') {
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
-          const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
+          const trackedFromCatalog = await readCatalogTrackedEvmTokens({
+            modelId,
+            networkId: net.id
+          }).catch(() => [])
           const chainId = resolveEvmChainId(net)
           const trackedByAddress = new Map<string, EvmTrackedToken>()
           for (const token of mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)) {
@@ -3997,7 +3961,10 @@ export const useWalletStore = create<WalletState>()(
               const prev = Number(fungibleAssets[assetKey] || 0)
               fungibleAssets[assetKey] = Math.max(prev, displaySats)
               if (!fungibleAssetLabels[assetKey]) fungibleAssetLabels[assetKey] = token.symbol
-              if (token.logoUri && !fungibleAssetLogos[assetKey]) fungibleAssetLogos[assetKey] = token.logoUri
+              if (!fungibleAssetLogos[assetKey]) {
+                const logoUri = token.logoUri || getTokenLogoForAsset(token.symbol)
+                if (logoUri) fungibleAssetLogos[assetKey] = encodeEvmContractLogoHint(logoUri, token.address)
+              }
               addressAssetsRowsApplied += 1
             }
             let tokenReadSuccesses = 0
@@ -4074,11 +4041,17 @@ export const useWalletStore = create<WalletState>()(
               const prev = Number(fungibleAssets[assetKey] || 0)
               fungibleAssets[assetKey] = Math.max(prev, row.displaySats)
               if (!fungibleAssetLabels[assetKey]) fungibleAssetLabels[assetKey] = row.symbol
-              if (row.logoUri && !fungibleAssetLogos[assetKey]) fungibleAssetLogos[assetKey] = row.logoUri
+              if (!fungibleAssetLogos[assetKey]) {
+                const logoUri = row.logoUri || getTokenLogoForAsset(row.symbol)
+                if (logoUri) fungibleAssetLogos[assetKey] = encodeEvmContractLogoHint(logoUri, row.token.address)
+              }
               assetKeyByContract.set(row.token.address, assetKey)
             }
 
-            const trackedNfts = [...resolveTrackedEvmNfts(net), ...await readCatalogTrackedEvmNfts(modelId).catch(() => [])]
+            const trackedNfts = [...resolveTrackedEvmNfts(net), ...await readCatalogTrackedEvmNfts({
+              modelId,
+              networkId: net.id
+            }).catch(() => [])]
             const nftByKey = new Map<string, EvmTrackedNft>()
             for (const nft of trackedNfts.slice(0, MAX_TRACKED_EVM_NFTS)) {
               if (!ethers.isAddress(nft.address)) continue
@@ -4234,7 +4207,8 @@ export const useWalletStore = create<WalletState>()(
                   if (tokenAddress) {
                     const logoUri = extractAssetLogoUri(row as unknown as Record<string, unknown>)
                       || buildTrustWalletErc20LogoUri(chainId, tokenAddress)
-                    if (logoUri) fungibleAssetLogos[assetKey] = logoUri
+                      || getTokenLogoForAsset(displaySymbol)
+                    if (logoUri) fungibleAssetLogos[assetKey] = encodeEvmContractLogoHint(logoUri, tokenAddress)
                   }
                   bridgeFallbackRowsApplied += 1
                 }
@@ -4957,7 +4931,7 @@ export const useWalletStore = create<WalletState>()(
           const assetLabel = String(networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const fromAssetId = extractTronContractFromAssetId(normalizedAssetId)
-          const hint = extractTronContractFromLogoHint(logoUri)
+          const hint = extractTronContractFromLogoUri(logoUri)
           const tracked = resolveTrackedTronTokens()
           const trackedMatch = tracked.find((t) => {
             const symbol = String(t.symbol || '').trim().toUpperCase()
@@ -5023,7 +4997,10 @@ export const useWalletStore = create<WalletState>()(
           if (!nft) {
             const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
             const trackedDefaults = await resolveTrackedEvmTokens(net)
-            const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
+            const trackedFromCatalog = await readCatalogTrackedEvmTokens({
+              modelId,
+              networkId: net.id
+            }).catch(() => [])
             const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
             const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
             const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
@@ -5859,7 +5836,7 @@ export const useWalletStore = create<WalletState>()(
           const assetLabel = String(networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const fromAssetId = extractTronContractFromAssetId(normalizedAssetId)
-          const hint = extractTronContractFromLogoHint(logoUri)
+          const hint = extractTronContractFromLogoUri(logoUri)
           const tracked = resolveTrackedTronTokens()
           const trackedMatch = tracked.find((t) => {
             const symbol = String(t.symbol || '').trim().toUpperCase()
@@ -6041,7 +6018,10 @@ export const useWalletStore = create<WalletState>()(
           const alias = parseEvmFungibleAssetAlias(normalizedAssetId)
           const modelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
           const trackedDefaults = await resolveTrackedEvmTokens(net)
-          const trackedFromCatalog = await readCatalogTrackedEvmTokens(modelId).catch(() => [])
+          const trackedFromCatalog = await readCatalogTrackedEvmTokens({
+            modelId,
+            networkId: net.id
+          }).catch(() => [])
           const trackedTokens = mergeTrackedEvmTokens(trackedDefaults, trackedFromCatalog)
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
 

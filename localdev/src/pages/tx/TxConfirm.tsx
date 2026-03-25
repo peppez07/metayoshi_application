@@ -214,6 +214,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const feePreviewAssetId = isDappTxRoute && dappHasWalletTx
     ? dappAssetId
     : String(txState.feePreviewAssetId || txState.assetId || '').trim()
+  const sendAssetId = isAssetTransfer
+    ? String(feePreviewAssetId || assetId).trim()
+    : ''
   const assetLabel = String(txState.assetLabel || assetId || '').trim()
   const toAddress = isDappTxRoute && dappHasWalletTx
     ? dappToAddress
@@ -562,6 +565,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       accountId: activeAccount?.id,
       isAssetTransfer,
       assetId: isAssetTransfer ? assetId : undefined,
+      sendAssetId: isAssetTransfer ? sendAssetId : undefined,
       amount,
       toAddress,
       fromAddress,
@@ -597,9 +601,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       let txHash = ''
       let txResult: any = null
       if (isAssetTransfer) {
-        if (!assetId) throw new Error('Asset id missing from transaction request')
+        if (!sendAssetId) throw new Error('Asset id missing from transaction request')
         const sent = await sendAssetTransfer({
-          assetId,
+          assetId: sendAssetId,
           qty: amount,
           toAddress: toAddress,
           memo
@@ -678,7 +682,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         networkId: activeNetwork.id,
         txHash,
         isAssetTransfer,
-        assetId: isAssetTransfer ? assetId : undefined
+        assetId: isAssetTransfer ? assetId : undefined,
+        sendAssetId: isAssetTransfer ? sendAssetId : undefined
       })
       
       addActivity({
@@ -733,6 +738,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         networkId: activeNetwork.id,
         isAssetTransfer,
         assetId: isAssetTransfer ? assetId : undefined,
+        sendAssetId: isAssetTransfer ? sendAssetId : undefined,
         amount,
         toAddress,
         fromAddress,

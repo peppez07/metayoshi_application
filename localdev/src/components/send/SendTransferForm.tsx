@@ -76,8 +76,26 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     isConnected,
     isSyncing,
     syncPercent,
-    lowSyncStreak
+    lowSyncStreak,
+    getSendableItems,
+    balanceRefreshNonce
   } = useWalletStore()
+
+  const currentItem = useMemo(() => {
+    const refreshed = getSendableItems({
+      accountId: item.accountId,
+      networkId: item.networkId,
+      includeHidden: true,
+      includeZeroBalance: true
+    })
+    return refreshed.find((candidate) => candidate.id === item.id)
+      || refreshed.find((candidate) => candidate.assetId && candidate.assetId === item.assetId)
+      || item
+  }, [
+    balanceRefreshNonce,
+    getSendableItems,
+    item
+  ])
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
@@ -86,14 +104,14 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const supportsMemo = isCosmosLikeModelId(activeModelId)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
-  const nftMode = resolveNftQuantityMode(item)
-  const isNative = item.requestType === 'native'
+  const nftMode = resolveNftQuantityMode(currentItem)
+  const isNative = currentItem.requestType === 'native'
   const isIntegerMode = nftMode === 'erc1155-integer'
   const isFixedOneMode = nftMode === 'erc721-fixed' || nftMode === 'nft-fixed'
   const nativeInputDecimals = isNative
     ? (activeModelId === 'cosmos' ? 6 : (activeModelId === 'sui' ? 9 : 8))
     : 8
-  const available = Number(item.rawAmount || 0) / 1e8
+  const available = Number(currentItem.rawAmount || 0) / 1e8
   const fallbackEstimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
   const modelPreferences = getNetworkModelPreferences(activeNetworkId)
   const previewNetwork = useMemo(() => ({
@@ -128,7 +146,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const availableFiatValue = isNative
     ? accountNetworkFiatNative?.[fiatScopeKey]?.usd
-    : accountNetworkFiatAssets?.[fiatScopeKey]?.[String(item.assetId || '').trim()]?.usd
+    : accountNetworkFiatAssets?.[fiatScopeKey]?.[String(currentItem.assetId || '').trim()]?.usd
   const displayAvailableFiat = formatFiatValue(availableFiatValue)
 
   const [toAddress, setToAddress] = useState('')
@@ -156,10 +174,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const previewAmount = isFixedOneMode ? '1' : amount
   const feePreviewAssetId = useMemo(() => {
     if (isNative) return ''
-    const canonicalEntryId = String(item.id || '').trim()
+    const canonicalEntryId = String(currentItem.id || '').trim()
     if (/^EVMTOKEN:/i.test(canonicalEntryId)) return canonicalEntryId
-    return String(item.assetId || '').trim()
-  }, [isNative, item.assetId, item.id])
+    return String(currentItem.assetId || '').trim()
+  }, [isNative, currentItem.assetId, currentItem.id])
   const hasFeePreviewInputs = Boolean(
     fromAddress
     && feePreviewRecipient
@@ -174,22 +192,22 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     setError('')
     setMemo('')
     setAmount(isFixedOneMode ? '1' : '')
-  }, [item.id, isFixedOneMode])
+  }, [currentItem.id, isFixedOneMode])
 
   useEffect(() => {
     let cancelled = false
     const hydrateFiat = async () => {
       if (cancelled) return
       await collectActiveNetworkData({
-        force: item.requestType === 'asset',
+        force: currentItem.requestType === 'asset',
         includeBalance: false,
-        includeAssets: item.requestType === 'asset',
+        includeAssets: currentItem.requestType === 'asset',
         includeFiat: true
       }).catch(() => {})
     }
     void hydrateFiat()
     return () => { cancelled = true }
-  }, [item.id, item.requestType, collectActiveNetworkData])
+  }, [currentItem.id, currentItem.requestType, collectActiveNetworkData])
 
   useEffect(() => {
     let cancelled = false
@@ -234,7 +252,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             toAddress: feePreviewRecipient,
             amount: previewAmount,
             assetId: feePreviewAssetId || undefined,
-            assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : EMPTY_LOGO_MAP,
+            assetLogos: currentItem.assetId && currentItem.logoUrl ? { [String(currentItem.assetId).trim()]: currentItem.logoUrl } : EMPTY_LOGO_MAP,
             isAssetTransfer: !isNative,
             gasLane: modelPreferences.evmGasLane,
             utxoFeePreset: modelPreferences.utxoFeePreset,
@@ -272,13 +290,14 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     isFixedOneMode,
     isNative,
     feePreviewAssetId,
-    item.assetId,
+    currentItem.assetId,
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
     modelPreferences.utxoInputStrategy,
     hasFeePreviewInputs,
     previewAmount,
-    feePreviewRecipient
+    feePreviewRecipient,
+    currentItem.logoUrl
   ])
 
   const validateAmount = (): string | null => {
@@ -427,7 +446,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       return
     }
 
-    const assetId = String(item.assetId || '').trim()
+    const assetId = String(currentItem.assetId || '').trim()
     if (!assetId) {
       setError('Asset id missing from selected send item')
       return
@@ -442,7 +461,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
         requestType: 'asset',
         assetId,
         feePreviewAssetId: feePreviewAssetId || assetId,
-        assetLabel: item.label || assetId,
+        assetLabel: currentItem.label || assetId,
         to: toAddress.trim(),
         amount: normalizedAmount,
         from: fromAddress,
@@ -460,7 +479,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           <IoArrowBackOutline className="w-5 h-5" />
         </button>
         <h1 className="text-sm font-black uppercase tracking-widest text-gray-200 truncate">
-          Send {item.kind === 'native' ? activeNetwork.symbol : item.label}
+          Send {currentItem.kind === 'native' ? activeNetwork.symbol : currentItem.label}
         </h1>
       </header>
 
@@ -472,7 +491,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           </div>
           <p className="text-[10px] text-gray-500 font-bold uppercase">Available</p>
           <p className="text-lg font-bold">
-            {formatUnits(available, nativeInputDecimals)} {item.kind === 'native' ? activeNetwork.symbol : item.symbol}
+            {formatUnits(available, nativeInputDecimals)} {currentItem.kind === 'native' ? activeNetwork.symbol : currentItem.symbol}
           </p>
           {displayAvailableFiat && (
             <p className="text-[11px] text-gray-400 mt-1">{displayAvailableFiat}</p>

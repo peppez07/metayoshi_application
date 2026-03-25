@@ -809,9 +809,45 @@ export async function readCatalogModelSummary(modelId: string): Promise<CatalogM
   }
 }
 
-export async function readCatalogTrackedEvmTokens(modelId: string): Promise<CatalogTrackedEvmToken[]> {
-  const normalizedModelId = normalizeLower(modelId)
-  if (!normalizedModelId) return []
+function resolveCatalogEvmLookupKeys(input: string | { modelId?: string | null; networkId?: string | null }): Set<string> {
+  const out = new Set<string>()
+  const add = (value: string | null | undefined) => {
+    const normalized = normalizeLower(value)
+    if (!normalized) return
+    out.add(normalized)
+    if (normalized === 'bnb') out.add('bsc')
+    if (normalized === 'bsc') out.add('bnb')
+    if (normalized === 'bnb-testnet' || normalized === 'bsc-testnet') {
+      out.add('bnb-testnet')
+      out.add('bsc-testnet')
+      out.add('bnb')
+      out.add('bsc')
+    }
+  }
+
+  if (typeof input === 'string') {
+    add(input)
+  } else {
+    add(input?.modelId)
+    add(input?.networkId)
+  }
+
+  return out
+}
+
+function matchesCatalogEvmLookup(
+  item: Pick<ServerCoinCatalogItem, 'runtimeModelId' | 'appNetworkId'>,
+  lookupKeys: Set<string>
+): boolean {
+  if (lookupKeys.size === 0) return false
+  return lookupKeys.has(normalizeLower(item.runtimeModelId)) || lookupKeys.has(normalizeLower(item.appNetworkId))
+}
+
+export async function readCatalogTrackedEvmTokens(
+  input: string | { modelId?: string | null; networkId?: string | null }
+): Promise<CatalogTrackedEvmToken[]> {
+  const lookupKeys = resolveCatalogEvmLookupKeys(input)
+  if (lookupKeys.size === 0) return []
 
   const db = await openCatalogDb()
   if (!db) return []
@@ -825,7 +861,7 @@ export async function readCatalogTrackedEvmTokens(modelId: string): Promise<Cata
     const item = row.item
     if (item.kind !== 'asset') continue
     if (!isWalletActiveCatalogItem(item)) continue
-    if (normalizeLower(item.runtimeModelId) !== normalizedModelId) continue
+    if (!matchesCatalogEvmLookup(item, lookupKeys)) continue
     const address = normalizeEvmAddressLoose(String(item.contractAddress || ''))
     if (!address || byAddress.has(address)) continue
     byAddress.set(address, {
@@ -839,9 +875,11 @@ export async function readCatalogTrackedEvmTokens(modelId: string): Promise<Cata
   return [...byAddress.values()]
 }
 
-export async function readCatalogTrackedEvmNfts(modelId: string): Promise<CatalogTrackedEvmNft[]> {
-  const normalizedModelId = normalizeLower(modelId)
-  if (!normalizedModelId) return []
+export async function readCatalogTrackedEvmNfts(
+  input: string | { modelId?: string | null; networkId?: string | null }
+): Promise<CatalogTrackedEvmNft[]> {
+  const lookupKeys = resolveCatalogEvmLookupKeys(input)
+  if (lookupKeys.size === 0) return []
 
   const db = await openCatalogDb()
   if (!db) return []
@@ -856,7 +894,7 @@ export async function readCatalogTrackedEvmNfts(modelId: string): Promise<Catalo
     const item = row.item
     if (item.kind !== 'asset') continue
     if (!isWalletActiveCatalogItem(item)) continue
-    if (normalizeLower(item.runtimeModelId) !== normalizedModelId) continue
+    if (!matchesCatalogEvmLookup(item, lookupKeys)) continue
     const address = normalizeEvmAddressLoose(String(item.contractAddress || ''))
     if (!address) continue
 
