@@ -713,10 +713,14 @@ export async function fetchBridgeAddressAssetUtxos(
   address: string
 ): Promise<RtmUnspentAsset[]> {
   if (!config.bridgeUrl) return []
-  // Spend-path reads must stay on the send host so send/spend flows do not
-  // depend on the balance subdomain being in sync or even enabled.
-  const apiBase = resolveSendApiBaseUrl(deriveBridgeApiBaseUrl(config.bridgeUrl))
-  if (!apiBase) return []
+  const bridgeBase = deriveBridgeApiBaseUrl(config.bridgeUrl)
+  const apiBases = shouldUseBalanceHostOnly(config)
+    ? [...new Set([resolveBalanceApiBaseUrl(bridgeBase)].filter(Boolean))]
+    : [...new Set([
+        resolveSendApiBaseUrl(bridgeBase),
+        resolveBalanceApiBaseUrl(bridgeBase)
+      ].filter(Boolean))]
+  if (apiBases.length <= 0) return []
 
   const { coin, chain } = resolveBridgeCoinChainHint(config)
   const params = new URLSearchParams()
@@ -724,63 +728,78 @@ export async function fetchBridgeAddressAssetUtxos(
   if (chain) params.set('chain', chain)
 
   const query = params.toString() ? `?${params.toString()}` : ''
-  const routeCandidates = [
-    `${apiBase}/v1/bridge/address/${encodeURIComponent(address)}/assets/utxos${query}`,
-    `${apiBase}/v1/address/${encodeURIComponent(address)}/assets/utxos${query}`
-  ]
   const headers: Record<string, string> = {}
   applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'asset UTXO lookup')
 
   let lastError: Error | null = null
-  for (let i = 0; i < routeCandidates.length; i += 1) {
-    const res = await fetch(routeCandidates[i], { method: 'GET', headers })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      let detail = text.trim()
-      if (detail) {
-        try {
-          const parsed = JSON.parse(detail)
-          detail = String(parsed?.error || parsed?.message || parsed?.detail || detail)
-        } catch {}
-      }
-      const compactDetail = compactErrorText(detail || 'Unexpected gateway error')
-      const shouldTryLegacyAlias =
-        i < routeCandidates.length - 1
-        && res.status === 404
-        && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
-      if (shouldTryLegacyAlias) continue
-      lastError = new Error(
-        `Bridge asset UTXO lookup failed for ${address} ` +
-        `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
-        `${compactDetail}`
-      )
-      break
-    }
-    const json = await res.json().catch(() => null)
-    if (!json?.ok) {
-      const detail = compactErrorText(String(json?.error || json?.message || 'Bridge asset UTXO lookup failed'))
-      throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
-    }
-    const assets = Array.isArray(json?.assets) ? json.assets : []
+  for (let baseIndex = 0; baseIndex < apiBases.length; baseIndex += 1) {
+    const routeCandidates = [
+      `${apiBases[baseIndex]}/v1/bridge/address/${encodeURIComponent(address)}/assets/utxos${query}`,
+      `${apiBases[baseIndex]}/v1/address/${encodeURIComponent(address)}/assets/utxos${query}`
+    ]
 
-    return assets.map((row: any) => ({
-      txid: String(row?.txid || ''),
-      vout: Number(row?.vout),
-      address: String(row?.address || address),
-      assetName: String(row?.assetName || row?.assetId || ''),
-      assetId: String(row?.assetId || ''),
-      scriptPubKey: String(row?.scriptPubKey || ''),
-      amount: Number(row?.amount ?? 0),
-      satoshis: Number(row?.amount ?? row?.satoshis ?? 0),
-      confirmations: Number(row?.confirmations ?? 0),
-      spendable: row?.spendable !== false
-    })).filter((row: RtmUnspentAsset) =>
-      Boolean(row.txid)
-      && Number.isFinite(row.vout)
-      && Boolean(row.scriptPubKey)
-      && Number.isFinite(row.amount)
-      && row.amount > 0
-    )
+    for (let routeIndex = 0; routeIndex < routeCandidates.length; routeIndex += 1) {
+      const res = await fetch(routeCandidates[routeIndex], { method: 'GET', headers })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        let detail = text.trim()
+        if (detail) {
+          try {
+            const parsed = JSON.parse(detail)
+            detail = String(parsed?.error || parsed?.message || parsed?.detail || detail)
+          } catch {}
+        }
+        const compactDetail = compactErrorText(detail || 'Unexpected gateway error')
+        const hasMoreRoutesOnBase = routeIndex < routeCandidates.length - 1
+        const hasMoreBases = baseIndex < apiBases.length - 1
+        const shouldTryAlternateRoute =
+          hasMoreRoutesOnBase
+          && res.status === 404
+          && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
+        const shouldTryAlternateBase =
+          hasMoreBases
+          && (
+            res.status >= 500
+            || (res.status === 404 && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail))
+          )
+        if (shouldTryAlternateRoute || shouldTryAlternateBase) continue
+        lastError = new Error(
+          `Bridge asset UTXO lookup failed for ${address} ` +
+          `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
+          `${compactDetail}`
+        )
+        break
+      }
+      const json = await res.json().catch(() => null)
+      if (!json?.ok) {
+        const detail = compactErrorText(String(json?.error || json?.message || 'Bridge asset UTXO lookup failed'))
+        if (baseIndex < apiBases.length - 1) {
+          lastError = new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
+          break
+        }
+        throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
+      }
+      const assets = Array.isArray(json?.assets) ? json.assets : []
+
+      return assets.map((row: any) => ({
+        txid: String(row?.txid || ''),
+        vout: Number(row?.vout),
+        address: String(row?.address || address),
+        assetName: String(row?.assetName || row?.assetId || ''),
+        assetId: String(row?.assetId || ''),
+        scriptPubKey: String(row?.scriptPubKey || ''),
+        amount: Number(row?.amount ?? 0),
+        satoshis: Number(row?.amount ?? row?.satoshis ?? 0),
+        confirmations: Number(row?.confirmations ?? 0),
+        spendable: row?.spendable !== false
+      })).filter((row: RtmUnspentAsset) =>
+        Boolean(row.txid)
+        && Number.isFinite(row.vout)
+        && Boolean(row.scriptPubKey)
+        && Number.isFinite(row.amount)
+        && row.amount > 0
+      )
+    }
   }
 
   if (lastError) throw lastError

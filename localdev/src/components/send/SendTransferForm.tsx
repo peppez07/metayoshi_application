@@ -163,7 +163,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           fromAddress
           && (
             (activeNetwork.coinType === 'EVM' && feePreviewRecipient)
-            || (activeNetwork.coinType === 'UTXO' && isNative && feePreviewRecipient && Number(previewAmount) > 0)
+            || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(previewAmount) > 0)
           )
         )
 
