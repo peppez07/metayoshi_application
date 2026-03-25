@@ -1,8 +1,18 @@
 import { ethers } from 'ethers'
+import {
+  Connection,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+  Transaction,
+  TransactionInstruction
+} from '@solana/web3.js'
 import { TronWeb } from 'tronweb'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
+import { extractSolanaMintFromAssetId } from './assetTypes'
 import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from './evmAssetId'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
 import { parseTrc20UiAmountToRaw, readTrc20TokenMetadata } from './tronNonCustodial'
@@ -80,6 +90,9 @@ const EVM_ERC1155_IFACE = new ethers.Interface([
 const PREVIEW_RPC_TIMEOUT_MS = 4_000
 const UTXO_FEE_RATE_CACHE_TTL_MS = 15_000
 const utxoFeeRateCache = new Map<string, { checkedAt: number; feePerByteSats: number }>()
+const SOL_TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const SOL_TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+const SOL_ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1Q2hvZbsiqW5xWH25efTNsLJA8knL')
 
 interface UtxoFeeRateResolution {
   feePerByteSats: number
@@ -144,6 +157,210 @@ function compactPreviewError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
   const compact = message.replace(/\s+/g, ' ').trim()
   return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact
+}
+
+function parseSolAmountToLamports(amount: string): bigint {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid SOL amount')
+  const [whole, frac = ''] = raw.split('.')
+  if (frac.length > 9) throw new Error('SOL supports up to 9 decimals')
+  const lamports = BigInt(`${whole}${frac.padEnd(9, '0')}`.replace(/^0+/, '') || '0')
+  if (lamports <= 0n) throw new Error('Amount must be greater than 0')
+  return lamports
+}
+
+function parseSplAmountToRaw(amount: string, decimals: number): bigint {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid SPL token amount')
+  const [whole, frac = ''] = raw.split('.')
+  if (frac.length > decimals) throw new Error(`Token supports up to ${decimals} decimals`)
+  const out = BigInt(`${whole}${frac.padEnd(decimals, '0')}`.replace(/^0+/, '') || '0')
+  if (out <= 0n) throw new Error('Token amount must be greater than 0')
+  return out
+}
+
+function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
+  const primary = String(rpcUrl || '').trim()
+  return Array.from(new Set([primary].filter(Boolean)))
+}
+
+async function withSolanaPreviewConnection<T>(rpcUrl: string, task: (connection: Connection) => Promise<T>): Promise<T> {
+  let lastError: unknown = null
+  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
+    try {
+      const connection = new Connection(candidate, 'confirmed')
+      return await task(connection)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Solana RPC request failed')
+}
+
+function getSolanaAssociatedTokenAddress(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
+    SOL_ASSOCIATED_TOKEN_PROGRAM_ID
+  )[0]
+}
+
+function createSolanaAssociatedTokenAccountInstruction(
+  payer: PublicKey,
+  ata: PublicKey,
+  owner: PublicKey,
+  mint: PublicKey,
+  tokenProgram: PublicKey
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: SOL_ASSOCIATED_TOKEN_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: ata, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: false, isWritable: false },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: tokenProgram, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }
+    ],
+    data: Buffer.alloc(0)
+  })
+}
+
+function toU64LE(value: bigint): Buffer {
+  const out = Buffer.alloc(8)
+  let v = value
+  for (let i = 0; i < 8; i += 1) {
+    out[i] = Number(v & 0xffn)
+    v >>= 8n
+  }
+  return out
+}
+
+function createSolanaTransferCheckedInstruction(
+  sourceAta: PublicKey,
+  mint: PublicKey,
+  destinationAta: PublicKey,
+  owner: PublicKey,
+  amountRaw: bigint,
+  decimals: number,
+  tokenProgram: PublicKey
+): TransactionInstruction {
+  const data = Buffer.concat([
+    Buffer.from([12]),
+    toU64LE(amountRaw),
+    Buffer.from([decimals & 0xff])
+  ])
+  return new TransactionInstruction({
+    programId: tokenProgram,
+    keys: [
+      { pubkey: sourceAta, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: destinationAta, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: true, isWritable: false }
+    ],
+    data
+  })
+}
+
+async function resolveSolanaMintMetadata(connection: Connection, mint: PublicKey): Promise<{ decimals: number; tokenProgram: PublicKey }> {
+  const info = await connection.getParsedAccountInfo(mint, 'confirmed')
+  const owner = info.value?.owner
+  const tokenProgram = owner?.equals(SOL_TOKEN_2022_PROGRAM_ID) ? SOL_TOKEN_2022_PROGRAM_ID : SOL_TOKEN_PROGRAM_ID
+  const parsed = (info.value?.data as any)?.parsed
+  const decimals = Number(parsed?.info?.decimals ?? 0)
+  if (!Number.isFinite(decimals) || decimals < 0 || decimals > 18) {
+    throw new Error('Invalid mint decimals')
+  }
+  return { decimals: Math.trunc(decimals), tokenProgram }
+}
+
+async function estimateSolanaNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  if (!rpcUrl) throw new Error('Missing Solana RPC URL')
+  const from = new PublicKey(fromAddress)
+  const to = new PublicKey(toAddress)
+  const lamports = parseSolAmountToLamports(String(input.amount || '').trim())
+
+  return await withSolanaPreviewConnection(rpcUrl, async (connection) => {
+    const tx = new Transaction().add(SystemProgram.transfer({
+      fromPubkey: from,
+      toPubkey: to,
+      lamports: Number(lamports)
+    }))
+    const { blockhash } = await connection.getLatestBlockhash('confirmed')
+    tx.feePayer = from
+    tx.recentBlockhash = blockhash
+    const feeLamports = (await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value
+    if (!Number.isFinite(feeLamports) || feeLamports === null) {
+      throw new Error('Unable to resolve Solana fee quote')
+    }
+    return {
+      fee: Number((feeLamports / LAMPORTS_PER_SOL).toFixed(9)),
+      debugLabel: 'Solana live native quote',
+      debugDetails: `SOL | lamportsPerTx=${feeLamports}`
+    }
+  })
+}
+
+async function estimateSolanaAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
+  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  const assetId = String(input.assetId || '').trim()
+  if (!rpcUrl) throw new Error('Missing Solana RPC URL')
+  const sender = new PublicKey(fromAddress)
+  const recipient = new PublicKey(toAddress)
+  const mintAddress = extractSolanaMintFromAssetId(assetId)
+  if (!mintAddress) throw new Error('Unable to resolve SPL mint address for fee estimation')
+  const mint = new PublicKey(mintAddress)
+
+  return await withSolanaPreviewConnection(rpcUrl, async (connection) => {
+    const { decimals, tokenProgram } = await resolveSolanaMintMetadata(connection, mint)
+    const amountRaw = parseSplAmountToRaw(String(input.amount || '').trim(), decimals)
+    const sourceAta = getSolanaAssociatedTokenAddress(sender, mint, tokenProgram)
+    const destinationAta = getSolanaAssociatedTokenAddress(recipient, mint, tokenProgram)
+    const sourceInfo = await connection.getParsedAccountInfo(sourceAta, 'confirmed')
+    if (!sourceInfo.value) throw new Error('Sender token account not found for the selected mint')
+
+    const tx = new Transaction()
+    const destinationInfo = await connection.getAccountInfo(destinationAta, 'confirmed')
+    let rentLamports = 0
+    if (!destinationInfo) {
+      rentLamports = await connection.getMinimumBalanceForRentExemption(165, 'confirmed')
+      tx.add(createSolanaAssociatedTokenAccountInstruction(
+        sender,
+        destinationAta,
+        recipient,
+        mint,
+        tokenProgram
+      ))
+    }
+    tx.add(createSolanaTransferCheckedInstruction(
+      sourceAta,
+      mint,
+      destinationAta,
+      sender,
+      amountRaw,
+      decimals,
+      tokenProgram
+    ))
+
+    const { blockhash } = await connection.getLatestBlockhash('confirmed')
+    tx.feePayer = sender
+    tx.recentBlockhash = blockhash
+    const feeLamports = (await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value
+    if (!Number.isFinite(feeLamports) || feeLamports === null) {
+      throw new Error('Unable to resolve Solana SPL fee quote')
+    }
+    const totalLamports = feeLamports + rentLamports
+    return {
+      fee: Number((totalLamports / LAMPORTS_PER_SOL).toFixed(9)),
+      debugLabel: 'Solana live asset quote',
+      debugDetails: `SPL | txFee=${feeLamports} lamports | ataRent=${rentLamports} lamports`
+    }
+  })
 }
 
 function buildTronPreviewClient(rpcUrl: string): TronWeb {
@@ -826,6 +1043,21 @@ export async function estimateTransactionFeePreview(
       const preview = input.isAssetTransfer
         ? await estimateTronAssetTransferFee(input)
         : await estimateTronNativeTransferFee(input)
+      return {
+        fee: preview.fee,
+        source: 'live',
+        kind: 'estimate',
+        isFinal: false,
+        statusLabel: 'Live network estimate',
+        debugLabel: preview.debugLabel,
+        debugDetails: preview.debugDetails
+      }
+    }
+
+    if (modelId === 'sol' && toAddress) {
+      const preview = input.isAssetTransfer
+        ? await estimateSolanaAssetTransferFee(input)
+        : await estimateSolanaNativeTransferFee(input)
       return {
         fee: preview.fee,
         source: 'live',

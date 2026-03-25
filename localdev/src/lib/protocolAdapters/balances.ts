@@ -297,6 +297,30 @@ async function getTronBalanceViaServer(network: Network, address: string, timeou
   return scalar
 }
 
+async function getSolanaBalanceViaServer(
+  network: Network,
+  address: string,
+  rpcConfig?: UtxoRpcConfig,
+  timeoutMs?: number
+): Promise<string> {
+  const response = await fetchServerAddressJson(network, address, 'balance', {}, {
+    timeoutMs,
+    rpcConfig
+  })
+  if (!response.ok) {
+    const detail = String(
+      response.json?.error
+      ?? (response.json?.result as any)?.error
+      ?? response.text
+      ?? `HTTP ${response.status}`
+    ).trim()
+    throw new Error(`Server Solana balance query failed [HTTP ${response.status}]: ${detail}`)
+  }
+  const scalar = parseServerBalanceScalar(response.json)
+  if (!scalar) throw new Error(`Server Solana balance query returned no balance: ${response.url}`)
+  return scalar
+}
+
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
   try {
     const response = await fetchServerAddressJson(network, address, 'balance', {}, {
@@ -388,8 +412,18 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
       try {
         return await getSolanaBalanceViaBridge(rpcConfig, address)
       } catch {
-        // Fall through to direct RPC.
+        // Fall through to server and direct RPC.
       }
+    }
+    try {
+      return await getSolanaBalanceViaServer(
+        network,
+        address,
+        rpcConfig,
+        Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
+      )
+    } catch {
+      // Fall through to direct RPC.
     }
     const rpcUrl = String(network.rpcUrl || '').trim()
     if (!rpcUrl) throw new Error('SOL RPC URL is not configured')

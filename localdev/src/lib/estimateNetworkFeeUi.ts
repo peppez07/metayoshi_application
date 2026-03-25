@@ -4,6 +4,7 @@ import { resolveRuntimeModelId } from './runtimeModel'
 export function estimateNetworkFeeUi(network: Pick<Network, 'coinType' | 'feePerByte'> & Partial<Pick<Network, 'id' | 'runtimeModelId'>>): number {
   const modelId = resolveRuntimeModelId(network as Network)
   if (modelId === 'cosmos' || modelId === 'cro' || modelId === 'crocosmos') return 0.0025
+  if (modelId === 'sol') return 0.000005
   if (network.coinType === 'UTXO') {
     const rawFeePerByteCoins = Number(network.feePerByte ?? 0.0000002)
     let feePerByteSats = Math.max(1, Math.round(rawFeePerByteCoins * 1e8))

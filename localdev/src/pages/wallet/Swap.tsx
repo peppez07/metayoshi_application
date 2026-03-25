@@ -16,7 +16,9 @@ import type { Network } from '../../coins/types'
 import { readCatalogTrackedEvmTokens } from '../../lib/catalogDb/repository'
 import { signEvmTransaction, signSolanaTransaction } from '../../lib/dappSigning'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
+import { resolveNetworkProtocolFamily } from '../../lib/protocolRegistry'
 import { getSolanaTokenRegistry } from '../../lib/solanaTokenRegistry'
+import { isSwapTestnetNetwork } from '../../lib/swapEligibility'
 import {
   createServerExecutionRpcConfig,
   fetchServerSwapChainPairs,
@@ -432,6 +434,39 @@ function buildTrackedEvmSwapAssetId(network: Pick<Network, 'id' | 'runtimeModelI
 
 function buildTrackedSolanaSwapAssetId(address: string): string {
   return `spl:solana:${String(address || '').trim()}`
+}
+
+function resolveSwapFamilyFallbackNetworks(
+  networks: Network[],
+  sourceNetwork: Network | null | undefined
+): Network[] {
+  if (!sourceNetwork?.id) return networks
+
+  const sourceFamily = resolveNetworkProtocolFamily(sourceNetwork)
+  const sourceIsTestnet = isSwapTestnetNetwork(sourceNetwork)
+  const sameFamilyAndEnvironment = (network: Network): boolean => (
+    resolveNetworkProtocolFamily(network) === sourceFamily
+    && isSwapTestnetNetwork(network) === sourceIsTestnet
+  )
+
+  switch (sourceFamily) {
+    case 'evm': {
+      const evmNetworks = networks.filter(sameFamilyAndEnvironment)
+      return evmNetworks.length > 0 ? evmNetworks : [sourceNetwork]
+    }
+    case 'cosmos': {
+      const cosmosNetworks = networks.filter(sameFamilyAndEnvironment)
+      return cosmosNetworks.length > 0 ? cosmosNetworks : [sourceNetwork]
+    }
+    default:
+      return networks.filter((network) => (
+        network.id === sourceNetwork.id
+        || (
+          resolveNetworkProtocolFamily(network) === sourceFamily
+          && isSwapTestnetNetwork(network) === sourceIsTestnet
+        )
+      ))
+  }
 }
 
 function normalizeSwapCatalogContractReference(value: unknown): string {
@@ -1124,22 +1159,22 @@ const Swap: React.FC = () => {
   const deferredDestinationQuery = useDeferredValue(destinationQuery)
   const selectedSourceNetwork = enabledNetworks.find((network) => network.id === fromNetworkId) || enabledNetworks[0] || null
   const selectedSourceServerNetworkId = resolveSwapServerNetworkId(selectedSourceNetwork)
-  const sourceNetworkOptions = useMemo(() => {
-    if (serverChainPairs.length <= 0) return enabledNetworks
-    const allowedSourceIds = new Set(serverChainPairs.map((pair) => pair.sourceNetworkId))
-    const filtered = enabledNetworks.filter((network) => allowedSourceIds.has(resolveSwapServerNetworkId(network)))
-    return filtered.length > 0 ? filtered : enabledNetworks
-  }, [enabledNetworks, serverChainPairs])
+  const sourceNetworkOptions = useMemo(() => enabledNetworks, [enabledNetworks])
   const destinationNetworkOptions = useMemo(() => {
-    if (serverChainPairs.length <= 0) return enabledNetworks
+    if (!selectedSourceNetwork) return enabledNetworks
+    if (serverChainPairs.length <= 0) {
+      return resolveSwapFamilyFallbackNetworks(enabledNetworks, selectedSourceNetwork)
+    }
     const filtered = enabledNetworks.filter((network) => (
       serverChainPairs.some((pair) => (
         pair.sourceNetworkId === selectedSourceServerNetworkId
         && pair.destinationNetworkId === resolveSwapServerNetworkId(network)
       ))
     ))
-    return filtered.length > 0 ? filtered : enabledNetworks
-  }, [enabledNetworks, selectedSourceServerNetworkId, serverChainPairs])
+    return filtered.length > 0
+      ? filtered
+      : resolveSwapFamilyFallbackNetworks(enabledNetworks, selectedSourceNetwork)
+  }, [enabledNetworks, selectedSourceNetwork, selectedSourceServerNetworkId, serverChainPairs])
 
   const fromNetwork = sourceNetworkOptions.find((network) => network.id === fromNetworkId)
     || enabledNetworks.find((network) => network.id === fromNetworkId)
