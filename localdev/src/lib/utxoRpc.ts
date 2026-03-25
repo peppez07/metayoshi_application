@@ -183,6 +183,12 @@ function compactErrorText(value: string, maxLen = 260): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
+function resolveRtmExplorerBaseUrl(): string {
+  const configured = String(import.meta.env.VITE_RTM_EXPLORER || '').trim()
+  const base = configured || 'https://explorer.raptoreum.com'
+  return base.replace(/\/+$/, '')
+}
+
 function dedupeStringList(values: Array<string | undefined>): string[] {
   const out: string[] = []
   const seen = new Set<string>()
@@ -805,6 +811,69 @@ export async function fetchBridgeAddressAssetUtxos(
 
   if (lastError) throw lastError
   return []
+}
+
+async function fetchRtmExplorerAssetUtxos(address: string): Promise<RtmUnspentAsset[]> {
+  const base = resolveRtmExplorerBaseUrl()
+  const url = `${base}/sites/address/${encodeURIComponent(address)}`
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  })
+  if (!res.ok) {
+    const detail = compactErrorText(await res.text().catch(() => ''))
+    throw new Error(
+      `RTM explorer asset UTXO lookup failed for ${address} ` +
+      `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ${detail || 'unexpected explorer error'}`
+    )
+  }
+
+  const json = await res.json().catch(() => null)
+  const scriptPubKey = String(json?.rpc_data?.info?.scriptPubKey || '').trim()
+  const deltas = Array.isArray(json?.rpc_data?.deltas) ? json.rpc_data.deltas : []
+  if (!scriptPubKey || deltas.length <= 0) return []
+
+  const spentOutpoints = new Set<string>()
+  const positiveRows = new Map<string, RtmUnspentAsset>()
+
+  for (const row of deltas) {
+    const txid = String(row?.txid || '').trim()
+    const vout = Number(row?.index)
+    const rawAmount = Number(row?.satoshis)
+    const assetName = String(row?.asset || '').trim()
+    const assetId = String(row?.assetId || '').trim()
+    const height = Number(row?.height ?? 0)
+    if (!txid || !Number.isFinite(vout) || vout < 0 || !Number.isFinite(rawAmount) || !assetName) continue
+
+    const outpoint = `${txid}:${Math.trunc(vout)}`
+    if (rawAmount < 0) {
+      spentOutpoints.add(outpoint)
+      positiveRows.delete(outpoint)
+      continue
+    }
+    if (rawAmount <= 0 || spentOutpoints.has(outpoint)) continue
+
+    positiveRows.set(outpoint, {
+      txid,
+      vout: Math.trunc(vout),
+      address,
+      assetName,
+      assetId,
+      scriptPubKey,
+      amount: rawAmount,
+      satoshis: rawAmount,
+      confirmations: height > 0 ? 1 : 0,
+      spendable: height > 0
+    })
+  }
+
+  return [...positiveRows.values()].filter((row) =>
+    row.confirmations >= 1
+    && row.spendable
+    && Boolean(row.scriptPubKey)
+    && Number.isFinite(row.amount)
+    && row.amount > 0
+  )
 }
 
 async function fetchBridgeAddressBalance(
@@ -2604,8 +2673,17 @@ export async function sendRtmAssetNonCustodial(
 
   let allAssetUtxos = await listUnspentAssets(config, fromAddress).catch(() => [])
   if (allAssetUtxos.length === 0 && !config.useLocalRpc) {
-    const byAddressApi = await fetchBridgeAddressAssetUtxos(config, fromAddress)
+    const byAddressApi = await fetchBridgeAddressAssetUtxos(config, fromAddress).catch(() => [])
     if (byAddressApi.length > 0) allAssetUtxos = byAddressApi
+  }
+  if (
+    allAssetUtxos.length === 0
+    && (
+      String(config.networkId || '').trim().toLowerCase() === 'rtm'
+      || String(config.coinSymbol || '').trim().toUpperCase() === 'RTM'
+    )
+  ) {
+    allAssetUtxos = await fetchRtmExplorerAssetUtxos(fromAddress).catch(() => [])
   }
   const spendableAssetUtxos: NonCustodialAssetSpendInput[] = []
   const spendableAssetUtxosCoinUnits: NonCustodialAssetSpendInput[] = []
@@ -2712,7 +2790,9 @@ export async function sendRtmAssetNonCustodial(
   let finalChangeSats = 0
 
   const sortedFeeCoins = [...feeCoins].sort((a, b) => b.amount - a.amount)
+  const selectedAssetOutpoints = new Set(selectedAssetInputs.map((u) => `${u.txid}:${u.vout}`))
   for (const utxo of sortedFeeCoins) {
+    if (selectedAssetOutpoints.has(`${utxo.txid}:${utxo.vout}`)) continue
     selectedFeeInputs.push(utxo)
     feeInputAccumSats += coinsToSats(utxo.amount)
 

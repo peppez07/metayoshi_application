@@ -4,6 +4,7 @@ import { resolvePublicApiBaseUrl } from '../../lib/apiBase'
 
 // RTM mainnet API profile and transport interceptor.
 const DEFAULT_WALLET = 'mainwallet'
+const DEFAULT_RTM_EXPLORER_URL = 'https://explorer.raptoreum.com'
 
 const apiBaseUrl = resolvePublicApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
 const wallet = String(import.meta.env.VITE_RTM_WALLET || DEFAULT_WALLET).trim() || DEFAULT_WALLET
@@ -19,7 +20,7 @@ export const RTM_API_INFO: CoinApiInfo = {
   defaultRpcUrl: apiBaseUrl,
   defaultBridgeUrl,
   defaultWallet: wallet,
-  defaultExplorerUrl: '',
+  defaultExplorerUrl: DEFAULT_RTM_EXPLORER_URL,
   healthUrl: `${apiBaseUrl}/health`,
   bridgeMethodsUrl: `${apiBaseUrl}/v1/bridge/methods/raptoreum`,
   sendCoinPathTemplate: '/v1/bridge/send/coin/raptoreum/main/:wallet',
