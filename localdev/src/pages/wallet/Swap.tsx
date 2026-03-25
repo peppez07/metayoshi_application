@@ -40,7 +40,7 @@ import {
   type ServerSwapQuote,
   type WalletSwapRoutePreference
 } from '../../lib/swapClient'
-import { getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { getTokenLogoForAsset, shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
 import {
   getBundledTrackedEvmTokens,
   useWalletStore,
@@ -785,7 +785,7 @@ function AssetLogo({
   alt: string
   className?: string
 }) {
-  if (option.logoUrl) {
+  if (shouldUseRemoteTokenLogoUrl(option.logoUrl)) {
     return (
       <img
         src={option.logoUrl}

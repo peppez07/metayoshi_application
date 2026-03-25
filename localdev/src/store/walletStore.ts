@@ -4374,9 +4374,6 @@ export const useWalletStore = create<WalletState>()(
           const rpcConfig = await createUtxoRpcConfig(net, {
             secureBridgeSigner: get().signBackendAuthMessage
           })
-          if (!hasUsableDirectRpcUrl(rpcConfig.rpcUrl, rpcConfig.bridgeUrl)) {
-            return
-          }
           try {
             const response = await fetchServerAddressJson(
               net,
@@ -6236,6 +6233,9 @@ export const useWalletStore = create<WalletState>()(
             throw new Error('Cosmos token send quantity must be a positive number')
           }
 
+          if (!String(net.rpcUrl || '').trim()) {
+            throw new Error(`Cosmos RPC URL is not configured for ${net.name}. Set VITE_${String(net.symbol || 'COSMOS').trim().toUpperCase()}_RPC or provide a network rpcUrl.`)
+          }
           const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
           if (String(senderAddress || '').trim() !== derived.address) {
             throw new Error(`Active COSMOS address does not match derived signer address (${senderAddress} != ${derived.address})`)
@@ -8037,6 +8037,9 @@ export const useWalletStore = create<WalletState>()(
 
         if (isCosmosLikeModelId(modelId)) {
           const cosmosCfg = resolveCosmosNetworkConfig(net)
+          if (!String(net.rpcUrl || '').trim()) {
+            throw new Error(`Cosmos RPC URL is not configured for ${net.name}. Set VITE_${String(net.symbol || 'COSMOS').trim().toUpperCase()}_RPC or provide a network rpcUrl.`)
+          }
           const txMemo = String(memo || '').trim()
           const amountRaw = parseDecimalToAtomicUnits(String(amount || ''), cosmosCfg.decimals, net.symbol)
           const derived = await deriveCosmosAddress(sessionMnemonic, accountIndex, cosmosCfg)

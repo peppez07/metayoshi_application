@@ -8,7 +8,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { getEnabledNetworks } from '../../lib/networkVisibility'
 import { EVM_ETHEREUM_L2_COIN_IDS } from '../../coins/coinSelection'
 import { getUnifiedLogoByName } from '../../coins/logos'
-import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { findBundledTokenLogoForAsset, getTokenLogoForAsset, shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import {
@@ -59,7 +59,7 @@ type TokenCircleLogoProps = {
 const TokenCircleLogo: React.FC<TokenCircleLogoProps> = ({ logoUrl, assetName, alt, className }) => {
   const bundledLogo = useMemo(() => findBundledTokenLogoForAsset(assetName), [assetName])
   const fallbackLogo = useMemo(() => getTokenLogoForAsset(assetName), [assetName])
-  const remoteLogo = String(logoUrl || '').trim()
+  const remoteLogo = shouldUseRemoteTokenLogoUrl(logoUrl) ? String(logoUrl || '').trim() : ''
   const [resolvedSrc, setResolvedSrc] = useState(bundledLogo || fallbackLogo)
 
   useEffect(() => {

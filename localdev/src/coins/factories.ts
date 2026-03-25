@@ -146,10 +146,10 @@ export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
       symbol: config.symbol || addressConfig.symbol,
       coinType: 'COSMOS',
       coinSymbol: config.coinSymbol || addressConfig.symbol,
-      rpcUrl: '',
+      rpcUrl: String(env[config.rpcEnvKey] || config.defaultRpcUrl || '').trim(),
       rpcWallet: '',
-      rpcUsername: '',
-      rpcPassword: '',
+      rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
+      rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
       bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, config.bridgeChain || 'main'),
       ...readBridgeCredentialsFromEnv(env, {
         userEnvKey: config.bridgeUserEnvKey,

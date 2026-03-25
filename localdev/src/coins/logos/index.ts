@@ -130,6 +130,22 @@ export function findBundledTokenLogoForAsset(assetName: string): string | null {
   return null
 }
 
+export function shouldUseRemoteTokenLogoUrl(value: string | null | undefined): boolean {
+  const raw = String(value || '').trim()
+  if (!raw) return false
+  if (raw.startsWith('data:') || raw.startsWith('blob:') || raw.startsWith('/')) return true
+  try {
+    const url = new URL(raw)
+    const host = url.hostname.toLowerCase()
+    if (host === 'raw.githubusercontent.com' || host.endsWith('.githubusercontent.com')) {
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function getUnifiedLogoByName(name: string): string {
   const raw = String(name || '').trim()
   if (!raw) return createSystemPlaceholderLogo('network', 'coin')

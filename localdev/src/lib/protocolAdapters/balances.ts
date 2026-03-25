@@ -321,6 +321,30 @@ async function getSolanaBalanceViaServer(
   return scalar
 }
 
+async function getSuiBalanceViaServer(
+  network: Network,
+  address: string,
+  rpcConfig?: UtxoRpcConfig,
+  timeoutMs?: number
+): Promise<string> {
+  const response = await fetchServerAddressJson(network, address, 'balance', {}, {
+    timeoutMs,
+    rpcConfig
+  })
+  if (!response.ok) {
+    const detail = String(
+      response.json?.error
+      ?? (response.json?.result as any)?.error
+      ?? response.text
+      ?? `HTTP ${response.status}`
+    ).trim()
+    throw new Error(`Server Sui balance query failed [HTTP ${response.status}]: ${detail}`)
+  }
+  const scalar = parseServerBalanceScalar(response.json)
+  if (!scalar) throw new Error(`Server Sui balance query returned no balance: ${response.url}`)
+  return scalar
+}
+
 async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoRpcConfig): Promise<string> {
   try {
     const response = await fetchServerAddressJson(network, address, 'balance', {}, {
@@ -465,6 +489,16 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
     return await getTronBalance(rpcUrl, address)
   }
   if (modelId === 'sui') {
+    try {
+      return await getSuiBalanceViaServer(
+        network,
+        address,
+        rpcConfig,
+        Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
+      )
+    } catch {
+      // Fall through to direct RPC.
+    }
     const rpcUrl = String(network.rpcUrl || '').trim()
     if (!rpcUrl) throw new Error('Sui RPC URL is not configured')
     return await getSuiBalance(rpcUrl, address)

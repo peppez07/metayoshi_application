@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { IoArrowUpOutline, IoChevronForward, IoEyeOffOutline, IoEyeOutline, IoLayersOutline } from 'react-icons/io5'
-import { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../../coins/tokenlogos'
+import { findBundledTokenLogoForAsset, getTokenLogoForAsset, shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
 import { formatAssetAmount, parseAssetName } from './useAssetListModel'
 
 interface AssetListRowProps {
@@ -41,7 +41,7 @@ const AssetListRow: React.FC<AssetListRowProps> = ({
   const isRootAsset = !sub
   const bundledLogo = useMemo(() => findBundledTokenLogoForAsset(effectiveName), [effectiveName])
   const fallbackLogo = useMemo(() => getTokenLogoForAsset(effectiveName), [effectiveName])
-  const remoteLogo = String(logoUrl || '').trim()
+  const remoteLogo = shouldUseRemoteTokenLogoUrl(logoUrl) ? String(logoUrl || '').trim() : ''
   const [logoSrc, setLogoSrc] = useState(bundledLogo || fallbackLogo)
   const compact = variant === 'compact'
 

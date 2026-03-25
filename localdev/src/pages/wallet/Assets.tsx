@@ -6,6 +6,7 @@ import {
   IoLayersOutline,
   IoSparklesOutline,
 } from 'react-icons/io5'
+import { shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
 import { isNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import { coinModelFamilyToRouteKey, resolveCoinModelFamily } from '../../lib/coinModel'
 import { formatFiatValue } from '../../store/walletStore'
@@ -123,7 +124,7 @@ const Assets: React.FC = () => {
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/70 shadow-[0_10px_20px_rgba(15,23,42,0.08)]">
-                        {assetLogos[name] ? (
+                        {shouldUseRemoteTokenLogoUrl(assetLogos[name]) ? (
                           <img src={assetLogos[name]} alt={name} className="h-full w-full object-cover" />
                         ) : (
                           <span className="text-xs font-black uppercase text-primary">{String(resolveAssetDisplayName(name) || name).slice(0, 2)}</span>

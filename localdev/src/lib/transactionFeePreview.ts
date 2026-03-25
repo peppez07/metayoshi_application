@@ -9,6 +9,8 @@ import {
   TransactionInstruction
 } from '@solana/web3.js'
 import { TronWeb } from 'tronweb'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { Transaction as SuiTransaction } from '@mysten/sui/transactions'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
 import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
@@ -27,6 +29,7 @@ import {
   type UtxoUnspent
 } from './utxoRpc'
 import { resolveRuntimeModelId } from './runtimeModel'
+import { resolveCosmosAddressConfig } from './cosmosAddress'
 
 export type TransactionFeePreviewSource = 'live' | 'fallback'
 export type TransactionFeePreviewKind = 'estimate' | 'max-cap'
@@ -93,6 +96,7 @@ const utxoFeeRateCache = new Map<string, { checkedAt: number; feePerByteSats: nu
 const SOL_TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const SOL_TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 const SOL_ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1Q2hvZbsiqW5xWH25efTNsLJA8knL')
+const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
 
 interface UtxoFeeRateResolution {
   feePerByteSats: number
@@ -177,6 +181,141 @@ function parseSplAmountToRaw(amount: string, decimals: number): bigint {
   const out = BigInt(`${whole}${frac.padEnd(decimals, '0')}`.replace(/^0+/, '') || '0')
   if (out <= 0n) throw new Error('Token amount must be greater than 0')
   return out
+}
+
+function parseSuiAmountToMist(amount: string): bigint {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid SUI amount')
+  const [whole, frac = ''] = raw.split('.')
+  if (frac.length > 9) throw new Error('SUI supports up to 9 decimals')
+  const mist = BigInt(`${whole}${frac.padEnd(9, '0')}`.replace(/^0+/, '') || '0')
+  if (mist <= 0n) throw new Error('Amount must be greater than 0')
+  return mist
+}
+
+function parseSuiTokenAmountToRaw(amount: string, decimals: number, label: string): bigint {
+  const raw = String(amount || '').trim()
+  if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error(`Invalid ${label} amount`)
+  const [whole, frac = ''] = raw.split('.')
+  if (frac.length > decimals) throw new Error(`${label} supports up to ${decimals} decimals`)
+  const amountRaw = BigInt(`${whole}${frac.padEnd(decimals, '0')}`.replace(/^0+/, '') || '0')
+  if (amountRaw <= 0n) throw new Error(`${label} amount must be greater than 0`)
+  return amountRaw
+}
+
+function createSuiPreviewClient(network: PreviewNetwork): SuiJsonRpcClient {
+  const rpcUrl = String(network.rpcUrl || '').trim()
+  if (!rpcUrl) throw new Error('Sui RPC URL is not configured')
+  return new SuiJsonRpcClient({
+    network: 'mainnet',
+    url: rpcUrl
+  })
+}
+
+async function listSuiCoinObjectsForPreview(
+  client: SuiJsonRpcClient,
+  owner: string,
+  coinType: string
+): Promise<Array<{ coinObjectId: string; balance: bigint }>> {
+  const rows: Array<{ coinObjectId: string; balance: bigint }> = []
+  let cursor: string | null | undefined = null
+
+  while (true) {
+    const page = await client.getCoins({
+      owner,
+      coinType,
+      cursor,
+      limit: 50
+    })
+    for (const row of page.data || []) {
+      const coinObjectId = String((row as any)?.coinObjectId || '').trim()
+      const balanceText = String((row as any)?.balance || '').trim()
+      if (!coinObjectId || !/^\d+$/.test(balanceText)) continue
+      const balance = BigInt(balanceText)
+      if (balance <= 0n) continue
+      rows.push({ coinObjectId, balance })
+    }
+    if (!page.hasNextPage || !page.nextCursor) break
+    cursor = page.nextCursor
+  }
+
+  rows.sort((a, b) => {
+    if (a.balance === b.balance) return a.coinObjectId.localeCompare(b.coinObjectId)
+    return a.balance > b.balance ? -1 : 1
+  })
+  return rows
+}
+
+function parseSuiNftAssetKey(assetId: string): { objectId: string } | null {
+  const match = String(assetId || '').trim().match(/^SUINFT:(0x[a-fA-F0-9]+)$/)
+  if (!match) return null
+  return { objectId: match[1] }
+}
+
+function computeSuiGasFeeMist(gasUsed: any): bigint {
+  const computationCost = BigInt(String(gasUsed?.computationCost || '0'))
+  const storageCost = BigInt(String(gasUsed?.storageCost || '0'))
+  const storageRebate = BigInt(String(gasUsed?.storageRebate || '0'))
+  const feeMist = computationCost + storageCost - storageRebate
+  return feeMist > 0n ? feeMist : 0n
+}
+
+async function estimateSuiTransferFee(
+  input: EstimateTransactionFeePreviewInput
+): Promise<{ feeMist: bigint; debugDetails: string }> {
+  const fromAddress = String(input.fromAddress || '').trim()
+  const toAddress = String(input.toAddress || '').trim()
+  if (!fromAddress || !toAddress) throw new Error('Sender and recipient are required for Sui fee estimation')
+
+  const client = createSuiPreviewClient(input.network)
+  const tx = new SuiTransaction()
+  tx.setSender(fromAddress)
+
+  if (input.isAssetTransfer) {
+    const assetId = String(input.assetId || '').trim()
+    if (!assetId) throw new Error('Asset id is required for Sui asset fee estimation')
+    const nft = parseSuiNftAssetKey(assetId)
+    if (nft) {
+      tx.transferObjects([nft.objectId], toAddress)
+    } else {
+      const metadata = await client.getCoinMetadata({ coinType: assetId }).catch(() => null as any)
+      const decimalsRaw = Number((metadata as any)?.decimals)
+      const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 9
+      const assetLabel = String((metadata as any)?.symbol || (metadata as any)?.name || assetId).trim() || assetId
+      const amountRaw = parseSuiTokenAmountToRaw(String(input.amount || '').trim(), decimals, assetLabel)
+      const coins = await listSuiCoinObjectsForPreview(client, fromAddress, assetId)
+
+      let selectedTotal = 0n
+      const selectedIds: string[] = []
+      for (const row of coins) {
+        selectedIds.push(row.coinObjectId)
+        selectedTotal += row.balance
+        if (selectedTotal >= amountRaw) break
+      }
+      if (selectedTotal < amountRaw || selectedIds.length === 0) {
+        throw new Error(`Insufficient ${assetLabel} balance`)
+      }
+
+      const primaryCoinId = selectedIds[0]
+      if (selectedIds.length > 1) {
+        tx.mergeCoins(primaryCoinId, selectedIds.slice(1))
+      }
+      const [transferCoin] = tx.splitCoins(primaryCoinId, [amountRaw])
+      tx.transferObjects([transferCoin], toAddress)
+    }
+  } else {
+    const amountMist = parseSuiAmountToMist(String(input.amount || '').trim())
+    const [coin] = tx.splitCoins(tx.gas, [amountMist])
+    tx.transferObjects([coin], toAddress)
+  }
+
+  const bytes = await tx.build({ client })
+  const result = await client.dryRunTransactionBlock({ transactionBlock: bytes })
+  const feeMist = computeSuiGasFeeMist((result as any)?.effects?.gasUsed)
+  return {
+    feeMist,
+    debugDetails: `SUI | txBytes=${bytes.length} | mode=${input.isAssetTransfer ? 'asset' : 'native'}`
+  }
 }
 
 function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
@@ -1003,6 +1142,27 @@ async function estimateEvmNativeTransferFee(
   return estimateFeeFromResolvedEvmQuote(quote, input)
 }
 
+function estimateCosmosConfiguredFee(
+  input: EstimateTransactionFeePreviewInput
+): TransactionFeePreviewResult {
+  const cfg = resolveCosmosAddressConfig({
+    id: input.network.id,
+    runtimeModelId: input.network.runtimeModelId
+  })
+  const feeAtomic = BigInt(String(cfg.feeAmountRaw || '0').trim() || '0')
+  const decimals = Math.max(0, Number(cfg.decimals || 0))
+  const fee = Number(feeAtomic) / (10 ** decimals)
+  return {
+    fee: Number.isFinite(fee) && fee > 0 ? fee : estimateNetworkFeeUi(input.network as Network),
+    source: 'live',
+    kind: 'estimate',
+    isFinal: false,
+    statusLabel: 'Configured network fee',
+    debugLabel: 'Cosmos configured fee',
+    debugDetails: `${cfg.symbol} | fee=${cfg.feeAmountRaw} ${cfg.feeDenom} | gas=${cfg.gasLimit}`
+  }
+}
+
 export async function estimateTransactionFeePreview(
   input: EstimateTransactionFeePreviewInput
 ): Promise<TransactionFeePreviewResult> {
@@ -1069,6 +1229,19 @@ export async function estimateTransactionFeePreview(
       }
     }
 
+    if (modelId === 'sui' && toAddress) {
+      const preview = await estimateSuiTransferFee(input)
+      return {
+        fee: Number((preview.feeMist.toString())) / 1e9,
+        source: 'live',
+        kind: 'estimate',
+        isFinal: false,
+        statusLabel: 'Live network estimate',
+        debugLabel: input.isAssetTransfer ? 'Sui live asset quote' : 'Sui live native quote',
+        debugDetails: preview.debugDetails
+      }
+    }
+
     if (input.network.coinType === 'UTXO' && toAddress) {
       const preview = input.isAssetTransfer
         ? await estimateUtxoAssetTransferFee(input)
@@ -1082,6 +1255,10 @@ export async function estimateTransactionFeePreview(
         debugLabel: preview.debugLabel,
         debugDetails: preview.debugDetails
       }
+    }
+
+    if (input.network.coinType === 'COSMOS' && toAddress) {
+      return estimateCosmosConfiguredFee(input)
     }
 
     return {

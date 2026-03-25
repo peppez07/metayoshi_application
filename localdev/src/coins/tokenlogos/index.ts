@@ -1,1 +1,1 @@
-export { findBundledTokenLogoForAsset, getTokenLogoForAsset } from '../logos'
+export { findBundledTokenLogoForAsset, getTokenLogoForAsset, shouldUseRemoteTokenLogoUrl } from '../logos'
