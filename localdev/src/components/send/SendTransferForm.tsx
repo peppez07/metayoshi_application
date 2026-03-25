@@ -154,6 +154,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const displayEstimatedNativeFeeFiat = formatFiatValue(estimatedNativeFeeFiat)
   const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
   const previewAmount = isFixedOneMode ? '1' : amount
+  const feePreviewAssetId = useMemo(() => {
+    if (isNative) return ''
+    const canonicalEntryId = String(item.id || '').trim()
+    if (/^EVMTOKEN:/i.test(canonicalEntryId)) return canonicalEntryId
+    return String(item.assetId || '').trim()
+  }, [isNative, item.assetId, item.id])
   const hasFeePreviewInputs = Boolean(
     fromAddress
     && feePreviewRecipient
@@ -227,7 +233,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
             fromAddress,
             toAddress: feePreviewRecipient,
             amount: previewAmount,
-            assetId: String(item.assetId || '').trim() || undefined,
+            assetId: feePreviewAssetId || undefined,
             assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : EMPTY_LOGO_MAP,
             isAssetTransfer: !isNative,
             gasLane: modelPreferences.evmGasLane,
@@ -265,6 +271,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     fromAddress,
     isFixedOneMode,
     isNative,
+    feePreviewAssetId,
     item.assetId,
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
@@ -434,6 +441,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       state: {
         requestType: 'asset',
         assetId,
+        feePreviewAssetId: feePreviewAssetId || assetId,
         assetLabel: item.label || assetId,
         to: toAddress.trim(),
         amount: normalizedAmount,

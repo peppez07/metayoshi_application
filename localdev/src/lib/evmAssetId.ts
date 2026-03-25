@@ -1,6 +1,7 @@
 import { ethers } from 'ethers'
 
 const EVM_TRACKED_ASSET_PATTERNS: RegExp[] = [
+  /^evmtoken:(0x[a-fA-F0-9]{40})$/i,
   /^(?:erc20|bep20|contract|token):[^:\s]+:(0x[a-fA-F0-9]{40})$/i,
   /^(?:erc20|bep20|contract|token):(0x[a-fA-F0-9]{40})$/i
 ]

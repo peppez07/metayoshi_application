@@ -31,6 +31,7 @@ interface TxLayoutProps {
 interface TxState {
   requestType?: 'native' | 'asset'
   assetId?: string
+  feePreviewAssetId?: string
   assetLabel?: string
   to?: string
   amount?: string
@@ -210,6 +211,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const assetId = isDappTxRoute && dappHasWalletTx
     ? dappAssetId
     : String(txState.assetId || '').trim()
+  const feePreviewAssetId = isDappTxRoute && dappHasWalletTx
+    ? dappAssetId
+    : String(txState.feePreviewAssetId || txState.assetId || '').trim()
   const assetLabel = String(txState.assetLabel || assetId || '').trim()
   const toAddress = isDappTxRoute && dappHasWalletTx
     ? dappToAddress
@@ -384,7 +388,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
             fromAddress,
             toAddress: feePreviewRecipient,
             amount,
-            assetId: assetId || undefined,
+            assetId: feePreviewAssetId || undefined,
             assetLogos: activeNetworkLogos,
             isAssetTransfer,
             dataHex: dappEvmRequest?.data,
@@ -427,6 +431,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     activeNetworkLogos,
     amount,
     assetId,
+    feePreviewAssetId,
     dappEvmRequest,
     fromAddress,
     isAssetTransfer,
