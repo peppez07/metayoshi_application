@@ -59,6 +59,7 @@ type SecureBridgeAuthConfig = {
   legacyBasicRecommended: boolean
   sessionEnabled: boolean
   signatureVerifierConfigured: boolean
+  secureBridgeEnabled: boolean
   challengePath?: string
   verifyPath?: string
   opTokenPath?: string
@@ -434,6 +435,7 @@ async function fetchSecureBridgeAuthConfig(
         legacyBasicRecommended: Boolean(response.json?.legacyBasic?.walletRecommended),
         sessionEnabled: Boolean(response.json?.session?.enabled),
         signatureVerifierConfigured: Boolean(response.json?.session?.signatureVerifier?.configured),
+        secureBridgeEnabled: Boolean(response.json?.secureBridge?.enabled),
         challengePath: String(response.json?.session?.challengePath || '').trim() || undefined,
         verifyPath: String(response.json?.session?.verifyPath || '').trim() || undefined,
         opTokenPath: String(response.json?.secureBridge?.opTokenPath || '').trim() || undefined,
@@ -468,17 +470,14 @@ async function getSecureBridgeSession(
   if (!authConfig && typeof authConfigResult.status === 'number' && isSecureBridgeUnavailableStatus(authConfigResult.status)) {
     throw asSecureUnavailable(`/v1/auth/config unavailable on this gateway (HTTP ${authConfigResult.status})`)
   }
-  if (
-    authConfig?.preferredMode === 'session-bearer'
-    && authConfig.sessionEnabled === false
-  ) {
+  if (authConfig?.sessionEnabled === false) {
     throw asSecureUnavailable('Signed wallet login is disabled by /v1/auth/config on this gateway')
   }
-  if (
-    authConfig?.preferredMode === 'session-bearer'
-    && authConfig.signatureVerifierConfigured === false
-  ) {
+  if (authConfig?.signatureVerifierConfigured === false) {
     throw asSecureUnavailable('Signature verifier is not configured on this gateway')
+  }
+  if (authConfig?.secureBridgeEnabled === false) {
+    throw asSecureUnavailable('Secure bridge writes are disabled by /v1/auth/config on this gateway')
   }
   const shouldSendLegacyBasicOnAuth = Boolean(authConfig?.walletPasswordRequired)
 
