@@ -3519,6 +3519,37 @@ export async function sendBridgeTokenTransfer(
   const txKeyAttempts = txKeyCandidates.length > 0 ? txKeyCandidates : ['']
 
   let lastError = 'Token transfer failed'
+  const tryEvmRelayFallback = async (reason: string): Promise<{ txid: string; relayed?: boolean } | null> => {
+    if (signedFormat !== 'evm-raw-hex') return null
+    console.warn(`[${traceId}] token transfer falling back to generic EVM asset relay`, {
+      coin,
+      chain,
+      reason
+    })
+    try {
+      const relayed = await sendBridgeEvmSignedRelay(config, {
+        kind: 'asset',
+        coin,
+        chain,
+        wallet,
+        signedTxHex
+      })
+      console.info(`[${traceId}] token transfer fallback relay success`, {
+        txid: relayed.txid,
+        relayed: relayed.relayed
+      })
+      return {
+        txid: relayed.txid,
+        relayed: relayed.relayed
+      }
+    } catch (fallbackError) {
+      console.warn(`[${traceId}] token transfer fallback relay failed`, {
+        reason,
+        detail: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      })
+      return null
+    }
+  }
   for (let i = 0; i < txKeyAttempts.length; i += 1) {
     const txKey = txKeyAttempts[i]
     const headers: Record<string, string> = { ...baseHeaders }
@@ -3574,6 +3605,8 @@ export async function sendBridgeTokenTransfer(
     } catch (err) {
       clearTimeout(timer)
       lastError = `Token transfer request failed: ${err instanceof Error ? err.message : String(err)}`
+      const fallback = await tryEvmRelayFallback(lastError)
+      if (fallback) return fallback
       continue
     } finally {
       clearTimeout(timer)
@@ -3623,6 +3656,10 @@ export async function sendBridgeTokenTransfer(
     const shouldRetryTxKey = txKeyAttempts.length > i + 1
       && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
     if (shouldRetryTxKey) continue
+    if (!errorCode && (res.status === 404 || res.status >= 500)) {
+      const fallback = await tryEvmRelayFallback(lastError)
+      if (fallback) return fallback
+    }
     throw new Error(lastError)
   }
 

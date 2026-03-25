@@ -2276,6 +2276,9 @@ type TrackedTronToken = {
   contract: string
 }
 
+const TRON_BASE58_ADDRESS_RE = /^T[1-9A-HJ-NP-Za-km-z]{33}$/
+const TRON_HEX_ADDRESS_RE = /^41[a-fA-F0-9]{40}$/
+
 const chainBalanceSnapshotCache = createRequestCache<ChainBalanceSyncResult & { balance: string }>({
   defaultTtlMs: 10_000,
   maxEntries: 200
@@ -2502,6 +2505,24 @@ function resolveTrackedTronTokens(): TrackedTronToken[] {
   // Default minimal TRC20 set (extend via VITE_TRON_TRACKED_TOKENS).
   // USDT TRC20 contract is widely used and stable.
   return [{ symbol: 'USDT', contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }]
+}
+
+function isLikelyTronContractAddress(value: string): boolean {
+  const raw = String(value || '').trim()
+  return TRON_BASE58_ADDRESS_RE.test(raw) || TRON_HEX_ADDRESS_RE.test(raw)
+}
+
+function buildTronAssetId(contract: string): string {
+  const normalized = String(contract || '').trim()
+  return isLikelyTronContractAddress(normalized) ? `trc20:${normalized}` : ''
+}
+
+function extractTronContractFromAssetId(assetId: string): string {
+  const raw = String(assetId || '').trim()
+  if (!raw) return ''
+  const tagged = raw.match(/^trc20:([^:\s]+)$/i)
+  const candidate = String(tagged?.[1] || raw).trim()
+  return isLikelyTronContractAddress(candidate) ? candidate : ''
 }
 
 function encodeTronContractLogoHint(logo: string, contract: string): string {
@@ -4302,6 +4323,7 @@ export const useWalletStore = create<WalletState>()(
                   }) as Array<Record<string, unknown>>
                 })()
             const assets: Record<string, number> = {}
+            const logos: Record<string, string> = {}
             const labels: Record<string, string> = {}
             const usedKeys = new Set<string>()
 
@@ -4333,20 +4355,33 @@ export const useWalletStore = create<WalletState>()(
                 || row.contractAddress
                 || 'TOKEN'
               ).trim().toUpperCase()
-              let key = baseSymbol
-              if (usedKeys.has(key)) {
+              const contract = String(
+                row.contractAddress
+                || row.contract_address
+                || row.tokenAddress
+                || row.token_address
+                || ''
+              ).trim()
+              const contractKey = buildTronAssetId(contract)
+              let key = contractKey || baseSymbol
+              if (!contractKey && usedKeys.has(key)) {
                 let suffix = 2
                 while (usedKeys.has(`${baseSymbol} #${suffix}`)) suffix += 1
                 key = `${baseSymbol} #${suffix}`
               }
               usedKeys.add(key)
-              assets[key] = displaySats
+              const prev = Number(assets[key] || 0)
+              assets[key] = Math.max(prev, displaySats)
               labels[key] = baseSymbol
+              const logoUri = extractAssetLogoUri(row)
+              if (logoUri && !logos[key]) {
+                logos[key] = contract ? encodeTronContractLogoHint(logoUri, contract) : logoUri
+              }
             }
 
             applyAssetSnapshot({
               assets,
-              logos: {},
+              logos,
               labels,
               evmNfts: {}
             })
@@ -4904,6 +4939,7 @@ export const useWalletStore = create<WalletState>()(
           localRpcOverrides: lro,
           evmNftAssets,
           networkAssets,
+          networkAssetLabels,
           networkAssetLogos,
           accountNetworkEvmNftAssets,
         } = get()
@@ -4918,17 +4954,22 @@ export const useWalletStore = create<WalletState>()(
 
         const modelId = resolveNetworkModelId(net)
         if (modelId === 'tron') {
+          const assetLabel = String(networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+          const fromAssetId = extractTronContractFromAssetId(normalizedAssetId)
           const hint = extractTronContractFromLogoHint(logoUri)
           const tracked = resolveTrackedTronTokens()
-          const trackedMatch = tracked.find((t) => String(t.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase())
-          const contract = String(hint || trackedMatch?.contract || '').trim()
+          const trackedMatch = tracked.find((t) => {
+            const symbol = String(t.symbol || '').trim().toUpperCase()
+            return symbol === normalizedAssetId.toUpperCase() || symbol === assetLabel.toUpperCase()
+          })
+          const contract = String(fromAssetId || hint || trackedMatch?.contract || '').trim()
           const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
           const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
           const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
           const tokenRef = contract ? `${explorerBase}/#/contract/${contract}` : undefined
           return {
-            name: normalizedAssetId,
+            name: assetLabel || normalizedAssetId,
             amount: Number.isFinite(amountUi) ? amountUi : 0,
             units: 0,
             reissuable: false,
@@ -5815,11 +5856,16 @@ export const useWalletStore = create<WalletState>()(
           const normalizedAssetId = String(assetId || '').trim()
           if (!normalizedAssetId) throw new Error('Token id is required')
 
+          const assetLabel = String(networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
           const logoUri = String(networkAssetLogos?.[activeNetworkId]?.[normalizedAssetId] || '').trim()
+          const fromAssetId = extractTronContractFromAssetId(normalizedAssetId)
           const hint = extractTronContractFromLogoHint(logoUri)
           const tracked = resolveTrackedTronTokens()
-          const trackedMatch = tracked.find((t) => String(t.symbol || '').trim().toUpperCase() === normalizedAssetId.toUpperCase())
-          const contract = String(hint || trackedMatch?.contract || '').trim()
+          const trackedMatch = tracked.find((t) => {
+            const symbol = String(t.symbol || '').trim().toUpperCase()
+            return symbol === normalizedAssetId.toUpperCase() || symbol === assetLabel.toUpperCase()
+          })
+          const contract = String(fromAssetId || hint || trackedMatch?.contract || '').trim()
           if (!contract) {
             throw new Error(`Unknown TRC20 contract for ${normalizedAssetId}. Configure VITE_TRON_TRACKED_TOKENS.`)
           }
@@ -6205,9 +6251,9 @@ export const useWalletStore = create<WalletState>()(
             throw new Error(`Destination address must be a valid ${cosmosCfg.hrp}1... address`)
           }
 
-          const amountRawText = String(qty || '').trim()
-          if (!/^\d+$/.test(amountRawText) || BigInt(amountRawText) <= 0n) {
-            throw new Error('Cosmos token send quantity must be a positive integer in raw denom units')
+          const amountInputText = String(qty || '').trim()
+          if (!/^\d+(\.\d+)?$/.test(amountInputText)) {
+            throw new Error('Cosmos token send quantity must be a positive number')
           }
 
           const derived = await deriveCosmosAddress(sessionMnemonic!, accountIndex, cosmosCfg)
@@ -6220,12 +6266,45 @@ export const useWalletStore = create<WalletState>()(
             localRpcOverride: lro2[net.id],
             secureBridgeSigner: get().signBackendAuthMessage
           })
+          let amountRawText = ''
+          let assetLabel = String(
+            networkAssetLabels?.[activeNetworkId]?.[denom]
+            || denom
+          ).trim() || denom
+          const matchingRows = await fetchBridgeTokenBalances(rpcConfig, {
+            coin: resolveCosmosBridgeCoinId(net),
+            chain: String(net.serverChain || 'main').trim() || 'main',
+            owner: derived.address,
+            tokenId: denom
+          }).catch(() => [])
+          const matchingRow = Array.isArray(matchingRows)
+            ? matchingRows.find((row) => {
+                const tokenId = String((row as any)?.tokenId || (row as any)?.assetId || (row as any)?.denom || '').trim()
+                return tokenId === denom
+              }) as Record<string, unknown> | undefined
+            : undefined
+          if (matchingRow) {
+            const rowLabel = String(matchingRow.symbol || matchingRow.name || '').trim()
+            if (rowLabel) assetLabel = rowLabel
+          }
           let signedTxBase64 = ''
           if (contractAsset) {
             if (!isCosmosAddressForHrp(contractAsset.contract, cosmosCfg.hrp)) {
               throw new Error(`Cosmos contract address must be a valid ${cosmosCfg.hrp}1... address`)
             }
             if (contractAsset.kind === 'cw20') {
+              const decimalsRaw = Number(matchingRow?.decimals)
+              const tokenDecimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30
+                ? decimalsRaw
+                : null
+              if (tokenDecimals === null) {
+                if (amountInputText.includes('.')) {
+                  throw new Error(`Unable to determine decimals for ${assetLabel}. Refresh the asset list or enter whole raw units.`)
+                }
+                amountRawText = amountInputText
+              } else {
+                amountRawText = parseDecimalToAtomicUnits(amountInputText, tokenDecimals, assetLabel).toString()
+              }
               const executeMsg = {
                 transfer: {
                   recipient,
@@ -6244,9 +6323,10 @@ export const useWalletStore = create<WalletState>()(
                 memo: txMemo
               })
             } else {
-              if (amountRawText !== '1') {
+              if (amountInputText !== '1') {
                 throw new Error('CW721 transfer quantity must be exactly 1')
               }
+              amountRawText = '1'
               const executeMsg = {
                 transfer_nft: {
                   recipient,
@@ -6266,6 +6346,18 @@ export const useWalletStore = create<WalletState>()(
               })
             }
           } else {
+            const decimalsRaw = Number(matchingRow?.decimals)
+            const tokenDecimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30
+              ? decimalsRaw
+              : (denom === cosmosCfg.nativeDenom ? cosmosCfg.decimals : null)
+            if (tokenDecimals === null) {
+              if (amountInputText.includes('.')) {
+                throw new Error(`Unable to determine decimals for ${assetLabel}. Refresh the asset list or enter whole raw units.`)
+              }
+              amountRawText = amountInputText
+            } else {
+              amountRawText = parseDecimalToAtomicUnits(amountInputText, tokenDecimals, assetLabel).toString()
+            }
             signedTxBase64 = await signCosmosTokenTransferTxBase64({
               rpcUrl: net.rpcUrl,
               fromAddress: derived.address,
