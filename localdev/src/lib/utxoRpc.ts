@@ -708,6 +708,102 @@ function normalizeSecureRelayTxid(result: any): string {
   ).trim()
 }
 
+const RTM_EXPLORER_SITE_BASE = 'https://explorer.raptoreum.com'
+
+function isRtmMainAssetRoute(config: UtxoRpcConfig): boolean {
+  const { coin, chain } = resolveBridgeCoinChainHint(config)
+  return String(coin || '').trim().toLowerCase() === 'raptoreum'
+    && String(chain || 'main').trim().toLowerCase() === 'main'
+}
+
+async function fetchRtmTxOut(config: UtxoRpcConfig, txid: string, vout: number): Promise<any> {
+  try {
+    return await jsonRpcCall(config, 'gettxout', [txid, vout, true])
+  } catch (bridgeError) {
+    if (
+      !config.useLocalRpc
+      && String(config.rpcUrl || '').trim()
+      && String(config.rpcUsername || '').trim()
+      && String(config.rpcPassword || '').trim()
+    ) {
+      return await jsonRpcCall(
+        {
+          ...config,
+          bridgeUrl: undefined,
+          useLocalRpc: true
+        },
+        'gettxout',
+        [txid, vout, true]
+      )
+    }
+    throw bridgeError
+  }
+}
+
+async function fetchRtmExplorerAssetUtxos(
+  config: UtxoRpcConfig,
+  address: string
+): Promise<RtmUnspentAsset[]> {
+  const res = await fetch(`${RTM_EXPLORER_SITE_BASE}/sites/address/${encodeURIComponent(address)}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  })
+  if (!res.ok) {
+    throw new Error(`RTM explorer address lookup failed for ${address} (HTTP ${res.status})`)
+  }
+
+  const json = await res.json().catch(() => null)
+  const deltas = Array.isArray(json?.rpc_data?.deltas) ? json.rpc_data.deltas : []
+  const candidates = new Map<string, { txid: string; vout: number; assetName: string; assetId: string }>()
+
+  for (const row of deltas) {
+    const satoshis = Number(row?.satoshis ?? 0)
+    const txid = String(row?.txid || '').trim()
+    const vout = Number(row?.index)
+    const assetName = String(row?.asset || '').trim()
+    const assetId = String(row?.assetId || '').trim()
+    if (!txid || !Number.isFinite(vout) || vout < 0 || satoshis <= 0 || !assetName) continue
+    candidates.set(`${txid}:${vout}`, { txid, vout, assetName, assetId })
+  }
+
+  const out: RtmUnspentAsset[] = []
+  for (const candidate of Array.from(candidates.values()).slice(0, 128)) {
+    let txout: any = null
+    try {
+      txout = await fetchRtmTxOut(config, candidate.txid, candidate.vout)
+    } catch {
+      continue
+    }
+
+    const confirmations = Number(txout?.confirmations ?? 0)
+    const scriptPubKey = txout?.scriptPubKey || {}
+    const addresses = Array.isArray(scriptPubKey?.addresses) ? scriptPubKey.addresses.map((value: any) => String(value)) : []
+    const asset = scriptPubKey?.asset || {}
+    const scriptHex = String(scriptPubKey?.hex || '').trim()
+    const assetName = String(asset?.name || candidate.assetName || '').trim()
+    const assetId = String(asset?.asset_id || candidate.assetId || '').trim()
+    const amount = Number(asset?.amount ?? 0)
+
+    if (confirmations < 1 || !scriptHex || !assetName || !Number.isFinite(amount) || amount <= 0) continue
+    if (!addresses.includes(address)) continue
+
+    out.push({
+      txid: candidate.txid,
+      vout: candidate.vout,
+      address,
+      assetName,
+      assetId,
+      scriptPubKey: scriptHex,
+      amount,
+      satoshis: amount,
+      confirmations,
+      spendable: true
+    })
+  }
+
+  return out
+}
+
 export async function fetchBridgeAddressAssetUtxos(
   config: UtxoRpcConfig,
   address: string
@@ -722,6 +818,7 @@ export async function fetchBridgeAddressAssetUtxos(
   const params = new URLSearchParams()
   if (coin) params.set('coin', coin)
   if (chain) params.set('chain', chain)
+  const allowRtmExplorerFallback = isRtmMainAssetRoute(config)
 
   const query = params.toString() ? `?${params.toString()}` : ''
   const routeCandidates = [
@@ -733,7 +830,17 @@ export async function fetchBridgeAddressAssetUtxos(
 
   let lastError: Error | null = null
   for (let i = 0; i < routeCandidates.length; i += 1) {
-    const res = await fetch(routeCandidates[i], { method: 'GET', headers })
+    let res: Response
+    try {
+      res = await fetch(routeCandidates[i], { method: 'GET', headers })
+    } catch (error) {
+      lastError = asError(error)
+      if (allowRtmExplorerFallback) {
+        const fallback = await fetchRtmExplorerAssetUtxos(config, address).catch(() => [])
+        if (fallback.length > 0) return fallback
+      }
+      break
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       let detail = text.trim()
@@ -749,6 +856,10 @@ export async function fetchBridgeAddressAssetUtxos(
         && res.status === 404
         && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
       if (shouldTryLegacyAlias) continue
+      if (allowRtmExplorerFallback) {
+        const fallback = await fetchRtmExplorerAssetUtxos(config, address).catch(() => [])
+        if (fallback.length > 0) return fallback
+      }
       lastError = new Error(
         `Bridge asset UTXO lookup failed for ${address} ` +
         `(HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}): ` +
@@ -762,6 +873,10 @@ export async function fetchBridgeAddressAssetUtxos(
       throw new Error(`Bridge asset UTXO lookup failed for ${address}: ${detail}`)
     }
     const assets = Array.isArray(json?.assets) ? json.assets : []
+    if (assets.length <= 0 && allowRtmExplorerFallback) {
+      const fallback = await fetchRtmExplorerAssetUtxos(config, address).catch(() => [])
+      if (fallback.length > 0) return fallback
+    }
 
     return assets.map((row: any) => ({
       txid: String(row?.txid || ''),
@@ -783,6 +898,10 @@ export async function fetchBridgeAddressAssetUtxos(
     )
   }
 
+  if (allowRtmExplorerFallback) {
+    const fallback = await fetchRtmExplorerAssetUtxos(config, address).catch(() => [])
+    if (fallback.length > 0) return fallback
+  }
   if (lastError) throw lastError
   return []
 }
