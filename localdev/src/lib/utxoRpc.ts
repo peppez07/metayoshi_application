@@ -189,6 +189,10 @@ function resolveRtmExplorerBaseUrl(): string {
   return base.replace(/\/+$/, '')
 }
 
+function canUseBridgeAddressAssetFallback(config: UtxoRpcConfig): boolean {
+  return !config.useLocalRpc && Boolean(String(config.bridgeUrl || '').trim())
+}
+
 function dedupeStringList(values: Array<string | undefined>): string[] {
   const out: string[] = []
   const seen = new Set<string>()
@@ -2963,7 +2967,19 @@ export async function listAssetBalancesByAddress(
   try {
     const result = await jsonRpcCall(config, 'listassetbalancesbyaddress', [address])
     const normalized = (result ?? {}) as Record<string, number>
-    if (Object.keys(normalized).length > 0 || !hostedAssets) return normalized
+    if (Object.keys(normalized).length > 0) return normalized
+    if (canUseBridgeAddressAssetFallback(config)) {
+      const byAddressApi = await fetchBridgeAddressAssetUtxos(config, address).catch(() => [])
+      const balances: Record<string, number> = {}
+      for (const row of byAddressApi) {
+        const assetName = String(row?.assetName ?? '').trim()
+        const rawAmount = Number(row?.amount ?? row?.satoshis ?? 0)
+        if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
+        balances[assetName] = (balances[assetName] ?? 0) + Math.trunc(rawAmount)
+      }
+      if (Object.keys(balances).length > 0) return balances
+    }
+    if (!hostedAssets) return normalized
     return hostedAssets
   } catch (error) {
     // Some bridge nodes return 502 "Asset metadata not found" for this method
@@ -2976,6 +2992,15 @@ export async function listAssetBalancesByAddress(
       const rawAmount = Number(row?.amount ?? row?.satoshis ?? 0)
       if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
       balances[assetName] = (balances[assetName] ?? 0) + Math.trunc(rawAmount)
+    }
+    if (Object.keys(balances).length === 0 && canUseBridgeAddressAssetFallback(config)) {
+      const byAddressApi = await fetchBridgeAddressAssetUtxos(config, address).catch(() => [])
+      for (const row of byAddressApi) {
+        const assetName = String(row?.assetName ?? '').trim()
+        const rawAmount = Number(row?.amount ?? row?.satoshis ?? 0)
+        if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
+        balances[assetName] = (balances[assetName] ?? 0) + Math.trunc(rawAmount)
+      }
     }
     if (Object.keys(balances).length === 0 && hostedAssets) return hostedAssets
     return balances

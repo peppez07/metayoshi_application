@@ -125,7 +125,7 @@ function parseEvmNftAssetKey(assetId: string): { standard: 'erc721' | 'erc1155';
 
 function supportsAddressIndex(coinSymbol?: string): boolean {
   const symbol = String(coinSymbol || '').trim().toUpperCase()
-  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE'
+  return symbol === 'RTM' || symbol === 'BTCZ' || symbol === 'ZEC' || symbol === 'TIDE' || symbol === 'FIRO' || symbol === 'DOGE' || symbol === 'DASH'
 }
 
 function parseFiniteNumber(value: unknown): number | null {
@@ -250,6 +250,15 @@ async function estimateUtxoNativeTransferFee(input: EstimateTransactionFeePrevie
     }
   }
   if (unspent.length === 0) {
+    try {
+      const { scanAddressUnspent } = await import('./utxoRpc')
+      const scanned = await scanAddressUnspent(rpcConfig, senderAddress)
+      if (scanned.length > 0) unspent = scanned
+    } catch {
+      // Chainstate scan may be unavailable on some providers.
+    }
+  }
+  if (unspent.length === 0) {
     throw new Error(`No confirmed spendable UTXOs found for quick fee preview on address ${senderAddress}`)
   }
 
@@ -356,7 +365,7 @@ async function estimateUtxoAssetTransferFee(input: EstimateTransactionFeePreview
 
   const qtyRawSats = Math.round(amountCoins * 1e8)
   let allAssetUtxos = await listUnspentAssets(rpcConfig, senderAddress).catch(() => [])
-  if (allAssetUtxos.length === 0 && resolveRuntimeModelId(input.network as Network) === 'rtm') {
+  if (allAssetUtxos.length === 0 && !rpcConfig.useLocalRpc && String(rpcConfig.bridgeUrl || '').trim()) {
     allAssetUtxos = await fetchBridgeAddressAssetUtxos(rpcConfig, senderAddress).catch(() => [])
   }
   const spendableAssetUtxosRaw: Array<{ amountSats: number }> = []
@@ -408,6 +417,12 @@ async function estimateUtxoAssetTransferFee(input: EstimateTransactionFeePreview
   if (feeCoins.length === 0) {
     try {
       feeCoins = await listUtxoUnspent(rpcConfig, senderAddress, 1)
+    } catch {}
+  }
+  if (feeCoins.length === 0) {
+    try {
+      const { scanAddressUnspent } = await import('./utxoRpc')
+      feeCoins = await scanAddressUnspent(rpcConfig, senderAddress)
     } catch {}
   }
   if (feeCoins.length === 0) {
