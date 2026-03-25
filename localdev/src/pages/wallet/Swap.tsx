@@ -1467,11 +1467,13 @@ const Swap: React.FC = () => {
         const matrixRows = (selectedMatrixMarket?.destinationItems || []).filter((item) => (
           matchesSwapCatalogQuery(item, deferredDestinationQuery)
         ))
+        const hasSelectedSourceAsset = Boolean(fromNetwork && fromItem?.assetId)
         const serverRows = await (
-          fromNetwork
+          hasSelectedSourceAsset && fromNetwork
             ? searchServerSwapPairAssets({
                 sourceNetwork: fromNetwork,
                 destinationNetwork: toNetwork,
+                sourceAssetId: fromItem?.assetId,
                 query: deferredDestinationQuery,
                 limit: 500
               })
@@ -1480,7 +1482,9 @@ const Swap: React.FC = () => {
                 limit: 500
               })
         )
-        const trackedRows = await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
+        const trackedRows = hasSelectedSourceAsset
+          ? []
+          : await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
         const mergedServerRows = mergeServerAssetLists([
           ...matrixRows,
           ...serverRows,
@@ -1498,7 +1502,9 @@ const Swap: React.FC = () => {
       } catch (error) {
         if (cancelled) return
         console.warn('Failed to load destination swap assets from server', error)
-        const ecosystemRows = await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery).catch(() => [])
+        const ecosystemRows = fromNetwork && fromItem?.assetId
+          ? []
+          : await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery).catch(() => [])
         if (cancelled) return
         setDestinationServerAssets(mergeServerAssetLists(ecosystemRows))
         setDestinationSearchError(ecosystemRows.length > 0 ? '' : formatSwapUiError(error))
@@ -1508,7 +1514,7 @@ const Swap: React.FC = () => {
     })()
 
     return () => { cancelled = true }
-  }, [deferredDestinationQuery, fromNetwork, selectedMatrixMarket, toNetwork])
+  }, [deferredDestinationQuery, fromItem?.assetId, fromNetwork, selectedMatrixMarket, toNetwork])
 
   useEffect(() => {
     setQuote(null)
