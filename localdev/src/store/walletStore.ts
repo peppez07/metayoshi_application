@@ -2038,7 +2038,9 @@ function buildEvmAssetBucketsFromBridgeRows(
     const displaySats = toAssetDisplaySats(rawBalance, decimals)
     if (!Number.isFinite(displaySats) || displaySats <= 0) continue
 
-    const tokenAddress = normalizeEvmAddressLoose(String(row.tokenAddress || row.tokenId || row.issuer || '').trim())
+    const tokenAddress = normalizeEvmAddressLoose(String(
+      row.contractAddress || row.tokenAddress || row.tokenId || row.issuer || ''
+    ).trim())
     const symbol = String(row.symbol || row.name || '').trim().toUpperCase()
     const displaySymbol = symbol || (tokenAddress ? shortAddress(tokenAddress) : 'TOKEN')
 
@@ -3882,7 +3884,7 @@ export const useWalletStore = create<WalletState>()(
             for (const row of bridgeTokenRows) {
               if (isBridgeEvmNativeTokenRow(row)) continue
               const tokenAddress = normalizeEvmAddressLoose(String(
-                row.tokenAddress || row.tokenId || row.issuer || ''
+                row.contractAddress || row.tokenAddress || row.tokenId || row.issuer || ''
               ).trim())
               if (!tokenAddress) continue
               const existing = trackedByAddress.get(tokenAddress)
@@ -3890,7 +3892,7 @@ export const useWalletStore = create<WalletState>()(
                 address: tokenAddress,
                 symbol: String(row.symbol || row.name || shortAddress(tokenAddress)).trim().toUpperCase() || shortAddress(tokenAddress),
                 decimals: Number.isInteger(Number(row.decimals)) ? Number(row.decimals) : 18,
-                logoUri: String(row.logoUri || '').trim() || undefined,
+                logoUri: String(row.logoUri || row.logoURI || '').trim() || undefined,
                 discovered: true
               }
               if (existing) {
@@ -3938,7 +3940,7 @@ export const useWalletStore = create<WalletState>()(
             for (const row of bridgeTokenRows) {
               if (isBridgeEvmNativeTokenRow(row)) continue
               const tokenAddress = normalizeEvmAddressLoose(String(
-                row.tokenAddress || row.tokenId || row.issuer || ''
+                row.contractAddress || row.tokenAddress || row.tokenId || row.issuer || ''
               ).trim())
               if (!tokenAddress) continue
               const symbol = String(row.symbol || row.name || shortAddress(tokenAddress)).trim().toUpperCase() || shortAddress(tokenAddress)
@@ -4772,7 +4774,7 @@ export const useWalletStore = create<WalletState>()(
               })
               const normalized: typeof rows = []
               for (const row of bridgeRows) {
-                const tokenId = String(row.tokenId || row.tokenAddress || '').trim()
+                const tokenId = String(row.tokenId || row.contractAddress || row.tokenAddress || '').trim()
                 const amountRaw = String(row.balanceRaw || '').trim()
                 if (!tokenId || !/^\d+$/.test(amountRaw)) continue
                 const decimals = Number(row.decimals ?? 0)
@@ -4784,7 +4786,7 @@ export const useWalletStore = create<WalletState>()(
                   tokenType: String(row.tokenType || '').trim(),
                   symbol: String(row.symbol || '').trim().toUpperCase() || undefined,
                   name: String(row.name || '').trim() || undefined,
-                  logoUri: String(row.logoUri || '').trim() || undefined
+                  logoUri: String(row.logoUri || row.logoURI || '').trim() || undefined
                 })
               }
               rows = normalized

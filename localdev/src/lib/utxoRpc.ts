@@ -2,12 +2,13 @@ import { getCoinApiInterceptor } from '../coins/interceptors'
 import type { CoinApiInterceptor, RpcInterceptorErrorContext } from '../coins/interceptors/types'
 import { useApiMonitorStore } from '../store/apiMonitorStore'
 import { recordRuntimeError } from './runtimeErrorMonitor'
-import { signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
+import { buildBtczTransparentUnsignedTransaction, signLegacyP2pkhTransaction, type UnsignedTxInput } from './utxoSign'
 import { getBuildFeatureFlag } from '../buildConfig'
 import { resolveAuthApiBaseUrl, resolveBalanceApiBaseUrl, resolveSendApiBaseUrl } from './apiBase'
 import { discoverWalletBackend, getDiscoveredGatewayBase } from './backendHelp'
 import { assertBridgeCredentialsConfigured, getMissingBridgeCredentialsMessage } from './bridgeCredentials'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from './serverTimeouts'
+import { addressToP2pkhScriptPubKeyHex } from './utxoAddress'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 
@@ -1594,7 +1595,7 @@ export interface UtxoBalance {
   total: number        // in coins
 }
 
-const BTCZ_EXPLORER_FALLBACK_BASE = ''
+const BTCZ_EXPLORER_FALLBACK_BASE = 'https://explorer.btcz.app'
 const BTC_EXPLORER_MAINNET_BASE = ''
 const BTC_EXPLORER_TESTNET_BASE = ''
 const BTC_EXPLORER_TESTNET4_BASE = ''
@@ -2364,6 +2365,19 @@ export async function createRawTransaction(
       return [address, Number((sats / 1e8).toFixed(8))]
     })
   ) as Record<string, number>
+
+  if (isBtczConfig(config)) {
+    return buildBtczTransparentUnsignedTransaction(
+      inputs.map((vin) => ({
+        txid: String(vin.txid || '').trim(),
+        vout: Number(vin.vout)
+      })),
+      Object.entries(normalizedOutputs).map(([address, amount]) => ({
+        scriptPubKeyHex: addressToP2pkhScriptPubKeyHex(address, 'BTCZ'),
+        amountSats: Math.round(Number(amount) * 1e8)
+      }))
+    )
+  }
 
   return await jsonRpcCall(config, 'createrawtransaction', [inputs, normalizedOutputs])
 }
@@ -3843,10 +3857,12 @@ export type BridgeTokenBalanceRow = {
   tokenType?: string
   tokenId: string
   tokenAddress?: string
+  contractAddress?: string
   symbol?: string
   name?: string
   issuer?: string
   logoUri?: string
+  logoURI?: string
   decimals?: number | null
   balanceRaw?: string
   balance?: string

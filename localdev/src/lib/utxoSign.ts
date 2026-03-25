@@ -286,6 +286,47 @@ export interface UnsignedTxInput {
   amountSats: number
 }
 
+export interface UnsignedTxOutpoint {
+  txid: string
+  vout: number
+  sequence?: number
+}
+
+export interface UnsignedTxOutput {
+  scriptPubKeyHex: string
+  amountSats: number
+}
+
+function scriptHexToBytes(scriptPubKeyHex: string): Uint8Array {
+  const normalized = String(scriptPubKeyHex || '').trim()
+  if (!normalized || normalized.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(normalized)) {
+    throw new Error('Invalid scriptPubKey hex')
+  }
+  return hexToBytes(normalized)
+}
+
+export function buildLegacyP2pkhUnsignedTransaction(
+  inputs: UnsignedTxOutpoint[],
+  outputs: UnsignedTxOutput[],
+  options?: { version?: number; locktime?: number }
+): string {
+  const tx: TxData = {
+    version: Number(options?.version ?? 1),
+    locktime: Number(options?.locktime ?? 0),
+    inputs: inputs.map((vin) => ({
+      txid: String(vin.txid || '').trim(),
+      vout: Number(vin.vout),
+      scriptSig: new Uint8Array(),
+      sequence: Number(vin.sequence ?? 0xffffffff)
+    })),
+    outputs: outputs.map((vout) => ({
+      amountSats: Number(vout.amountSats),
+      scriptPubKey: scriptHexToBytes(vout.scriptPubKeyHex)
+    }))
+  }
+  return bytesToHex(serializeTx(tx))
+}
+
 export async function signLegacyP2pkhTransaction(
   unsignedHex: string,
   inputs: UnsignedTxInput[],
@@ -369,6 +410,37 @@ const BTCZ_PERS_PREVOUT = asciiBytes('ZcashPrevoutHash')
 const BTCZ_PERS_SEQUENCE = asciiBytes('ZcashSequencHash')
 const BTCZ_PERS_OUTPUTS = asciiBytes('ZcashOutputsHash')
 const BTCZ_SIGHASH_PREFIX = asciiBytes('ZcashSigHash')
+
+export function buildBtczTransparentUnsignedTransaction(
+  inputs: UnsignedTxOutpoint[],
+  outputs: UnsignedTxOutput[],
+  options?: { locktime?: number; expiryHeight?: number; versionGroupId?: number }
+): string {
+  const tx: BtczTxData = {
+    rawHeader: 0x80000004,
+    version: 4,
+    versionGroupId: Number(options?.versionGroupId ?? BTCZ_SAPLING_VERSION_GROUP_ID) >>> 0,
+    isSapling: true,
+    inputs: inputs.map((vin) => ({
+      txid: String(vin.txid || '').trim(),
+      prevTxIdLe: reverseBytes(hexToBytes(String(vin.txid || '').trim())),
+      vout: Number(vin.vout),
+      scriptSig: new Uint8Array(),
+      sequence: Number(vin.sequence ?? 0xffffffff)
+    })),
+    outputs: outputs.map((vout) => ({
+      amountSats: Number(vout.amountSats),
+      scriptPubKey: scriptHexToBytes(vout.scriptPubKeyHex)
+    })),
+    locktime: Number(options?.locktime ?? 0),
+    expiryHeight: Number(options?.expiryHeight ?? 0),
+    valueBalance: 0n,
+    shieldedSpendCount: 0,
+    shieldedOutputCount: 0,
+    joinSplitCount: 0
+  }
+  return bytesToHex(serializeBtczTransparentTx(tx))
+}
 
 function blake2bPersonalized(data: Uint8Array, personalization: Uint8Array): Uint8Array {
   if (personalization.length !== 16) throw new Error('BLAKE2b personalization must be 16 bytes')

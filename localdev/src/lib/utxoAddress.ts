@@ -116,6 +116,41 @@ export function isAddressForCoinSymbol(address: string, coinType: string): boole
   return isAddressForUtxoSpec(address, spec)
 }
 
+export function addressToP2pkhScriptPubKeyHex(address: string, coinType: string): string {
+  const spec = getUtxoAddressSpec(coinType.toUpperCase())
+  if (!spec) throw new Error(`Unknown UTXO coin type: ${coinType}`)
+
+  const decoded = bs58.decode(String(address || '').trim())
+  if (decoded.length < 5) throw new Error('Invalid base58 address payload')
+
+  const payload = decoded.slice(0, -4)
+  const checksum = decoded.slice(-4)
+  const expectedChecksum = checksum4(payload)
+  if (!checksum.every((byte, i) => byte === expectedChecksum[i])) {
+    throw new Error('Invalid address checksum')
+  }
+
+  const version = versionToBytes(spec.p2pkhVersion)
+  if (payload.length !== version.length + 20) {
+    throw new Error('Unsupported address payload length')
+  }
+  for (let i = 0; i < version.length; i += 1) {
+    if (payload[i] !== version[i]) {
+      throw new Error(`Address version does not match ${coinType}`)
+    }
+  }
+
+  const hash160 = payload.slice(version.length)
+  const script = new Uint8Array(25)
+  script[0] = 0x76
+  script[1] = 0xa9
+  script[2] = 0x14
+  script.set(hash160, 3)
+  script[23] = 0x88
+  script[24] = 0xac
+  return bytesToHex(script)
+}
+
 export async function deriveUtxoAddress(
   mnemonic: string,
   coinType: string,
