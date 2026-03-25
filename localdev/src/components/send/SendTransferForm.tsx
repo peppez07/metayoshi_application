@@ -13,6 +13,8 @@ import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
 import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
 
+const EMPTY_LOGO_MAP: Record<string, string> = {}
+
 function formatUnits(value: number, maxDecimals = 8): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return value.toFixed(maxDecimals).replace(/\.?0+$/, '')
@@ -94,6 +96,35 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const available = Number(item.rawAmount || 0) / 1e8
   const fallbackEstimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
   const modelPreferences = getNetworkModelPreferences(activeNetworkId)
+  const previewNetwork = useMemo(() => ({
+    id: activeNetwork.id,
+    symbol: activeNetwork.symbol,
+    coinSymbol: activeNetwork.coinSymbol,
+    rpcUrl: activeNetwork.rpcUrl,
+    rpcWallet: activeNetwork.rpcWallet,
+    rpcUsername: activeNetwork.rpcUsername,
+    rpcPassword: activeNetwork.rpcPassword,
+    bridgeUrl: activeNetwork.bridgeUrl,
+    bridgeUsername: activeNetwork.bridgeUsername,
+    bridgePassword: activeNetwork.bridgePassword,
+    coinType: activeNetwork.coinType,
+    feePerByte: activeNetwork.feePerByte,
+    runtimeModelId: activeNetwork.runtimeModelId
+  }), [
+    activeNetwork.id,
+    activeNetwork.symbol,
+    activeNetwork.coinSymbol,
+    activeNetwork.rpcUrl,
+    activeNetwork.rpcWallet,
+    activeNetwork.rpcUsername,
+    activeNetwork.rpcPassword,
+    activeNetwork.bridgeUrl,
+    activeNetwork.bridgeUsername,
+    activeNetwork.bridgePassword,
+    activeNetwork.coinType,
+    activeNetwork.feePerByte,
+    activeNetwork.runtimeModelId
+  ])
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
   const availableFiatValue = isNative
     ? accountNetworkFiatNative?.[fiatScopeKey]?.usd
@@ -192,12 +223,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
 
         try {
           const preview = await estimateTransactionFeePreview({
-            network: activeNetwork,
+            network: previewNetwork,
             fromAddress,
             toAddress: feePreviewRecipient,
             amount: previewAmount,
             assetId: String(item.assetId || '').trim() || undefined,
-            assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : undefined,
+            assetLogos: item.assetId && item.logoUrl ? { [String(item.assetId).trim()]: item.logoUrl } : EMPTY_LOGO_MAP,
             isAssetTransfer: !isNative,
             gasLane: modelPreferences.evmGasLane,
             utxoFeePreset: modelPreferences.utxoFeePreset,
@@ -229,7 +260,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       window.clearTimeout(timer)
     }
   }, [
-    activeNetwork,
+    previewNetwork,
     amount,
     fromAddress,
     isFixedOneMode,

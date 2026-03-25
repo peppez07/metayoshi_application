@@ -20,6 +20,8 @@ import {
   type DappSendEvmTransactionPayload
 } from '../../lib/dappPermissions'
 
+const EMPTY_LOGO_MAP: Record<string, string> = {}
+
 interface TxLayoutProps {
   title: string
   error?: string
@@ -265,7 +267,39 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const [isNetworkFeeReady, setIsNetworkFeeReady] = useState(false)
   const [feePreviewMeta, setFeePreviewMeta] = useState<Pick<TransactionFeePreviewResult, 'source' | 'kind' | 'statusLabel'> | null>(null)
   const estimatedTotalCost = spendBeforeNetworkFee + estimatedNetworkFee
-  const activeNetworkLogos = networkAssetLogos?.[displayNetworkId] || {}
+  const activeNetworkLogos = useMemo(
+    () => networkAssetLogos?.[displayNetworkId] || EMPTY_LOGO_MAP,
+    [displayNetworkId, networkAssetLogos]
+  )
+  const previewNetwork = useMemo(() => ({
+    id: activeNetwork.id,
+    symbol: activeNetwork.symbol,
+    coinSymbol: activeNetwork.coinSymbol,
+    rpcUrl: activeNetwork.rpcUrl,
+    rpcWallet: activeNetwork.rpcWallet,
+    rpcUsername: activeNetwork.rpcUsername,
+    rpcPassword: activeNetwork.rpcPassword,
+    bridgeUrl: activeNetwork.bridgeUrl,
+    bridgeUsername: activeNetwork.bridgeUsername,
+    bridgePassword: activeNetwork.bridgePassword,
+    coinType: activeNetwork.coinType,
+    feePerByte: activeNetwork.feePerByte,
+    runtimeModelId: activeNetwork.runtimeModelId
+  }), [
+    activeNetwork.id,
+    activeNetwork.symbol,
+    activeNetwork.coinSymbol,
+    activeNetwork.rpcUrl,
+    activeNetwork.rpcWallet,
+    activeNetwork.rpcUsername,
+    activeNetwork.rpcPassword,
+    activeNetwork.bridgeUrl,
+    activeNetwork.bridgeUsername,
+    activeNetwork.bridgePassword,
+    activeNetwork.coinType,
+    activeNetwork.feePerByte,
+    activeNetwork.runtimeModelId
+  ])
   const dappEvmRequest = isDappTxRoute && isDappEvmTransactionRequest(currentDappRequest?.request)
     ? currentDappRequest.request
     : null
@@ -346,7 +380,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         setIsEstimatingNetworkFee(true)
         try {
           const preview = await estimateTransactionFeePreview({
-            network: activeNetwork,
+            network: previewNetwork,
             fromAddress,
             toAddress: feePreviewRecipient,
             amount,
@@ -389,9 +423,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       window.clearTimeout(timer)
     }
   }, [
-    activeNetwork,
+    previewNetwork,
     activeNetworkLogos,
-    displayNetworkId,
     amount,
     assetId,
     dappEvmRequest,
