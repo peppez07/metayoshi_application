@@ -556,6 +556,17 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       return
     }
     setIsSubmitting(true)
+    const sendTraceId = `wallet-send-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    console.info(`[${sendTraceId}] submitting transaction`, {
+      networkId: activeNetwork.id,
+      accountId: activeAccount?.id,
+      isAssetTransfer,
+      assetId: isAssetTransfer ? assetId : undefined,
+      amount,
+      toAddress,
+      fromAddress,
+      requestOrigin: isDappTxRoute ? requestOrigin : undefined
+    })
     const previousNetworkId = String(activeNetworkId || '').trim()
     const previousAccountId = String(activeAccountId || '').trim()
     const shouldRestoreNetwork = Boolean(isDappTxRoute && pendingDappRequest && previousNetworkId && previousNetworkId !== pendingDappRequest.networkId)
@@ -663,6 +674,12 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         throw new Error(`Unsupported coin type: ${activeNetwork.coinType}`)
       }
       if (!txHash) throw new Error('Transaction sent but hash is missing')
+      console.info(`[${sendTraceId}] transaction accepted`, {
+        networkId: activeNetwork.id,
+        txHash,
+        isAssetTransfer,
+        assetId: isAssetTransfer ? assetId : undefined
+      })
       
       addActivity({
         id: txHash,
@@ -711,7 +728,17 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       navigate('/tx/result', { replace: true, state: resultState })
     } catch (e: any) {
       const message = String(e?.message ?? 'Transaction failed')
-      setSubmitError(message)
+      const tracedMessage = `${message} [trace ${sendTraceId}]`
+      console.error(`[${sendTraceId}] transaction failed`, {
+        networkId: activeNetwork.id,
+        isAssetTransfer,
+        assetId: isAssetTransfer ? assetId : undefined,
+        amount,
+        toAddress,
+        fromAddress,
+        message
+      })
+      setSubmitError(tracedMessage)
       if (isDappTxRoute && pendingDappRequest && canUseChromeStorage()) {
         await chrome.storage.local.set({
           [DAPP_PENDING_REQUEST_STORAGE_KEY]: {

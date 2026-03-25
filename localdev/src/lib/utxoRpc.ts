@@ -3510,6 +3510,7 @@ export async function sendBridgeTokenTransfer(
   const url = `${apiBase}/v1/bridge/token/transfer/${encodeURIComponent(coin)}/${encodeURIComponent(chain)}`
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
   applyBridgeBasicAuthHeaders(baseHeaders, config, config.networkId || config.coinSymbol || 'token transfer')
+  const traceId = `token-relay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   const txKeyCandidates = dedupeStringList([
     ...(config.bridgeTxKeyCandidates || []),
@@ -3553,6 +3554,17 @@ export async function sendBridgeTokenTransfer(
               }
             }
           }
+      console.info(`[${traceId}] token transfer request`, {
+        url,
+        coin,
+        chain,
+        tokenId,
+        fromAddress: String(input.fromAddress || '').trim() || undefined,
+        toAddress,
+        amount: amountNum,
+        signedFormat,
+        signedTxLength: signedTxHex.length
+      })
       res = await fetch(url, {
         method: 'POST',
         headers,
@@ -3571,6 +3583,7 @@ export async function sendBridgeTokenTransfer(
     const json = (() => {
       try { return rawText ? JSON.parse(rawText) : null } catch { return null }
     })()
+    const errorCode = String(json?.error?.errorCode || '').trim()
 
     if (res.ok) {
       if (json?.error) {
@@ -3579,18 +3592,34 @@ export async function sendBridgeTokenTransfer(
       }
       const txid = String(json?.result?.txid || json?.txid || '').trim()
       if (!txid) throw new Error('Token transfer succeeded but no txid returned from bridge')
+      console.info(`[${traceId}] token transfer success`, {
+        txid,
+        relayed: Boolean(json?.result?.relayed),
+        status: res.status
+      })
       return { txid, relayed: Boolean(json?.result?.relayed) }
     }
 
+    const fallbackDetail = rawText
+      ? rawText
+      : `Bridge returned HTTP ${res.status} with an empty response body`
     const detail = compactErrorText(String(
       json?.error?.message
       || json?.error
       || json?.message
-      || rawText
+      || fallbackDetail
       || res.statusText
       || `HTTP ${res.status}`
     ))
-    lastError = `Token transfer failed [HTTP ${res.status}]: ${detail}`
+    lastError = errorCode
+      ? `Token transfer failed [HTTP ${res.status}][${errorCode}]: ${detail}`
+      : `Token transfer failed [HTTP ${res.status}]: ${detail}`
+    console.warn(`[${traceId}] token transfer failed`, {
+      status: res.status,
+      errorCode: errorCode || undefined,
+      detail,
+      rawText: rawText || undefined
+    })
     const shouldRetryTxKey = txKeyAttempts.length > i + 1
       && isBridgeTxAuthRejection(res.status, `${detail} ${rawText}`)
     if (shouldRetryTxKey) continue

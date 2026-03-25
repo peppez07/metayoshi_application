@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "smoke:evm-token-send-prep": "tsx scripts/prepare-evm-token-sends.ts",
     "verify:server-balances": "tsx scripts/verify-wallet-server-balances.ts",
     "package:releases": "node scripts/repack-releases.mjs",
     "release": "npm run build && npm run package:releases",
