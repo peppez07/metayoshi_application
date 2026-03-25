@@ -600,11 +600,14 @@ export async function searchServerSwapPairAssets(
   input: {
     sourceNetwork: Pick<Network, 'id' | 'runtimeModelId' | 'chainId' | 'bridgeUrl' | 'rpcUrl'>
     destinationNetwork: Pick<Network, 'id' | 'runtimeModelId' | 'chainId' | 'bridgeUrl' | 'rpcUrl'>
+    sourceAssetId?: string
     query?: string
     limit?: number
   }
 ): Promise<ServerSwapCatalogAsset[]> {
+  const requestedSourceAssetId = readString(input.sourceAssetId)
   if (getWalletSwapApiVersion() !== 'v1') {
+    if (requestedSourceAssetId) return []
     return await searchServerSwapAssets(input.destinationNetwork, {
       query: input.query,
       limit: input.limit
@@ -616,6 +619,7 @@ export async function searchServerSwapPairAssets(
     || deriveServerApiBaseUrl(input.destinationNetwork as Network)
   )
   if (!apiBase) {
+    if (requestedSourceAssetId) return []
     return await searchServerSwapAssets(input.destinationNetwork, {
       query: input.query,
       limit: input.limit
@@ -628,6 +632,7 @@ export async function searchServerSwapPairAssets(
   params.set('sourceNetworkId', sourceNetworkId)
   params.set('destinationNetworkId', destinationNetworkId)
   params.set('networkId', destinationNetworkId)
+  if (requestedSourceAssetId) params.set('sourceAssetId', requestedSourceAssetId)
   if (Number.isFinite(Number(input.sourceNetwork.chainId))) {
     params.set('sourceChainId', String(input.sourceNetwork.chainId))
   }
@@ -645,6 +650,7 @@ export async function searchServerSwapPairAssets(
     sourceNetworkId,
     destinationNetworkId,
     networkId: destinationNetworkId,
+    sourceAssetId: requestedSourceAssetId || undefined,
     sourceChain: sourceNetworkId,
     destinationChain: destinationNetworkId,
     sourceChainId: Number.isFinite(Number(input.sourceNetwork.chainId)) ? String(input.sourceNetwork.chainId) : undefined,
@@ -668,6 +674,7 @@ export async function searchServerSwapPairAssets(
 
   if (!response.ok) {
     if (response.status === 404 || response.status === 405 || response.status === 501) {
+      if (requestedSourceAssetId) return []
       return await searchServerSwapAssets(input.destinationNetwork, {
         query: input.query,
         limit: input.limit
@@ -686,6 +693,7 @@ export async function searchServerSwapPairAssets(
   )
   if (parsed.length > 0) return parsed
 
+  if (requestedSourceAssetId) return []
   return await searchServerSwapAssets(input.destinationNetwork, {
     query: input.query,
     limit: input.limit
