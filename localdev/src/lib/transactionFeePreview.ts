@@ -10,6 +10,7 @@ import {
 } from '@solana/web3.js'
 import { TronWeb } from 'tronweb'
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc'
 import { Transaction as SuiTransaction } from '@mysten/sui/transactions'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
@@ -203,12 +204,22 @@ function parseSuiTokenAmountToRaw(amount: string, decimals: number, label: strin
   return amountRaw
 }
 
-function createSuiPreviewClient(network: PreviewNetwork): SuiJsonRpcClient {
-  const rpcUrl = String(network.rpcUrl || '').trim()
-  if (!rpcUrl) throw new Error('Sui RPC URL is not configured')
+function createSuiPreviewClient(rpcConfig: UtxoRpcConfig): SuiJsonRpcClient {
+  const bridgeUrl = String(rpcConfig.bridgeUrl || '').trim()
+  if (!bridgeUrl) throw new Error('Bridge URL is required for Sui fee estimation')
+  const username = String(rpcConfig.bridgeUsername || '').trim()
+  const password = String(rpcConfig.bridgePassword || '').trim()
+  if (!username || !password) throw new Error('Bridge credentials are required for Sui fee estimation')
   return new SuiJsonRpcClient({
     network: 'mainnet',
-    url: rpcUrl
+    transport: new JsonRpcHTTPTransport({
+      url: bridgeUrl,
+      rpc: {
+        headers: {
+          Authorization: `Basic ${btoa(`${username}:${password}`)}`
+        }
+      }
+    })
   })
 }
 
@@ -267,7 +278,8 @@ async function estimateSuiTransferFee(
   const toAddress = String(input.toAddress || '').trim()
   if (!fromAddress || !toAddress) throw new Error('Sender and recipient are required for Sui fee estimation')
 
-  const client = createSuiPreviewClient(input.network)
+  const rpcConfig = buildRpcPreviewConfig(input.network)
+  const client = createSuiPreviewClient(rpcConfig)
   const tx = new SuiTransaction()
   tx.setSender(fromAddress)
 

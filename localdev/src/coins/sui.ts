@@ -3,8 +3,6 @@ import { resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
-const DEFAULT_SUI_RPC_URL = 'https://fullnode.mainnet.sui.io:443'
-
 export const SUI_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
   ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
@@ -26,12 +24,7 @@ export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'SUI',
     coinType: 'SUI',
     coinSymbol: 'SUI',
-    rpcUrl: String(
-      env.VITE_SUI_RPC
-      || env.VITE_SUI_RPC_URL
-      || env.VITE_SUI_JSON_RPC
-      || DEFAULT_SUI_RPC_URL
-    ).trim(),
+    rpcUrl: '',
     rpcWallet: '',
     rpcUsername: '',
     rpcPassword: '',

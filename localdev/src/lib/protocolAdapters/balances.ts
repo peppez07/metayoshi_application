@@ -382,26 +382,7 @@ async function getEvmBalance(network: Network, address: string, rpcConfig: UtxoR
   }
 }
 
-async function fetchSuiJsonRpc(endpoint: string, method: string, params: any[]): Promise<any> {
-  const response = await fetch(String(endpoint || '').trim(), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method,
-      params
-    })
-  })
-  if (!response.ok) throw new Error(`Sui RPC HTTP ${response.status}`)
-  const json = await response.json().catch(() => null)
-  if (!json || json.error) {
-    throw new Error(`Sui RPC error: ${JSON.stringify(json?.error || json)}`)
-  }
-  return json.result
-}
-
-async function getSuiBalance(rpcUrl: string, address: string): Promise<string> {
+async function getSuiBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
   const candidates: Array<{ method: string; params: any[] }> = [
     { method: 'suix_getBalance', params: [address] },
     { method: 'suix_getBalance', params: [address, '0x2::sui::SUI'] },
@@ -411,7 +392,7 @@ async function getSuiBalance(rpcUrl: string, address: string): Promise<string> {
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
-      const result = await fetchSuiJsonRpc(rpcUrl, candidate.method, candidate.params)
+      const result = await callBridgeMethod(rpcConfig, candidate.method, candidate.params)
       const totalBalance = String(
         result?.totalBalance
         || result?.balance
@@ -427,7 +408,7 @@ async function getSuiBalance(rpcUrl: string, address: string): Promise<string> {
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Sui balance query failed')
+  throw lastError instanceof Error ? lastError : new Error('Bridge Sui balance query failed')
 }
 
 export async function fetchProtocolBalance(network: Network, modelId: string, address: string, rpcConfig?: UtxoRpcConfig): Promise<string | null> {
@@ -497,11 +478,10 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
         Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
       )
     } catch {
-      // Fall through to direct RPC.
+      // Fall through to bridge JSON-RPC.
     }
-    const rpcUrl = String(network.rpcUrl || '').trim()
-    if (!rpcUrl) throw new Error('Sui RPC URL is not configured')
-    return await getSuiBalance(rpcUrl, address)
+    if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for Sui')
+    return await getSuiBalanceViaBridge(rpcConfig, address)
   }
   if (network.coinType === 'EVM') {
     if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for EVM networks')
