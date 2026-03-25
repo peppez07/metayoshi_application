@@ -728,8 +728,9 @@ export async function fetchBridgeAddressAssetUtxos(
   if (chain) params.set('chain', chain)
 
   const query = params.toString() ? `?${params.toString()}` : ''
-  const headers: Record<string, string> = {}
-  applyBridgeBasicAuthHeaders(headers, config, config.networkId || config.coinSymbol || 'asset UTXO lookup')
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  applyOptionalServerApiKey(headers)
+  applyOptionalBridgeBasicAuthHeaders(headers, config)
 
   let lastError: Error | null = null
   for (let baseIndex = 0; baseIndex < apiBases.length; baseIndex += 1) {
@@ -1558,11 +1559,7 @@ function parseBtczExplorerCoinValue(
     return Number(Number(decimalText).toFixed(8))
   }
   if (/^\d+$/.test(decimalText)) {
-    const integerValue = Number(decimalText)
-    if (!Number.isFinite(integerValue)) return null
-    // BTCZ explorer responses are safer to interpret as satoshis when an integer-only
-    // amount is returned. Coin-denominated responses include a decimal point.
-    return Number((integerValue / 1e8).toFixed(8))
+    return Number(Number(decimalText).toFixed(8))
   }
 
   const parsed = Number(decimalText)

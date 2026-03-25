@@ -1,6 +1,5 @@
 export const DEFAULT_PUBLIC_API_BASE_URL = 'https://api.metayoshi.app'
-type WalletApiService = 'api' | 'balance' | 'send' | 'swap'
-const SERVICE_HOST_LABELS = ['api', 'balance', 'send', 'swap', 'www', 'web', 'tokens'] as const
+const API_HOST_ALIASES = ['api', 'auth', 'balance', 'send', 'swap', 'www', 'web', 'tokens'] as const
 
 function isLocalApiBaseEnabled(): boolean {
   return String((import.meta as any)?.env?.VITE_ENABLE_LOCAL_BACKEND_HELP || '').trim().toLowerCase() === 'true'
@@ -39,7 +38,7 @@ export function normalizeConfiguredApiBaseUrl(value: unknown): string {
   }
 }
 
-function replaceServiceHost(baseUrl: string, service: WalletApiService): string {
+function toCanonicalApiOrigin(baseUrl: string): string {
   const normalized = normalizeConfiguredApiBaseUrl(baseUrl)
   if (!normalized) return ''
   try {
@@ -47,13 +46,13 @@ function replaceServiceHost(baseUrl: string, service: WalletApiService): string 
     if (isLocalHostname(parsed.hostname)) return parsed.origin
     const host = String(parsed.hostname || '').trim().toLowerCase()
     if (host === 'metayoshi.app' || host === 'metayoshi.com') {
-      parsed.hostname = `${service}.${host}`
+      parsed.hostname = `api.${host}`
       return parsed.origin
     }
     const parts = parsed.hostname.split('.').filter(Boolean)
     if (parts.length < 2) return parsed.origin
-    if (!SERVICE_HOST_LABELS.includes(parts[0] as (typeof SERVICE_HOST_LABELS)[number])) return parsed.origin
-    parts[0] = service
+    if (!API_HOST_ALIASES.includes(parts[0] as (typeof API_HOST_ALIASES)[number])) return parsed.origin
+    parts[0] = 'api'
     parsed.hostname = parts.join('.')
     return parsed.origin
   } catch {
@@ -61,53 +60,44 @@ function replaceServiceHost(baseUrl: string, service: WalletApiService): string 
   }
 }
 
-function resolveServiceEnvBase(service: WalletApiService): string {
+function resolveCanonicalApiBase(value?: unknown): string {
   const env = (import.meta as any)?.env || {}
-  const candidates = (() => {
-    switch (service) {
-      case 'api':
-        return [env.VITE_AUTH_API_BASE_URL, env.VITE_SECURE_BRIDGE_API_BASE_URL, env.VITE_API_BASE_URL]
-      case 'balance':
-        return [env.VITE_BALANCE_API_BASE_URL]
-      case 'send':
-        return [env.VITE_SEND_API_BASE_URL, env.VITE_SECURE_BRIDGE_API_BASE_URL]
-      case 'swap':
-        return [env.VITE_SWAP_API_BASE_URL, env.VITE_SECURE_BRIDGE_API_BASE_URL]
-      default:
-        return []
-    }
-  })()
+  const candidates = [
+    value,
+    env.VITE_API_BASE_URL,
+    env.VITE_SECURE_BRIDGE_API_BASE_URL,
+    env.VITE_AUTH_API_BASE_URL,
+    env.VITE_BALANCE_API_BASE_URL,
+    env.VITE_SEND_API_BASE_URL,
+    env.VITE_SWAP_API_BASE_URL
+  ]
   for (const candidate of candidates) {
-    const normalized = normalizeConfiguredApiBaseUrl(candidate)
+    const normalized = toCanonicalApiOrigin(String(candidate ?? ''))
     if (normalized) return normalized
   }
   return ''
 }
 
-function resolveServiceApiBaseUrl(service: WalletApiService, fallbackBase?: unknown): string {
-  const explicit = resolveServiceEnvBase(service)
-  if (explicit) return explicit
-  const normalizedFallback = normalizeConfiguredApiBaseUrl(fallbackBase)
-  if (normalizedFallback) return replaceServiceHost(normalizedFallback, service)
-  return replaceServiceHost(DEFAULT_PUBLIC_API_BASE_URL, service)
+function resolveServiceApiBaseUrl(fallbackBase?: unknown): string {
+  return resolveCanonicalApiBase(fallbackBase) || DEFAULT_PUBLIC_API_BASE_URL
 }
 
 export function resolvePublicApiBaseUrl(value: unknown): string {
-  return resolveServiceApiBaseUrl('api', value)
+  return resolveServiceApiBaseUrl(value)
 }
 
 export function resolveAuthApiBaseUrl(value?: unknown): string {
-  return resolveServiceApiBaseUrl('api', value)
+  return resolveServiceApiBaseUrl(value)
 }
 
 export function resolveBalanceApiBaseUrl(value?: unknown): string {
-  return resolveServiceApiBaseUrl('balance', value)
+  return resolveServiceApiBaseUrl(value)
 }
 
 export function resolveSendApiBaseUrl(value?: unknown): string {
-  return resolveServiceApiBaseUrl('send', value)
+  return resolveServiceApiBaseUrl(value)
 }
 
 export function resolveSwapApiBaseUrl(value?: unknown): string {
-  return resolveServiceApiBaseUrl('swap', value)
+  return resolveServiceApiBaseUrl(value)
 }

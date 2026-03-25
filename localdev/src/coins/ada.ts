@@ -1,9 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
-
-const DEFAULT_ADA_RPC_URL = ''
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 const DEFAULT_ADA_EXPLORER_URL = ''
 
 export function createAdaNetwork(ctx: CoinRuntimeContext): Network {
@@ -23,10 +21,10 @@ export function createAdaNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'ADA',
     coinType: 'BTC',
     coinSymbol: 'ADA',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_ADA_RPC || DEFAULT_ADA_RPC_URL).trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env.VITE_ADA_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_ADA_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('cardano', 'main'),
     bridgeUsername,
     bridgePassword,

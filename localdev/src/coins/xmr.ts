@@ -1,7 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 const DEFAULT_XMR_EXPLORER_URL = ''
 
@@ -22,10 +22,10 @@ export function createXmrNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'XMR',
     coinType: 'BTC',
     coinSymbol: 'XMR',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_XMR_RPC || '').trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env.VITE_XMR_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_XMR_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('monero', 'main'),
     bridgeUsername,
     bridgePassword,

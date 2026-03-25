@@ -891,6 +891,7 @@ const Send: React.FC = () => {
   const [draggingRowKey, setDraggingRowKey] = useState<string | null>(null)
   const [dragOverRowKey, setDragOverRowKey] = useState<string | null>(null)
   const [isScanningAll, setIsScanningAll] = useState(false)
+  const [isPreparingSelectedItem, setIsPreparingSelectedItem] = useState(false)
   const [, setScanProgress] = useState<{ done: number; total: number; label: string }>({
     done: 0,
     total: 0,
@@ -1034,6 +1035,49 @@ const Send: React.FC = () => {
     if (!selectedId || selectedItem) return
     setSelectedId(null)
   }, [selectedId, selectedItem])
+
+  useEffect(() => {
+    if (!selectedItem) {
+      setIsPreparingSelectedItem(false)
+      return
+    }
+    if (selectedItem.accountId === activeAccountId && selectedItem.networkId === activeNetworkId) {
+      setIsPreparingSelectedItem(false)
+      return
+    }
+
+    let cancelled = false
+    setIsPreparingSelectedItem(true)
+
+    const syncSelectedScope = async () => {
+      try {
+        if (selectedItem.accountId !== activeAccountId) {
+          setActiveAccount(selectedItem.accountId)
+        }
+        if (selectedItem.networkId !== activeNetworkId) {
+          await setActiveNetwork(selectedItem.networkId)
+        }
+      } catch (error) {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : String(error)
+        setScanError(`Cannot prepare send form: ${message}`)
+        setSelectedId(null)
+      } finally {
+        if (!cancelled) setIsPreparingSelectedItem(false)
+      }
+    }
+
+    void syncSelectedScope()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeAccountId,
+    activeNetworkId,
+    selectedItem,
+    setActiveAccount,
+    setActiveNetwork
+  ])
 
   useEffect(() => {
     setHubPreferences((current) => {
@@ -1695,6 +1739,19 @@ const Send: React.FC = () => {
   }
 
   if (selectedItem) {
+    if (isPreparingSelectedItem || selectedItem.accountId !== activeAccountId || selectedItem.networkId !== activeNetworkId) {
+      return (
+        <div className="flex h-full items-center justify-center bg-dark-800 px-6 text-center">
+          <div>
+            <p className="text-sm font-bold text-gray-200">Preparing send form...</p>
+            <p className="mt-2 text-xs text-gray-500">
+              Switching to {selectedItem.networkId.toUpperCase()} for the selected asset so fee preview uses the right wallet context.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <SendTransferForm
         item={selectedItem}

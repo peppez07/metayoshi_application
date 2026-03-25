@@ -19,7 +19,6 @@ import {
   scoreCandidate,
   supportsEvmBridgeMethods
 } from './networks'
-import { sanitizeRpcUrl } from '../../lib/serverOnly'
 import {
   isServerCoinBridgeEnabled,
   resolveServerCoinChain,
@@ -230,12 +229,9 @@ export async function loadServerRegistrySnapshotFromApi(input: {
         serverChain: chain,
         name: String(coin.name || base.name).trim() || base.name,
         symbol: normalizeServerCoinSymbol(coinId, String(coin.symbol || '').trim(), base.symbol) || base.symbol,
-        rpcUrl: sanitizeRpcUrl(
-          String(selectedNetwork?.rpcUrl || base.rpcUrl).trim() || base.rpcUrl,
-          input.apiBaseUrl
-        ),
+        rpcUrl: '',
         rpcWallet: rpcWallet || base.rpcWallet || '',
-        rpcUsername: String(selectedNetwork?.rpcUser || base.rpcUsername || '').trim(),
+        rpcUsername: '',
         bridgeUrl: resolveBridgeUrlForNetwork(input.apiBaseUrl, modelNetworkId, coinId, chain, rpcWallet),
         bridgeUsername: input.defaultBridgeUser || undefined,
         bridgePassword: input.defaultBridgePassword || undefined,

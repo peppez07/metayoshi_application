@@ -1,9 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
-
-const DEFAULT_XRP_RPC_URL = ''
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 const DEFAULT_XRP_EXPLORER_URL = ''
 
 export function createXrpNetwork(ctx: CoinRuntimeContext): Network {
@@ -24,10 +22,10 @@ export function createXrpNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'XRP',
     coinType: 'XRP',
     coinSymbol: 'XRP',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_XRP_RPC || DEFAULT_XRP_RPC_URL).trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: wallet,
-    rpcUsername: String(env.VITE_XRP_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_XRP_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('xrp', 'main', wallet),
     bridgeUsername,
     bridgePassword,

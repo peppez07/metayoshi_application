@@ -1,7 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 import { resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const SUI_CAPABILITIES: NetworkCapabilitiesInput = {
   features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
@@ -24,10 +24,10 @@ export function createSuiNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'SUI',
     coinType: 'SUI',
     coinSymbol: 'SUI',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_SUI_RPC || '').trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env.VITE_SUI_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_SUI_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('sui', 'main'),
     bridgeUsername,
     bridgePassword,

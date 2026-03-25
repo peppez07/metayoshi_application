@@ -1,9 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
-
-const DEFAULT_XLM_RPC_URL = ''
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 const DEFAULT_XLM_EXPLORER_URL = ''
 
 export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
@@ -23,10 +21,10 @@ export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'XLM',
     coinType: 'BTC',
     coinSymbol: 'XLM',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_XLM_RPC || DEFAULT_XLM_RPC_URL).trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env.VITE_XLM_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_XLM_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('stellar', 'main'),
     bridgeUsername,
     bridgePassword,

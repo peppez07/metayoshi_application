@@ -2626,7 +2626,7 @@ function isLikelyHostedApiBaseRpcUrl(rpcUrl: string, bridgeUrl?: string): boolea
     const host = parsed.hostname.toLowerCase()
     const path = parsed.pathname.replace(/\/+$/, '') || '/'
     if (
-      ['metayoshi.app', 'api.metayoshi.app', 'balance.metayoshi.app', 'send.metayoshi.app', 'swap.metayoshi.app', 'web.metayoshi.app', 'www.metayoshi.app'].includes(host)
+      ['metayoshi.app', 'api.metayoshi.app', 'web.metayoshi.app', 'www.metayoshi.app'].includes(host)
       && (path === '/' || path === '/v1')
     ) {
       return true

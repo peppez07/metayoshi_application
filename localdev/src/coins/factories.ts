@@ -1,6 +1,6 @@
 import { readBridgeCredentialsFromEnv } from '../lib/bridgeCredentials'
 import { resolveCosmosAddressConfig } from '../lib/cosmosAddress'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 import type { CoinModule, CoinRuntimeContext, Network, NetworkCapabilitiesInput } from './types'
 
 export const FULL_ASSET_CAPABILITIES: NetworkCapabilitiesInput = {
@@ -52,8 +52,6 @@ type EvmCoinFactoryConfig = {
   capabilities?: NetworkCapabilitiesInput
 }
 
-const EVM_DEFAULT_RPC_URLS: Record<string, string> = {}
-
 type CosmosCoinFactoryConfig = {
   id: string
   runtimeModelId?: string
@@ -75,35 +73,6 @@ type CosmosCoinFactoryConfig = {
   capabilities?: NetworkCapabilitiesInput
 }
 
-function isAllowedServerRpcUrl(candidateUrl: string, apiBaseUrl: string): boolean {
-  try {
-    const candidate = new URL(candidateUrl)
-    const apiBase = new URL(apiBaseUrl)
-    const candidateHost = String(candidate.hostname || '').trim().toLowerCase()
-    const apiHost = String(apiBase.hostname || '').trim().toLowerCase()
-    if (!candidateHost || !apiHost) return false
-    return candidateHost === apiHost || candidateHost.endsWith('.metayoshi.app')
-  } catch {
-    return false
-  }
-}
-
-function resolveServerBackedRpcUrl(configuredUrl: unknown, apiBaseUrl: string, defaultRpcUrl = ''): string {
-  const preferredDefault = String(defaultRpcUrl || '').trim().replace(/\/+$/, '')
-  const fallback = preferredDefault || String(apiBaseUrl || '').trim().replace(/\/+$/, '')
-  const explicit = String(configuredUrl || '').trim()
-  if (!explicit) return fallback
-  return isAllowedServerRpcUrl(explicit, fallback) ? explicit : fallback
-}
-
-function resolveDefaultEvmRpcUrl(config: Pick<EvmCoinFactoryConfig, 'id' | 'bridgeCoinId'>): string {
-  const direct =
-    EVM_DEFAULT_RPC_URLS[String(config.id || '').trim().toLowerCase()]
-    || EVM_DEFAULT_RPC_URLS[String(config.bridgeCoinId || '').trim().toLowerCase()]
-    || ''
-  return String(direct || '').trim()
-}
-
 export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
   createNetwork: (ctx: CoinRuntimeContext) => Network
   coin: CoinModule
@@ -123,13 +92,10 @@ export function createEvmCoinModule(config: EvmCoinFactoryConfig): {
     coinType: 'EVM',
     coinSymbol: config.coinSymbol,
     chainId: config.chainId,
-    rpcUrl: sanitizeRpcUrl(
-      resolveServerBackedRpcUrl(env[config.rpcEnvKey], ctx.apiBaseUrl, resolveDefaultEvmRpcUrl(config)),
-      ctx.apiBaseUrl
-    ),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
-    rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, config.bridgeChain || 'main'),
     ...readBridgeCredentialsFromEnv(env, {
       userEnvKey: config.bridgeUserEnvKey,
@@ -180,10 +146,10 @@ export function createCosmosCoinModule(config: CosmosCoinFactoryConfig): {
       symbol: config.symbol || addressConfig.symbol,
       coinType: 'COSMOS',
       coinSymbol: config.coinSymbol || addressConfig.symbol,
-      rpcUrl: sanitizeRpcUrl(String(env[config.rpcEnvKey] || config.defaultRpcUrl).trim() || config.defaultRpcUrl, ctx.apiBaseUrl),
+      rpcUrl: '',
       rpcWallet: '',
-      rpcUsername: String(env[config.rpcUserEnvKey] || '').trim(),
-      rpcPassword: String(env[config.rpcPasswordEnvKey] || '').trim(),
+      rpcUsername: '',
+      rpcPassword: '',
       bridgeUrl: ctx.buildBridgeUrl(config.bridgeCoinId, config.bridgeChain || 'main'),
       ...readBridgeCredentialsFromEnv(env, {
         userEnvKey: config.bridgeUserEnvKey,

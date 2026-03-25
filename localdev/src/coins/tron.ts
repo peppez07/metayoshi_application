@@ -1,9 +1,7 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
 import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
-import { sanitizeExplorerUrl, sanitizeRpcUrl } from '../lib/serverOnly'
-
-const DEFAULT_TRON_RPC_URL = ''
+import { sanitizeExplorerUrl } from '../lib/serverOnly'
 const DEFAULT_TRON_EXPLORER_URL = ''
 
 export function createTronNetwork(ctx: CoinRuntimeContext): Network {
@@ -23,10 +21,10 @@ export function createTronNetwork(ctx: CoinRuntimeContext): Network {
     symbol: 'TRX',
     coinType: 'BTC',
     coinSymbol: 'TRX',
-    rpcUrl: sanitizeRpcUrl(String(env.VITE_TRON_RPC || DEFAULT_TRON_RPC_URL).trim() || ctx.apiBaseUrl, ctx.apiBaseUrl),
+    rpcUrl: '',
     rpcWallet: '',
-    rpcUsername: String(env.VITE_TRON_RPC_USER || '').trim(),
-    rpcPassword: String(env.VITE_TRON_RPC_PASSWORD || '').trim(),
+    rpcUsername: '',
+    rpcPassword: '',
     bridgeUrl: ctx.buildBridgeUrl('tron', 'main'),
     bridgeUsername,
     bridgePassword,

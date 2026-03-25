@@ -106,6 +106,7 @@ function validateConfiguredNetworks(networks: Network[]): void {
     const name = String(network?.name || '').trim()
     const symbol = String(network?.symbol || '').trim()
     const rpcUrl = String(network?.rpcUrl || '').trim()
+    const bridgeUrl = String(network?.bridgeUrl || '').trim()
     const registeredCoinModule = MODULE_BY_NETWORK_ID.get(id)
 
     if (!id) throw new Error('Configured network is missing `id`')
@@ -117,7 +118,9 @@ function validateConfiguredNetworks(networks: Network[]): void {
     }
     if (!name) throw new Error(`Configured network ${id} is missing \`name\``)
     if (!symbol) throw new Error(`Configured network ${id} is missing \`symbol\``)
-    if (!rpcUrl) throw new Error(`Configured network ${id} is missing \`rpcUrl\``)
+    if (!rpcUrl && !bridgeUrl) {
+      throw new Error(`Configured network ${id} is missing both \`bridgeUrl\` and \`rpcUrl\``)
+    }
     if (!network.capabilities) throw new Error(`Configured network ${id} is missing \`capabilities\``)
 
     if (network.coinType === 'UTXO') {

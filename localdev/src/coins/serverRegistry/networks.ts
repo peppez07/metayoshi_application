@@ -1,7 +1,6 @@
 import type { Network } from '../types'
 import type { NetworkCandidate, ServerCoinNetworkRow, ServerCoinRow } from './types'
 import { EVM_MODEL_NETWORK_IDS, normalizeServerCoinSymbol, sanitizeServerCoinId } from './mappings'
-import { sanitizeRpcUrl } from '../../lib/serverOnly'
 
 export function resolveActiveServerNetwork(networks: ServerCoinNetworkRow[] | undefined): ServerCoinNetworkRow | null {
   const rows = Array.isArray(networks) ? networks.filter((n) => n && n.isActive !== false) : []
@@ -133,9 +132,11 @@ export function isNetworkSpendable(network: Network): boolean {
 }
 
 export function scoreCandidate(candidate: NetworkCandidate): number {
-  const rpcUrl = String(candidate.network.rpcUrl || '').trim().toLowerCase()
-  const isHttps = rpcUrl.startsWith('https://')
-  const isLocal = isLoopbackOrPrivateHost(rpcUrl)
+  const directUrl = String(candidate.network.rpcUrl || '').trim().toLowerCase()
+  const bridgeUrl = String(candidate.network.bridgeUrl || '').trim().toLowerCase()
+  const transportUrl = directUrl || bridgeUrl
+  const isHttps = transportUrl.startsWith('https://')
+  const isLocal = isLoopbackOrPrivateHost(transportUrl)
   let score = 0
   if (candidate.isPublicnode) score += 120
   if (candidate.chain === 'main') score += 40
@@ -189,9 +190,9 @@ export function createGenericServerNetwork(input: {
     symbol,
     coinType: 'BTC',
     coinSymbol: symbol,
-    rpcUrl: sanitizeRpcUrl(String(input.selectedNetwork?.rpcUrl || '').trim(), input.apiBaseUrl) || input.apiBaseUrl,
+    rpcUrl: '',
     rpcWallet: rpcWallet || '',
-    rpcUsername: String(input.selectedNetwork?.rpcUser || '').trim(),
+    rpcUsername: '',
     rpcPassword: '',
     bridgeUrl: `${input.apiBaseUrl}/v1/bridge/${input.coinId}/${input.chain}`,
     bridgeUsername: input.defaultBridgeUser || undefined,

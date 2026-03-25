@@ -51,10 +51,10 @@ export function sanitizeExplorerUrl(value: string): string {
   return sanitizeServerHttpUrl(value, '')
 }
 
-export function sanitizeRpcUrl(value: string, apiBaseUrl: string): string {
+export function sanitizeRpcUrl(value: string, fallback = ''): string {
   const raw = String(value || '').trim()
   if (raw && isValidHttpUrl(raw)) return raw
-  return String(apiBaseUrl || '').trim()
+  return String(fallback || '').trim()
 }
 
 export function sanitizeBridgeUrl(value: string, apiBaseUrl: string): string {
@@ -64,7 +64,7 @@ export function sanitizeBridgeUrl(value: string, apiBaseUrl: string): string {
 export function sanitizeNetworkServerOnly(network: Network, apiBaseUrl: string): Network {
   return {
     ...network,
-    rpcUrl: sanitizeRpcUrl(String(network.rpcUrl || '').trim(), apiBaseUrl),
+    rpcUrl: sanitizeRpcUrl(String(network.rpcUrl || '').trim()),
     bridgeUrl: sanitizeBridgeUrl(String(network.bridgeUrl || '').trim(), apiBaseUrl) || undefined,
     explorerUrl: sanitizeExplorerUrl(String(network.explorerUrl || '').trim()) || undefined
   }
