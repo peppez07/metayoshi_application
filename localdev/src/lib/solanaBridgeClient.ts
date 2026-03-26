@@ -16,6 +16,7 @@ function parseSolanaRpcNumber(value: unknown, label: string): number {
 }
 
 export const SOLANA_ASSOCIATED_TOKEN_ACCOUNT_RENT_LAMPORTS = 2_039_280
+export const SOLANA_BASE_SIGNATURE_FEE_LAMPORTS = 5_000
 
 export async function getSolanaLatestBlockhash(rpcConfig: UtxoRpcConfig): Promise<{
   blockhash: string
@@ -44,6 +45,36 @@ export async function getSolanaFeeForCompiledMessage(
     throw new Error('Solana bridge returned no fee quote')
   }
   return parseSolanaRpcNumber(feeLamports, 'fee quote')
+}
+
+export async function getSolanaRecentPrioritizationFees(
+  rpcConfig: UtxoRpcConfig
+): Promise<number[]> {
+  const result = await callBridgeMethod(rpcConfig, 'getRecentPrioritizationFees', [])
+  const rows = Array.isArray(result) ? result : Array.isArray((result as any)?.value) ? (result as any).value : []
+  const fees: number[] = []
+  for (const row of rows) {
+    const fee = Number((row as any)?.prioritizationFee)
+    if (Number.isFinite(fee) && fee >= 0) fees.push(Math.trunc(fee))
+  }
+  return fees
+}
+
+export async function estimateSolanaLamportsPerSignature(
+  rpcConfig: UtxoRpcConfig,
+  compiledMessageBytes: Uint8Array
+): Promise<{ feeLamports: number; mode: 'rpc' | 'base' }> {
+  try {
+    const feeLamports = await getSolanaFeeForCompiledMessage(rpcConfig, compiledMessageBytes)
+    return { feeLamports, mode: 'rpc' }
+  } catch {
+    const recentFees = await getSolanaRecentPrioritizationFees(rpcConfig).catch(() => [])
+    const prioritizationFee = recentFees.length > 0 ? Math.max(...recentFees) : 0
+    return {
+      feeLamports: SOLANA_BASE_SIGNATURE_FEE_LAMPORTS + prioritizationFee,
+      mode: 'base'
+    }
+  }
 }
 
 export async function getSolanaParsedAccountInfo(

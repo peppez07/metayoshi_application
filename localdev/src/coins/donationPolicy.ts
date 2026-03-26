@@ -3,9 +3,7 @@ import type { Network } from './types'
 export const DONATION_ENABLED_DEFAULT = true
 export const DONATION_PERCENT_DEFAULT = 0.5
 
-// Safe app-level fallback used when bridge donation policy is unavailable and env is unset.
-const RTM_DONATION_ADDRESS_DEFAULT = 'RTRcdtm5uvFn7iQjLmEQvvcvJhKDzNsfAf'
-// Optional app fallbacks for non-RTM donation-enabled coins.
+// Optional app fallbacks for donation-enabled coins.
 const DOGE_DONATION_ADDRESS_DEFAULT = ''
 const FIRO_DONATION_ADDRESS_DEFAULT = 'aPkbNkmpaWieJ22xdeaUh7vJnPT5stjJjC'
 
@@ -87,7 +85,6 @@ const policyCache = new Map<string, { ts: number; value: CoinDonationPolicy | nu
 const CACHE_TTL_MS = 60_000
 
 const DONATION_COIN_ID_BY_NETWORK_ID: Record<string, string> = {
-  rtm: 'raptoreum',
   doge: 'dogecoin',
   firo: 'firo',
   arr: 'arr'
@@ -101,12 +98,10 @@ function resolveDonationEnvPrefix(network: Network): string {
   const id = String(network.id || '').trim().toUpperCase()
   if (!id) return ''
   if (id === 'DOGE') return 'DOGE'
-  if (id === 'RTM') return 'RTM'
   return id
 }
 
 function resolveDonationAddressDefault(prefix: string): string {
-  if (prefix === 'RTM') return RTM_DONATION_ADDRESS_DEFAULT
   if (prefix === 'DOGE') return DOGE_DONATION_ADDRESS_DEFAULT
   if (prefix === 'FIRO') return FIRO_DONATION_ADDRESS_DEFAULT
   return ''

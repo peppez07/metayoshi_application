@@ -5,7 +5,6 @@ import {
   IoCloudUploadOutline,
   IoColorPaletteOutline,
   IoGlobeOutline,
-  IoHeartOutline,
   IoKeyOutline,
   IoLockClosedOutline,
   IoMoonOutline,
@@ -97,13 +96,6 @@ const MainSettings: React.FC = () => {
           path: '/settings/blockchains',
           icon: <IoGlobeOutline className="h-4.5 w-4.5" />,
           iconClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300'
-        },
-        {
-          label: 'Donation percentage',
-          description: 'Support MetaYoshi development',
-          path: '/settings/donation',
-          icon: <IoHeartOutline className="h-4.5 w-4.5" />,
-          iconClass: 'bg-pink-100 text-pink-600 dark:bg-pink-500/15 dark:text-pink-300'
         }
       ]
     },

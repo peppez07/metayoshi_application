@@ -349,9 +349,32 @@ function toServerManagedSwapUnavailableError(error: unknown): Error {
   return new Error('MetaYoshi server swap service is unavailable')
 }
 
-function isServerManagedQuoteResponse(raw: unknown): boolean {
+function isServerManagedQuotePayload(raw: unknown): boolean {
   const response = asRecord(raw)
   return Boolean(readString(response.quoteId) && readString(response.mode) && readString(response.destinationAmount))
+}
+
+function resolveServerManagedQuotePayload(raw: unknown): Record<string, unknown> | null {
+  const response = asRecord(raw)
+  const nestedData = asRecord(response.data)
+  const candidates = [
+    response,
+    asRecord(response.quote),
+    nestedData,
+    asRecord(nestedData.quote)
+  ]
+
+  for (const candidate of candidates) {
+    if (Object.keys(candidate).length === 0) continue
+    if (!isServerManagedQuotePayload(candidate)) continue
+    if (candidate === response) return candidate
+    return {
+      ...response,
+      ...candidate
+    }
+  }
+
+  return null
 }
 
 function isLikelyTransactionHash(value: string): boolean {
@@ -435,8 +458,8 @@ function isLikelySuiDigest(value: string): boolean {
 }
 
 function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
-  if (isServerManagedQuoteResponse(raw)) {
-    const response = asRecord(raw)
+  const response = resolveServerManagedQuotePayload(raw)
+  if (response) {
     const quoteId = readString(response.quoteId)
     if (!quoteId) throw new Error('Swap quote response is missing quoteId')
     return {
@@ -520,12 +543,18 @@ function buildCanonicalAssetRef(
 }
 
 function buildServerManagedQuoteRequestBody(request: ServerSwapQuoteRequest): Record<string, unknown> {
+  const sourceAssetId = readString(request.source.asset?.assetId)
+  const destinationAssetId = readString(request.destination.asset?.assetId)
   return {
     source: {
       networkId: request.source.networkId,
       symbol: request.source.symbol,
       address: request.source.address,
       amount: request.source.amount,
+      assetId: sourceAssetId || undefined,
+      assetKind: readString(request.source.asset?.kind) || undefined,
+      contractAddress: readString(request.source.asset?.contractAddress) || undefined,
+      decimals: request.source.asset?.decimals,
       asset: request.source.asset
         ? {
             assetId: request.source.asset.assetId,
@@ -539,6 +568,10 @@ function buildServerManagedQuoteRequestBody(request: ServerSwapQuoteRequest): Re
       networkId: request.destination.networkId,
       symbol: request.destination.symbol,
       address: request.destination.address,
+      assetId: destinationAssetId || undefined,
+      assetKind: readString(request.destination.asset?.kind) || undefined,
+      contractAddress: readString(request.destination.asset?.contractAddress) || undefined,
+      decimals: request.destination.asset?.decimals,
       asset: request.destination.asset
         ? {
             assetId: request.destination.asset.assetId,

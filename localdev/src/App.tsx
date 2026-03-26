@@ -43,7 +43,6 @@ import SettingsLayout from './pages/settings/SettingsLayout'
 import MainSettings from './pages/settings/MainSettings'
 import PasswordSettings from './pages/settings/PasswordSettings'
 import AutolockSettings from './pages/settings/AutolockSettings'
-import DonationSettings from './pages/settings/DonationSettings'
 import SecuritySettings from './pages/settings/SecuritySettings'
 import BackupSettings from './pages/settings/BackupSettings'
 import RestoreSettings from './pages/settings/RestoreSettings'
@@ -377,7 +376,6 @@ function App() {
             <Route path="accounts" element={<AccountManager />} />
             <Route path="password" element={<PasswordSettings />} />
             <Route path="autolock" element={<AutolockSettings />} />
-            <Route path="donation" element={<DonationSettings />} />
             <Route path="authorized-sites" element={<AuthorizedSites />} />
             <Route path="blockchains" element={<BlockchainVisibilitySettings />} />
             <Route path="rpc" element={<Navigate to="/settings" replace />} />

@@ -19,8 +19,8 @@ import { normalizeTronRpcAddress, parseTrc20UiAmountToRaw, readTrc20TokenMetadat
 import { extractTronContractFromAssetId, extractTronContractFromLogoUri } from './tronAssetId'
 import { createSuiBridgeClient } from './suiBridgeClient'
 import {
+  estimateSolanaLamportsPerSignature,
   getSolanaAccountInfo,
-  getSolanaFeeForCompiledMessage,
   getSolanaLatestBlockhash,
   getSolanaParsedAccountInfo,
   SOLANA_ASSOCIATED_TOKEN_ACCOUNT_RENT_LAMPORTS
@@ -413,11 +413,12 @@ async function estimateSolanaNativeTransferFee(input: EstimateTransactionFeePrev
   const { blockhash } = await getSolanaLatestBlockhash(rpcConfig)
   tx.feePayer = from
   tx.recentBlockhash = blockhash
-  const feeLamports = await getSolanaFeeForCompiledMessage(rpcConfig, tx.compileMessage().serialize())
+  const feeResolution = await estimateSolanaLamportsPerSignature(rpcConfig, tx.compileMessage().serialize())
+  const feeLamports = feeResolution.feeLamports
   return {
     fee: Number((feeLamports / LAMPORTS_PER_SOL).toFixed(9)),
     debugLabel: 'Solana live native quote',
-    debugDetails: `SOL | lamportsPerTx=${feeLamports}`
+    debugDetails: `SOL | lamportsPerTx=${feeLamports} | feeMode=${feeResolution.mode}`
   }
 }
 
@@ -466,12 +467,13 @@ async function estimateSolanaAssetTransferFee(input: EstimateTransactionFeePrevi
   const { blockhash } = await getSolanaLatestBlockhash(rpcConfig)
   tx.feePayer = sender
   tx.recentBlockhash = blockhash
-  const feeLamports = await getSolanaFeeForCompiledMessage(rpcConfig, tx.compileMessage().serialize())
+  const feeResolution = await estimateSolanaLamportsPerSignature(rpcConfig, tx.compileMessage().serialize())
+  const feeLamports = feeResolution.feeLamports
   const totalLamports = feeLamports + rentLamports
   return {
     fee: Number((totalLamports / LAMPORTS_PER_SOL).toFixed(9)),
     debugLabel: 'Solana live asset quote',
-    debugDetails: `SPL | txFee=${feeLamports} lamports | ataRent=${rentLamports} lamports`
+    debugDetails: `SPL | txFee=${feeLamports} lamports | ataRent=${rentLamports} lamports | feeMode=${feeResolution.mode}`
   }
 }
 
