@@ -1452,7 +1452,7 @@ const Swap: React.FC = () => {
       })(),
       readString(selectedMatrixMarket.flow).replace(/-/g, ' ')
     ].filter(Boolean)
-    return parts.join(' • ')
+    return parts.join(' | ')
   }, [selectedMatrixMarket])
   const inventoryVersionText = readString(selectedMatrixMarket?.version)
     ? `Catalog ${readString(selectedMatrixMarket?.version).slice(0, 12)}`
@@ -2142,7 +2142,7 @@ const Swap: React.FC = () => {
                       disabled={isSearchingDestinationAssets || !fromNetwork?.id || !fromItem?.assetId || !toNetwork?.id}
                       className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600 transition hover:border-orange-300/40 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isSearchingDestinationAssets ? 'Refreshing…' : 'Refresh routes'}
+                      {isSearchingDestinationAssets ? 'Refreshing...' : 'Refresh routes'}
                     </button>
                     <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600">
                       {toNetwork?.name || 'Select network'}
@@ -2161,7 +2161,7 @@ const Swap: React.FC = () => {
                     {inventoryStatusText ? (
                       <p className="mt-1 text-[10px] font-medium text-slate-500">
                         {inventoryStatusText}
-                        {inventoryVersionText ? ` • ${inventoryVersionText}` : ''}
+                        {inventoryVersionText ? ` | ${inventoryVersionText}` : ''}
                       </p>
                     ) : null}
                   </div>
