@@ -1,4 +1,5 @@
 import type { Network } from '../coins'
+import { getBuildFeatureFlag } from '../buildConfig'
 import type { UtxoRpcConfig } from './utxoRpc'
 import { getSecureBridgeSessionInfo } from './utxoRpc'
 
@@ -12,8 +13,13 @@ export async function appendOptionalServerAuthHeaders(
   } = {}
 ): Promise<void> {
   const { network, rpcConfig } = input
+  const secureBridgeAuthEnabled =
+    typeof rpcConfig?.secureBridgeWritesEnabled === 'boolean'
+      ? rpcConfig.secureBridgeWritesEnabled
+      : getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)
   const canTryBearer = Boolean(
-    rpcConfig?.bridgeUrl
+    secureBridgeAuthEnabled
+    && rpcConfig?.bridgeUrl
     && typeof rpcConfig?.secureBridgeSigner === 'function'
   )
   if (canTryBearer) {

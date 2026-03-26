@@ -136,11 +136,7 @@ export function shouldUseRemoteTokenLogoUrl(value: string | null | undefined): b
   if (raw.startsWith('data:') || raw.startsWith('blob:') || raw.startsWith('/')) return true
   try {
     const url = new URL(raw)
-    const host = url.hostname.toLowerCase()
-    if (host === 'raw.githubusercontent.com' || host.endsWith('.githubusercontent.com')) {
-      return false
-    }
-    return true
+    return url.protocol === 'http:' || url.protocol === 'https:'
   } catch {
     return false
   }

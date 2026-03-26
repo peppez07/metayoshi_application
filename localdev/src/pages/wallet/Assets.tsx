@@ -6,7 +6,7 @@ import {
   IoLayersOutline,
   IoSparklesOutline,
 } from 'react-icons/io5'
-import { shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
+import { getTokenLogoForAsset, shouldUseRemoteTokenLogoUrl } from '../../coins/tokenlogos'
 import { isNftAssetKey, resolveSolanaAssetTypeLabel } from '../../lib/assetTypes'
 import { coinModelFamilyToRouteKey, resolveCoinModelFamily } from '../../lib/coinModel'
 import { formatFiatValue } from '../../store/walletStore'
@@ -116,41 +116,47 @@ const Assets: React.FC = () => {
             ) : (
               <div className="space-y-3">
                 {previewRows.map(([name, rawAmount]) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => openAsset(name)}
-                    className="wallet-soft-surface flex w-full items-center justify-between gap-3 rounded-[22px] px-4 py-3 text-left transition-transform hover:-translate-y-0.5"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/70 shadow-[0_10px_20px_rgba(15,23,42,0.08)]">
-                        {shouldUseRemoteTokenLogoUrl(assetLogos[name]) ? (
-                          <img src={assetLogos[name]} alt={name} className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="text-xs font-black uppercase text-primary">{String(resolveAssetDisplayName(name) || name).slice(0, 2)}</span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-100">{resolveAssetDisplayName(name)}</p>
-                        <p className="truncate text-xs text-gray-500">
-                          {isNftAssetKey(name)
-                            ? 'NFT asset'
-                            : isSolanaEcosystem
-                              ? (resolveSolanaAssetTypeLabel(name) || activeNetwork.symbol)
-                              : isEvmEcosystem
-                                ? activeNetwork.name
-                                : activeNetwork.symbol}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 pl-2">
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-gray-100">{formatAssetAmount(rawAmount)}</p>
-                        <p className="text-xs text-gray-500">{formatFiatValue(fiatByAsset[name]?.usd) || '$0.00 USD'}</p>
-                      </div>
-                      <IoArrowForward className="h-4 w-4 text-gray-400" />
-                    </div>
-                  </button>
+                  (() => {
+                    const displayName = resolveAssetDisplayName(name)
+                    const resolvedLogo = assetLogos[name] || getTokenLogoForAsset(displayName || name)
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => openAsset(name)}
+                        className="wallet-soft-surface flex w-full items-center justify-between gap-3 rounded-[22px] px-4 py-3 text-left transition-transform hover:-translate-y-0.5"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/70 shadow-[0_10px_20px_rgba(15,23,42,0.08)]">
+                            {shouldUseRemoteTokenLogoUrl(resolvedLogo) ? (
+                              <img src={resolvedLogo} alt={name} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-xs font-black uppercase text-primary">{String(displayName || name).slice(0, 2)}</span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-gray-100">{displayName}</p>
+                            <p className="truncate text-xs text-gray-500">
+                              {isNftAssetKey(name)
+                                ? 'NFT asset'
+                                : isSolanaEcosystem
+                                  ? (resolveSolanaAssetTypeLabel(name) || activeNetwork.symbol)
+                                  : isEvmEcosystem
+                                    ? activeNetwork.name
+                                    : activeNetwork.symbol}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 pl-2">
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-gray-100">{formatAssetAmount(rawAmount)}</p>
+                            <p className="text-xs text-gray-500">{formatFiatValue(fiatByAsset[name]?.usd) || '$0.00 USD'}</p>
+                          </div>
+                          <IoArrowForward className="h-4 w-4 text-gray-400" />
+                        </div>
+                      </button>
+                    )
+                  })()
                 ))}
 
                 {currentRows.length > previewRows.length ? (

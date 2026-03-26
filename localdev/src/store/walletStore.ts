@@ -3035,6 +3035,11 @@ async function readLegacyPersistedCatalogSnapshot(): Promise<{
   }
 }
 
+function isChromeStorageNoSpaceError(error: unknown): boolean {
+  const message = String(error instanceof Error ? error.message : error || '').toLowerCase()
+  return message.includes('file_error_no_space') || message.includes('quota') || message.includes('no space')
+}
+
 const extensionStateStorage: StateStorage = {
   getItem: async (name) => {
     if (hasChromeStorageLocal()) {
@@ -3074,7 +3079,15 @@ const extensionStateStorage: StateStorage = {
       } catch {
         parsed = value
       }
-      await chrome.storage.local.set({ [name]: parsed })
+      try {
+        await chrome.storage.local.set({ [name]: parsed })
+      } catch (error) {
+        if (isChromeStorageNoSpaceError(error)) {
+          console.error(`[walletStore] Skipping persisted write for "${name}" because Chrome storage is out of space.`, error)
+          return
+        }
+        throw error
+      }
       removeLocalStorageSafe(name)
       return
     }
