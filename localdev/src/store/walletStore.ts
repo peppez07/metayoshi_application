@@ -3568,7 +3568,10 @@ export const useWalletStore = create<WalletState>()(
           const response = await fetchServerAddressJson(network, requestAddress, 'portfolio', {
             fiat: 'usd,eur'
           }, {
-            rpcConfig: rpcConfig || undefined
+            rpcConfig: rpcConfig || undefined,
+            // Portfolio assembly can be slower than balance reads because it may
+            // aggregate native, token, and NFT valuation data server-side.
+            timeoutMs: Math.max(Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS), 45_000)
           })
           if (!response.ok) {
             setNetworkFiatFailureCooldown(cacheKey)

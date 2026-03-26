@@ -363,6 +363,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           && (
             (activeNetwork.coinType === 'EVM' && (feePreviewRecipient || String(dappEvmRequest?.data || '').trim()))
             || (isCosmosLikeModelId(activeModelId) && feePreviewRecipient && Number(amount) > 0)
+            || (activeModelId === 'sui' && feePreviewRecipient && Number(amount) > 0)
             || (activeModelId === 'sol' && feePreviewRecipient && Number(amount) > 0)
             || (activeModelId === 'tron' && feePreviewRecipient && Number(amount) > 0)
             || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(amount) > 0)

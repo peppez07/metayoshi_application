@@ -1527,10 +1527,8 @@ const Swap: React.FC = () => {
       setToAssetId('')
       return
     }
-    if (nativeToOption) {
-      if (toAssetId !== nativeToOption.id) {
-        setToAssetId(nativeToOption.id)
-      }
+    if (!toAssetId && nativeToOption) {
+      setToAssetId(nativeToOption.id)
       return
     }
     if (!toOptions.some((item) => item.id === toAssetId)) {

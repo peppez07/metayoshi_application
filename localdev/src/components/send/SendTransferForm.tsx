@@ -219,6 +219,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           && (
             (activeNetwork.coinType === 'EVM' && feePreviewRecipient)
             || (activeNetwork.coinType === 'COSMOS' && feePreviewRecipient && Number(previewAmount) > 0)
+            || (activeModelId === 'sui' && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeModelId === 'sol' && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeModelId === 'tron' && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(previewAmount) > 0)
