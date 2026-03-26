@@ -19,7 +19,7 @@ export function resolveFeePreviewRecipient(
     return DEFAULT_EVM_PREVIEW_RECIPIENT
   }
 
-  if (modelId === 'sol') {
+  if (network.coinType === 'SOL' || modelId === 'sol' || modelId === 'solana') {
     return DEFAULT_SOLANA_PREVIEW_RECIPIENT
   }
 
@@ -33,6 +33,30 @@ export function resolveFeePreviewRecipient(
 
   if (network.coinType === 'UTXO') {
     return String(senderAddress || '').trim()
+  }
+
+  return ''
+}
+
+export function resolveFeePreviewSender(
+  network: Pick<Network, 'coinType' | 'id' | 'runtimeModelId'>,
+  senderAddress?: string
+): string {
+  const sender = String(senderAddress || '').trim()
+  if (sender) return sender
+
+  const modelId = String(network.runtimeModelId || network.id || '').trim().toLowerCase()
+
+  if (network.coinType === 'SOL' || modelId === 'sol' || modelId === 'solana') {
+    return DEFAULT_SOLANA_PREVIEW_RECIPIENT
+  }
+
+  if (modelId === 'tron') {
+    return DEFAULT_TRON_PREVIEW_RECIPIENT
+  }
+
+  if (modelId === 'sui') {
+    return DEFAULT_SUI_PREVIEW_RECIPIENT
   }
 
   return ''

@@ -11,7 +11,7 @@ import { fetchCoinDonationPolicy, supportsCoinDonationPolicy } from '../../coins
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
-import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
+import { resolveFeePreviewRecipient, resolveFeePreviewSender } from '../../lib/feePreviewRecipient'
 
 const EMPTY_LOGO_MAP: Record<string, string> = {}
 
@@ -101,6 +101,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
   const caps = resolveNetworkCapabilities(activeNetwork)
   const activeModelId = resolveRuntimeModelId(activeNetwork)
+  const isSolanaModel = activeNetwork.coinType === 'SOL' || activeModelId === 'sol' || activeModelId === 'solana'
   const supportsMemo = isCosmosLikeModelId(activeModelId)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -170,7 +171,8 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     ? estimatedNativeFee * (nativeNetworkFiatUsd / nativeBalance)
     : null
   const displayEstimatedNativeFeeFiat = formatFiatValue(estimatedNativeFeeFiat)
-  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
+  const feePreviewSender = resolveFeePreviewSender(activeNetwork, fromAddress)
+  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, feePreviewSender, toAddress)
   const previewAmount = isFixedOneMode ? '1' : amount
   const feePreviewAssetId = useMemo(() => {
     if (isNative) return ''
@@ -179,7 +181,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
     return String(currentItem.assetId || '').trim()
   }, [isNative, currentItem.assetId, currentItem.id])
   const hasFeePreviewInputs = Boolean(
-    fromAddress
+    feePreviewSender
     && feePreviewRecipient
     && (
       isFixedOneMode
@@ -215,12 +217,12 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       const run = async () => {
         const fallback = estimateNetworkFeeUi(activeNetwork)
         const canFetchLivePreview = Boolean(
-          fromAddress
+          feePreviewSender
           && (
             (activeNetwork.coinType === 'EVM' && feePreviewRecipient)
             || (activeNetwork.coinType === 'COSMOS' && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeModelId === 'sui' && feePreviewRecipient && Number(previewAmount) > 0)
-            || (activeModelId === 'sol' && feePreviewRecipient && Number(previewAmount) > 0)
+            || (isSolanaModel && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeModelId === 'tron' && feePreviewRecipient && Number(previewAmount) > 0)
             || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(previewAmount) > 0)
           )
@@ -252,7 +254,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
         try {
           const preview = await estimateTransactionFeePreview({
             network: previewNetwork,
-            fromAddress,
+            fromAddress: feePreviewSender,
             toAddress: feePreviewRecipient,
             amount: previewAmount,
             assetId: feePreviewAssetId || undefined,
@@ -290,8 +292,10 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   }, [
     previewNetwork,
     activeModelId,
+    isSolanaModel,
     amount,
     fromAddress,
+    feePreviewSender,
     isFixedOneMode,
     isNative,
     feePreviewAssetId,

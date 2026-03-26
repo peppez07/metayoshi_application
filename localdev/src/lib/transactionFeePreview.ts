@@ -36,6 +36,7 @@ import {
 } from './utxoRpc'
 import { resolveRuntimeModelId } from './runtimeModel'
 import { resolveCosmosAddressConfig } from './cosmosAddress'
+import { resolveFeePreviewRecipient, resolveFeePreviewSender } from './feePreviewRecipient'
 
 export type TransactionFeePreviewSource = 'live' | 'fallback'
 export type TransactionFeePreviewKind = 'estimate' | 'max-cap'
@@ -1038,9 +1039,12 @@ export async function estimateTransactionFeePreview(
   const fallback = estimateNetworkFeeUi(input.network as Network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
+  const previewSender = resolveFeePreviewSender(input.network as Network, fromAddress)
+  const previewRecipient = resolveFeePreviewRecipient(input.network as Network, previewSender, toAddress)
   const modelId = resolveRuntimeModelId(input.network as Network)
+  const isSolanaModel = input.network.coinType === 'SOL' || modelId === 'sol' || modelId === 'solana'
 
-  if (!fromAddress) {
+  if (!previewSender) {
     return {
       fee: fallback,
       source: 'fallback',
@@ -1053,10 +1057,10 @@ export async function estimateTransactionFeePreview(
   }
 
   try {
-    if (input.network.coinType === 'EVM' && (toAddress || String(input.dataHex || '').trim())) {
+    if (input.network.coinType === 'EVM' && (previewRecipient || String(input.dataHex || '').trim())) {
       const resolvedPreview = input.isAssetTransfer
-        ? await estimateEvmAssetTransferFee(input)
-        : await estimateEvmNativeTransferFee(input)
+        ? await estimateEvmAssetTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
+        : await estimateEvmNativeTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
       return {
         fee: Number(ethers.formatEther(resolvedPreview.feeWei)),
         source: 'live',
@@ -1068,10 +1072,10 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (modelId === 'tron' && toAddress) {
+    if (modelId === 'tron' && previewRecipient) {
       const preview = input.isAssetTransfer
-        ? await estimateTronAssetTransferFee(input)
-        : await estimateTronNativeTransferFee(input)
+        ? await estimateTronAssetTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
+        : await estimateTronNativeTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
       return {
         fee: preview.fee,
         source: 'live',
@@ -1083,10 +1087,10 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (modelId === 'sol' && toAddress) {
+    if (isSolanaModel && previewRecipient) {
       const preview = input.isAssetTransfer
-        ? await estimateSolanaAssetTransferFee(input)
-        : await estimateSolanaNativeTransferFee(input)
+        ? await estimateSolanaAssetTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
+        : await estimateSolanaNativeTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
       return {
         fee: preview.fee,
         source: 'live',
@@ -1098,8 +1102,8 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (modelId === 'sui' && toAddress) {
-      const preview = await estimateSuiTransferFee(input)
+    if (modelId === 'sui' && previewRecipient) {
+      const preview = await estimateSuiTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
       return {
         fee: Number((preview.feeMist.toString())) / 1e9,
         source: 'live',
@@ -1111,10 +1115,10 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (input.network.coinType === 'UTXO' && toAddress) {
+    if (input.network.coinType === 'UTXO' && previewRecipient) {
       const preview = input.isAssetTransfer
-        ? await estimateUtxoAssetTransferFee(input)
-        : await estimateUtxoNativeTransferFee(input)
+        ? await estimateUtxoAssetTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
+        : await estimateUtxoNativeTransferFee({ ...input, fromAddress: previewSender, toAddress: previewRecipient })
       return {
         fee: preview.fee,
         source: 'live',
@@ -1126,7 +1130,7 @@ export async function estimateTransactionFeePreview(
       }
     }
 
-    if (input.network.coinType === 'COSMOS' && toAddress) {
+    if (input.network.coinType === 'COSMOS' && previewRecipient) {
       return estimateCosmosConfiguredFee(input)
     }
 

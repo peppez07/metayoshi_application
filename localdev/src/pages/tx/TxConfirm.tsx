@@ -11,7 +11,7 @@ import { getAccountDisplayName } from '../../lib/accountName'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
-import { resolveFeePreviewRecipient } from '../../lib/feePreviewRecipient'
+import { resolveFeePreviewRecipient, resolveFeePreviewSender } from '../../lib/feePreviewRecipient'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import {
   DAPP_PENDING_REQUEST_STORAGE_KEY,
@@ -251,6 +251,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const numericAmount = Number(amount)
   const safeAmount = Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : 0
   const activeModelId = resolveRuntimeModelId(activeNetwork)
+  const isSolanaModel = activeNetwork.coinType === 'SOL' || activeModelId === 'sol' || activeModelId === 'solana'
   const activeAccountName = getAccountDisplayName(activeAccount, displayNetworkId, 'Account 1')
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -323,8 +324,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     ? `${formatCoinAmount(safeAmount)} ${activeNetwork.symbol}`
     : (safeAmount > 0 ? `${safeAmount} ${isAssetTransfer ? (assetLabel || 'ASSET') : activeNetwork.symbol}` : 'No amount provided')
   const modelPreferences = getNetworkModelPreferences(displayNetworkId)
-  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, fromAddress, toAddress)
-  const hasFeePreviewInputs = Boolean(fromAddress && hasTxState)
+  const feePreviewSender = resolveFeePreviewSender(activeNetwork, fromAddress)
+  const feePreviewRecipient = resolveFeePreviewRecipient(activeNetwork, feePreviewSender, toAddress)
+  const hasFeePreviewInputs = Boolean(feePreviewSender && hasTxState)
   const availableNativeBalance = useMemo(() => {
     const scoped = parseCoinAmount(activeAccount?.networkBalances?.[displayNetworkId])
     if (scoped > 0) return scoped
@@ -359,12 +361,12 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       const run = async () => {
         const fallback = estimateNetworkFeeUi(activeNetwork)
         const canFetchLivePreview = Boolean(
-          fromAddress
+          feePreviewSender
           && (
             (activeNetwork.coinType === 'EVM' && (feePreviewRecipient || String(dappEvmRequest?.data || '').trim()))
             || (isCosmosLikeModelId(activeModelId) && feePreviewRecipient && Number(amount) > 0)
             || (activeModelId === 'sui' && feePreviewRecipient && Number(amount) > 0)
-            || (activeModelId === 'sol' && feePreviewRecipient && Number(amount) > 0)
+            || (isSolanaModel && feePreviewRecipient && Number(amount) > 0)
             || (activeModelId === 'tron' && feePreviewRecipient && Number(amount) > 0)
             || (activeNetwork.coinType === 'UTXO' && feePreviewRecipient && Number(amount) > 0)
           )
@@ -392,7 +394,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         try {
           const preview = await estimateTransactionFeePreview({
             network: previewNetwork,
-            fromAddress,
+            fromAddress: feePreviewSender,
             toAddress: feePreviewRecipient,
             amount,
             assetId: feePreviewAssetId || undefined,
@@ -441,7 +443,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     feePreviewAssetId,
     dappEvmRequest,
     fromAddress,
+    feePreviewSender,
     activeModelId,
+    isSolanaModel,
     isAssetTransfer,
     modelPreferences.evmGasLane,
     modelPreferences.utxoFeePreset,
