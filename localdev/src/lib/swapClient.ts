@@ -57,6 +57,10 @@ export type ServerSwapMatrixMarket = {
   modes: string[]
   pathKinds: string[]
   destinationItems: ServerSwapCatalogAsset[]
+  version?: string
+  updatedAt?: string
+  ttlSec?: number
+  flow?: string
 }
 
 export type WalletSwapReadiness = {
@@ -363,6 +367,8 @@ function parseServerSwapMatrixMarkets(
   payload: unknown,
   sourceNetworkId: string
 ): ServerSwapMatrixMarket[] {
+  const payloadRecord = asRecord(payload)
+  const meta = asRecord(payloadRecord.meta)
   const rows = extractSwapCatalogRows(payload)
   const out: ServerSwapMatrixMarket[] = []
   const seen = new Set<string>()
@@ -392,7 +398,11 @@ function parseServerSwapMatrixMarkets(
       routeKinds: readStringArray(item.routeKinds),
       modes: readStringArray(item.modes),
       pathKinds: readStringArray(item.pathKinds),
-      destinationItems
+      destinationItems,
+      version: readString(meta.version) || undefined,
+      updatedAt: readString(meta.updatedAt) || undefined,
+      ttlSec: readNumber(meta.ttlSec),
+      flow: readString(meta.flow) || undefined
     })
   }
 
@@ -407,7 +417,11 @@ function parseServerSwapMatrixMarkets(
         routeKinds: [],
         modes: [],
         pathKinds: [],
-        destinationItems: fallbackItems
+        destinationItems: fallbackItems,
+        version: readString(meta.version) || undefined,
+        updatedAt: readString(meta.updatedAt) || undefined,
+        ttlSec: readNumber(meta.ttlSec),
+        flow: readString(meta.flow) || undefined
       }]
     : []
 }

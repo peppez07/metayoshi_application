@@ -343,6 +343,28 @@ function formatExpiry(expiresAt: number): string {
   return `${minutes}m ${remainder}s`
 }
 
+function formatInventoryTimestamp(value?: string): string {
+  const raw = readString(value)
+  if (!raw) return ''
+  const timestamp = Date.parse(raw)
+  if (!Number.isFinite(timestamp)) return ''
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+function formatInventoryTtl(ttlSec?: number): string {
+  if (!Number.isFinite(Number(ttlSec)) || Number(ttlSec) <= 0) return ''
+  const seconds = Math.max(0, Math.trunc(Number(ttlSec)))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`
+}
+
 function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string): string {
   if (!item) return fallbackSymbol || 'Select asset'
   if (!item.label || item.label === item.symbol) return item.symbol
@@ -1248,6 +1270,7 @@ const Swap: React.FC = () => {
   const [destinationServerAssets, setDestinationServerAssets] = useState<ServerSwapCatalogAsset[]>([])
   const [isSearchingDestinationAssets, setIsSearchingDestinationAssets] = useState(false)
   const [destinationSearchError, setDestinationSearchError] = useState('')
+  const [routeInventoryRefreshNonce, setRouteInventoryRefreshNonce] = useState(0)
   const [slippagePct, setSlippagePct] = useState('0.5')
   const [sponsorPreference, setSponsorPreference] = useState<ServerSponsorPreference>('preferred')
   const [routePreference, setRoutePreference] = useState<WalletSwapRoutePreference>('best-value')
@@ -1416,6 +1439,24 @@ const Swap: React.FC = () => {
       : (toOptions.length > 0
     ? `No receive tokens match "${destinationQuery}". Try a symbol like ${toOptions.slice(0, 3).map((item) => item.symbol).join(', ')}.`
     : 'No receive tokens were returned by the live MetaYoshi server for this route.')
+  const inventoryStatusText = useMemo(() => {
+    if (!selectedMatrixMarket) return ''
+    const parts = [
+      (() => {
+        const updatedAt = formatInventoryTimestamp(selectedMatrixMarket.updatedAt)
+        return updatedAt ? `Route inventory updated ${updatedAt}` : 'Route inventory loaded from the backend matrix'
+      })(),
+      (() => {
+        const ttl = formatInventoryTtl(selectedMatrixMarket.ttlSec)
+        return ttl ? `refresh window ${ttl}` : ''
+      })(),
+      readString(selectedMatrixMarket.flow).replace(/-/g, ' ')
+    ].filter(Boolean)
+    return parts.join(' • ')
+  }, [selectedMatrixMarket])
+  const inventoryVersionText = readString(selectedMatrixMarket?.version)
+    ? `Catalog ${readString(selectedMatrixMarket?.version).slice(0, 12)}`
+    : ''
 
   useEffect(() => {
     let cancelled = false
@@ -1543,7 +1584,7 @@ const Swap: React.FC = () => {
     })()
 
     return () => { cancelled = true }
-  }, [fromNetwork, fromItem?.assetId])
+  }, [fromNetwork, fromItem?.assetId, routeInventoryRefreshNonce])
 
   useEffect(() => {
     if (!activeAccount?.id || !fromNetwork?.id || activeNetworkId !== fromNetwork.id) return
@@ -1621,7 +1662,7 @@ const Swap: React.FC = () => {
     })()
 
     return () => { cancelled = true }
-  }, [deferredDestinationQuery, fromItem?.assetId, fromNetwork, selectedMatrixMarket, toNetwork])
+  }, [deferredDestinationQuery, fromItem?.assetId, fromNetwork, routeInventoryRefreshNonce, selectedMatrixMarket, toNetwork])
 
   useEffect(() => {
     setQuote(null)
@@ -2094,9 +2135,19 @@ const Swap: React.FC = () => {
               <section className="rounded-[28px] border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">You receive</span>
-                  <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600">
-                    {toNetwork?.name || 'Select network'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRouteInventoryRefreshNonce((value) => value + 1)}
+                      disabled={isSearchingDestinationAssets || !fromNetwork?.id || !fromItem?.assetId || !toNetwork?.id}
+                      className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600 transition hover:border-orange-300/40 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSearchingDestinationAssets ? 'Refreshing…' : 'Refresh routes'}
+                    </button>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-600">
+                      {toNetwork?.name || 'Select network'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-3">
@@ -2107,6 +2158,12 @@ const Swap: React.FC = () => {
                     <p className="mt-1 text-[11px] text-slate-400">
                       {quoteStatusText}
                     </p>
+                    {inventoryStatusText ? (
+                      <p className="mt-1 text-[10px] font-medium text-slate-500">
+                        {inventoryStatusText}
+                        {inventoryVersionText ? ` • ${inventoryVersionText}` : ''}
+                      </p>
+                    ) : null}
                   </div>
                   <SwapAssetButton
                     option={toItem}
