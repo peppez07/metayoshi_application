@@ -675,6 +675,24 @@ function mergeServerAssetLists(...groups: ServerSwapCatalogAsset[][]): ServerSwa
   return out
 }
 
+function collectRouteScopedDestinationAssets(input: {
+  matrixRows: ServerSwapCatalogAsset[]
+  pairRows: ServerSwapCatalogAsset[]
+  fallbackRows?: ServerSwapCatalogAsset[]
+}): ServerSwapCatalogAsset[] {
+  const matrixRows = Array.isArray(input.matrixRows) ? input.matrixRows : []
+  const pairRows = Array.isArray(input.pairRows) ? input.pairRows : []
+  const fallbackRows = Array.isArray(input.fallbackRows) ? input.fallbackRows : []
+
+  if (pairRows.length > 0) {
+    return mergeServerAssetLists(pairRows, matrixRows)
+  }
+  if (matrixRows.length > 0) {
+    return mergeServerAssetLists(matrixRows)
+  }
+  return mergeServerAssetLists(fallbackRows)
+}
+
 function resolveAssetFamily(item: Pick<SwapAssetOption, 'kind'>): AssetSelectorFilter {
   return item.kind === 'nft' ? 'nfts' : 'tokens'
 }
@@ -1293,7 +1311,7 @@ const Swap: React.FC = () => {
     () => fromOptions.find((item) => item.kind === 'native') || null,
     [fromOptions]
   )
-  const fromItem = nativeFromOption || fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
+  const fromItem = fromOptions.find((item) => item.id === fromAssetId) || fromOptions[0] || null
   const fromServerNetworkId = resolveSwapServerNetworkId(fromNetwork)
   const toServerNetworkId = resolveSwapServerNetworkId(toNetwork)
   const selectedMatrixMarket = useMemo(
@@ -1313,7 +1331,7 @@ const Swap: React.FC = () => {
     () => toOptions.find((item) => item.kind === 'native') || null,
     [toOptions]
   )
-  const toItem = nativeToOption || toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
+  const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
   const runtimeServices = asRecord(asRecord(backendSnapshot?.runtimeHealth).services)
   const gatewayRuntime = asRecord(runtimeServices.gateway)
   const gatewayRuntimeOk = readBoolean(gatewayRuntime.ok)
@@ -1566,14 +1584,10 @@ const Swap: React.FC = () => {
                 limit: 500
               })
         )
-        const trackedRows = hasSelectedSourceAsset
-          ? []
-          : await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery)
-        const mergedServerRows = mergeServerAssetLists([
-          ...matrixRows,
-          ...serverRows,
-          ...trackedRows
-        ])
+        const mergedServerRows = collectRouteScopedDestinationAssets({
+          matrixRows,
+          pairRows: serverRows
+        })
         if (cancelled) return
         if (mergedServerRows.length > 0) {
           setDestinationServerAssets(mergedServerRows)
@@ -1582,16 +1596,25 @@ const Swap: React.FC = () => {
         }
 
         setDestinationServerAssets([])
-        setDestinationSearchError('No receive tokens were returned for this network combination.')
+        setDestinationSearchError(
+          hasSelectedSourceAsset
+            ? 'No live receive tokens were returned for this route.'
+            : 'No receive tokens were returned for this network combination.'
+        )
       } catch (error) {
         if (cancelled) return
         console.warn('Failed to load destination swap assets from server', error)
-        const ecosystemRows = fromNetwork && fromItem?.assetId
-          ? []
-          : await loadTrackedDestinationAssets(toNetwork, deferredDestinationQuery).catch(() => [])
         if (cancelled) return
-        setDestinationServerAssets(mergeServerAssetLists(ecosystemRows))
-        setDestinationSearchError(ecosystemRows.length > 0 ? '' : formatSwapUiError(error))
+        const matrixRows = (selectedMatrixMarket?.destinationItems || []).filter((item) => (
+          matchesSwapCatalogQuery(item, deferredDestinationQuery)
+        ))
+        if (matrixRows.length > 0) {
+          setDestinationServerAssets(mergeServerAssetLists(matrixRows))
+          setDestinationSearchError('Showing the last route inventory returned by the server matrix.')
+          return
+        }
+        setDestinationServerAssets([])
+        setDestinationSearchError(formatSwapUiError(error))
       } finally {
         if (!cancelled) setIsSearchingDestinationAssets(false)
       }
@@ -2021,7 +2044,7 @@ const Swap: React.FC = () => {
                     option={fromItem}
                     networkName={fromNetwork?.name}
                     placeholder="Chain asset"
-                    onClick={() => {}}
+                    onClick={() => setTokenSelectorSide('from')}
                   />
                 </div>
 
@@ -2036,7 +2059,7 @@ const Swap: React.FC = () => {
                   </button>
                 </div>
 
-                {false ? (
+                {fromQuickPicks.length > 0 ? (
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick sell picks</span>
@@ -2089,11 +2112,11 @@ const Swap: React.FC = () => {
                     option={toItem}
                     networkName={toNetwork?.name}
                     placeholder="Chain asset"
-                    onClick={() => {}}
+                    onClick={() => setTokenSelectorSide('to')}
                   />
                 </div>
 
-                {false ? (
+                {toQuickPicks.length > 0 ? (
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Quick buy picks</span>
@@ -2271,7 +2294,7 @@ const Swap: React.FC = () => {
         </Button>
       </div>
 
-      {false ? (
+      {tokenSelectorSide === 'from' ? (
         <TokenSelectorModal
           title="Select sell token"
           networkName={fromNetwork?.name}
@@ -2292,7 +2315,7 @@ const Swap: React.FC = () => {
         />
       ) : null}
 
-      {false ? (
+      {tokenSelectorSide === 'to' ? (
         <TokenSelectorModal
           title="Select receive token"
           networkName={toNetwork?.name}

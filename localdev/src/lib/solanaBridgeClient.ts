@@ -40,6 +40,9 @@ export async function getSolanaFeeForCompiledMessage(
     { commitment: 'confirmed' }
   ])
   const feeLamports = (result as any)?.value ?? result
+  if (feeLamports === null || feeLamports === undefined || feeLamports === '') {
+    throw new Error('Solana bridge returned no fee quote')
+  }
   return parseSolanaRpcNumber(feeLamports, 'fee quote')
 }
 

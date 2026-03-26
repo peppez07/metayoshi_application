@@ -517,14 +517,28 @@ function loadBridgeEnvFromSiblingServerRepo(): void {
     false
   )
 
+  const siblingServerRoots = [
+    path.resolve(__dirname, '../../server_website_metayoshi'),
+    path.resolve(__dirname, '../server_website_metayoshi'),
+    path.resolve(__dirname, '../../metayoshi_SERVER'),
+    path.resolve(__dirname, '../metayoshi_SERVER')
+  ]
+
   const candidateFiles = [
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/config/env/windows/vultr/newserver/gateway.env'),
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/config/env/windows/local/newserver/gateway.env'),
-    path.resolve(__dirname, '../server_website_metayoshi/backend_gateway/tools/linux/newserver.production.env.example'),
-    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.windows'),
-    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/local/.env.secondary'),
-    path.resolve(__dirname, '../metayoshi_SERVER/_server_support/windows/vultr/.env'),
-    path.resolve(__dirname, '../metayoshi_SERVER/.env')
+    path.join(siblingServerRoots[0], 'backend_gateway/config/env/windows/vultr/newserver/gateway.env'),
+    path.join(siblingServerRoots[0], 'backend_gateway/config/env/windows/local/newserver/gateway.env'),
+    path.join(siblingServerRoots[0], 'backend_gateway/tools/linux/newserver.production.env.example'),
+    path.join(siblingServerRoots[1], 'backend_gateway/config/env/windows/vultr/newserver/gateway.env'),
+    path.join(siblingServerRoots[1], 'backend_gateway/config/env/windows/local/newserver/gateway.env'),
+    path.join(siblingServerRoots[1], 'backend_gateway/tools/linux/newserver.production.env.example'),
+    path.join(siblingServerRoots[2], '_server_support/windows/local/.env.windows'),
+    path.join(siblingServerRoots[2], '_server_support/windows/local/.env.secondary'),
+    path.join(siblingServerRoots[2], '_server_support/windows/vultr/.env'),
+    path.join(siblingServerRoots[2], '.env'),
+    path.join(siblingServerRoots[3], '_server_support/windows/local/.env.windows'),
+    path.join(siblingServerRoots[3], '_server_support/windows/local/.env.secondary'),
+    path.join(siblingServerRoots[3], '_server_support/windows/vultr/.env'),
+    path.join(siblingServerRoots[3], '.env')
   ]
 
   let selectedFile = ''
