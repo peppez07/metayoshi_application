@@ -4,7 +4,6 @@ import { sha256 } from '@noble/hashes/sha256'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 import nacl from 'tweetnacl'
 import {
-  Connection,
   Transaction,
   VersionedTransaction,
   Keypair
@@ -13,7 +12,7 @@ import { resolveEvmExternalSigner } from './evmExternalSigner'
 import { deriveSolanaAddress } from './solanaAddress'
 import { deriveCosmosAddress, resolveCosmosAddressConfig } from './cosmosAddress'
 import type { Network } from '../coins'
-import { sendBridgeEvmSignedRelay, type UtxoRpcConfig } from './utxoRpc'
+import { sendBridgeEvmSignedRelay, sendBridgeSolanaSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
 type JsonObject = Record<string, any>
 
@@ -321,7 +320,7 @@ export async function signSolanaTransactions(input: {
 export async function signAndSendSolanaTransaction(input: {
   mnemonic: string
   accountIndex?: number
-  rpcUrl: string
+  rpcConfig: UtxoRpcConfig
   serializedTxBase64: string
 }): Promise<{ signature: string }> {
   const signed = await signSolanaTransaction({
@@ -329,11 +328,11 @@ export async function signAndSendSolanaTransaction(input: {
     accountIndex: input.accountIndex,
     serializedTxBase64: input.serializedTxBase64
   })
-  const connection = new Connection(String(input.rpcUrl || '').trim(), 'confirmed')
-  const signature = await connection.sendRawTransaction(fromBase64(signed), {
-    skipPreflight: false
+  const relayed = await sendBridgeSolanaSignedRelay(input.rpcConfig, {
+    kind: 'coin',
+    signedTxBase64: signed
   })
-  return { signature }
+  return { signature: String(relayed.txid || '').trim() }
 }
 
 export async function signCosmosDirect(input: {

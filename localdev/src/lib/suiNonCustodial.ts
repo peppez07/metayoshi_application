@@ -1,31 +1,24 @@
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from './suiAddress'
+import { createSuiBridgeClient } from './suiBridgeClient'
 import { sendBridgeSuiSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
 export const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
 
 type BaseSuiSendInput = {
-  rpcUrl: string
   rpcConfig: UtxoRpcConfig
   mnemonic: string
   accountIndex: number
   fromAddress: string
+}
+
+type SuiTransferRecipientInput = {
   toAddress: string
 }
 
 function normalizeMnemonic(value: string): string {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-function createSuiClient(rpcUrl: string): SuiJsonRpcClient {
-  const url = String(rpcUrl || '').trim()
-  if (!url) throw new Error('Sui RPC URL is not configured')
-  return new SuiJsonRpcClient({
-    network: 'mainnet',
-    url
-  })
 }
 
 function deriveSuiKeypair(mnemonic: string, accountIndex: number): Ed25519Keypair {
@@ -51,7 +44,7 @@ function parsePositiveRawAmount(value: string, label: string): bigint {
 }
 
 async function signAndRelaySuiTransaction(
-  client: SuiJsonRpcClient,
+  client: ReturnType<typeof createSuiBridgeClient>,
   keypair: Ed25519Keypair,
   tx: Transaction,
   rpcConfig: UtxoRpcConfig,
@@ -69,7 +62,7 @@ async function signAndRelaySuiTransaction(
 }
 
 async function listSuiCoinObjects(
-  client: SuiJsonRpcClient,
+  client: ReturnType<typeof createSuiBridgeClient>,
   owner: string,
   coinType: string
 ): Promise<Array<{ coinObjectId: string; balance: bigint }>> {
@@ -103,13 +96,13 @@ async function listSuiCoinObjects(
 }
 
 export async function sendSuiNativeNonCustodial(
-  input: BaseSuiSendInput & { amountMist: string }
+  input: BaseSuiSendInput & SuiTransferRecipientInput & { amountMist: string }
 ): Promise<{ hash: string }> {
   const amountMist = parsePositiveRawAmount(input.amountMist, 'SUI')
   const recipient = normalizeSuiAddress(input.toAddress)
   const keypair = deriveSuiKeypair(input.mnemonic, input.accountIndex)
   assertSignerMatchesFromAddress(keypair, input.fromAddress)
-  const client = createSuiClient(input.rpcUrl)
+  const client = createSuiBridgeClient(input.rpcConfig)
 
   const tx = new Transaction()
   const [coin] = tx.splitCoins(tx.gas, [amountMist])
@@ -119,7 +112,7 @@ export async function sendSuiNativeNonCustodial(
 }
 
 export async function sendSuiCoinAssetNonCustodial(
-  input: BaseSuiSendInput & {
+  input: BaseSuiSendInput & SuiTransferRecipientInput & {
     coinType: string
     amountRaw: string
   }
@@ -130,7 +123,7 @@ export async function sendSuiCoinAssetNonCustodial(
   const recipient = normalizeSuiAddress(input.toAddress)
   const keypair = deriveSuiKeypair(input.mnemonic, input.accountIndex)
   const fromAddress = assertSignerMatchesFromAddress(keypair, input.fromAddress)
-  const client = createSuiClient(input.rpcUrl)
+  const client = createSuiBridgeClient(input.rpcConfig)
   const coins = await listSuiCoinObjects(client, fromAddress, coinType)
 
   let selectedTotal = 0n
@@ -157,16 +150,43 @@ export async function sendSuiCoinAssetNonCustodial(
 }
 
 export async function sendSuiObjectAssetNonCustodial(
-  input: BaseSuiSendInput & { objectId: string }
+  input: BaseSuiSendInput & SuiTransferRecipientInput & { objectId: string }
 ): Promise<{ hash: string }> {
   const objectId = normalizeSuiAddress(input.objectId)
   const recipient = normalizeSuiAddress(input.toAddress)
   const keypair = deriveSuiKeypair(input.mnemonic, input.accountIndex)
   assertSignerMatchesFromAddress(keypair, input.fromAddress)
-  const client = createSuiClient(input.rpcUrl)
+  const client = createSuiBridgeClient(input.rpcConfig)
 
   const tx = new Transaction()
   tx.transferObjects([objectId], recipient)
 
   return await signAndRelaySuiTransaction(client, keypair, tx, input.rpcConfig, 'asset')
+}
+
+function decodeBase64Bytes(value: string): Uint8Array {
+  const normalized = String(value || '').trim()
+  if (!normalized) throw new Error('Prepared Sui transaction bytes are required')
+  const raw = atob(normalized)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+export async function signAndRelayPreparedSuiTransaction(
+  input: BaseSuiSendInput & {
+    txBytesBase64: string
+    relayKind?: 'coin' | 'asset'
+  }
+): Promise<{ hash: string }> {
+  const txBytes = decodeBase64Bytes(input.txBytesBase64)
+  const keypair = deriveSuiKeypair(input.mnemonic, input.accountIndex)
+  assertSignerMatchesFromAddress(keypair, input.fromAddress)
+  const signed = await keypair.signTransaction(txBytes)
+  const sent = await sendBridgeSuiSignedRelay(input.rpcConfig, {
+    kind: input.relayKind === 'coin' ? 'coin' : 'asset',
+    txBytesBase64: signed.bytes,
+    signatures: [signed.signature]
+  })
+  return { hash: sent.txid }
 }

@@ -438,7 +438,17 @@ const DappRequestConfirm: React.FC = () => {
             return await signAndSendSolanaTransaction({
               mnemonic,
               accountIndex,
-              rpcUrl: String(requestNetwork?.rpcUrl || ''),
+              rpcConfig: {
+                networkId: String(requestNetwork?.id || ''),
+                coinSymbol: String(requestNetwork?.coinSymbol || requestNetwork?.symbol || ''),
+                rpcUrl: String(requestNetwork?.rpcUrl || ''),
+                rpcWallet: String(requestNetwork?.rpcWallet || ''),
+                rpcUsername: String(requestNetwork?.rpcUsername || ''),
+                rpcPassword: String(requestNetwork?.rpcPassword || ''),
+                bridgeUrl: String(requestNetwork?.bridgeUrl || ''),
+                bridgeUsername: String(requestNetwork?.bridgeUsername || ''),
+                bridgePassword: String(requestNetwork?.bridgePassword || '')
+              },
               serializedTxBase64: String(requestPayload?.serializedTxBase64 || '')
             })
           })()

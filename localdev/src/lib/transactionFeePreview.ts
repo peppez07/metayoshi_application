@@ -1,6 +1,5 @@
 import { ethers } from 'ethers'
 import {
-  Connection,
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
@@ -8,9 +7,7 @@ import {
   Transaction,
   TransactionInstruction
 } from '@solana/web3.js'
-import { TronWeb } from 'tronweb'
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
-import { JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc'
 import { Transaction as SuiTransaction } from '@mysten/sui/transactions'
 import type { Network } from '../coins'
 import type { EvmGasLane, UtxoFeePreset, UtxoInputStrategy } from './coinFeatureModel'
@@ -18,8 +15,16 @@ import { estimateNetworkFeeUi } from './estimateNetworkFeeUi'
 import { extractSolanaMintFromAssetId } from './assetTypes'
 import { extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from './evmAssetId'
 import { estimateEvmTxFee, type EvmFeeQuote } from './evmFee'
-import { parseTrc20UiAmountToRaw, readTrc20TokenMetadata } from './tronNonCustodial'
+import { normalizeTronRpcAddress, parseTrc20UiAmountToRaw, readTrc20TokenMetadata } from './tronNonCustodial'
 import { extractTronContractFromAssetId, extractTronContractFromLogoUri } from './tronAssetId'
+import { createSuiBridgeClient } from './suiBridgeClient'
+import {
+  getSolanaAccountInfo,
+  getSolanaFeeForCompiledMessage,
+  getSolanaLatestBlockhash,
+  getSolanaParsedAccountInfo,
+  SOLANA_ASSOCIATED_TOKEN_ACCOUNT_RENT_LAMPORTS
+} from './solanaBridgeClient'
 import {
   callBridgeMethod,
   fetchBridgeAddressAssetUtxos,
@@ -205,22 +210,7 @@ function parseSuiTokenAmountToRaw(amount: string, decimals: number, label: strin
 }
 
 function createSuiPreviewClient(rpcConfig: UtxoRpcConfig): SuiJsonRpcClient {
-  const bridgeUrl = String(rpcConfig.bridgeUrl || '').trim()
-  if (!bridgeUrl) throw new Error('Bridge URL is required for Sui fee estimation')
-  const username = String(rpcConfig.bridgeUsername || '').trim()
-  const password = String(rpcConfig.bridgePassword || '').trim()
-  if (!username || !password) throw new Error('Bridge credentials are required for Sui fee estimation')
-  return new SuiJsonRpcClient({
-    network: 'mainnet',
-    transport: new JsonRpcHTTPTransport({
-      url: bridgeUrl,
-      rpc: {
-        headers: {
-          Authorization: `Basic ${btoa(`${username}:${password}`)}`
-        }
-      }
-    })
-  })
+  return createSuiBridgeClient(rpcConfig)
 }
 
 async function listSuiCoinObjectsForPreview(
@@ -330,24 +320,6 @@ async function estimateSuiTransferFee(
   }
 }
 
-function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
-  const primary = String(rpcUrl || '').trim()
-  return Array.from(new Set([primary].filter(Boolean)))
-}
-
-async function withSolanaPreviewConnection<T>(rpcUrl: string, task: (connection: Connection) => Promise<T>): Promise<T> {
-  let lastError: unknown = null
-  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
-    try {
-      const connection = new Connection(candidate, 'confirmed')
-      return await task(connection)
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('Solana RPC request failed')
-}
-
 function getSolanaAssociatedTokenAddress(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
@@ -413,11 +385,11 @@ function createSolanaTransferCheckedInstruction(
   })
 }
 
-async function resolveSolanaMintMetadata(connection: Connection, mint: PublicKey): Promise<{ decimals: number; tokenProgram: PublicKey }> {
-  const info = await connection.getParsedAccountInfo(mint, 'confirmed')
-  const owner = info.value?.owner
-  const tokenProgram = owner?.equals(SOL_TOKEN_2022_PROGRAM_ID) ? SOL_TOKEN_2022_PROGRAM_ID : SOL_TOKEN_PROGRAM_ID
-  const parsed = (info.value?.data as any)?.parsed
+async function resolveSolanaMintMetadata(rpcConfig: UtxoRpcConfig, mint: PublicKey): Promise<{ decimals: number; tokenProgram: PublicKey }> {
+  const info = await getSolanaParsedAccountInfo(rpcConfig, mint.toBase58())
+  const ownerBase58 = String((info as any)?.owner?.toBase58?.() || (info as any)?.owner || '').trim()
+  const tokenProgram = ownerBase58 === SOL_TOKEN_2022_PROGRAM_ID.toBase58() ? SOL_TOKEN_2022_PROGRAM_ID : SOL_TOKEN_PROGRAM_ID
+  const parsed = (info as any)?.data?.parsed ?? (info as any)?.parsed
   const decimals = Number(parsed?.info?.decimals ?? 0)
   if (!Number.isFinite(decimals) || decimals < 0 || decimals > 18) {
     throw new Error('Invalid mint decimals')
@@ -426,219 +398,123 @@ async function resolveSolanaMintMetadata(connection: Connection, mint: PublicKey
 }
 
 async function estimateSolanaNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
-  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const rpcConfig = buildRpcPreviewConfig(input.network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
-  if (!rpcUrl) throw new Error('Missing Solana RPC URL')
   const from = new PublicKey(fromAddress)
   const to = new PublicKey(toAddress)
   const lamports = parseSolAmountToLamports(String(input.amount || '').trim())
-
-  return await withSolanaPreviewConnection(rpcUrl, async (connection) => {
-    const tx = new Transaction().add(SystemProgram.transfer({
-      fromPubkey: from,
-      toPubkey: to,
-      lamports: Number(lamports)
-    }))
-    const { blockhash } = await connection.getLatestBlockhash('confirmed')
-    tx.feePayer = from
-    tx.recentBlockhash = blockhash
-    const feeLamports = (await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value
-    if (!Number.isFinite(feeLamports) || feeLamports === null) {
-      throw new Error('Unable to resolve Solana fee quote')
-    }
-    return {
-      fee: Number((feeLamports / LAMPORTS_PER_SOL).toFixed(9)),
-      debugLabel: 'Solana live native quote',
-      debugDetails: `SOL | lamportsPerTx=${feeLamports}`
-    }
-  })
+  const tx = new Transaction().add(SystemProgram.transfer({
+    fromPubkey: from,
+    toPubkey: to,
+    lamports: Number(lamports)
+  }))
+  const { blockhash } = await getSolanaLatestBlockhash(rpcConfig)
+  tx.feePayer = from
+  tx.recentBlockhash = blockhash
+  const feeLamports = await getSolanaFeeForCompiledMessage(rpcConfig, tx.compileMessage().serialize())
+  return {
+    fee: Number((feeLamports / LAMPORTS_PER_SOL).toFixed(9)),
+    debugLabel: 'Solana live native quote',
+    debugDetails: `SOL | lamportsPerTx=${feeLamports}`
+  }
 }
 
 async function estimateSolanaAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
-  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const rpcConfig = buildRpcPreviewConfig(input.network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
   const assetId = String(input.assetId || '').trim()
-  if (!rpcUrl) throw new Error('Missing Solana RPC URL')
   const sender = new PublicKey(fromAddress)
   const recipient = new PublicKey(toAddress)
   const mintAddress = extractSolanaMintFromAssetId(assetId)
   if (!mintAddress) throw new Error('Unable to resolve SPL mint address for fee estimation')
   const mint = new PublicKey(mintAddress)
 
-  return await withSolanaPreviewConnection(rpcUrl, async (connection) => {
-    const { decimals, tokenProgram } = await resolveSolanaMintMetadata(connection, mint)
-    const amountRaw = parseSplAmountToRaw(String(input.amount || '').trim(), decimals)
-    const sourceAta = getSolanaAssociatedTokenAddress(sender, mint, tokenProgram)
-    const destinationAta = getSolanaAssociatedTokenAddress(recipient, mint, tokenProgram)
-    const sourceInfo = await connection.getParsedAccountInfo(sourceAta, 'confirmed')
-    if (!sourceInfo.value) throw new Error('Sender token account not found for the selected mint')
+  const { decimals, tokenProgram } = await resolveSolanaMintMetadata(rpcConfig, mint)
+  const amountRaw = parseSplAmountToRaw(String(input.amount || '').trim(), decimals)
+  const sourceAta = getSolanaAssociatedTokenAddress(sender, mint, tokenProgram)
+  const destinationAta = getSolanaAssociatedTokenAddress(recipient, mint, tokenProgram)
+  const sourceInfo = await getSolanaParsedAccountInfo(rpcConfig, sourceAta.toBase58())
+  if (!sourceInfo) throw new Error('Sender token account not found for the selected mint')
 
-    const tx = new Transaction()
-    const destinationInfo = await connection.getAccountInfo(destinationAta, 'confirmed')
-    let rentLamports = 0
-    if (!destinationInfo) {
-      rentLamports = await connection.getMinimumBalanceForRentExemption(165, 'confirmed')
-      tx.add(createSolanaAssociatedTokenAccountInstruction(
-        sender,
-        destinationAta,
-        recipient,
-        mint,
-        tokenProgram
-      ))
-    }
-    tx.add(createSolanaTransferCheckedInstruction(
-      sourceAta,
-      mint,
-      destinationAta,
+  const tx = new Transaction()
+  const destinationInfo = await getSolanaAccountInfo(rpcConfig, destinationAta.toBase58())
+  let rentLamports = 0
+  if (!destinationInfo) {
+    // MetaYoshi's Solana bridge does not currently expose rent-exemption lookup, so use the canonical ATA size amount.
+    rentLamports = SOLANA_ASSOCIATED_TOKEN_ACCOUNT_RENT_LAMPORTS
+    tx.add(createSolanaAssociatedTokenAccountInstruction(
       sender,
-      amountRaw,
-      decimals,
+      destinationAta,
+      recipient,
+      mint,
       tokenProgram
     ))
+  }
+  tx.add(createSolanaTransferCheckedInstruction(
+    sourceAta,
+    mint,
+    destinationAta,
+    sender,
+    amountRaw,
+    decimals,
+    tokenProgram
+  ))
 
-    const { blockhash } = await connection.getLatestBlockhash('confirmed')
-    tx.feePayer = sender
-    tx.recentBlockhash = blockhash
-    const feeLamports = (await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value
-    if (!Number.isFinite(feeLamports) || feeLamports === null) {
-      throw new Error('Unable to resolve Solana SPL fee quote')
-    }
-    const totalLamports = feeLamports + rentLamports
-    return {
-      fee: Number((totalLamports / LAMPORTS_PER_SOL).toFixed(9)),
-      debugLabel: 'Solana live asset quote',
-      debugDetails: `SPL | txFee=${feeLamports} lamports | ataRent=${rentLamports} lamports`
-    }
-  })
+  const { blockhash } = await getSolanaLatestBlockhash(rpcConfig)
+  tx.feePayer = sender
+  tx.recentBlockhash = blockhash
+  const feeLamports = await getSolanaFeeForCompiledMessage(rpcConfig, tx.compileMessage().serialize())
+  const totalLamports = feeLamports + rentLamports
+  return {
+    fee: Number((totalLamports / LAMPORTS_PER_SOL).toFixed(9)),
+    debugLabel: 'Solana live asset quote',
+    debugDetails: `SPL | txFee=${feeLamports} lamports | ataRent=${rentLamports} lamports`
+  }
 }
 
-function buildTronPreviewClient(rpcUrl: string): TronWeb {
-  const apiKey = String((import.meta as any)?.env?.VITE_TRON_API_KEY || '').trim()
-  return new TronWeb({
-    fullHost: rpcUrl,
-    headers: apiKey ? { 'TRON-PRO-API-KEY': apiKey } : undefined
-  } as any)
-}
-
-function parseTronAmountToSun(amount: string): number {
+function parseTronAmountToSun(amount: string): bigint {
   const raw = String(amount || '').trim()
   if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid TRX amount')
   const [whole, frac = ''] = raw.split('.')
   if (frac.length > 6) throw new Error('TRX supports up to 6 decimals')
-  const sun = Number(`${whole}${frac.padEnd(6, '0')}`)
-  if (!Number.isFinite(sun) || sun <= 0) throw new Error('Amount must be greater than 0')
-  return Math.trunc(sun)
-}
-
-function parseTronLatestUnitPrice(raw: string, fallbackSun: number): number {
-  const text = String(raw || '').trim()
-  if (!text) return fallbackSun
-  const lastEntry = text.split(',').map((v) => v.trim()).filter(Boolean).pop() || ''
-  const candidate = lastEntry.includes(':')
-    ? lastEntry.split(':').map((v) => v.trim()).filter(Boolean).pop() || ''
-    : lastEntry
-  const parsed = Number(candidate)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackSun
-}
-
-function parseTronChainParameterValue(params: Array<{ key?: string; value?: unknown }>, expectedKeys: string[]): number | null {
-  const expected = new Set(expectedKeys.map((value) => String(value || '').trim().toLowerCase()))
-  for (const row of params) {
-    const key = String((row as any)?.key || '').trim().toLowerCase()
-    if (!key || !expected.has(key)) continue
-    const parsed = Number((row as any)?.value)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  return null
-}
-
-function countTronTxBandwidthBytes(transaction: { raw_data_hex?: string; signature?: string[] } | null | undefined): number {
-  const rawHex = String((transaction as any)?.raw_data_hex || '').trim()
-  const rawBytes = rawHex && /^[0-9a-f]+$/i.test(rawHex) ? Math.ceil(rawHex.length / 2) : 0
-  const signatures = Array.isArray((transaction as any)?.signature) ? (transaction as any).signature : []
-  const signatureBytes = signatures.length > 0
-    ? signatures.reduce((sum: number, sig: unknown) => {
-        const hex = String(sig || '').trim()
-        return sum + ((hex && /^[0-9a-f]+$/i.test(hex)) ? Math.ceil(hex.length / 2) : 67)
-      }, 0)
-    : 67
-  return Math.max(0, rawBytes + signatureBytes)
-}
-
-function readTronAvailableEnergy(resources: Record<string, unknown> | null | undefined): number {
-  const energyLimit = Number((resources as any)?.EnergyLimit ?? 0)
-  const energyUsed = Number((resources as any)?.EnergyUsed ?? 0)
-  const available = energyLimit - energyUsed
-  return Number.isFinite(available) && available > 0 ? available : 0
-}
-
-async function resolveTronBandwidthPriceSun(tronWeb: TronWeb): Promise<number> {
-  try {
-    return parseTronLatestUnitPrice(await tronWeb.trx.getBandwidthPrices(), 1_000)
-  } catch {
-    try {
-      const params = await tronWeb.trx.getChainParameters()
-      return parseTronChainParameterValue(params as any, ['gettransactionfee', 'transactionfee']) || 1_000
-    } catch {
-      return 1_000
-    }
-  }
-}
-
-async function resolveTronEnergyPriceSun(tronWeb: TronWeb): Promise<number> {
-  try {
-    return parseTronLatestUnitPrice(await tronWeb.trx.getEnergyPrices(), 100)
-  } catch {
-    try {
-      const params = await tronWeb.trx.getChainParameters()
-      return parseTronChainParameterValue(params as any, ['getenergyfee', 'energyfee']) || 100
-    } catch {
-      return 100
-    }
-  }
+  const sun = BigInt(`${whole}${frac.padEnd(6, '0')}`.replace(/^0+/, '') || '0')
+  if (sun <= 0n) throw new Error('Amount must be greater than 0')
+  return sun
 }
 
 async function estimateTronNativeTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
-  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const rpcConfig = buildRpcPreviewConfig(input.network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
   const amountSun = parseTronAmountToSun(String(input.amount || '').trim())
-  if (!rpcUrl) throw new Error('Missing TRON RPC URL')
-  if (!TronWeb.isAddress(fromAddress) || !TronWeb.isAddress(toAddress)) {
-    throw new Error('Sender and recipient must be valid TRON addresses')
-  }
-
-  const tronWeb = buildTronPreviewClient(rpcUrl)
-  const [unsignedTx, availableBandwidth, bandwidthPriceSun] = await Promise.all([
-    tronWeb.transactionBuilder.sendTrx(toAddress, amountSun, fromAddress),
-    tronWeb.trx.getBandwidth(fromAddress).catch(() => 0),
-    resolveTronBandwidthPriceSun(tronWeb)
-  ])
-
-  const requiredBandwidth = countTronTxBandwidthBytes(unsignedTx as any)
-  const paidBandwidth = Math.max(0, requiredBandwidth - Math.max(0, Number(availableBandwidth) || 0))
-  const feeSun = paidBandwidth * bandwidthPriceSun
+  const fromHex = await normalizeTronRpcAddress(fromAddress)
+  const toHex = await normalizeTronRpcAddress(toAddress)
+  const quote = await estimateEvmTxFee({
+    rpcConfig,
+    from: fromHex,
+    to: toHex,
+    valueWei: amountSun,
+    fallbackGasLimitHex: '0x5208',
+    lane: input.gasLane
+  })
+  const feeSun = quote.estimatedFeeWei
 
   return {
-    fee: Number((feeSun / 1e6).toFixed(6)),
+    fee: Number(feeSun) / 1e6,
     debugLabel: 'TRON live native quote',
-    debugDetails: `TRX | bandwidth=${requiredBandwidth}B | free=${Math.max(0, Number(availableBandwidth) || 0)} | paid=${paidBandwidth}B | price=${bandwidthPriceSun} sun/B`
+    debugDetails: `TRX | gasLimit=${quote.gasLimit.toString()} | feeSun=${feeSun.toString()}`
   }
 }
 
 async function estimateTronAssetTransferFee(input: EstimateTransactionFeePreviewInput): Promise<UtxoFeePreviewResult> {
-  const rpcUrl = String(input.network.rpcUrl || '').trim()
+  const rpcConfig = buildRpcPreviewConfig(input.network)
   const fromAddress = String(input.fromAddress || '').trim()
   const toAddress = String(input.toAddress || '').trim()
   const assetId = String(input.assetId || '').trim()
   const amount = String(input.amount || '').trim()
   const assetLogos = input.assetLogos || {}
-  if (!rpcUrl) throw new Error('Missing TRON RPC URL')
-  if (!TronWeb.isAddress(fromAddress) || !TronWeb.isAddress(toAddress)) {
-    throw new Error('Sender and recipient must be valid TRON addresses')
-  }
 
   let contractAddress = extractTronContractFromAssetId(assetId)
   if (!contractAddress) {
@@ -646,46 +522,27 @@ async function estimateTronAssetTransferFee(input: EstimateTransactionFeePreview
   }
   if (!contractAddress) throw new Error('Unable to resolve TRC20 contract address for fee estimation')
 
-  const { decimals } = await readTrc20TokenMetadata(rpcUrl, contractAddress)
+  const { decimals } = await readTrc20TokenMetadata(rpcConfig, contractAddress)
   const amountRaw = parseTrc20UiAmountToRaw(amount, decimals)
-  const tronWeb = buildTronPreviewClient(rpcUrl)
-  const parameters = [
-    { type: 'address', value: toAddress },
-    { type: 'uint256', value: amountRaw.toString() }
-  ]
-
-  const [energyEstimate, trigger, resources, availableBandwidth, bandwidthPriceSun, energyPriceSun] = await Promise.all([
-    tronWeb.transactionBuilder.estimateEnergy(contractAddress, 'transfer(address,uint256)', {}, parameters, fromAddress).catch(() => null),
-    tronWeb.transactionBuilder.triggerSmartContract(contractAddress, 'transfer(address,uint256)', { feeLimit: 20_000_000 }, parameters, fromAddress),
-    tronWeb.trx.getAccountResources(fromAddress).catch(() => null),
-    tronWeb.trx.getBandwidth(fromAddress).catch(() => 0),
-    resolveTronBandwidthPriceSun(tronWeb),
-    resolveTronEnergyPriceSun(tronWeb)
-  ])
-
-  const tx = (trigger as any)?.transaction
-  if (!tx) throw new Error('Unable to build TRC20 transfer transaction for fee estimation')
-
-  const requiredBandwidth = countTronTxBandwidthBytes(tx)
-  const freeBandwidth = Math.max(0, Number(availableBandwidth) || 0)
-  const paidBandwidth = Math.max(0, requiredBandwidth - freeBandwidth)
-  const availableEnergy = readTronAvailableEnergy(resources as any)
-  const requiredEnergy = Math.max(
-    0,
-    Number((energyEstimate as any)?.energy_required ?? 0)
-      || Number((trigger as any)?.energy_required ?? 0)
-      || Number((trigger as any)?.energy_used ?? 0)
-      || 0
-  )
-  if (requiredEnergy <= 0) throw new Error('Unable to resolve TRC20 energy estimate')
-
-  const paidEnergy = Math.max(0, requiredEnergy - availableEnergy)
-  const feeSun = (paidBandwidth * bandwidthPriceSun) + (paidEnergy * energyPriceSun)
+  const fromHex = await normalizeTronRpcAddress(fromAddress)
+  const toHex = await normalizeTronRpcAddress(toAddress)
+  const contractHex = await normalizeTronRpcAddress(contractAddress)
+  const transferData = EVM_ERC20_IFACE.encodeFunctionData('transfer', [toHex, amountRaw])
+  const quote = await estimateEvmTxFee({
+    rpcConfig,
+    from: fromHex,
+    to: contractHex,
+    data: transferData,
+    valueWei: 0n,
+    fallbackGasLimitHex: '0x186a0',
+    lane: input.gasLane
+  })
+  const feeSun = quote.estimatedFeeWei
 
   return {
-    fee: Number((feeSun / 1e6).toFixed(6)),
+    fee: Number(feeSun) / 1e6,
     debugLabel: 'TRON live asset quote',
-    debugDetails: `TRC20 | bandwidth=${requiredBandwidth}B | paidBandwidth=${paidBandwidth}B | energy=${requiredEnergy} | paidEnergy=${paidEnergy} | energyPrice=${energyPriceSun} sun`
+    debugDetails: `TRC20 | gasLimit=${quote.gasLimit.toString()} | feeSun=${feeSun.toString()}`
   }
 }
 

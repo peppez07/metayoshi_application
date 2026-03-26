@@ -7,12 +7,14 @@ import {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
+  requestServerSwapPrepare,
   requestServerSwapQuote,
   resolveServerSwapAssetDecimals,
   submitServerSwap,
   type ServerExecutionStatus,
   type ServerSponsorPreference,
   type ServerSwapAssetRef,
+  type ServerSwapPrepareResponse,
   type ServerSwapQuote,
   type ServerSwapQuoteRequest,
   type ServerSwapSubmitRequest
@@ -450,6 +452,17 @@ export function resolveWalletSwapReadiness(
     }
   }
 
+  if (fromNetwork.coinType === 'SUI' && toNetwork.coinType === 'SUI' && sameChain) {
+    return {
+      state: 'active',
+      tone: 'emerald',
+      engineLabel: 'Aftermath Sui routing',
+      title: 'Same-chain Sui swaps are available',
+      detail: 'Quotes use the MetaYoshi swap service, then the wallet signs the prepared Sui transaction and relays it through the bridge.',
+      canRequestQuotes: true
+    }
+  }
+
   if (fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM' && sameChain) {
     return {
       state: 'active',
@@ -477,7 +490,7 @@ export function resolveWalletSwapReadiness(
     tone: 'slate',
     engineLabel: 'Not supported',
     title: 'This pair is outside the current swap scope',
-    detail: 'The current wallet build can only request quotes for compatible EVM or Solana swap flows.',
+    detail: 'The current wallet build can only request quotes for compatible EVM, Solana, or same-chain Sui swap flows.',
     canRequestQuotes: false
   }
 }
@@ -750,6 +763,7 @@ export {
   createServerExecutionRpcConfig,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
+  requestServerSwapPrepare,
   requestServerSwapQuote,
   resolveServerSwapAssetDecimals,
   submitServerSwap
@@ -759,6 +773,7 @@ export type {
   ServerExecutionStatus,
   ServerSponsorPreference,
   ServerSwapAssetRef,
+  ServerSwapPrepareResponse,
   ServerSwapQuote,
   ServerSwapQuoteRequest,
   ServerSwapSubmitRequest

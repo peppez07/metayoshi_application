@@ -159,8 +159,38 @@ export const INITIAL_NETWORKS: Network[] = ALL_NETWORKS.filter((network) => (
   && !TEMPORARILY_DISABLED_NETWORK_IDS.has(String(network.id || '').trim())
 ))
 
+function listStartupNetworkIds(networks: Network[]): string[] {
+  return networks
+    .map((network) => String(network?.id || '').trim().toLowerCase())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+}
+
+function validateInitialNetworks(networks: Network[]): void {
+  if (networks.length > 0) return
+  throw new Error(
+    'No startup networks remain enabled after applying the bundled registry, build config, and environment filters. ' +
+    'Review VITE_ENABLED_COINS, VITE_DISABLED_COINS, and metayoshi.build.json.'
+  )
+}
+
+function validateConfiguredDefaultNetworkId(configuredId: string, networks: Network[]): void {
+  if (!configuredId) return
+  const enabledStartupIds = new Set(listStartupNetworkIds(networks))
+  if (enabledStartupIds.has(configuredId)) return
+  throw new Error(
+    `VITE_DEFAULT_NETWORK=${configuredId} does not resolve to an enabled startup network. ` +
+    `Enabled startup networks: ${[...enabledStartupIds].join(', ')}`
+  )
+}
+
+validateInitialNetworks(INITIAL_NETWORKS)
+
+const CONFIGURED_DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK ?? '').trim().toLowerCase()
+validateConfiguredDefaultNetworkId(CONFIGURED_DEFAULT_NETWORK_ID, INITIAL_NETWORKS)
+
 export const DEFAULT_ACTIVE_NETWORK_ID =
-  INITIAL_NETWORKS.find((n) => n.id === (import.meta.env.VITE_DEFAULT_NETWORK ?? DEFAULT_NETWORK_ID))?.id
+  INITIAL_NETWORKS.find((n) => String(n.id || '').trim().toLowerCase() === (CONFIGURED_DEFAULT_NETWORK_ID || DEFAULT_NETWORK_ID))?.id
   ?? INITIAL_NETWORKS[0]?.id
   ?? DEFAULT_NETWORK_ID
 

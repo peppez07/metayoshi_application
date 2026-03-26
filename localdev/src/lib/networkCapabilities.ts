@@ -44,20 +44,21 @@ const DEFAULT_CAPABILITIES: NetworkCapabilitySet = {
 }
 
 export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabilitySet {
+  const isFullAssetSwapNetwork = net.coinType === 'EVM' || net.coinType === 'SOL' || net.coinType === 'SUI'
   const defaults: NetworkCapabilitySet = {
     ...DEFAULT_CAPABILITIES,
     features: {
       ...DEFAULT_CAPABILITIES.features,
-      // Back-compat: EVM/SOL and old supportsAssets flag imply asset support
-      assetLayer: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
-      assetSend: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
-      swap: net.coinType === 'EVM' || net.coinType === 'SOL'
+      // Back-compat: EVM/SOL/SUI and old supportsAssets flag imply asset support.
+      assetLayer: isFullAssetSwapNetwork || net.supportsAssets === true,
+      assetSend: isFullAssetSwapNetwork || net.supportsAssets === true,
+      swap: isFullAssetSwapNetwork
     },
     ui: {
       ...DEFAULT_CAPABILITIES.ui,
-      showAssetsTab: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
-      showAssetsAction: net.coinType === 'EVM' || net.coinType === 'SOL' || net.supportsAssets === true,
-      showSwapAction: net.coinType === 'EVM' || net.coinType === 'SOL'
+      showAssetsTab: isFullAssetSwapNetwork || net.supportsAssets === true,
+      showAssetsAction: isFullAssetSwapNetwork || net.supportsAssets === true,
+      showSwapAction: isFullAssetSwapNetwork
     }
   }
 
@@ -91,6 +92,16 @@ export function resolveNetworkCapabilities(net: CapabilityInput): NetworkCapabil
   // Solana must always expose asset listing UI (SPL tokens), even if a stale persisted
   // capability object still has legacy false flags.
   if (net.coinType === 'SOL') {
+    merged.features.assetLayer = true
+    merged.features.assetSend = true
+    merged.features.swap = true
+    merged.ui.showAssetsTab = true
+    merged.ui.showAssetsAction = true
+    merged.ui.showSwapAction = true
+  }
+
+  // Sui must always expose wallet-native asset and swap UI when the network is enabled.
+  if (net.coinType === 'SUI') {
     merged.features.assetLayer = true
     merged.features.assetSend = true
     merged.features.swap = true

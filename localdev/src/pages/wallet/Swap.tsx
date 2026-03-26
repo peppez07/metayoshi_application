@@ -25,6 +25,7 @@ import {
   fetchServerSwapMatrix,
   fetchServerExecutionStatus,
   isTerminalServerExecutionStatus,
+  requestServerSwapPrepare,
   requestServerSwapQuote,
   resolveServerSwapAssetDecimals,
   resolveSwapServerNetworkId,
@@ -151,6 +152,82 @@ async function buildSignedProviderExecution(params: {
   }
 }
 
+function mergeWarnings(...groups: Array<string[] | undefined>): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const item of group || []) {
+      const normalized = readString(item)
+      if (!normalized || seen.has(normalized)) continue
+      seen.add(normalized)
+      out.push(normalized)
+    }
+  }
+  return out
+}
+
+async function submitPreparedSuiSwap(params: {
+  quote: ServerSwapQuote
+  rpcConfig: ReturnType<typeof createServerExecutionRpcConfig>
+  mnemonic: string | null
+  accountIndex: number
+  sourceAddress: string
+  sourceAsset?: ServerSwapAssetRef
+}): Promise<ServerExecutionStatus> {
+  const quoteProviderExecution = asRecord(asRecord(params.quote.metadata).providerExecution)
+  const quotedProviderKind = readString(quoteProviderExecution.providerKind).toLowerCase()
+  const prepared = await requestServerSwapPrepare(params.rpcConfig, {
+    quoteId: params.quote.quoteId
+  })
+  const providerExecution = asRecord(prepared.providerExecution)
+  const providerKind = readString(
+    providerExecution.providerKind
+    || prepared.providerKind
+    || quotedProviderKind
+  ).toLowerCase()
+
+  if (providerKind === 'mayan') {
+    throw new Error('Mayan Sui SDK execution is not enabled in this wallet build yet')
+  }
+  if (providerKind && providerKind !== 'aftermath') {
+    throw new Error(`Provider prepare is not enabled for ${providerKind}`)
+  }
+
+  const unsignedTransaction = readString(providerExecution.unsignedTransaction)
+  if (!unsignedTransaction) {
+    throw new Error('Swap prepare is missing providerExecution.unsignedTransaction')
+  }
+  if (prepared.prepared !== true) {
+    throw new Error('Swap prepare did not return a prepared Sui transaction')
+  }
+
+  const mnemonic = readString(params.mnemonic)
+  if (!mnemonic) throw new Error('Wallet is locked')
+  const relayKind = params.sourceAsset?.kind === 'native' ? 'coin' : 'asset'
+  const { signAndRelayPreparedSuiTransaction } = await import('../../lib/suiNonCustodial')
+  const submitted = await signAndRelayPreparedSuiTransaction({
+    rpcConfig: params.rpcConfig,
+    mnemonic,
+    accountIndex: params.accountIndex,
+    fromAddress: params.sourceAddress,
+    txBytesBase64: unsignedTransaction,
+    relayKind
+  })
+
+  return {
+    executionId: submitted.hash,
+    quoteId: params.quote.quoteId,
+    status: 'submitted',
+    detail: readString(prepared.detail) || 'Sui swap signed by wallet and relayed through MetaYoshi bridge',
+    updatedAt: Date.now(),
+    receipt: {
+      txid: submitted.hash,
+      networkId: params.rpcConfig.networkId
+    },
+    warnings: mergeWarnings(params.quote.warnings, prepared.warnings)
+  }
+}
+
 function formatSwapUiError(error: unknown): string {
   const message = compactError(error)
   const normalized = message.toLowerCase()
@@ -245,6 +322,13 @@ function formatSwapUiError(error: unknown): string {
 
   if (normalized.includes('server execution request failed')) {
     return 'Swap service is temporarily unavailable. Please try again in a moment.'
+  }
+
+  if (
+    normalized.includes('mayan sui sdk execution is not enabled')
+    || normalized.includes('provider prepare is not enabled for mayan')
+  ) {
+    return 'Cross-chain Sui aggregator execution is not enabled in this wallet build yet. Same-chain Sui swaps are ready through Aftermath.'
   }
 
   return message
@@ -1758,37 +1842,49 @@ const Swap: React.FC = () => {
         sourceAsset,
         destinationAsset
       } = await buildSwapContext()
-      const providerExecution = await buildSignedProviderExecution({
-        quote,
-        sourceNetwork: fromNetwork,
-        mnemonic: sessionMnemonic,
-        accountIndex: Number(activeAccount?.derivationIndex) || 0
-      })
-      const submitted = await submitServerSwap(rpcConfig, {
-        quoteId: quote.quoteId,
-        source: {
-          networkId: sourceNetworkId,
-          chainId: fromNetwork.chainId,
-          symbol: fromItem.symbol || fromNetwork.symbol,
-          address: sourceAddress,
-          amount: fromAmount,
-          asset: sourceAsset
-        },
-        destination: {
-          networkId: destinationNetworkId,
-          chainId: toNetwork.chainId,
-          symbol: toItem.symbol || toNetwork.symbol,
-          address: destinationAddress,
-          asset: destinationAsset
-        },
-        minDestinationAmount: quote.minDestinationAmount,
-        sponsorPreference,
-        executionMode: quote.mode,
-        quoteMetadata: quote.metadata,
-        providerExecution
-      })
+      const accountIndex = Number(activeAccount?.derivationIndex) || 0
+      const submitted = fromNetwork.coinType === 'SUI'
+        ? await submitPreparedSuiSwap({
+            quote,
+            rpcConfig,
+            mnemonic: sessionMnemonic,
+            accountIndex,
+            sourceAddress,
+            sourceAsset
+          })
+        : await (async () => {
+            const providerExecution = await buildSignedProviderExecution({
+              quote,
+              sourceNetwork: fromNetwork,
+              mnemonic: sessionMnemonic,
+              accountIndex
+            })
+            return await submitServerSwap(rpcConfig, {
+              quoteId: quote.quoteId,
+              source: {
+                networkId: sourceNetworkId,
+                chainId: fromNetwork.chainId,
+                symbol: fromItem.symbol || fromNetwork.symbol,
+                address: sourceAddress,
+                amount: fromAmount,
+                asset: sourceAsset
+              },
+              destination: {
+                networkId: destinationNetworkId,
+                chainId: toNetwork.chainId,
+                symbol: toItem.symbol || toNetwork.symbol,
+                address: destinationAddress,
+                asset: destinationAsset
+              },
+              minDestinationAmount: quote.minDestinationAmount,
+              sponsorPreference,
+              executionMode: quote.mode,
+              quoteMetadata: quote.metadata,
+              providerExecution
+            })
+          })()
       setExecution(submitted)
-      showToast('Swap submitted to server execution', 'info')
+      showToast(fromNetwork.coinType === 'SUI' ? 'Sui swap signed and relayed' : 'Swap submitted to server execution', 'info')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)

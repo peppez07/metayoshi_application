@@ -1,7 +1,5 @@
 import {
-  Connection,
   Keypair,
-  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
@@ -9,31 +7,17 @@ import {
   TransactionInstruction
 } from '@solana/web3.js'
 import { hexToBytes } from '@noble/hashes/utils'
+import {
+  getSolanaAccountInfo,
+  getSolanaLatestBlockhash,
+  getSolanaParsedAccountInfo,
+  waitForSolanaSignatureConfirmation
+} from './solanaBridgeClient'
+import { sendBridgeSolanaSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1Q2hvZbsiqW5xWH25efTNsLJA8knL')
-const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
-
-function readEnvFlag(name: string, fallback = false): boolean {
-  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
-  const raw = String(env?.[name] ?? '').trim().toLowerCase()
-  if (!raw) return fallback
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false
-  return fallback
-}
-
-const SOL_ALLOW_PUBLIC_RPC_FALLBACK = readEnvFlag('VITE_SOL_ALLOW_PUBLIC_RPC_FALLBACK', false)
-
-function resolveSolanaRpcCandidates(rpcUrl: string): string[] {
-  const primary = String(rpcUrl || '').trim()
-  const defaults = SOL_ALLOW_PUBLIC_RPC_FALLBACK
-    ? ['', '']
-    : []
-  return Array.from(new Set([primary, ...defaults].filter(Boolean)))
-}
-
 function parseSolAmount(amount: string): bigint {
   const raw = String(amount || '').trim()
   if (!/^\d+(\.\d+)?$/.test(raw)) throw new Error('Invalid SOL amount')
@@ -42,25 +26,6 @@ function parseSolAmount(amount: string): bigint {
   const lamports = BigInt(`${whole}${frac.padEnd(9, '0')}`.replace(/^0+/, '') || '0')
   if (lamports <= 0n) throw new Error('Amount must be greater than 0')
   return lamports
-}
-
-export async function getSolanaBalance(rpcUrl: string, address: string): Promise<string> {
-  const pubkey = new PublicKey(String(address || '').trim())
-  let lastError: unknown = null
-  let firstSuccessful: string | null = null
-  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
-    try {
-      const connection = new Connection(candidate, 'confirmed')
-      const lamports = await connection.getBalance(pubkey, 'confirmed')
-      const formatted = (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/\.?0+$/, '')
-      if (firstSuccessful == null) firstSuccessful = formatted
-      if (lamports > 0) return formatted
-    } catch (error) {
-      lastError = error
-    }
-  }
-  if (firstSuccessful != null) return firstSuccessful
-  throw lastError instanceof Error ? lastError : new Error('Failed to query Solana balance from configured RPC endpoints')
 }
 
 function parseTokenAmount(amount: string, decimals: number): bigint {
@@ -146,33 +111,6 @@ function createTransferCheckedInstruction(
   })
 }
 
-async function withSolanaConnection<T>(rpcUrl: string, task: (connection: Connection) => Promise<T>): Promise<T> {
-  let lastError: unknown = null
-  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
-    try {
-      const connection = new Connection(candidate, 'confirmed')
-      return await task(connection)
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('Solana RPC request failed')
-}
-
-async function resolveMintMetadata(connection: Connection, mint: PublicKey): Promise<{ decimals: number; tokenProgram: PublicKey }> {
-  const info = await connection.getParsedAccountInfo(mint, 'confirmed')
-  const owner = info.value?.owner
-  const tokenProgram = owner?.equals(TOKEN_2022_PROGRAM_ID)
-    ? TOKEN_2022_PROGRAM_ID
-    : TOKEN_PROGRAM_ID
-  const parsed = (info.value?.data as any)?.parsed
-  const decimals = Number(parsed?.info?.decimals ?? 0)
-  if (!Number.isFinite(decimals) || decimals < 0 || decimals > 18) {
-    throw new Error('Invalid mint decimals')
-  }
-  return { decimals: Math.trunc(decimals), tokenProgram }
-}
-
 export type SolanaTokenBalanceRow = {
   tokenId: string
   amountRaw: string
@@ -184,166 +122,9 @@ export type SolanaTokenBalanceRow = {
   name?: string
 }
 
-async function fetchJsonRpc(endpoint: string, method: string, params: any[]): Promise<any> {
-  const body = {
-    jsonrpc: '2.0',
-    id: 1,
-    method,
-    params
-  }
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
-  })
-  if (!response.ok) throw new Error(`Solana RPC HTTP ${response.status} @ ${endpoint}`)
-  const json = await response.json().catch(() => null)
-  if (!json || json.error) {
-    throw new Error(`Solana RPC error @ ${endpoint}: ${JSON.stringify(json?.error || json)}`)
-  }
-  return json.result
-}
-
-async function fetchTokenRowsViaHttpRpc(endpoint: string, owner: string, programId: string): Promise<SolanaTokenBalanceRow[]> {
-  const result = await fetchJsonRpc(endpoint, 'getTokenAccountsByOwner', [
-    owner,
-    { programId },
-    { encoding: 'jsonParsed', commitment: 'confirmed' }
-  ])
-  const rows = Array.isArray(result?.value) ? result.value : []
-  const out: SolanaTokenBalanceRow[] = []
-  for (const row of rows) {
-    const parsed = row?.account?.data?.parsed?.info
-    const mint = String(parsed?.mint || '').trim()
-    const tokenAmount = parsed?.tokenAmount || {}
-    const amountRaw = String(tokenAmount?.amount || '').trim()
-    const amountUi = String(tokenAmount?.uiAmountString || '').trim()
-    const decimals = Number(tokenAmount?.decimals ?? 0)
-    if (!mint || !/^\d+$/.test(amountRaw)) continue
-    const rawBig = BigInt(amountRaw)
-    if (rawBig <= 0n) continue
-    out.push({
-      tokenId: mint,
-      amountRaw,
-      amountUi: amountUi || '0',
-      decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
-      tokenProgram: programId,
-      isNft: decimals === 0 && rawBig === 1n
-    })
-  }
-  return out
-}
-
-function readU32LE(buffer: Buffer, offset: number): number {
-  if (offset + 4 > buffer.length) return 0
-  return buffer.readUInt32LE(offset)
-}
-
-function readBorshString(buffer: Buffer, offset: number): { value: string; next: number } {
-  const len = readU32LE(buffer, offset)
-  const start = offset + 4
-  const end = Math.min(buffer.length, start + Math.max(0, len))
-  const value = buffer.slice(start, end).toString('utf8').replace(/\0/g, '').trim()
-  return { value, next: end }
-}
-
-async function readMetaplexTokenMetadata(
-  connection: Connection,
-  mint: PublicKey
-): Promise<{ symbol?: string; name?: string }> {
-  try {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-      METADATA_PROGRAM_ID
-    )
-    const info = await connection.getAccountInfo(pda, 'confirmed')
-    if (!info?.data || info.data.length < 70) return {}
-    const data = Buffer.from(info.data)
-
-    // Metadata account layout: key(1) + updateAuthority(32) + mint(32) + Data{name,symbol,uri,...}
-    let cursor = 1 + 32 + 32
-    const namePart = readBorshString(data, cursor)
-    cursor = namePart.next
-    const symbolPart = readBorshString(data, cursor)
-    const name = String(namePart.value || '').trim()
-    const symbol = String(symbolPart.value || '').trim().toUpperCase()
-    return {
-      name: name || undefined,
-      symbol: symbol || undefined
-    }
-  } catch {
-    return {}
-  }
-}
-
-export async function listSolanaTokenBalances(rpcUrl: string, ownerAddress: string): Promise<SolanaTokenBalanceRow[]> {
-  const owner = new PublicKey(String(ownerAddress || '').trim())
-  const ownerBase58 = owner.toBase58()
-  let lastError: unknown = null
-  let firstSuccessful: SolanaTokenBalanceRow[] | null = null
-  for (const candidate of resolveSolanaRpcCandidates(rpcUrl)) {
-    try {
-      const connection = new Connection(candidate, 'confirmed')
-      const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]
-      const rows: SolanaTokenBalanceRow[] = []
-      const metadataByMint = new Map<string, { symbol?: string; name?: string }>()
-      for (const programId of programs) {
-        const result = await connection.getParsedTokenAccountsByOwner(owner, { programId }, 'confirmed')
-        for (const accountRow of result.value) {
-          const parsed = (accountRow.account.data as any)?.parsed?.info
-          const mint = String(parsed?.mint || '').trim()
-          const tokenAmount = parsed?.tokenAmount
-          const amountRaw = String(tokenAmount?.amount || '').trim()
-          const amountUi = String(tokenAmount?.uiAmountString || '').trim()
-          const decimals = Number(tokenAmount?.decimals ?? 0)
-          if (!mint || !/^\d+$/.test(amountRaw)) continue
-          const rawBig = BigInt(amountRaw)
-          if (rawBig <= 0n) continue
-          let metadata = metadataByMint.get(mint)
-          if (!metadata) {
-            metadata = await readMetaplexTokenMetadata(connection, new PublicKey(mint))
-            metadataByMint.set(mint, metadata)
-          }
-          rows.push({
-            tokenId: mint,
-            amountRaw,
-            amountUi: amountUi || '0',
-            decimals: Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0,
-            tokenProgram: programId.toBase58(),
-            isNft: decimals === 0 && rawBig === 1n,
-            symbol: metadata.symbol,
-            name: metadata.name
-          })
-        }
-      }
-      if (firstSuccessful == null) firstSuccessful = rows
-      if (rows.length > 0) return rows
-    } catch (error) {
-      lastError = error
-    }
-  }
-  // Optional public fallback for deployments that intentionally allow it.
-  if (SOL_ALLOW_PUBLIC_RPC_FALLBACK) {
-    try {
-      const fallbackEndpoints = ['', '']
-      for (const endpoint of fallbackEndpoints) {
-        const tokenkegRows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_PROGRAM_ID.toBase58())
-        const token2022Rows = await fetchTokenRowsViaHttpRpc(endpoint, ownerBase58, TOKEN_2022_PROGRAM_ID.toBase58())
-        const merged = [...tokenkegRows, ...token2022Rows]
-        if (firstSuccessful == null) firstSuccessful = merged
-        if (merged.length > 0) return merged
-      }
-    } catch (error) {
-      lastError = error
-    }
-  }
-  if (firstSuccessful != null) return firstSuccessful
-  if (lastError) throw lastError instanceof Error ? lastError : new Error('Failed to list Solana token balances')
-  return []
-}
 
 export async function sendSolanaSplTokenNonCustodial(params: {
-  rpcUrl: string
+  rpcConfig: UtxoRpcConfig
   fromAddress: string
   toAddress: string
   assetId: string
@@ -366,56 +147,66 @@ export async function sendSolanaSplTokenNonCustodial(params: {
   const recipient = new PublicKey(toAddress)
   const mint = new PublicKey(mintAddress)
 
-  return await withSolanaConnection(params.rpcUrl, async (connection) => {
-    const { decimals, tokenProgram } = await resolveMintMetadata(connection, mint)
-    const amountRaw = parseTokenAmount(params.amount, decimals)
-    const sourceAta = getAssociatedTokenAddress(sender.publicKey, mint, tokenProgram)
-    const destinationAta = getAssociatedTokenAddress(recipient, mint, tokenProgram)
+  const mintInfo = await getSolanaParsedAccountInfo(params.rpcConfig, mint.toBase58())
+  const ownerBase58 = String(mintInfo?.owner?.toBase58?.() || mintInfo?.owner || '').trim()
+  const tokenProgram = ownerBase58 === TOKEN_2022_PROGRAM_ID.toBase58()
+    ? TOKEN_2022_PROGRAM_ID
+    : TOKEN_PROGRAM_ID
+  const decimals = Number((mintInfo as any)?.data?.parsed?.info?.decimals ?? (mintInfo as any)?.parsed?.info?.decimals ?? 0)
+  if (!Number.isFinite(decimals) || decimals < 0 || decimals > 18) {
+    throw new Error('Invalid mint decimals')
+  }
 
-    const sourceInfo = await connection.getParsedAccountInfo(sourceAta, 'confirmed')
-    if (!sourceInfo.value) {
-      throw new Error('Sender token account not found for the selected mint')
-    }
-    const sourceAmountRaw = String(((sourceInfo.value.data as any)?.parsed?.info?.tokenAmount?.amount) || '0').trim()
-    const sourceAmount = /^\d+$/.test(sourceAmountRaw) ? BigInt(sourceAmountRaw) : 0n
-    if (sourceAmount < amountRaw) {
-      throw new Error('Insufficient token balance')
-    }
+  const amountRaw = parseTokenAmount(params.amount, Math.trunc(decimals))
+  const sourceAta = getAssociatedTokenAddress(sender.publicKey, mint, tokenProgram)
+  const destinationAta = getAssociatedTokenAddress(recipient, mint, tokenProgram)
+  const sourceInfo = await getSolanaParsedAccountInfo(params.rpcConfig, sourceAta.toBase58())
+  if (!sourceInfo) {
+    throw new Error('Sender token account not found for the selected mint')
+  }
+  const sourceAmountRaw = String((((sourceInfo as any)?.data?.parsed?.info?.tokenAmount?.amount) || '0')).trim()
+  const sourceAmount = /^\d+$/.test(sourceAmountRaw) ? BigInt(sourceAmountRaw) : 0n
+  if (sourceAmount < amountRaw) {
+    throw new Error('Insufficient token balance')
+  }
 
-    const tx = new Transaction()
-    const destinationInfo = await connection.getAccountInfo(destinationAta, 'confirmed')
-    if (!destinationInfo) {
-      tx.add(createAssociatedTokenAccountInstruction(
-        sender.publicKey,
-        destinationAta,
-        recipient,
-        mint,
-        tokenProgram
-      ))
-    }
-
-    tx.add(createTransferCheckedInstruction(
-      sourceAta,
-      mint,
-      destinationAta,
+  const tx = new Transaction()
+  const destinationInfo = await getSolanaAccountInfo(params.rpcConfig, destinationAta.toBase58())
+  if (!destinationInfo) {
+    tx.add(createAssociatedTokenAccountInstruction(
       sender.publicKey,
-      amountRaw,
-      decimals,
+      destinationAta,
+      recipient,
+      mint,
       tokenProgram
     ))
+  }
 
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-    tx.feePayer = sender.publicKey
-    tx.recentBlockhash = blockhash
-    tx.sign(sender)
-    const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-    return { hash: signature }
+  tx.add(createTransferCheckedInstruction(
+    sourceAta,
+    mint,
+    destinationAta,
+    sender.publicKey,
+    amountRaw,
+    Math.trunc(decimals),
+    tokenProgram
+  ))
+
+  const { blockhash } = await getSolanaLatestBlockhash(params.rpcConfig)
+  tx.feePayer = sender.publicKey
+  tx.recentBlockhash = blockhash
+  tx.sign(sender)
+  const signedTxBase64 = tx.serialize().toString('base64')
+  const sent = await sendBridgeSolanaSignedRelay(params.rpcConfig, {
+    kind: 'asset',
+    signedTxBase64
   })
+  await waitForSolanaSignatureConfirmation(params.rpcConfig, sent.txid)
+  return { hash: sent.txid }
 }
 
 export async function sendSolanaNonCustodial(params: {
-  rpcUrl: string
+  rpcConfig: UtxoRpcConfig
   fromAddress: string
   toAddress: string
   amountSol: string
@@ -436,21 +227,23 @@ export async function sendSolanaNonCustodial(params: {
   const amountLamports = Number(lamports)
   if (!Number.isFinite(amountLamports) || amountLamports <= 0) throw new Error('Invalid SOL amount')
 
-  return await withSolanaConnection(params.rpcUrl, async (connection) => {
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-    const tx = new Transaction({
-      feePayer: sender.publicKey,
-      recentBlockhash: blockhash
-    }).add(
-      SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
-        toPubkey: new PublicKey(toAddress),
-        lamports: amountLamports
-      })
-    )
-    tx.sign(sender)
-    const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-    return { hash: signature }
+  const { blockhash } = await getSolanaLatestBlockhash(params.rpcConfig)
+  const tx = new Transaction({
+    feePayer: sender.publicKey,
+    recentBlockhash: blockhash
+  }).add(
+    SystemProgram.transfer({
+      fromPubkey: sender.publicKey,
+      toPubkey: new PublicKey(toAddress),
+      lamports: amountLamports
+    })
+  )
+  tx.sign(sender)
+  const signedTxBase64 = tx.serialize().toString('base64')
+  const sent = await sendBridgeSolanaSignedRelay(params.rpcConfig, {
+    kind: 'coin',
+    signedTxBase64
   })
+  await waitForSolanaSignatureConfirmation(params.rpcConfig, sent.txid)
+  return { hash: sent.txid }
 }

@@ -1,4 +1,5 @@
 import type { Network } from '../coins/types'
+import { resolveRuntimeModelId } from './runtimeModel'
 
 function normalizeHostname(value: string): string {
   return String(value || '').trim().toLowerCase()
@@ -62,9 +63,13 @@ export function sanitizeBridgeUrl(value: string, apiBaseUrl: string): string {
 }
 
 export function sanitizeNetworkServerOnly(network: Network, apiBaseUrl: string): Network {
+  const modelId = resolveRuntimeModelId(network)
+  const sanitizedRpcUrl = (modelId === 'sui' || modelId === 'sol' || modelId === 'tron')
+    ? ''
+    : sanitizeRpcUrl(String(network.rpcUrl || '').trim())
   return {
     ...network,
-    rpcUrl: sanitizeRpcUrl(String(network.rpcUrl || '').trim()),
+    rpcUrl: sanitizedRpcUrl,
     bridgeUrl: sanitizeBridgeUrl(String(network.bridgeUrl || '').trim(), apiBaseUrl) || undefined,
     explorerUrl: sanitizeExplorerUrl(String(network.explorerUrl || '').trim()) || undefined
   }

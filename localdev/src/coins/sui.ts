@@ -4,8 +4,8 @@ import { getUnifiedLogoByName } from './logos'
 import { sanitizeExplorerUrl } from '../lib/serverOnly'
 
 export const SUI_CAPABILITIES: NetworkCapabilitiesInput = {
-  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true },
-  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true }
+  features: { nativeSend: true, assetLayer: true, assetSend: true, activity: true, swap: true },
+  ui: { showAssetsTab: true, showAssetsAction: true, showSendAction: true, showActivityTab: true, showSwapAction: true }
 }
 
 export function createSuiNetwork(ctx: CoinRuntimeContext): Network {

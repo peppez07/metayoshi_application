@@ -1016,6 +1016,7 @@ async function createUtxoRpcConfig(
     secureBridgeSigner?: (message: string) => Promise<{ address: string; signature: string }>
   } = {}
 ): Promise<UtxoRpcConfig> {
+  const modelId = resolveNetworkModelId(net)
   const override = opts.localRpcOverride
   const bridgeTxKeyCandidates = await resolveBridgeTxKeyCandidates()
   const bridgeTxKey = bridgeTxKeyCandidates[0]
@@ -1036,7 +1037,9 @@ async function createUtxoRpcConfig(
     coinSymbol: net.symbol,
     apiInterceptor: getCoinApiInterceptor(net.id),
     // Local RPC fields Ã¢â‚¬â€ use user override if set, otherwise fall back to network defaults
-    rpcUrl:      (override?.rpcUrl?.trim())      || net.rpcUrl,
+    rpcUrl: (modelId === 'sui' || modelId === 'sol' || modelId === 'tron')
+      ? ''
+      : ((override?.rpcUrl?.trim()) || net.rpcUrl),
     rpcWallet:   (override?.rpcWallet?.trim())   || net.rpcWallet,
     rpcUsername: (override?.rpcUsername?.trim()) || net.rpcUsername,
     rpcPassword: (override?.rpcPassword?.trim()) || net.rpcPassword,
@@ -4746,16 +4749,6 @@ export const useWalletStore = create<WalletState>()(
           try {
             let rows: SolanaWalletAssetRow[] = []
 
-            const env = ((import.meta as any)?.env || {}) as Record<string, unknown>
-            const solDirectFallbackFlag = String(env.VITE_SOL_ALLOW_DIRECT_ASSET_RPC_FALLBACK ?? '').trim().toLowerCase()
-            const rpcUrl = String(net.rpcUrl || '').trim()
-            const disableDirectAssetRpcFallback =
-              solDirectFallbackFlag === '0'
-              || solDirectFallbackFlag === 'false'
-              || solDirectFallbackFlag === 'no'
-              || solDirectFallbackFlag === 'off'
-            const allowDirectAssetRpcFallback = Boolean(rpcUrl) && !disableDirectAssetRpcFallback
-
             const rpcConfig = await createUtxoRpcConfig(net, {
               useLocalRpc: ulr,
               localRpcOverride: lro[net.id],
@@ -4796,25 +4789,6 @@ export const useWalletStore = create<WalletState>()(
                 })
               }
               rows = normalized
-            }
-
-            if (rows.length === 0 && allowDirectAssetRpcFallback) {
-              try {
-                const { listSolanaTokenBalances } = await loadSolanaNonCustodialModule()
-                const directRows = await listSolanaTokenBalances(rpcUrl, address)
-                rows = directRows.map((row) => ({
-                  tokenId: String(row.tokenId || '').trim(),
-                  amountRaw: String(row.amountRaw || '').trim(),
-                  amountUi: String(row.amountUi || '').trim(),
-                  decimals: Number.isFinite(row.decimals) ? Math.max(0, Math.trunc(row.decimals)) : 0,
-                  isNft: Boolean(row.isNft),
-                  symbol: String((row as any)?.symbol || '').trim().toUpperCase() || undefined,
-                  name: String((row as any)?.name || '').trim() || undefined,
-                  logoUri: String((row as any)?.logoUri || '').trim() || undefined
-                }))
-              } catch {
-                rows = []
-              }
             }
 
             const assets: Record<string, number> = {}
@@ -5844,8 +5818,13 @@ export const useWalletStore = create<WalletState>()(
             throw new Error(`Unknown TRC20 contract for ${normalizedAssetId}. Configure VITE_TRON_TRACKED_TOKENS.`)
           }
 
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
           const { readTrc20TokenMetadata, parseTrc20UiAmountToRaw, sendTrc20NonCustodial } = await loadTronNonCustodialModule()
-          const meta = await readTrc20TokenMetadata(net.rpcUrl, contract)
+          const meta = await readTrc20TokenMetadata(rpcConfig, contract)
           const amountRaw = parseTrc20UiAmountToRaw(String(qty || '').trim(), meta.decimals)
 
           const { deriveTronAddress } = await loadTronAddressModule()
@@ -5855,7 +5834,7 @@ export const useWalletStore = create<WalletState>()(
           }
 
           const sent = await sendTrc20NonCustodial({
-            rpcUrl: net.rpcUrl,
+            rpcConfig,
             contractAddress: contract,
             fromAddress: derived.address,
             toAddress: recipient,
@@ -6132,7 +6111,6 @@ export const useWalletStore = create<WalletState>()(
               throw new Error('Sui object transfer quantity must be exactly 1')
             }
             const sent = await sendSuiObjectAssetNonCustodial({
-              rpcUrl: net.rpcUrl,
               rpcConfig,
               mnemonic: sessionMnemonic!,
               accountIndex,
@@ -6155,7 +6133,6 @@ export const useWalletStore = create<WalletState>()(
           ).trim() || 'Sui token'
           const amountRaw = parseDecimalToAtomicUnits(String(qty || '').trim(), decimals, assetLabel)
           const sent = await sendSuiCoinAssetNonCustodial({
-            rpcUrl: net.rpcUrl,
             rpcConfig,
             mnemonic: sessionMnemonic!,
             accountIndex,
@@ -6181,8 +6158,13 @@ export const useWalletStore = create<WalletState>()(
           }
 
           const { sendSolanaSplTokenNonCustodial } = await loadSolanaNonCustodialModule()
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
           const tx = await sendSolanaSplTokenNonCustodial({
-            rpcUrl: net.rpcUrl,
+            rpcConfig,
             fromAddress: derived.address,
             toAddress: recipient,
             assetId: tokenId,
@@ -7262,17 +7244,6 @@ export const useWalletStore = create<WalletState>()(
             const rpcConfig = await createUtxoRpcConfig(net, {
               secureBridgeSigner: get().signBackendAuthMessage
             })
-            if (!hasUsableDirectRpcUrl(rpcConfig.rpcUrl, rpcConfig.bridgeUrl)) {
-              await waitForUiStabilize()
-              if (isStaleRequest()) return
-              set((state) => ({
-                isSyncing: false,
-                isConnected: false,
-                syncPercent: 0,
-                lowSyncStreak: state.lowSyncStreak
-              }))
-              return
-            }
             const snapshot = await fetchChainBalanceAndSync({
               network: net,
               address,
@@ -7910,9 +7881,12 @@ export const useWalletStore = create<WalletState>()(
         if (fromAddress !== derived.address) {
           throw new Error(`Active SOL address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
         const { sendSolanaNonCustodial } = await loadSolanaNonCustodialModule()
         return await sendSolanaNonCustodial({
-          rpcUrl: net.rpcUrl,
+          rpcConfig,
           fromAddress,
           toAddress: to,
           amountSol: amount,
@@ -7943,7 +7917,6 @@ export const useWalletStore = create<WalletState>()(
           amount,
           rpcConfig,
           suiSend: () => sendSuiNativeNonCustodial({
-            rpcUrl: net.rpcUrl,
             rpcConfig,
             mnemonic: sessionMnemonic,
             accountIndex,
@@ -7994,9 +7967,12 @@ export const useWalletStore = create<WalletState>()(
         if (fromAddress !== derived.address) {
           throw new Error(`Active TRX address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
         const { sendTronNonCustodial } = await loadTronNonCustodialModule()
         return await sendTronNonCustodial({
-          rpcUrl: net.rpcUrl,
+          rpcConfig,
           fromAddress,
           toAddress: to,
           amountTrx: amount,

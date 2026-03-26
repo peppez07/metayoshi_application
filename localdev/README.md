@@ -79,6 +79,13 @@ npm run build
 
 To use local environment values, copy `.env.example` to `.env.local` and fill in your own settings.
 
+Configuration guardrails:
+
+- keep all `VITE_*_API_BASE_URL` values on the same canonical backend origin unless you are intentionally testing a custom deployment
+- if any `VITE_*_API_BASE_URL` points at `localhost` or `127.0.0.1`, also set `VITE_ENABLE_LOCAL_BACKEND_HELP=true`
+- set both `VITE_BRIDGE_USER` and `VITE_BRIDGE_PASSWORD`, or leave both unset
+- if you set `VITE_DEFAULT_NETWORK`, it must still be enabled after `VITE_DISABLED_COINS`, `VITE_ENABLED_COINS`, and `metayoshi.build.json` filtering
+
 To hide or deactivate specific blockchains before building, use either:
 
 - `.env.local` with `VITE_DISABLED_COINS`

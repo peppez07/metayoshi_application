@@ -6,22 +6,10 @@ import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../serverTimeouts'
 import { isMetayoshiHttpUrl } from '../serverOnly'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
-let solanaWeb3ModulePromise: Promise<typeof import('@solana/web3.js')> | null = null
-let tronNonCustodialModulePromise: Promise<typeof import('../tronNonCustodial')> | null = null
 
 function loadEthersModule() {
   if (!ethersModulePromise) ethersModulePromise = import('ethers')
   return ethersModulePromise
-}
-
-function loadSolanaWeb3Module() {
-  if (!solanaWeb3ModulePromise) solanaWeb3ModulePromise = import('@solana/web3.js')
-  return solanaWeb3ModulePromise
-}
-
-function loadTronNonCustodialModule() {
-  if (!tronNonCustodialModulePromise) tronNonCustodialModulePromise = import('../tronNonCustodial')
-  return tronNonCustodialModulePromise
 }
 
 function asNumberLike(value: unknown): number | null {
@@ -144,16 +132,6 @@ async function getSolanaBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: stri
     }
   }
   throw lastError instanceof Error ? lastError : new Error('Bridge Solana balance query failed')
-}
-
-async function getSolanaBalanceDirectRpc(rpcUrl: string, address: string): Promise<string> {
-  const { Connection, LAMPORTS_PER_SOL, PublicKey } = await loadSolanaWeb3Module()
-  const connection = new Connection(String(rpcUrl || '').trim(), 'confirmed')
-  const lamports = await connection.getBalance(new PublicKey(address), 'confirmed')
-  if (!Number.isFinite(lamports) || lamports < 0) {
-    throw new Error('Invalid Solana balance from RPC')
-  }
-  return String(lamports / LAMPORTS_PER_SOL)
 }
 
 async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<string> {
@@ -428,11 +406,9 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
         Number(rpcConfig?.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
       )
     } catch {
-      // Fall through to direct RPC.
+      // Keep server-first MetaYoshi transport as the only fallback.
     }
-    const rpcUrl = String(network.rpcUrl || '').trim()
-    if (!rpcUrl) throw new Error('SOL RPC URL is not configured')
-    return await getSolanaBalanceDirectRpc(rpcUrl, address)
+    throw new Error('MetaYoshi Solana balance transport is unavailable')
   }
   if (modelId === 'xmr') {
     if (!rpcConfig?.bridgeUrl) throw new Error('Bridge RPC config is required for XMR')
@@ -456,18 +432,14 @@ export async function fetchProtocolBalance(network: Network, modelId: string, ad
       try {
         const serverAddress = await normalizeServerAddress(network, address)
         if (/^0x[0-9a-fA-F]{40}$/.test(serverAddress)) {
-          const { ethers } = await loadEthersModule()
           const raw = await callBridgeMethod(rpcConfig, 'eth_getBalance', [serverAddress, 'latest'])
-          return ethers.formatEther(parseRpcQuantityToBigInt(raw, 'eth_getBalance'))
+          return formatDecimalUnits(parseRpcQuantityToBigInt(raw, 'eth_getBalance'), 6)
         }
       } catch {
-        // Fall through to direct RPC.
+        // Keep MetaYoshi-only transport.
       }
     }
-    const rpcUrl = String(network.rpcUrl || '').trim()
-    if (!rpcUrl) throw new Error('TRON RPC URL is not configured')
-    const { getTronBalance } = await loadTronNonCustodialModule()
-    return await getTronBalance(rpcUrl, address)
+    throw new Error('MetaYoshi TRON balance transport is unavailable')
   }
   if (modelId === 'sui') {
     try {

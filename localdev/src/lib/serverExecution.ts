@@ -86,6 +86,16 @@ export interface ServerSwapSubmitRequest {
   }
 }
 
+export interface ServerSwapPrepareResponse {
+  quoteId: string
+  providerKind?: string
+  executionModel?: string
+  prepared: boolean
+  detail?: string
+  warnings: string[]
+  providerExecution?: Record<string, unknown>
+}
+
 export interface ServerExecutionReceipt {
   txid?: string
   explorerUrl?: string
@@ -125,9 +135,9 @@ type JsonResponse = {
   text: string
 }
 
-type ServerExecutionAction = 'quote' | 'submit' | 'status' | 'approval'
+type ServerExecutionAction = 'quote' | 'prepare' | 'submit' | 'status' | 'approval'
 
-type ServerManagedExecutionAction = 'quote' | 'submit' | 'status'
+type ServerManagedExecutionAction = 'quote' | 'prepare' | 'submit' | 'status'
 
 type BridgeNetworkInput = Pick<
   Network,
@@ -210,6 +220,8 @@ function getServerExecutionMonitorMethod(action: ServerExecutionAction): string 
   switch (action) {
     case 'quote':
       return 'swap.quote'
+    case 'prepare':
+      return 'swap.prepare'
     case 'approval':
       return 'swap.approval'
     case 'submit':
@@ -371,6 +383,8 @@ async function executeServerManagedJsonRequest(
   const discoveredUrl =
     action === 'quote'
       ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/quote')
+      : action === 'prepare'
+        ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/prepare')
       : action === 'submit'
         ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/submit')
         : undefined
@@ -416,6 +430,10 @@ function buildExplorerTxUrl(baseUrl: string | undefined, txid: string): string |
   return `${base}/tx/${hash}`
 }
 
+function isLikelySuiDigest(value: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{20,64}$/.test(readString(value))
+}
+
 function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSwapQuote {
   if (isServerManagedQuoteResponse(raw)) {
     const response = asRecord(raw)
@@ -447,6 +465,24 @@ function normalizeQuote(raw: unknown, request: ServerSwapQuoteRequest): ServerSw
     }
   }
   throw new Error('Swap quote response did not come from the MetaYoshi server swap service')
+}
+
+function normalizePreparedExecution(raw: unknown): ServerSwapPrepareResponse {
+  const response = asRecord(raw)
+  const quoteId = readString(response.quoteId)
+  if (!quoteId) throw new Error('Swap prepare response is missing quoteId')
+  return {
+    quoteId,
+    providerKind: readString(response.providerKind) || undefined,
+    executionModel: readString(response.executionModel) || undefined,
+    prepared: Boolean(response.prepared),
+    detail: readString(response.detail) || undefined,
+    warnings: readStringArray(response.warnings),
+    providerExecution: (() => {
+      const providerExecution = asRecord(response.providerExecution)
+      return Object.keys(providerExecution).length > 0 ? providerExecution : undefined
+    })()
+  }
 }
 
 function hasTransactionRequest(value: unknown): boolean {
@@ -813,6 +849,29 @@ export async function requestServerSwapQuote(
   return quote
 }
 
+export async function requestServerSwapPrepare(
+  config: ServerExecutionRpcConfig,
+  input: { quoteId: string }
+): Promise<ServerSwapPrepareResponse> {
+  const quoteId = readString(input.quoteId)
+  if (!quoteId) throw new Error('Quote id is required for swap prepare')
+
+  let raw: unknown
+  try {
+    raw = await executeServerManagedJsonRequest(config, '/v1/swap/prepare', {
+      method: 'POST',
+      body: JSON.stringify({ quoteId })
+    }, 'prepare')
+  } catch (error) {
+    if (isLegacySwapFallbackError(error)) {
+      throw toServerManagedSwapUnavailableError(error)
+    }
+    throw error
+  }
+
+  return normalizePreparedExecution(raw)
+}
+
 export async function submitServerSwap(
   config: ServerExecutionRpcConfig,
   request: ServerSwapSubmitRequest
@@ -837,6 +896,50 @@ export async function fetchServerExecutionStatus(
 ): Promise<ServerExecutionStatus> {
   const normalizedExecutionId = readString(executionId)
   if (!normalizedExecutionId) throw new Error('Execution id is required')
+  if (readString(config.networkId).toLowerCase() === 'sui' && isLikelySuiDigest(normalizedExecutionId)) {
+    const txInfo = await callBridgeMethod(config, 'sui_getTransactionBlock', [
+      normalizedExecutionId,
+      { showEffects: true }
+    ]).catch(() => null)
+    const body = asRecord(txInfo)
+    const effects = asRecord(body.effects)
+    const nestedResult = asRecord(body.result)
+    const nestedEffects = asRecord(nestedResult.effects)
+    const status = readString(
+      effects.status && asRecord(effects.status).status
+      || nestedEffects.status && asRecord(nestedEffects.status).status
+    ).toLowerCase()
+    const digest = readString(body.digest) || readString(nestedResult.digest) || normalizedExecutionId
+    if (!Object.keys(body).length) {
+      return {
+        executionId: normalizedExecutionId,
+        status: 'pending',
+        detail: 'Sui swap transaction pending',
+        updatedAt: Date.now(),
+        receipt: {
+          txid: digest,
+          explorerUrl: buildExplorerTxUrl(config.explorerUrl, digest),
+          networkId: config.networkId
+        },
+        warnings: []
+      }
+    }
+
+    return {
+      executionId: normalizedExecutionId,
+      status: status === 'success' ? 'confirmed' : (status === 'failure' ? 'failed' : 'pending'),
+      detail: status === 'success'
+        ? 'Sui swap transaction confirmed'
+        : (status === 'failure' ? 'Sui swap transaction failed' : 'Sui swap transaction pending'),
+      updatedAt: Date.now(),
+      receipt: {
+        txid: digest,
+        explorerUrl: buildExplorerTxUrl(config.explorerUrl, digest),
+        networkId: config.networkId
+      },
+      warnings: []
+    }
+  }
   if (isLikelyTransactionHash(normalizedExecutionId)) {
     const receipt = await callBridgeMethod(config, 'eth_getTransactionReceipt', [normalizedExecutionId]).catch(() => null)
     const body = asRecord(receipt)
