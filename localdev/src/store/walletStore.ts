@@ -641,6 +641,8 @@ const SEND_OPERATION_MAX_TPS = 5
 const SEND_OPERATION_MIN_INTERVAL_MS = Math.max(1, Math.trunc(1000 / SEND_OPERATION_MAX_TPS))
 const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
+const MAX_PERSISTED_ACTIVITY_ENTRIES = 100
+const LAST_ACTIVE_PERSIST_INTERVAL_MS = 60_000
 const FROZEN_STABLE_NETWORK_IDS = new Set<string>(['rtm', 'eth', 'dash', 'btcz', 'firo', 'zec'])
 const DEFAULT_TRANSIENT_BRIDGE_COOLDOWN_MS = 20_000
 const TRANSIENT_BRIDGE_COOLDOWN_MS_BY_NETWORK: Record<string, number> = {
@@ -2878,6 +2880,13 @@ function mergeActivityListsPreferLatest(...lists: Activity[][]): Activity[] {
   return [...byKey.values()].sort((left, right) => right.timestamp - left.timestamp)
 }
 
+function trimPersistedActivityEntries<T extends { timestamp: number }>(activity: T[]): T[] {
+  if (!Array.isArray(activity) || activity.length <= MAX_PERSISTED_ACTIVITY_ENTRIES) {
+    return Array.isArray(activity) ? activity : []
+  }
+  return activity.slice(0, MAX_PERSISTED_ACTIVITY_ENTRIES)
+}
+
 const TIDE_LEGACY_ADDRESS_SPEC = {
   bip44CoinType: 200,
   p2pkhVersion: 0x21
@@ -3040,6 +3049,8 @@ function isChromeStorageNoSpaceError(error: unknown): boolean {
   return message.includes('file_error_no_space') || message.includes('quota') || message.includes('no space')
 }
 
+let hasLoggedChromeStorageNoSpace = false
+
 const extensionStateStorage: StateStorage = {
   getItem: async (name) => {
     if (hasChromeStorageLocal()) {
@@ -3083,7 +3094,10 @@ const extensionStateStorage: StateStorage = {
         await chrome.storage.local.set({ [name]: parsed })
       } catch (error) {
         if (isChromeStorageNoSpaceError(error)) {
-          console.error(`[walletStore] Skipping persisted write for "${name}" because Chrome storage is out of space.`, error)
+          if (!hasLoggedChromeStorageNoSpace) {
+            hasLoggedChromeStorageNoSpace = true
+            console.error(`[walletStore] Skipping persisted write for "${name}" because Chrome storage is out of space.`, error)
+          }
           return
         }
         throw error
@@ -6499,7 +6513,11 @@ export const useWalletStore = create<WalletState>()(
       setAutolock: (minutes) => set({ autolockMinutes: minutes }),
       setDonationPercent: (percent) => set({ donationPercent: clampDonationPercent(Number(percent)) }),
       
-      updateLastActive: () => set({ lastActiveTimestamp: Date.now() }),
+      updateLastActive: () => set((state) => {
+        const now = Date.now()
+        if (now - state.lastActiveTimestamp < LAST_ACTIVE_PERSIST_INTERVAL_MS) return state
+        return { lastActiveTimestamp: now }
+      }),
       
       checkAutolock: () => {
         const { lastActiveTimestamp, autolockMinutes, isLocked, isInitialized, lock } = get()
@@ -6545,7 +6563,7 @@ export const useWalletStore = create<WalletState>()(
           })
           if (normalizedMergedActivity.length === 0) return state
           return {
-            activity: normalizedMergedActivity
+            activity: trimPersistedActivityEntries(normalizedMergedActivity)
           }
         })
         for (const item of mergedActivity) {
@@ -6567,7 +6585,7 @@ export const useWalletStore = create<WalletState>()(
             state.activity.length
           )
           if (!normalizedActivity) return state
-          return { activity: [normalizedActivity, ...state.activity] }
+          return { activity: trimPersistedActivityEntries([normalizedActivity, ...state.activity]) }
         })
         if (normalizedActivity) {
           void upsertActivityHistoryRecord(normalizedActivity).catch(() => {})
@@ -8101,11 +8119,7 @@ export const useWalletStore = create<WalletState>()(
         nextAccountIndex: state.nextAccountIndex,
         activeAccountId: state.activeAccountId,
         activeNetworkId: state.activeNetworkId,
-        networks: state.networks,
         disabledNetworkIds: state.disabledNetworkIds,
-        isConnected: state.isConnected,
-        isSyncing: state.isSyncing,
-        syncPercent: state.syncPercent,
         sendListPreferences: state.sendListPreferences,
         rememberedSendSelection: state.rememberedSendSelection,
         networkModelPreferences: state.networkModelPreferences,
@@ -8113,7 +8127,7 @@ export const useWalletStore = create<WalletState>()(
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
         lastActiveTimestamp: state.lastActiveTimestamp,
-        activity: state.activity
+        activity: trimPersistedActivityEntries(state.activity)
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
@@ -8186,7 +8200,7 @@ export const useWalletStore = create<WalletState>()(
           networks: normalizedNetworks,
           disabledNetworkIds: normalizedDisabledNetworkIds,
           activeNetworkId,
-          activity: normalizedActivity,
+          activity: trimPersistedActivityEntries(normalizedActivity),
           catalogQueryNonce: 0,
           localRpcOverrides: remapNetworkIdKeyedRecord(
             ((persisted as any).localRpcOverrides ?? merged.localRpcOverrides ?? {}) as Record<string, {
