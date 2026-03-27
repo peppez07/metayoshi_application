@@ -49,6 +49,9 @@ import {
   type SendableItem
 } from '../../store/walletStore'
 
+const SERVER_SWAP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
+const SWAP_NOT_CONFIGURED_MESSAGE = 'Swap is not configured yet. Set VITE_APP_API_KEY for the server API and reload the wallet.'
+
 function compactError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
   return message.replace(/\s+/g, ' ').trim()
@@ -233,7 +236,7 @@ function formatSwapUiError(error: unknown): string {
   const normalized = message.toLowerCase()
 
   if (normalized.includes('vite_app_api_key is required')) {
-    return 'Swap is not configured yet. Set VITE_APP_API_KEY for the server API and reload the wallet.'
+    return SWAP_NOT_CONFIGURED_MESSAGE
   }
 
   if (
@@ -1650,6 +1653,10 @@ const Swap: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
+    if (!SERVER_SWAP_API_KEY) {
+      setServerChainPairs([])
+      return () => { cancelled = true }
+    }
     void (async () => {
       try {
         const pairs = await fetchServerSwapChainPairs()
@@ -1733,6 +1740,10 @@ const Swap: React.FC = () => {
       setSourceServerAssets([])
       return
     }
+    if (!SERVER_SWAP_API_KEY) {
+      setSourceServerAssets([])
+      return () => { cancelled = true }
+    }
 
     void (async () => {
       try {
@@ -1754,6 +1765,10 @@ const Swap: React.FC = () => {
     if (!fromNetwork?.id || !fromItem?.assetId) {
       setDestinationMatrixMarkets([])
       return
+    }
+    if (!SERVER_SWAP_API_KEY) {
+      setDestinationMatrixMarkets([])
+      return () => { cancelled = true }
     }
 
     void (async () => {
@@ -1789,6 +1804,12 @@ const Swap: React.FC = () => {
       setDestinationSearchError('')
       setIsSearchingDestinationAssets(false)
       return
+    }
+    if (!SERVER_SWAP_API_KEY) {
+      setDestinationServerAssets([])
+      setDestinationSearchError(SWAP_NOT_CONFIGURED_MESSAGE)
+      setIsSearchingDestinationAssets(false)
+      return () => { cancelled = true }
     }
 
     void (async () => {
@@ -2013,6 +2034,12 @@ const Swap: React.FC = () => {
   }
 
   const requestQuote = async (options?: { suppressErrors?: boolean; suppressSuccess?: boolean }) => {
+    if (!SERVER_SWAP_API_KEY) {
+      setErrorText(SWAP_NOT_CONFIGURED_MESSAGE)
+      if (!options?.suppressErrors) showToast(SWAP_NOT_CONFIGURED_MESSAGE, 'info')
+      return
+    }
+
     if (!swapReadiness.canRequestQuotes) {
       setErrorText(swapReadiness.detail)
       if (!options?.suppressErrors) {

@@ -13,12 +13,16 @@ export async function appendOptionalServerAuthHeaders(
   } = {}
 ): Promise<void> {
   const { network, rpcConfig } = input
+  const username = String(rpcConfig?.bridgeUsername || network?.bridgeUsername || '').trim()
+  const password = String(rpcConfig?.bridgePassword || network?.bridgePassword || '').trim()
+  const hasLegacyBasicAuth = Boolean(username && password)
   const secureBridgeAuthEnabled =
     typeof rpcConfig?.secureBridgeWritesEnabled === 'boolean'
       ? rpcConfig.secureBridgeWritesEnabled
       : getBuildFeatureFlag('bridgeSecureWritesEnabled', 'VITE_BRIDGE_SECURE_WRITES_ENABLED', true)
   const canTryBearer = Boolean(
     secureBridgeAuthEnabled
+    && (APP_API_KEY || hasLegacyBasicAuth)
     && rpcConfig?.bridgeUrl
     && typeof rpcConfig?.secureBridgeSigner === 'function'
   )
@@ -35,8 +39,6 @@ export async function appendOptionalServerAuthHeaders(
 
   if (String(headers.Authorization || '').trim().toLowerCase().startsWith('bearer ')) return
 
-  const username = String(rpcConfig?.bridgeUsername || network?.bridgeUsername || '').trim()
-  const password = String(rpcConfig?.bridgePassword || network?.bridgePassword || '').trim()
   if (!username || !password) return
   headers.Authorization = `Basic ${btoa(`${username}:${password}`)}`
 }
