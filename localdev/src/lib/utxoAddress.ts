@@ -155,6 +155,59 @@ export function addressToP2pkhScriptPubKeyHex(address: string, coinType: string)
   return bytesToHex(script)
 }
 
+export function addressToScriptPubKeyHex(address: string, coinType: string): string {
+  const spec = getUtxoAddressSpec(coinType.toUpperCase())
+  if (!spec) throw new Error(`Unknown UTXO coin type: ${coinType}`)
+
+  const decoded = bs58.decode(String(address || '').trim())
+  if (decoded.length < 5) throw new Error('Invalid base58 address payload')
+
+  const payload = decoded.slice(0, -4)
+  const checksum = decoded.slice(-4)
+  const expectedChecksum = checksum4(payload)
+  if (!checksum.every((byte, i) => byte === expectedChecksum[i])) {
+    throw new Error('Invalid address checksum')
+  }
+
+  const p2pkhVersion = versionToBytes(spec.p2pkhVersion)
+  if (payload.length === p2pkhVersion.length + 20) {
+    let matchesP2pkh = true
+    for (let i = 0; i < p2pkhVersion.length; i += 1) {
+      if (payload[i] !== p2pkhVersion[i]) {
+        matchesP2pkh = false
+        break
+      }
+    }
+    if (matchesP2pkh) {
+      return addressToP2pkhScriptPubKeyHex(address, coinType)
+    }
+  }
+
+  if (spec.p2shVersion !== undefined) {
+    const p2shVersion = versionToBytes(spec.p2shVersion)
+    if (payload.length === p2shVersion.length + 20) {
+      let matchesP2sh = true
+      for (let i = 0; i < p2shVersion.length; i += 1) {
+        if (payload[i] !== p2shVersion[i]) {
+          matchesP2sh = false
+          break
+        }
+      }
+      if (matchesP2sh) {
+        const scriptHash = payload.slice(p2shVersion.length)
+        const script = new Uint8Array(23)
+        script[0] = 0xa9
+        script[1] = 0x14
+        script.set(scriptHash, 2)
+        script[22] = 0x87
+        return bytesToHex(script)
+      }
+    }
+  }
+
+  throw new Error(`Address version does not match ${coinType}`)
+}
+
 export function redeemScriptToP2shAddress(redeemScriptHex: string, coinType: string): string {
   const spec = getUtxoAddressSpec(coinType.toUpperCase())
   if (!spec) throw new Error(`Unknown UTXO coin type: ${coinType}`)

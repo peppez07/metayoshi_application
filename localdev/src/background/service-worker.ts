@@ -32,6 +32,7 @@ import {
   type DappScope
 } from '../lib/dappPermissions'
 import { getAccountAddressForNetwork, isMultisigAccount } from '../lib/multisig'
+import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
@@ -104,6 +105,14 @@ type SendAssetParams = {
   memo?: string
 }
 
+type RtmMarketActionParams = {
+  version: 1
+  kind: string
+  orderId: string
+  networkId: string
+  [key: string]: unknown
+}
+
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
 const OPEN_WALLET_METHODS = new Set(['wallet_openWallet', 'metayoshi_openWallet', 'rtm_openWallet'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
@@ -122,6 +131,8 @@ const COSMOS_SIGN_AMINO_METHODS = new Set(['wallet_cosmosSignAmino'])
 const COSMOS_SEND_TX_METHODS = new Set(['wallet_cosmosSendTx'])
 const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
+const RTM_MARKET_ACTION_METHODS = new Set(['wallet_rtmMarketAction'])
+const RTM_GET_PUBLIC_KEY_METHODS = new Set(['wallet_rtmGetPublicKey'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
 const ETHEREUM_ACCOUNTS_METHODS = new Set(['eth_accounts'])
@@ -1196,6 +1207,26 @@ function parseSendAssetParams(params: unknown): SendAssetParams {
   return memo ? { assetId, qty, toAddress, memo } : { assetId, qty, toAddress }
 }
 
+function parseRtmMarketActionParams(params: unknown): RtmMarketActionParams {
+  const candidate = Array.isArray(params) ? params[0] : params
+  if (!candidate || typeof candidate !== 'object') {
+    throw { code: -32602, message: 'wallet_rtmMarketAction requires an action payload' }
+  }
+
+  const payload = candidate as Record<string, unknown>
+  const version = Number(payload.version ?? 0)
+  const kind = String(payload.kind ?? '').trim()
+  const orderId = String(payload.orderId ?? '').trim()
+  const networkId = String(payload.networkId ?? '').trim()
+
+  if (version !== 1) throw { code: -32602, message: 'wallet_rtmMarketAction requires version 1' }
+  if (!kind) throw { code: -32602, message: 'wallet_rtmMarketAction requires `kind`' }
+  if (!orderId) throw { code: -32602, message: 'wallet_rtmMarketAction requires `orderId`' }
+  if (networkId !== 'rtm') throw { code: -32602, message: 'wallet_rtmMarketAction is only supported on RTM' }
+
+  return payload as RtmMarketActionParams
+}
+
 function parseSignMessageParams(params: unknown): {
   ecosystem: 'evm' | 'solana'
   message?: string
@@ -1272,7 +1303,9 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
     'rtm_sendTransaction',
     'wallet_sendAsset',
     'metayoshi_sendAsset',
-    'rtm_sendAsset'
+    'rtm_sendAsset',
+    'wallet_rtmMarketAction',
+    'wallet_rtmGetPublicKey'
   ])
   const protocol = resolveDappProtocol(network)
   const matrix: DappMethodMatrix = {
@@ -1962,6 +1995,46 @@ async function handleRpcMethod(
     return currentAddress ? [currentAddress] : []
   }
 
+  if (RTM_GET_PUBLIC_KEY_METHODS.has(method)) {
+    const approvedOrigin = await requireDappScopes(origin, ['read'])
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if ((state.isLocked ?? true)) {
+      throw { code: -32603, message: 'Wallet is locked' }
+    }
+    const rtmNetwork = resolveDappNetworks(state).find((entry) => String(entry.id || '').trim() === 'rtm')
+    if (!rtmNetwork) {
+      throw { code: 4900, message: 'RTM network is not available' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
+    const mnemonic = String((state as any).sessionMnemonic || '').trim()
+    if (!mnemonic) {
+      throw { code: -32603, message: 'Wallet is locked' }
+    }
+    const accountIndex = Number.isInteger((activeAccount as any)?.derivationIndex)
+      ? Number((activeAccount as any).derivationIndex)
+      : Math.max(0, (state.accounts || []).findIndex((entry) => entry.id === activeAccount.id))
+    const derived = await deriveUtxoAddress(mnemonic, 'RTM', accountIndex)
+    const currentAddress = String(getActiveAddressFromState(state, 'rtm') || '').trim()
+    if (currentAddress && currentAddress !== derived.address) {
+      throw { code: -32603, message: 'Active RTM signer does not match the selected account' }
+    }
+    await touchLastConnected(approvedOrigin)
+    return {
+      networkId: 'rtm',
+      accountId: activeAccount.id,
+      address: derived.address,
+      pubkeyHex: derived.pubHex
+    }
+  }
+
   if (ETHEREUM_CHAIN_ID_METHODS.has(method)) {
     if (!network || network.coinType !== 'EVM') {
       throw { code: 4900, message: 'No EVM network is available' }
@@ -2362,6 +2435,47 @@ async function handleRpcMethod(
       surfaceTarget
     )
     return result
+  }
+
+  if (RTM_MARKET_ACTION_METHODS.has(method)) {
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if (!network || String(network.id || '').trim() !== 'rtm') {
+      throw { code: -32603, message: 'wallet_rtmMarketAction requires the RTM network' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
+
+    const parsedAction = parseRtmMarketActionParams(params)
+    const actionKind = String(parsedAction.kind || '').trim()
+    const scopes = (
+      actionKind === 'fund_seller_asset'
+      || actionKind === 'claim_seller_asset'
+      || actionKind === 'refund_seller_asset'
+    ) ? ['read', 'send_asset'] : ['read', 'send_coin']
+
+    if (origin) {
+      const approved = await requestScopes(origin, scopes as any, { networkId: effectiveNetworkId, surfaceTarget })
+      if (!approved) {
+        throw { code: 4001, message: 'User rejected the request' }
+      }
+      await touchLastConnected(origin)
+    }
+
+    return await requestDappActionApproval(
+      origin || 'unknown',
+      network.id,
+      activeAccount.id,
+      'wallet_rtmMarketAction' as any,
+      parsedAction,
+      surfaceTarget
+    )
   }
   
   // Select account
