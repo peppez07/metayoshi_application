@@ -3302,7 +3302,8 @@ function buildBaseAccount(candidate: Partial<Account>, index: number): Account {
       COSMOS: addresses.COSMOS ?? '',
       SOL: addresses.SOL ?? '',
       SUI: addresses.SUI ?? '',
-      XRP: addresses.XRP ?? ''
+      XRP: addresses.XRP ?? '',
+      XLM: addresses.XLM ?? ''
     },
     networkAddresses,
     networkBalances,
@@ -3751,7 +3752,8 @@ export const useWalletStore = create<WalletState>()(
                 COSMOS: account.addresses?.COSMOS || '',
                 SOL: account.addresses?.SOL || '',
                 SUI: account.addresses?.SUI || '',
-                XRP: account.addresses?.XRP || ''
+                XRP: account.addresses?.XRP || '',
+                XLM: account.addresses?.XLM || ''
               },
               networkNames: { ...(account.networkNames ?? {}) },
               networkAddresses: { ...(account.networkAddresses ?? {}) },
@@ -7012,7 +7014,8 @@ export const useWalletStore = create<WalletState>()(
               COSMOS: derived.addresses.COSMOS || acc.addresses?.COSMOS || '',
               SOL:  acc.addresses?.SOL || '',
               SUI:  derived.addresses.SUI || acc.addresses?.SUI || '',
-              XRP:  derived.addresses.XRP || acc.addresses?.XRP || ''
+              XRP:  derived.addresses.XRP || acc.addresses?.XRP || '',
+              XLM:  derived.addresses.XLM || acc.addresses?.XLM || ''
             },
             networkAddresses: {
               ...(acc.networkAddresses ?? {}),
@@ -7260,11 +7263,12 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
         }
 
-        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '' }
+        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '', XLM: '' }
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
         if (selectedNetwork.coinType === 'COSMOS') addresses.COSMOS = selectedAddress
         if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
+        if (selectedNetwork.coinType === 'XLM') addresses.XLM = selectedAddress
         if (selectedModelId === 'sol') addresses.SOL = selectedAddress
 
         const newAccount: Account = {

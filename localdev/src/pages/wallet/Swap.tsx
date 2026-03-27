@@ -310,6 +310,10 @@ function formatSwapUiError(error: unknown): string {
     return 'The wallet could not open a secure swap session with the server. Retry after reconnecting the wallet.'
   }
 
+  if (normalized.includes('cannot sign the backend auth challenge required for server-managed swaps')) {
+    return 'This account cannot sign the backend auth challenge required for server-managed swaps. Switch to a derived account.'
+  }
+
   if (normalized.includes('evm chainid is required') || normalized.includes('selected network is not evm')) {
     return 'This swap route is not available for the selected network pair.'
   }
@@ -349,7 +353,7 @@ function formatSwapUiError(error: unknown): string {
     normalized.includes('mayan sui sdk execution is not enabled')
     || normalized.includes('provider prepare is not enabled for mayan')
   ) {
-    return 'Cross-chain Sui aggregator execution is not enabled in this wallet build yet. Same-chain Sui swaps are ready through Aftermath.'
+    return 'Cross-chain Sui provider prepare flows are not part of the generic wallet swap contract yet. Use the provider help routes for the non-core path.'
   }
 
   return message
@@ -386,6 +390,11 @@ function formatInventoryTtl(ttlSec?: number): string {
   return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => readString(item)).filter(Boolean)
+}
+
 function formatAssetLabel(item: SwapAssetOption | null, fallbackSymbol?: string): string {
   if (!item) return fallbackSymbol || 'Select asset'
   if (!item.label || item.label === item.symbol) return item.symbol
@@ -419,6 +428,180 @@ type LiveServerAssetMetadata = {
   label: string
   contractAddress?: string
   logoUrl?: string
+}
+
+function resolveSwapReadinessFromBackend(params: {
+  fromNetwork?: Pick<Network, 'coinType' | 'id' | 'name'> | null
+  toNetwork?: Pick<Network, 'coinType' | 'id' | 'name'> | null
+  backendSnapshot?: Record<string, unknown> | null
+  accountCapabilities?: { canUseBackendAuth?: boolean } | null
+}): {
+  state: 'active' | 'planned' | 'unsupported'
+  tone: 'emerald' | 'amber' | 'slate'
+  engineLabel: string
+  title: string
+  detail: string
+  canRequestQuotes: boolean
+} {
+  const { fromNetwork, toNetwork, backendSnapshot, accountCapabilities } = params
+  if (!fromNetwork || !toNetwork) {
+    return {
+      state: 'unsupported',
+      tone: 'slate',
+      engineLabel: 'Select networks',
+      title: 'Choose networks to start swap search',
+      detail: 'The wallet needs both source and destination networks before it can query the MetaYoshi server.',
+      canRequestQuotes: false
+    }
+  }
+
+  if (!backendSnapshot) {
+    return {
+      state: 'planned',
+      tone: 'amber',
+      engineLabel: 'Loading backend contract',
+      title: 'Swap readiness is loading',
+      detail: 'The wallet is still loading the live backend bootstrap and auth contract.',
+      canRequestQuotes: false
+    }
+  }
+
+  const authConfig = asRecord(backendSnapshot.authConfig)
+  const sessionConfig = asRecord(authConfig.session)
+  const signatureVerifier = asRecord(sessionConfig.signatureVerifier)
+  const secureBridge = asRecord(authConfig.secureBridge)
+  if (sessionConfig.enabled === false) {
+    return {
+      state: 'unsupported',
+      tone: 'slate',
+      engineLabel: 'Session auth disabled',
+      title: 'Server-managed swaps are disabled on this gateway',
+      detail: 'The gateway has signed session login disabled in /v1/auth/config.',
+      canRequestQuotes: false
+    }
+  }
+  if (signatureVerifier.configured === false) {
+    return {
+      state: 'unsupported',
+      tone: 'slate',
+      engineLabel: 'Signature verifier missing',
+      title: 'Server-managed swaps are disabled on this gateway',
+      detail: 'The gateway signature verifier is not configured in /v1/auth/config.',
+      canRequestQuotes: false
+    }
+  }
+  if (secureBridge.secureBridgeWritesReady === false || secureBridge.walletRecommended === false) {
+    return {
+      state: 'unsupported',
+      tone: 'slate',
+      engineLabel: 'Secure writes disabled',
+      title: 'Server-managed swaps are disabled on this gateway',
+      detail: 'The gateway reports that secure bridge writes are not ready for wallet-managed swaps.',
+      canRequestQuotes: false
+    }
+  }
+  if (accountCapabilities?.canUseBackendAuth === false) {
+    return {
+      state: 'unsupported',
+      tone: 'slate',
+      engineLabel: 'Unsupported account',
+      title: 'This account cannot sign the backend auth challenge',
+      detail: 'Server-managed swaps require a derived EVM backend-auth signer. Switch to a derived account to continue.',
+      canRequestQuotes: false
+    }
+  }
+
+  const discovery = asRecord(backendSnapshot.discovery)
+  const bootstrap = asRecord(discovery.bootstrap)
+  const capabilities = asRecord(bootstrap.capabilities)
+  const swapCapabilities = asRecord(capabilities.swap)
+  const coreContract = asRecord(swapCapabilities.coreContract)
+  const coreFamilies = readStringArray(coreContract.executableFamilies).map((item) => item.toLowerCase())
+  const coreRoutes = readStringArray(coreContract.routes).map((item) => item.toLowerCase())
+  const walletReady = readBoolean(swapCapabilities.walletSwapReady)
+  const blockers = readStringArray(swapCapabilities.blockers)
+
+  const runtimeServices = asRecord(asRecord(backendSnapshot.runtimeHealth).services)
+  const gatewayRuntimeOk = readBoolean(asRecord(runtimeServices.gateway).ok)
+  const swapEngineRuntimeOk = readBoolean(asRecord(runtimeServices.swapEngine).ok)
+
+  if (fromNetwork.coinType === 'SUI' && toNetwork.coinType === 'SUI' && fromNetwork.id === toNetwork.id) {
+    return {
+      state: 'planned',
+      tone: 'amber',
+      engineLabel: 'Aftermath Sui routing',
+      title: 'Same-chain Sui swaps are discoverable but not generic wallet-ready',
+      detail: 'Sui provider-specific prepare flows remain non-core until the gateway promotes them into the wallet swap contract.',
+      canRequestQuotes: false
+    }
+  }
+
+  const isEvmPair = fromNetwork.coinType === 'EVM' && toNetwork.coinType === 'EVM'
+  const isSolanaPair = fromNetwork.coinType === 'SOL' && toNetwork.coinType === 'SOL'
+  const pairFamilyReady =
+    (isEvmPair && coreFamilies.includes('evm'))
+    || (isSolanaPair && coreFamilies.includes('solana'))
+  const coreRoutesReady =
+    coreRoutes.includes('post /v1/swap/quote')
+    && coreRoutes.includes('post /v1/swap/simulate')
+    && coreRoutes.includes('post /v1/swap/submit')
+    && coreRoutes.includes('get /v1/execute/{executionid}')
+  const hasRuntimeBlockers = blockers.length > 0 || walletReady === false || swapEngineRuntimeOk === false
+
+  if (isEvmPair || isSolanaPair) {
+    if (gatewayRuntimeOk === false) {
+      return {
+        state: 'planned',
+        tone: 'amber',
+        engineLabel: 'Gateway degraded',
+        title: 'Swap readiness is waiting on gateway health',
+        detail: 'The gateway reports degraded health, so the wallet is keeping swap search in a planned state.',
+        canRequestQuotes: false
+      }
+    }
+
+    if (hasRuntimeBlockers) {
+      return {
+        state: 'planned',
+        tone: 'amber',
+        engineLabel: 'Backend contract blocked',
+        title: 'Swap search is waiting on backend readiness',
+        detail: blockers.length > 0
+          ? `The live backend bootstrap reports swap blockers: ${blockers.join(', ')}.`
+          : 'The live backend has not marked the core wallet swap path as ready yet.',
+        canRequestQuotes: false
+      }
+    }
+
+    if (pairFamilyReady && coreRoutesReady) {
+      return {
+        state: 'active',
+        tone: 'emerald',
+        engineLabel: isSolanaPair ? 'Jupiter Solana routing' : 'Live EVM routing',
+        title: 'Swap search is available',
+        detail: 'The wallet is using the live backend swap contract for auth, quote, simulate, submit, and execution status.',
+        canRequestQuotes: true
+      }
+    }
+
+    return {
+      state: 'planned',
+      tone: 'amber',
+      engineLabel: 'Backend contract loading',
+      title: 'Swap search is not fully ready yet',
+      detail: 'The live backend bootstrap has not yet confirmed the wallet-ready swap contract for this pair.',
+      canRequestQuotes: false
+    }
+  }
+
+  return {
+    state: 'unsupported',
+    tone: 'slate',
+    engineLabel: 'Not supported',
+    title: 'This pair is outside the current swap scope',
+    detail: 'The current wallet build can request quotes only for wallet-ready EVM and Solana swap flows.',
+    canRequestQuotes: false
+  }
 }
 type LiveServerAssetIndex = {
   nativeAsset?: LiveServerAssetMetadata
@@ -1267,7 +1450,8 @@ const Swap: React.FC = () => {
     getSendableItems,
     sendPreparedEvmTransaction,
     resolveBackendAuthAddress,
-    signBackendAuthMessage
+    signBackendAuthMessage,
+    resolveAccountCapabilities
   } = useWalletStore()
 
   const enabledNetworks = getEnabledNetworks(networks, disabledNetworkIds)
@@ -1376,35 +1560,20 @@ const Swap: React.FC = () => {
     [toOptions]
   )
   const toItem = toOptions.find((item) => item.id === toAssetId) || toOptions[0] || null
-  const runtimeServices = asRecord(asRecord(backendSnapshot?.runtimeHealth).services)
-  const gatewayRuntime = asRecord(runtimeServices.gateway)
-  const gatewayRuntimeOk = readBoolean(gatewayRuntime.ok)
+  const sourceAccountCapabilities = useMemo(
+    () => (activeAccount?.id && fromNetwork?.id
+      ? resolveAccountCapabilities(activeAccount.id, fromNetwork.id)
+      : null),
+    [activeAccount?.id, fromNetwork?.id, resolveAccountCapabilities]
+  )
   const swapReadiness = useMemo(() => {
-    if (!fromNetwork || !toNetwork) {
-      return {
-        state: 'unsupported' as const,
-        tone: 'slate' as const,
-        engineLabel: 'Select networks',
-        title: 'Choose networks to start swap search',
-        detail: 'The wallet needs both source and destination networks before it can query the MetaYoshi server.',
-        canRequestQuotes: false
-      }
-    }
-    return {
-      state: 'active' as const,
-      tone: 'emerald' as const,
-      engineLabel: 'Live server routing',
-      title: 'Swap search is available',
-      detail: gatewayRuntimeOk === false
-        ? 'The gateway reports degraded health, but the wallet will still let the backend decide which routes are available.'
-        : 'The wallet exposes chain-to-chain routes returned by the backend and limits destination chains to the selected source chain.',
-      canRequestQuotes: true
-    }
-  }, [
-    fromNetwork,
-    toNetwork,
-    gatewayRuntimeOk
-  ])
+    return resolveSwapReadinessFromBackend({
+      fromNetwork,
+      toNetwork,
+      backendSnapshot,
+      accountCapabilities: sourceAccountCapabilities
+    })
+  }, [backendSnapshot, fromNetwork, sourceAccountCapabilities, toNetwork])
   const fromBalance = fromItem?.amount || '0'
   const isSameAssetPair = Boolean(
     fromNetwork?.id
@@ -1788,6 +1957,12 @@ const Swap: React.FC = () => {
 
     const resolveSwapAddress = async (network: Network) => {
       if (network.coinType === 'EVM') {
+        if (activeAccount?.id) {
+          const backendAuthCaps = resolveAccountCapabilities(activeAccount.id, network.id)
+          if (!backendAuthCaps.canUseBackendAuth) {
+            throw new Error('This account cannot sign the backend auth challenge required for server-managed swaps. Switch to a derived account.')
+          }
+        }
         const signerAddress = String(await resolveBackendAuthAddress() || '').trim()
         if (!signerAddress) throw new Error(`Could not resolve a ${network.symbol} signer address`)
         return signerAddress
@@ -1926,48 +2101,37 @@ const Swap: React.FC = () => {
         destinationAsset
       } = await buildSwapContext()
       const accountIndex = Number(activeAccount?.derivationIndex) || 0
-      const submitted = fromNetwork.coinType === 'SUI'
-        ? await submitPreparedSuiSwap({
-            quote,
-            rpcConfig,
-            mnemonic: sessionMnemonic,
-            accountIndex,
-            sourceAddress,
-            sourceAsset
-          })
-        : await (async () => {
-            const providerExecution = await buildSignedProviderExecution({
-              quote,
-              sourceNetwork: fromNetwork,
-              mnemonic: sessionMnemonic,
-              accountIndex
-            })
-            return await submitServerSwap(rpcConfig, {
-              quoteId: quote.quoteId,
-              source: {
-                networkId: sourceNetworkId,
-                chainId: fromNetwork.chainId,
-                symbol: fromItem.symbol || fromNetwork.symbol,
-                address: sourceAddress,
-                amount: fromAmount,
-                asset: sourceAsset
-              },
-              destination: {
-                networkId: destinationNetworkId,
-                chainId: toNetwork.chainId,
-                symbol: toItem.symbol || toNetwork.symbol,
-                address: destinationAddress,
-                asset: destinationAsset
-              },
-              minDestinationAmount: quote.minDestinationAmount,
-              sponsorPreference,
-              executionMode: quote.mode,
-              quoteMetadata: quote.metadata,
-              providerExecution
-            })
-          })()
+      const providerExecution = await buildSignedProviderExecution({
+        quote,
+        sourceNetwork: fromNetwork,
+        mnemonic: sessionMnemonic,
+        accountIndex
+      })
+      const submitted = await submitServerSwap(rpcConfig, {
+        quoteId: quote.quoteId,
+        source: {
+          networkId: sourceNetworkId,
+          chainId: fromNetwork.chainId,
+          symbol: fromItem.symbol || fromNetwork.symbol,
+          address: sourceAddress,
+          amount: fromAmount,
+          asset: sourceAsset
+        },
+        destination: {
+          networkId: destinationNetworkId,
+          chainId: toNetwork.chainId,
+          symbol: toItem.symbol || toNetwork.symbol,
+          address: destinationAddress,
+          asset: destinationAsset
+        },
+        minDestinationAmount: quote.minDestinationAmount,
+        sponsorPreference,
+        executionMode: quote.mode,
+        quoteMetadata: quote.metadata,
+        providerExecution
+      })
       setExecution(submitted)
-      showToast(fromNetwork.coinType === 'SUI' ? 'Sui swap signed and relayed' : 'Swap submitted to server execution', 'info')
+      showToast('Swap submitted to server execution', 'info')
     } catch (error) {
       const message = formatSwapUiError(error)
       setErrorText(message)

@@ -468,12 +468,12 @@ export function resolveWalletSwapReadiness(
 
   if (fromNetwork.coinType === 'SUI' && toNetwork.coinType === 'SUI' && sameChain) {
     return {
-      state: 'active',
-      tone: 'emerald',
+      state: 'planned',
+      tone: 'amber',
       engineLabel: 'Aftermath Sui routing',
-      title: 'Same-chain Sui swaps are available',
-      detail: 'Quotes use the MetaYoshi swap service, then the wallet signs the prepared Sui transaction and relays it through the bridge.',
-      canRequestQuotes: true
+      title: 'Same-chain Sui swaps are discoverable but not generic wallet-ready',
+      detail: 'Sui provider-specific prepare flows remain non-core until the gateway promotes them into the wallet swap contract.',
+      canRequestQuotes: false
     }
   }
 
@@ -504,7 +504,7 @@ export function resolveWalletSwapReadiness(
     tone: 'slate',
     engineLabel: 'Not supported',
     title: 'This pair is outside the current swap scope',
-    detail: 'The current wallet build can only request quotes for compatible EVM, Solana, or same-chain Sui swap flows.',
+    detail: 'The current wallet build can request quotes only for wallet-ready EVM and Solana swap flows.',
     canRequestQuotes: false
   }
 }

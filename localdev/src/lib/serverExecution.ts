@@ -135,9 +135,9 @@ type JsonResponse = {
   text: string
 }
 
-type ServerExecutionAction = 'quote' | 'prepare' | 'submit' | 'status' | 'approval'
+type ServerExecutionAction = 'quote' | 'simulate' | 'prepare' | 'submit' | 'status' | 'approval'
 
-type ServerManagedExecutionAction = 'quote' | 'prepare' | 'submit' | 'status'
+type ServerManagedExecutionAction = 'quote' | 'simulate' | 'prepare' | 'submit' | 'status'
 
 type BridgeNetworkInput = Pick<
   Network,
@@ -162,6 +162,14 @@ function readNumber(value: unknown): number | undefined {
   if (!text) return undefined
   const parsed = Number(text)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  const text = readString(value).toLowerCase()
+  if (text === 'true') return true
+  if (text === 'false') return false
+  return undefined
 }
 
 function readStringArray(value: unknown): string[] {
@@ -220,6 +228,8 @@ function getServerExecutionMonitorMethod(action: ServerExecutionAction): string 
   switch (action) {
     case 'quote':
       return 'swap.quote'
+    case 'simulate':
+      return 'swap.simulate'
     case 'prepare':
       return 'swap.prepare'
     case 'approval':
@@ -406,6 +416,8 @@ async function executeServerManagedJsonRequest(
   const discoveredUrl =
     action === 'quote'
       ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/quote')
+      : action === 'simulate'
+        ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/simulate')
       : action === 'prepare'
         ? resolveDiscoveredSwapCommandUrl(swapCommands, 'POST', '/v1/swap/prepare')
       : action === 'submit'
@@ -505,6 +517,29 @@ function normalizePreparedExecution(raw: unknown): ServerSwapPrepareResponse {
       const providerExecution = asRecord(response.providerExecution)
       return Object.keys(providerExecution).length > 0 ? providerExecution : undefined
     })()
+  }
+}
+
+export interface ServerSwapSimulateResponse {
+  quoteId: string
+  valid: boolean
+  detail?: string
+  status?: string
+  warnings: string[]
+  metadata?: Record<string, unknown>
+}
+
+function normalizeSimulateResponse(raw: unknown): ServerSwapSimulateResponse {
+  const response = asRecord(raw)
+  const quoteId = readString(response.quoteId)
+  if (!quoteId) throw new Error('Swap simulate response is missing quoteId')
+  return {
+    quoteId,
+    valid: readBoolean(response.valid) !== false,
+    detail: readString(response.detail) || undefined,
+    status: readString(response.status) || undefined,
+    warnings: readStringArray(response.warnings),
+    metadata: Object.keys(response).length > 0 ? response : undefined
   }
 }
 
@@ -643,6 +678,9 @@ async function submitServerManagedSwap(
   const sourceSymbol = readString(metadata.sourceSymbol) || request.source.symbol
   const destinationNetworkId = readString(metadata.destinationNetworkId) || request.destination.networkId
   const destinationSymbol = readString(metadata.destinationSymbol) || request.destination.symbol
+  const simulateResponse = await requestServerSwapSimulate(config, {
+    quoteId: request.quoteId
+  })
   const approvalNonce = crypto.randomUUID()
   const approvalMessage = buildApprovalMessage(request, metadata, sourceAsset, destinationAsset, approvalNonce)
   const signature = await signer(approvalMessage)
@@ -724,14 +762,14 @@ async function submitServerManagedSwap(
       executionId: finalTxid,
       quoteId: readString(response.quoteId) || request.quoteId,
       status: 'submitted',
-      detail: readString(response.detail) || 'Swap submitted',
+      detail: readString(response.detail) || readString(simulateResponse.detail) || 'Swap submitted',
       updatedAt: readNumber(response.updatedAt) || Date.now(),
       receipt: {
         txid: finalTxid,
         explorerUrl: buildExplorerTxUrl(config.explorerUrl, finalTxid),
         networkId: readString(response.networkId) || sourceNetworkId
       },
-      warnings: readStringArray(response.warnings)
+      warnings: [...new Set([...readStringArray(simulateResponse.warnings), ...readStringArray(response.warnings)])]
     }
   }
 
@@ -741,14 +779,14 @@ async function submitServerManagedSwap(
     status: normalizeExecutionStatus(response.status === 'submitted' ? 'PENDING' : response.status) === 'pending'
       ? (readString(response.status).toLowerCase() === 'broadcasted' ? 'broadcasted' : 'submitted')
       : normalizeExecutionStatus(response.status),
-      detail: readString(response.detail) || 'Server swap submitted',
-      updatedAt: readNumber(response.updatedAt) || Date.now(),
-      receipt: {
-        txid: readString(response.txid) || undefined,
-        explorerUrl: readString(response.explorerUrl) || undefined,
-        networkId: readString(response.networkId) || destinationNetworkId || sourceNetworkId
-      },
-    warnings: readStringArray(response.warnings)
+    detail: readString(response.detail) || readString(simulateResponse.detail) || 'Server swap submitted',
+    updatedAt: readNumber(response.updatedAt) || Date.now(),
+    receipt: {
+      txid: readString(response.txid) || undefined,
+      explorerUrl: readString(response.explorerUrl) || undefined,
+      networkId: readString(response.networkId) || destinationNetworkId || sourceNetworkId
+    },
+    warnings: [...new Set([...readStringArray(simulateResponse.warnings), ...readStringArray(response.warnings)])]
   }
 }
 
@@ -903,6 +941,33 @@ export async function requestServerSwapPrepare(
   }
 
   return normalizePreparedExecution(raw)
+}
+
+export async function requestServerSwapSimulate(
+  config: ServerExecutionRpcConfig,
+  input: { quoteId: string }
+): Promise<ServerSwapSimulateResponse> {
+  const quoteId = readString(input.quoteId)
+  if (!quoteId) throw new Error('Quote id is required for swap simulate')
+
+  let raw: unknown
+  try {
+    raw = await executeServerManagedJsonRequest(config, '/v1/swap/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ quoteId })
+    }, 'simulate')
+  } catch (error) {
+    if (isLegacySwapFallbackError(error)) {
+      throw toServerManagedSwapUnavailableError(error)
+    }
+    throw error
+  }
+
+  const simulate = normalizeSimulateResponse(raw)
+  if (simulate.valid === false) {
+    throw new Error(simulate.detail || 'Swap simulation failed')
+  }
+  return simulate
 }
 
 export async function submitServerSwap(

@@ -438,6 +438,10 @@ function normalizeSubmitHash(payload: BridgeJson, signedXdr: string): string {
     root?.data && asRecord(root.data)?.hash,
     root?.data && asRecord(root.data)?.txid
   ]
+  if (typeof root?.result === 'string') {
+    const resultHash = normalizeText(root.result)
+    if (resultHash) return resultHash
+  }
   for (const candidate of candidates) {
     const hash = normalizeText(candidate)
     if (hash) return hash
@@ -544,6 +548,8 @@ function buildReadMethodPayloadCandidates(methodNames: string[], params: unknown
 
 function buildSubmitPayloadCandidates(signedXdr: string, extra: Record<string, unknown> = {}): RpcLikePayload[] {
   const common = {
+    signedTx: signedXdr,
+    signedTxXdr: signedXdr,
     signedXdr,
     xdr: signedXdr,
     txXdr: signedXdr,
@@ -555,21 +561,23 @@ function buildSubmitPayloadCandidates(signedXdr: string, extra: Record<string, u
     {
       jsonrpc: '2.0',
       id: 'stellar-submit-1',
-      method: 'submit',
+      method: 'submittransaction',
       params: [common]
     },
     {
       jsonrpc: '2.0',
       id: 'stellar-submit-2',
-      method: 'submitTransaction',
+      method: 'sendrawtransaction',
       params: [common]
     },
     {
       jsonrpc: '2.0',
       id: 'stellar-submit-3',
-      method: 'sendTransaction',
+      method: 'submit',
       params: [common]
     },
+    { method: 'submittransaction', params: [common] },
+    { method: 'sendrawtransaction', params: [common] },
     { method: 'submit', params: [common] },
     { method: 'submitTransaction', params: [common] },
     { method: 'sendTransaction', params: [common] },
@@ -602,7 +610,7 @@ export function createStellarBridgeClient(input: StellarBridgeClientConfig = {})
     if (!accountAddress) throw new Error('Stellar account address is required')
 
     const methodResponse = await callReadMethod(
-      ['account_info', 'getAccount', 'getAccountInfo', 'account', 'loadAccount'],
+      ['account', 'getaccount', 'account_info', 'getAccount', 'getAccountInfo', 'loadAccount'],
       [
         {
           account: accountAddress,
@@ -659,7 +667,7 @@ export function createStellarBridgeClient(input: StellarBridgeClientConfig = {})
 
   async function getFeeStats(): Promise<StellarFeeStats> {
     const response = await callReadMethod(
-      ['fee', 'feeStats', 'getFeeStats', 'getBaseFee', 'getFee', 'get_fee_stats'],
+      ['fee_stats', 'fee', 'feeStats', 'getFeeStats', 'getBaseFee', 'getFee', 'get_fee_stats'],
       []
     ).catch(() => null)
 

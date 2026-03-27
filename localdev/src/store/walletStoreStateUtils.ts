@@ -12,6 +12,7 @@ type AccountAddressBucket = {
   SOL?: string
   SUI?: string
   XRP?: string
+  XLM?: string
 }
 
 export interface WalletStoreAccountLike {
@@ -457,6 +458,8 @@ function resolveActivityAccountId(
         push(account.addresses?.COSMOS)
       } else if (network?.coinType === 'SUI') {
         push(account.addresses?.SUI)
+      } else if (network?.coinType === 'XLM') {
+        push(account.addresses?.XLM)
       } else if (!network) {
         Object.values(account.networkAddresses || {}).forEach(push)
         push(account.addresses?.EVM)
@@ -466,6 +469,7 @@ function resolveActivityAccountId(
         push(account.addresses?.SOL)
         push(account.addresses?.SUI)
         push(account.addresses?.XRP)
+        push(account.addresses?.XLM)
       }
 
       return (

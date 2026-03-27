@@ -30,6 +30,7 @@ export interface AccountAddresses {
   SOL: string
   SUI: string
   XRP: string
+  XLM: string
 }
 
 export interface BaseAccountShape {
@@ -53,7 +54,8 @@ export function createEmptyAccountAddresses(): AccountAddresses {
     COSMOS: '',
     SOL: '',
     SUI: '',
-    XRP: ''
+    XRP: '',
+    XLM: ''
   }
 }
 
@@ -103,6 +105,7 @@ export function getAccountAddressForNetwork(
   if (normalizedCoinType === 'UTXO') return String(addresses.UTXO || '').trim()
   if (normalizedCoinType === 'SOL') return String(addresses.SOL || '').trim()
   if (normalizedCoinType === 'SUI') return String(addresses.SUI || '').trim()
+  if (normalizedCoinType === 'XLM') return String(addresses.XLM || '').trim()
   return String(addresses.UTXO || addresses.EVM || '').trim()
 }
 

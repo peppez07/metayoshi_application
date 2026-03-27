@@ -23,6 +23,7 @@ export async function deriveAccountAddresses(
   let firstUtxoAddress = ''
   let firstXrpAddress = ''
   let firstCosmosAddress = ''
+  let firstXlmAddress = ''
   let evmAddress = ''
 
   for (const net of networks) {
@@ -39,6 +40,7 @@ export async function deriveAccountAddresses(
       if (net.coinType === 'EVM' && !evmAddress) evmAddress = address
       if (net.coinType === 'UTXO' && !firstUtxoAddress) firstUtxoAddress = address
       if (net.coinType === 'XRP' && !firstXrpAddress) firstXrpAddress = address
+      if (net.coinType === 'XLM' && !firstXlmAddress) firstXlmAddress = address
       if (resolveNetworkProtocolFamily(net) === 'cosmos' && !firstCosmosAddress) {
         firstCosmosAddress = address
       }
@@ -57,7 +59,8 @@ export async function deriveAccountAddresses(
       COSMOS: firstCosmosAddress,
       SOL: '',
       SUI: '',
-      XRP: firstXrpAddress
+      XRP: firstXrpAddress,
+      XLM: firstXlmAddress
     },
     networkAddresses,
     derivationErrors

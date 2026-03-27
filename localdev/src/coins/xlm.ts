@@ -19,7 +19,7 @@ export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
     displayChain: 'main',
     name: 'Stellar',
     symbol: 'XLM',
-    coinType: 'BTC',
+    coinType: 'XLM',
     coinSymbol: 'XLM',
     rpcUrl: '',
     rpcWallet: '',
