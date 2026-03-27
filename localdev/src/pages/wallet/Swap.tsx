@@ -266,11 +266,32 @@ function formatSwapUiError(error: unknown): string {
   }
 
   if (
+    normalized.includes('gateway auth discovery is down')
+    || normalized.includes('gateway auth discovery is unavailable')
+  ) {
+    return 'The MetaYoshi swap gateway is still loading its auth configuration. Retry in a moment.'
+  }
+
+  if (
+    normalized.includes('auth endpoints are not ready')
+    || normalized.includes('auth challenge endpoint unavailable')
+    || normalized.includes('auth verify endpoint unavailable')
+  ) {
+    return 'The MetaYoshi swap gateway is online, but secure swap sign-in is not ready yet. Retry in a moment.'
+  }
+
+  if (
     normalized.includes('did not come from the metayoshi server swap service')
     || normalized.includes('only supports metayoshi server-managed swaps')
-    || normalized.includes('metayoshi server swap service is unavailable')
   ) {
-    return 'The MetaYoshi swap backend is not ready for this request yet. Retry in a moment or switch to a pair the server currently routes.'
+    return 'This quote is not backed by a MetaYoshi server-managed route yet. Retry in a moment or switch to a pair shown in the live route inventory.'
+  }
+
+  if (
+    normalized.includes('metayoshi server swap service is unavailable')
+    || normalized.includes('legacy swap mode is configured')
+  ) {
+    return 'The MetaYoshi swap service is temporarily unavailable on this gateway. Retry in a moment.'
   }
 
   if (
