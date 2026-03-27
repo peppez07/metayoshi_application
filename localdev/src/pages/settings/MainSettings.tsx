@@ -33,6 +33,7 @@ const MainSettings: React.FC = () => {
       path: string
       icon: React.ReactNode
       iconClass: string
+      badge?: string
       tone?: 'danger'
     }>
   }> = [
@@ -48,17 +49,11 @@ const MainSettings: React.FC = () => {
         },
         {
           label: 'Multisig',
-          description: 'Import and manage EVM Safe accounts',
-          path: '/settings/multisig',
-          icon: <IoPeopleOutline className="h-4.5 w-4.5" />,
-          iconClass: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300'
-        },
-        {
-          label: 'Multisig',
-          description: 'Manage Safe-style contract accounts',
+          description: 'Enable multisig, pick chains, and manage Safe accounts',
           path: '/settings/multisig',
           icon: <IoShieldCheckmarkOutline className="h-4.5 w-4.5" />,
-          iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300'
+          iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',
+          badge: 'Beta'
         },
         {
           label: 'Change password',
@@ -185,9 +180,16 @@ const MainSettings: React.FC = () => {
                   {item.icon}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-semibold ${item.tone === 'danger' ? 'text-red-500 dark:text-red-300' : 'text-gray-100'}`}>
-                    {item.label}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className={`text-sm font-semibold ${item.tone === 'danger' ? 'text-red-500 dark:text-red-300' : 'text-gray-100'}`}>
+                      {item.label}
+                    </p>
+                    {item.badge ? (
+                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="text-xs text-gray-500">{item.description}</p>
                 </div>
                 <IoChevronForward className={`h-4 w-4 shrink-0 ${item.tone === 'danger' ? 'text-red-300' : 'text-gray-400'}`} />

@@ -25,6 +25,7 @@ import {
   getSolanaParsedAccountInfo,
   SOLANA_ASSOCIATED_TOKEN_ACCOUNT_RENT_LAMPORTS
 } from './solanaBridgeClient'
+import { createStellarBridgeClient } from './stellarBridgeClient'
 import {
   callBridgeMethod,
   fetchBridgeAddressAssetUtxos,
@@ -1114,6 +1115,27 @@ export async function estimateTransactionFeePreview(
         statusLabel: 'Live network estimate',
         debugLabel: input.isAssetTransfer ? 'Sui live asset quote' : 'Sui live native quote',
         debugDetails: preview.debugDetails
+      }
+    }
+
+    if (modelId === 'xlm' && previewRecipient) {
+      const rpcConfig = buildRpcPreviewConfig(input.network)
+      const client = createStellarBridgeClient({
+        bridgeUrl: rpcConfig.bridgeUrl,
+        bridgeUsername: rpcConfig.bridgeUsername,
+        bridgePassword: rpcConfig.bridgePassword,
+        timeoutMs: Number(rpcConfig.timeoutMs ?? PREVIEW_RPC_TIMEOUT_MS)
+      })
+      const stats = await client.getFeeStats()
+      const fee = Number(stats.baseFeeStroops || 0) / 1e7
+      return {
+        fee,
+        source: 'live',
+        kind: 'estimate',
+        isFinal: false,
+        statusLabel: 'Live network estimate',
+        debugLabel: input.isAssetTransfer ? 'Stellar live asset quote' : 'Stellar live native quote',
+        debugDetails: `XLM | baseFee=${String(stats.baseFeeStroops || 0)} stroops`
       }
     }
 

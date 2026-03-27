@@ -63,6 +63,10 @@ function normalizeDiscoveredChainKey(value: unknown): string {
       return 'osmosis'
     case 'tron-mainnet':
       return 'tron'
+    case 'stellar':
+    case 'stellar-mainnet':
+    case 'xlm':
+      return 'stellar'
     default:
       return normalized
   }
@@ -81,6 +85,7 @@ function resolveExpectedChainRegistryKey(coinId: string, modelNetworkId: string 
   if (normalizedCoinId === 'cosmos' || normalizedModelId === 'cosmos') return 'cosmoshub'
   if (normalizedCoinId === 'osmosis' || normalizedModelId === 'osmosis') return 'osmosis'
   if (normalizedCoinId === 'tron' || normalizedModelId === 'tron') return 'tron'
+  if (normalizedCoinId === 'stellar' || normalizedModelId === 'xlm') return 'stellar'
   if (normalizedCoinId === 'sui' || normalizedModelId === 'sui') return 'sui'
   return ''
 }

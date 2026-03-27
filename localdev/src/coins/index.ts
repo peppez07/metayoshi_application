@@ -1,7 +1,7 @@
 import { getBundledCoinRegistryEntries } from './coinRegistry'
 import { resolveEnabledNetworkIds } from './coinSelection'
 import { loadServerRegistrySnapshotFromApi } from './serverRegistry/runtime'
-import { validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
+import { mapServerCoinIdToNetworkId, validateEthereumLayer2NetworkIdMapping } from './serverRegistry/mappings'
 import { resolvePublicApiBaseUrl } from '../lib/apiBase'
 import { normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
 import { sanitizeNetworkServerOnly } from '../lib/serverOnly'
@@ -213,6 +213,28 @@ export function estimateNetworkFee(networkId: string, txBytes: number): number |
 
 validateEthereumLayer2NetworkIdMapping()
 
+function normalizeNetworkId(value: unknown): string {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isEnabledNetworkId(value: unknown): boolean {
+  const normalized = normalizeNetworkId(value)
+  return Boolean(normalized) && ENABLED_NETWORK_IDS.has(normalized)
+}
+
+function shouldIncludeServerCatalogItem(item: ServerCoinCatalogItem): boolean {
+  const appNetworkId = normalizeNetworkId(item.appNetworkId)
+  if (appNetworkId && !appNetworkId.includes('--')) return isEnabledNetworkId(appNetworkId)
+
+  const runtimeModelId = normalizeNetworkId(item.runtimeModelId)
+  if (runtimeModelId) return isEnabledNetworkId(runtimeModelId)
+
+  const mappedNetworkId = normalizeNetworkId(mapServerCoinIdToNetworkId(item.coinId))
+  if (mappedNetworkId) return isEnabledNetworkId(mappedNetworkId)
+
+  return true
+}
+
 export async function loadServerRegistrySnapshot(): Promise<{
   networks: Network[] | null
   catalog: ServerCoinCatalogItem[]
@@ -225,13 +247,19 @@ export async function loadServerRegistrySnapshot(): Promise<{
     allNetworks: ALL_NETWORKS,
     allCoinIds: ALL_COIN_IDS
   })
+  const filteredNetworks = Array.isArray(snapshot.networks)
+    ? snapshot.networks
+      .filter((network) => isEnabledNetworkId(network?.id))
+      .filter((network) => !TEMPORARILY_DISABLED_NETWORK_IDS.has(String(network?.id || '').trim()))
+      .map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
+    : null
+  const filteredCatalog = Array.isArray(snapshot.catalog)
+    ? snapshot.catalog.filter(shouldIncludeServerCatalogItem)
+    : []
   return {
     ...snapshot,
-    networks: Array.isArray(snapshot.networks)
-      ? snapshot.networks
-        .filter((network) => !TEMPORARILY_DISABLED_NETWORK_IDS.has(String(network?.id || '').trim()))
-        .map((network) => sanitizeNetworkServerOnly(network, API_BASE_URL))
-      : null
+    networks: filteredNetworks,
+    catalog: filteredCatalog
   }
 }
 

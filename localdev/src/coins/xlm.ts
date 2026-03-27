@@ -1,5 +1,5 @@
 import type { CoinModule, CoinRuntimeContext, Network } from './types'
-import { NATIVE_ONLY_CAPABILITIES, resolveBridgeCredentials } from './factories'
+import { FULL_ASSET_CAPABILITIES, resolveBridgeCredentials } from './factories'
 import { getUnifiedLogoByName } from './logos'
 import { sanitizeExplorerUrl } from '../lib/serverOnly'
 const DEFAULT_XLM_EXPLORER_URL = ''
@@ -29,7 +29,7 @@ export function createXlmNetwork(ctx: CoinRuntimeContext): Network {
     bridgeUsername,
     bridgePassword,
     explorerUrl: sanitizeExplorerUrl(String(env.VITE_XLM_EXPLORER || DEFAULT_XLM_EXPLORER_URL).trim()) || undefined,
-    capabilities: NATIVE_ONLY_CAPABILITIES,
+    capabilities: FULL_ASSET_CAPABILITIES,
     derivation: {
       status: 'supported'
     },
@@ -41,6 +41,6 @@ export const xlmCoin: CoinModule = {
   id: 'xlm',
   symbol: 'XLM',
   coinSymbol: 'XLM',
-  capabilities: NATIVE_ONLY_CAPABILITIES,
+  capabilities: FULL_ASSET_CAPABILITIES,
   createNetwork: createXlmNetwork
 }

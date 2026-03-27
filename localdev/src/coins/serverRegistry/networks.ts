@@ -63,6 +63,7 @@ export function inferBridgeCapabilities(
   const isEvmModel = Boolean(modelNetworkId && EVM_MODEL_NETWORK_IDS.has(modelNetworkId))
   const isRtm = coinId === 'raptoreum'
   const isCardano = coinId === 'cardano' || modelNetworkId === 'ada'
+  const isStellar = coinId === 'stellar' || coinId === 'xlm' || modelNetworkId === 'xlm'
 
   const canSendCoin =
     serverCapabilities?.send === true
@@ -71,9 +72,10 @@ export function inferBridgeCapabilities(
     || methods.has('sendmany')
     || methods.has('eth_sendrawtransaction')
     || methods.has('submit')
+    || methods.has('submittransaction')
 
-  const assetLayer = isEvmModel || isRtm || isCardano
-  const assetSend = isEvmModel || isRtm || isCardano || methods.has('sendasset')
+  const assetLayer = isEvmModel || isRtm || isCardano || isStellar
+  const assetSend = isEvmModel || isRtm || isCardano || isStellar || methods.has('sendasset')
 
   return {
     features: {

@@ -15,6 +15,7 @@ const AccountManager: React.FC = () => {
     activeAccountId,
     activeNetworkId,
     networks,
+    multisigSettings,
     setActiveAccount,
     addAccount,
     removeAccount,
@@ -34,6 +35,7 @@ const AccountManager: React.FC = () => {
   const { showToast } = useToast()
   const navigate = useNavigate()
   const activeNetwork = networks.find((n) => n.id === activeNetworkId) || networks[0]
+  const multisigEnabled = multisigSettings.enabled
   const activeAccount = useMemo(
     () => accounts.find((a) => a.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
@@ -223,6 +225,11 @@ const AccountManager: React.FC = () => {
                 ? 'This account is treated as a contract-backed multisig account when multisig metadata becomes available.'
                 : 'This account is watch-only and does not have a local signing key.'}
             </p>
+            {!multisigEnabled && (
+              <p className="text-[11px] text-amber-300 leading-relaxed">
+                Multisig is disabled in settings. Open the Multisig page to enable it and choose allowed chains.
+              </p>
+            )}
           </div>
         )}
 
@@ -257,7 +264,7 @@ const AccountManager: React.FC = () => {
                 Cancel
               </Button>
               <Button variant="outline" className="flex-1" onClick={() => navigate('/settings/multisig')} disabled={isCreating}>
-                Multisig
+                {multisigEnabled ? 'Multisig' : 'Enable multisig'}
               </Button>
               {canAddAccount && (
                 <Button className="flex-1" onClick={() => void handleAddAccount()} isLoading={isCreating}>Create</Button>

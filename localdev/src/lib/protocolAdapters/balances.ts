@@ -4,6 +4,7 @@ import { callBridgeMethod } from '../utxoRpc'
 import { fetchServerAddressJson, normalizeServerAddress } from '../serverAddressApi'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../serverTimeouts'
 import { isMetayoshiHttpUrl } from '../serverOnly'
+import { createStellarBridgeClient } from '../stellarBridgeClient'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
 
@@ -176,42 +177,13 @@ async function getMoneroBalanceViaBridge(rpcConfig: UtxoRpcConfig): Promise<stri
 }
 
 async function getStellarBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {
-  const variants: Array<{ method: string; params: any[] }> = [
-    { method: 'getaddressbalance', params: [address] },
-    { method: 'getaddressbalance', params: [{ address }] },
-    { method: 'getaddressbalance', params: [{ addresses: [address] }] },
-    { method: 'getAccount', params: [address] }
-  ]
-  const cacheKey = resolveBridgeVariantCacheKey(rpcConfig, 'stellar-balance')
-  const cached = bridgeMethodVariantCache.get(cacheKey)
-  const calls = cached && isFresh(cached.checkedAt, BRIDGE_METHOD_VARIANT_CACHE_TTL_MS)
-    ? [
-        ...variants.filter((v) => v.method === cached.method),
-        ...variants.filter((v) => v.method !== cached.method)
-      ]
-    : variants
-
-  let lastError: unknown = null
-  for (const call of calls) {
-    try {
-      const result = await callBridgeMethod(rpcConfig, call.method, call.params)
-      const scalar = asDecimalString((result as any)?.balance ?? (result as any)?.result?.balance ?? result)
-      if (scalar) {
-        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
-        return scalar
-      }
-      const balances = Array.isArray((result as any)?.balances) ? (result as any).balances : []
-      const native = balances.find((b: any) => String(b?.asset_type || '').toLowerCase() === 'native')
-      const nativeBalance = asDecimalString(native?.balance)
-      if (nativeBalance) {
-        bridgeMethodVariantCache.set(cacheKey, { method: call.method, checkedAt: Date.now() })
-        return nativeBalance
-      }
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('Bridge Stellar balance query failed')
+  const client = createStellarBridgeClient({
+    bridgeUrl: rpcConfig.bridgeUrl,
+    bridgeUsername: rpcConfig.bridgeUsername,
+    bridgePassword: rpcConfig.bridgePassword,
+    timeoutMs: Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
+  })
+  return await client.getNativeBalance(address)
 }
 
 async function getCardanoBalanceViaBridge(rpcConfig: UtxoRpcConfig, address: string): Promise<string> {

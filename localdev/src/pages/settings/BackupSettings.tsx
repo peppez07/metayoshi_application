@@ -49,6 +49,7 @@ const BackupSettings: React.FC = () => {
     networkAssets,
     sendListPreferences,
     networkModelPreferences,
+    multisigSettings,
     nextAccountIndex,
     createdAt
   } = useWalletStore()
@@ -114,7 +115,8 @@ const BackupSettings: React.FC = () => {
       acceptedTermsAt,
       networkAssets,
       sendListPreferences,
-      networkModelPreferences
+      networkModelPreferences,
+      multisigSettings
     }
 
     downloadJSON(backup, `metayoshi-fullbackup-${Date.now()}.json`)

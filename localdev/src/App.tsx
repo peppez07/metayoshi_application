@@ -380,7 +380,6 @@ function App() {
             <Route path="autolock" element={<AutolockSettings />} />
             <Route path="authorized-sites" element={<AuthorizedSites />} />
             <Route path="blockchains" element={<BlockchainVisibilitySettings />} />
-            <Route path="multisig" element={<MultisigSettings />} />
             <Route path="rpc" element={<Navigate to="/settings" replace />} />
             <Route path="*" element={<Navigate to="/settings" replace />} />
           </Route>

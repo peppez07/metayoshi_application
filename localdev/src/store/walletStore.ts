@@ -38,6 +38,7 @@ import {
   fetchDiscoveredRuntimeHealth
 } from '../lib/backendHelp'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
+import { createStellarBridgeClient } from '../lib/stellarBridgeClient'
 import { appendOptionalServerAuthHeaders } from '../lib/serverRequestAuth'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
 import { getBuildFeatureFlag } from '../buildConfig'
@@ -296,6 +297,7 @@ export interface FullBackupV1 {
 
 export interface FullBackupV2 extends Omit<FullBackupV1, 'version'> {
   version: 2
+  multisigSettings?: MultisigSettingsState
 }
 
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
@@ -355,6 +357,13 @@ export interface Account {
   networkBalances: Record<string, string>
   balance: string
   multisig?: MultisigMetadata
+}
+
+export interface MultisigSettingsState {
+  enabled: boolean
+  crossChainEnabled: boolean
+  allowedNetworkIds: string[]
+  defaultNetworkId: string | null
 }
 
 export type DerivedAccount = Account & {
@@ -506,6 +515,7 @@ interface WalletState {
   rememberedSendSelection: Record<string, RememberedSendSelectionBucket>
   /** Per-network execution preferences for model-specific send controls. */
   networkModelPreferences: Record<string, NetworkModelPreferences>
+  multisigSettings: MultisigSettingsState
   authorizedSites: string[]
   autolockMinutes: number
   donationPercent: number
@@ -601,6 +611,10 @@ interface WalletState {
   removeNetwork: (id: string) => void
   updateNetwork: (id: string, updates: Partial<Network>) => void
   setNetworkEnabled: (networkId: string, enabled: boolean) => void
+  setMultisigEnabled: (enabled: boolean) => void
+  setCrossChainMultisigEnabled: (enabled: boolean) => void
+  setMultisigNetworkAllowed: (networkId: string, allowed: boolean) => void
+  setDefaultMultisigNetworkId: (networkId: string | null) => void
 
   // Local RPC settings
   setUseLocalRpc: (enabled: boolean) => void
@@ -736,7 +750,6 @@ const BALANCE_UI_STABILIZE_MS = 650
 const UTXO_ZERO_BALANCE_RECHECK_MS = 900
 const SEND_OPERATION_MAX_TPS = 5
 const SEND_OPERATION_MIN_INTERVAL_MS = Math.max(1, Math.trunc(1000 / SEND_OPERATION_MAX_TPS))
-const MIN_DONATION_PERCENT = 0.5
 const MAX_DONATION_PERCENT = 5
 const MAX_PERSISTED_ACTIVITY_ENTRIES = 100
 const LAST_ACTIVE_PERSIST_INTERVAL_MS = 60_000
@@ -939,8 +952,8 @@ async function checkOnChainTransactionStatus(
 }
 
 function clampDonationPercent(value: number): number {
-  if (!Number.isFinite(value)) return MIN_DONATION_PERCENT
-  return Math.max(MIN_DONATION_PERCENT, Math.min(MAX_DONATION_PERCENT, Number(value.toFixed(1))))
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(MAX_DONATION_PERCENT, Number(value.toFixed(1))))
 }
 
 function delay(ms: number): Promise<void> {
@@ -2394,6 +2407,41 @@ function normalizeNetworkModelPreferencesState(
   return normalizeNetworkModelPreferencesRecord(remapNetworkIdKeyedRecord(raw || {}), networks)
 }
 
+function getSupportedMultisigNetworks(networks: Network[]): Network[] {
+  return networks.filter((network) => network.coinType === 'EVM')
+}
+
+function normalizeMultisigSettingsState(
+  value: unknown,
+  networks: Network[]
+): MultisigSettingsState {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const supportedIds = new Set(
+    getSupportedMultisigNetworks(networks)
+      .map((network) => String(network.id || '').trim())
+      .filter(Boolean)
+  )
+  const allowedNetworkIds = Array.isArray(record.allowedNetworkIds)
+    ? Array.from(
+        new Set(
+          record.allowedNetworkIds
+            .map((entry) => String(entry || '').trim())
+            .filter((networkId) => supportedIds.has(networkId))
+        )
+      )
+    : []
+  const defaultNetworkIdRaw = String(record.defaultNetworkId || '').trim()
+  const defaultNetworkId = allowedNetworkIds.includes(defaultNetworkIdRaw)
+    ? defaultNetworkIdRaw
+    : (allowedNetworkIds[0] || null)
+  return {
+    enabled: Boolean(record.enabled),
+    crossChainEnabled: Boolean(record.crossChainEnabled),
+    allowedNetworkIds,
+    defaultNetworkId
+  }
+}
+
 function buildNativeSendEntryId(networkId: string): string {
   const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim()).toLowerCase()
   return `${SEND_LIST_NATIVE_PREFIX}${normalizedNetworkId}`
@@ -3464,9 +3512,15 @@ export const useWalletStore = create<WalletState>()(
       sendListPreferences: {},
       rememberedSendSelection: {},
       networkModelPreferences: {},
+      multisigSettings: {
+        enabled: false,
+        crossChainEnabled: false,
+        allowedNetworkIds: [],
+        defaultNetworkId: null
+      },
       authorizedSites: [],
       autolockMinutes: 5,
-      donationPercent: MIN_DONATION_PERCENT,
+      donationPercent: 0,
       lastActiveTimestamp: Date.now(),
       useLocalRpc: false,
       localRpcOverrides: {},
@@ -3764,7 +3818,13 @@ export const useWalletStore = create<WalletState>()(
           disabledNetworkIds: resolveDefaultDisabledNetworkIds(normalizeNetworkListSymbols(INITIAL_NETWORKS)),
           syncPercent: null,
           lowSyncStreak: 0,
-          donationPercent: MIN_DONATION_PERCENT,
+          donationPercent: 0,
+          multisigSettings: {
+            enabled: false,
+            crossChainEnabled: false,
+            allowedNetworkIds: [],
+            defaultNetworkId: null
+          },
           networkAssets: {},
           networkAssetLogos: {},
           networkAssetLabels: {},
@@ -4944,15 +5004,13 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
-            const rows = response.ok && Array.isArray((response.json?.assets as any)?.balances)
-              ? (response.json?.assets as any).balances as Array<Record<string, unknown>>
-              : await fetchBridgeTokenBalances(rpcConfig, {
-                  coin: 'stellar',
-                  chain: 'main',
-                  owner: address,
-                  wallet: String(net.rpcWallet || '').trim() || undefined
-                }) as Array<Record<string, unknown>>
+            const stellarClient = createStellarBridgeClient({
+              bridgeUrl: rpcConfig.bridgeUrl,
+              bridgeUsername: rpcConfig.bridgeUsername,
+              bridgePassword: rpcConfig.bridgePassword,
+              timeoutMs: Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
+            })
+            const rows = await stellarClient.getAssetBalances(address) as Array<Record<string, unknown>>
             const assets: Record<string, number> = {}
             const labels: Record<string, string> = {}
             for (const row of rows) {
@@ -4962,7 +5020,7 @@ export const useWalletStore = create<WalletState>()(
                 || row.assetCode
                 || ''
               ).trim()
-              const tokenType = String(row.tokenType || row.asset_type || '').trim().toLowerCase()
+              const tokenType = String(row.tokenType || row.assetType || row.asset_type || '').trim().toLowerCase()
               if (!tokenId || tokenType === 'native' || tokenId.toLowerCase() === 'native') continue
 
               const rawBalanceText = String(row.balanceRaw || '').trim()
@@ -4980,10 +5038,10 @@ export const useWalletStore = create<WalletState>()(
               }
               if (!Number.isFinite(displaySats) || displaySats <= 0) continue
 
-              const issuer = String(row.issuer || row.asset_issuer || '').trim()
+              const issuer = String(row.assetIssuer || row.issuer || row.asset_issuer || '').trim()
               const assetKey = issuer ? `${tokenId}|${issuer}` : tokenId
               assets[assetKey] = displaySats
-              labels[assetKey] = String(row.symbol || row.asset_code || row.name || tokenId).trim() || tokenId
+              labels[assetKey] = String(row.symbol || row.assetCode || row.asset_code || row.name || tokenId).trim() || tokenId
             }
 
             applyAssetSnapshot({
@@ -5373,6 +5431,29 @@ export const useWalletStore = create<WalletState>()(
             contract_address: '',
             txid_or_longname: normalizedAssetId,
             ownership_address: issuer || ''
+          }
+        }
+
+        if (modelId === 'xlm') {
+          const [assetCode, issuer] = normalizedAssetId.split('|').map((v) => String(v || '').trim())
+          if (!assetCode || !issuer) throw new Error('Stellar asset id must be in assetCode|issuer format')
+          const knownRaw = Number(networkAssets?.[activeNetworkId]?.[normalizedAssetId] ?? 0)
+          const amountUi = Number.isFinite(knownRaw) ? (knownRaw / 1e8) : 0
+          const explorerBase = String(net.explorerUrl || '').trim().replace(/\/+$/, '')
+          const ref = issuer ? `${explorerBase}/account/${issuer}` : undefined
+          return {
+            name: String(networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId] || assetCode).trim() || assetCode,
+            amount: Number.isFinite(amountUi) ? amountUi : 0,
+            units: 0,
+            reissuable: false,
+            has_ipfs: false,
+            ipfs_hash: undefined,
+            preview_url: ref || undefined,
+            metadata_url: ref || undefined,
+            token_id: normalizedAssetId,
+            contract_address: '',
+            txid_or_longname: normalizedAssetId,
+            ownership_address: issuer
           }
         }
 
@@ -6201,7 +6282,7 @@ export const useWalletStore = create<WalletState>()(
         await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts, activeAccountId, networkAssets, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
         } = get()
 
         const net = networks.find(n => n.id === activeNetworkId)
@@ -6566,6 +6647,44 @@ export const useWalletStore = create<WalletState>()(
           if (!sentHash) throw new Error('EVM token transfer broadcast returned no transaction hash')
           await get().collectActiveNetworkData({ force: true, includeFiat: false })
           return { txid: sentHash }
+        }
+
+        if (modelId === 'xlm') {
+          const normalizedAssetId = String(assetId || '').trim()
+          const [assetCode, assetIssuer] = normalizedAssetId.split('|').map((value) => String(value || '').trim())
+          const recipient = String(toAddress || '').trim()
+          if (!assetCode || !assetIssuer) throw new Error('Stellar asset id must be in assetCode|issuer format')
+          if (!recipient) throw new Error('Stellar recipient address is required')
+          if (!(normalizedAssetId in (networkAssets?.[activeNetworkId] || {}))) {
+            throw new Error(`Active account does not currently hold Stellar asset ${normalizedAssetId}`)
+          }
+
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            useLocalRpc: ulr2,
+            localRpcOverride: lro2[net.id],
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const { deriveStellarAddress } = await loadStellarAddressModule()
+          const derived = await deriveStellarAddress(sessionMnemonic!, accountIndex)
+          if (String(senderAddress || '').trim() !== derived.address) {
+            throw new Error(`Active XLM address does not match derived signer address (${senderAddress} != ${derived.address})`)
+          }
+
+          const { sendStellarAssetNonCustodial } = await loadStellarNonCustodialModule()
+          const sent = await sendStellarAssetNonCustodial({
+            rpcUrl: net.rpcUrl,
+            fromAddress: derived.address,
+            toAddress: recipient,
+            amount: String(qty || '').trim(),
+            assetCode,
+            assetIssuer,
+            privateKeyHex: derived.privHex,
+            bridgeUrl: rpcConfig.bridgeUrl,
+            bridgeUsername: rpcConfig.bridgeUsername,
+            bridgePassword: rpcConfig.bridgePassword
+          })
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
+          return { txid: sent.hash }
         }
 
         if (modelId === 'sui') {
@@ -6938,7 +7057,8 @@ export const useWalletStore = create<WalletState>()(
           activity:         normalizedActivity,
           authorizedSites:  Array.isArray(backup.authorizedSites) ? backup.authorizedSites : [],
           autolockMinutes:  typeof backup.autolockMinutes === 'number' ? backup.autolockMinutes : 5,
-          donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? MIN_DONATION_PERCENT)),
+          donationPercent:  clampDonationPercent(Number((backup as any).donationPercent ?? 0)),
+          multisigSettings: normalizeMultisigSettingsState((backup as any).multisigSettings, networks),
           networkAssets:    {},
           accountNetworkAssets: {},
           sendListPreferences: normalizeSendListPreferencesRecord(backup.sendListPreferences ?? {}),
@@ -7563,6 +7683,7 @@ export const useWalletStore = create<WalletState>()(
           )
           return {
             networks: nextNetworks,
+            multisigSettings: normalizeMultisigSettingsState(state.multisigSettings, nextNetworks),
             disabledNetworkIds: enabledCount > MAX_ACTIVE_REFRESH_NETWORKS
               ? clampDisabledNetworkIdsToMaxEnabled([...normalizedDisabled, nextNetwork.id], nextNetworks)
               : normalizedDisabled
@@ -7582,16 +7703,21 @@ export const useWalletStore = create<WalletState>()(
         set({
           networks: filtered,
           activeNetworkId: newActiveId,
-          disabledNetworkIds: nextDisabled
+          disabledNetworkIds: nextDisabled,
+          multisigSettings: normalizeMultisigSettingsState(get().multisigSettings, filtered)
         })
       },
 
       updateNetwork: (id, updates) => {
-        set((state) => ({
-          networks: state.networks.map(net => 
+        set((state) => {
+          const nextNetworks = state.networks.map(net =>
             net.id === id ? normalizeNetworkSymbol({ ...net, ...updates }) : net
           )
-        }))
+          return {
+            networks: nextNetworks,
+            multisigSettings: normalizeMultisigSettingsState(state.multisigSettings, nextNetworks)
+          }
+        })
       },
 
       setNetworkEnabled: (networkId, enabled) => {
@@ -7635,6 +7761,7 @@ export const useWalletStore = create<WalletState>()(
             disabledNetworkIds: nextDisabled,
             activeNetworkId: nextActiveId,
             accounts: nextAccounts,
+            multisigSettings: normalizeMultisigSettingsState(state.multisigSettings, state.networks),
             lastActiveTimestamp: Date.now()
           }
         })
@@ -7646,6 +7773,55 @@ export const useWalletStore = create<WalletState>()(
           })()
         }
       },
+
+      setMultisigEnabled: (enabled) => set((state) => ({
+        multisigSettings: {
+          ...state.multisigSettings,
+          enabled: Boolean(enabled)
+        }
+      })),
+
+      setCrossChainMultisigEnabled: (enabled) => set((state) => ({
+        multisigSettings: {
+          ...state.multisigSettings,
+          crossChainEnabled: Boolean(enabled)
+        }
+      })),
+
+      setMultisigNetworkAllowed: (networkId, allowed) => set((state) => {
+        const targetId = resolveKnownNetworkId(state.networks, networkId)
+        if (!targetId) return state
+        const supportedIds = new Set(getSupportedMultisigNetworks(state.networks).map((network) => network.id))
+        if (!supportedIds.has(targetId)) return state
+        const current = normalizeMultisigSettingsState(state.multisigSettings, state.networks)
+        const hasTarget = current.allowedNetworkIds.includes(targetId)
+        if (allowed === hasTarget) return state
+        const allowedNetworkIds = allowed
+          ? [...current.allowedNetworkIds, targetId]
+          : current.allowedNetworkIds.filter((id) => id !== targetId)
+        return {
+          multisigSettings: normalizeMultisigSettingsState(
+            {
+              ...current,
+              allowedNetworkIds,
+              defaultNetworkId: allowed
+                ? (current.defaultNetworkId || targetId)
+                : (current.defaultNetworkId === targetId ? null : current.defaultNetworkId)
+            },
+            state.networks
+          )
+        }
+      }),
+
+      setDefaultMultisigNetworkId: (networkId) => set((state) => ({
+        multisigSettings: normalizeMultisigSettingsState(
+          {
+            ...state.multisigSettings,
+            defaultNetworkId: networkId
+          },
+          state.networks
+        )
+      })),
 
       setUseLocalRpc: (enabled) => set({ useLocalRpc: enabled }),
 
@@ -8810,14 +8986,24 @@ export const useWalletStore = create<WalletState>()(
         if (fromAddress !== derived.address) {
           throw new Error(`Active XLM address does not match derived signer address (${fromAddress} != ${derived.address})`)
         }
+        const rpcConfig = await createUtxoRpcConfig(net, {
+          useLocalRpc: get().useLocalRpc,
+          localRpcOverride: get().localRpcOverrides[net.id],
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
         const { sendStellarNonCustodial } = await loadStellarNonCustodialModule()
-        return await sendStellarNonCustodial({
+        const sent = await sendStellarNonCustodial({
           rpcUrl: net.rpcUrl,
+          bridgeUrl: rpcConfig.bridgeUrl,
+          bridgeUsername: rpcConfig.bridgeUsername,
+          bridgePassword: rpcConfig.bridgePassword,
           fromAddress,
           toAddress: to,
           amountXlm: amount,
           privateKeyHex: derived.privHex
         })
+        await get().collectActiveNetworkData({ force: true, includeFiat: false })
+        return sent
       },
 
       sendTronTransaction: async ({ to, amount }) => {
@@ -8958,6 +9144,7 @@ export const useWalletStore = create<WalletState>()(
         sendListPreferences: state.sendListPreferences,
         rememberedSendSelection: state.rememberedSendSelection,
         networkModelPreferences: state.networkModelPreferences,
+        multisigSettings: state.multisigSettings,
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
         donationPercent: state.donationPercent,
@@ -9060,7 +9247,8 @@ export const useWalletStore = create<WalletState>()(
           sendListPreferences: normalizeSendListPreferencesRecord((persisted as any).sendListPreferences),
           rememberedSendSelection: normalizeRememberedSendSelectionRecord((persisted as any).rememberedSendSelection),
           networkModelPreferences: normalizeNetworkModelPreferencesState((persisted as any).networkModelPreferences, normalizedNetworks),
-          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? MIN_DONATION_PERCENT))
+          multisigSettings: normalizeMultisigSettingsState((persisted as any).multisigSettings, normalizedNetworks),
+          donationPercent: clampDonationPercent(Number((persisted as any).donationPercent ?? merged.donationPercent ?? 0))
         }
       }
     }
