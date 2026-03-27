@@ -19,7 +19,7 @@ import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../..
 import { coinModelFamilyToRouteKey, compareNetworksByModelFamily, resolveCoinModelFamily } from '../../lib/coinModel'
 import { getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
-import { isServerSwapEnabledNetwork, isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
+import { isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
@@ -57,10 +57,8 @@ const WalletLayout: React.FC = () => {
     accountNetworkFiatTotals,
     accountNetworkFiatNative,
     activity,
-    backendSnapshot,
     setActiveNetwork,
     collectActiveNetworkData,
-    getSendableItems
   } = useWalletStore()
 
   const [showNetworkSheet, setShowNetworkSheet] = useState(false)
@@ -90,20 +88,9 @@ const WalletLayout: React.FC = () => {
     accountNetworkFiatTotals[fiatScopeKey]?.usd
     ?? accountNetworkFiatNative[fiatScopeKey]?.usd
   const displayFiatValue = formatFiatValue(portfolioFiatValue)
-  const activeNetworkSwapItems = useMemo(() => {
-    if (!activeAccount?.id || !activeNetwork?.id) return []
-    return getSendableItems({
-      accountId: activeAccount.id,
-      networkId: activeNetwork.id,
-      includeHidden: false,
-      includeZeroBalance: false
-    })
-  }, [activeAccount?.id, activeNetwork?.id, getSendableItems])
   const showSwapAction = Boolean(
     activeNetwork
     && isSwapActionEnabledNetwork(activeNetwork)
-    && isServerSwapEnabledNetwork(activeNetwork, backendSnapshot?.swapChains)
-    && activeNetworkSwapItems.length > 0
   )
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()

@@ -34,14 +34,14 @@ function ToggleCard({
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between gap-4 rounded-2xl border border-dark-600 bg-dark-800/70 px-4 py-4 text-left transition-colors hover:bg-dark-700/80"
+      className="flex w-full flex-col items-start gap-3 rounded-2xl border border-dark-600 bg-dark-800/70 px-4 py-4 text-left transition-colors hover:bg-dark-700/80 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-gray-100">{title}</p>
-        <p className="mt-1 text-xs text-gray-500">{description}</p>
+        <p className="mt-1 break-words text-xs text-gray-500">{description}</p>
       </div>
       <div
-        className={`relative h-8 w-14 rounded-full border transition-colors ${
+        className={`relative h-8 w-14 shrink-0 rounded-full border transition-colors ${
           checked ? accentClass : 'border-dark-500 bg-dark-900/80'
         }`}
         aria-hidden="true"
@@ -186,13 +186,13 @@ const MultisigSettings: React.FC = () => {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Multisig Policy</p>
-            <div className="mt-1 flex items-center gap-2">
+            <div className="mt-1 flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-gray-100">Enable multisig and choose the chains it can use</h2>
               <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
                 Beta
               </span>
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-gray-500">
+            <p className="mt-2 break-words text-xs leading-relaxed text-gray-500">
               This page controls wallet policy for multisig accounts. EVM Safe is the only executable multisig family in v1.
             </p>
           </div>
@@ -245,14 +245,14 @@ const MultisigSettings: React.FC = () => {
       </div>
 
       <div className="wallet-surface space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Allowed Chains</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 break-words text-xs text-gray-500">
               Pick which EVM chains may host Safe accounts in this wallet.
             </p>
           </div>
-          <span className="rounded-full border border-dark-600 bg-dark-900/80 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
+          <span className="inline-flex max-w-full self-start rounded-full border border-dark-600 bg-dark-900/80 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-gray-300 sm:self-auto">
             {multisigSettings.allowedNetworkIds.length} selected
           </span>
         </div>
@@ -297,7 +297,7 @@ const MultisigSettings: React.FC = () => {
                             </span>
                           ) : null}
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 break-words text-xs text-gray-500">
                           Safe import and proposal execution are supported on this chain.
                         </p>
                       </div>
@@ -341,11 +341,11 @@ const MultisigSettings: React.FC = () => {
       </div>
 
       <div className="wallet-surface space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <IoShieldCheckmarkOutline className="h-4.5 w-4.5 text-emerald-300" />
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Supported Family</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 break-words text-xs text-gray-500">
               EVM Safe v1 is available now. Other multisig families and true cross-chain execution are not implemented yet.
             </p>
           </div>
@@ -367,14 +367,14 @@ const MultisigSettings: React.FC = () => {
       </div>
 
       <div className="wallet-surface space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Import Safe</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 break-words text-xs text-gray-500">
               Import an existing Safe on one of the enabled chains. The linked owner signer remains a local wallet account.
             </p>
           </div>
-          <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+          <span className={`inline-flex max-w-full self-start rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] sm:self-auto ${
             multisigSettings.enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
           }`}>
             {multisigSettings.enabled ? 'Enabled' : 'Disabled'}
@@ -446,10 +446,10 @@ const MultisigSettings: React.FC = () => {
       </div>
 
       <div className="wallet-surface space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Managed Accounts</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 break-words text-xs text-gray-500">
               {multisigAccounts.length > 0
                 ? 'Review owners, thresholds, and pending proposals for imported Safe accounts.'
                 : 'No multisig accounts imported yet.'}
@@ -457,7 +457,7 @@ const MultisigSettings: React.FC = () => {
           </div>
           <Button
             variant="outline"
-            className="px-3"
+            className="self-start px-3 sm:self-auto"
             onClick={() => void refreshPending().then(() => showToast('Pending proposals refreshed', 'success')).catch((err) => showToast(err instanceof Error ? err.message : String(err), 'error'))}
           >
             <IoRefreshOutline className="mr-2 h-4 w-4" />
@@ -491,7 +491,7 @@ const MultisigSettings: React.FC = () => {
                       {getAccountKindLabel(account)}
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-500">
+                  <p className="mt-1 break-words text-[11px] text-gray-500">
                     {network?.name || multisig.networkId || 'Unknown network'} · {multisig.threshold || 0} of {owners.length}
                   </p>
                 </div>
@@ -525,7 +525,7 @@ const MultisigSettings: React.FC = () => {
                 </div>
                 <div className="rounded-xl border border-dark-600 bg-dark-900/50 p-3">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Linked signer</p>
-                  <p className="mt-2 text-xs text-gray-300">
+                  <p className="mt-2 break-words text-xs text-gray-300">
                     {linkedSigner
                       ? getAccountDisplayName(linkedSigner, multisig.networkId, linkedSigner.name)
                       : 'No owner signer linked'}
@@ -551,13 +551,13 @@ const MultisigSettings: React.FC = () => {
                 ) : pending.map((row) => (
                   <div key={row.safeTxHash} className="space-y-2 rounded-xl border border-dark-600 bg-dark-900/60 p-3">
                     <p className="break-all font-mono text-[11px] text-gray-300">{row.safeTxHash}</p>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="break-words text-[11px] text-gray-500">
                       Nonce {row.nonce} · {row.confirmationsSubmitted}/{row.confirmationsRequired} confirmations
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Button
                         variant="outline"
-                        className="flex-1"
+                        className="w-full flex-1"
                         isLoading={actionBusyKey === `confirm:${row.safeTxHash}`}
                         onClick={() => void (async () => {
                           setActionBusyKey(`confirm:${row.safeTxHash}`)
@@ -575,7 +575,7 @@ const MultisigSettings: React.FC = () => {
                         Confirm
                       </Button>
                       <Button
-                        className="flex-1"
+                        className="w-full flex-1"
                         isLoading={actionBusyKey === `execute:${row.safeTxHash}`}
                         onClick={() => void (async () => {
                           setActionBusyKey(`execute:${row.safeTxHash}`)
@@ -602,11 +602,11 @@ const MultisigSettings: React.FC = () => {
       </div>
 
       <div className="wallet-surface space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <IoSwapHorizontalOutline className="h-4.5 w-4.5 text-violet-300" />
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Cross-chain Status</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 break-words text-xs text-gray-500">
               {multisigSettings.crossChainEnabled
                 ? 'Cross-chain policy is enabled, but execution remains limited to EVM Safe accounts.'
                 : 'Cross-chain policy is disabled. Multisig execution remains scoped to the selected Safe chains.'}

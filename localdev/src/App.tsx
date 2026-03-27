@@ -46,7 +46,6 @@ import AutolockSettings from './pages/settings/AutolockSettings'
 import SecuritySettings from './pages/settings/SecuritySettings'
 import BackupSettings from './pages/settings/BackupSettings'
 import RestoreSettings from './pages/settings/RestoreSettings'
-import ShowSecrets from './pages/settings/ShowSecrets'
 import AccountManager from './pages/settings/AccountManager'
 import MultisigSettings from './pages/settings/MultisigSettings'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
@@ -372,8 +371,8 @@ function App() {
             <Route path="security" element={<SecuritySettings />} />
             <Route path="backup" element={<BackupSettings />} />
             <Route path="restore" element={<RestoreSettings />} />
-            <Route path="show-secrets" element={<ShowSecrets />} />
-            <Route path="download-keys" element={<Navigate to="/settings/show-secrets" replace />} />
+            <Route path="show-secrets" element={<Navigate to="/settings/backup?tab=secrets" replace />} />
+            <Route path="download-keys" element={<Navigate to="/settings/backup?tab=secrets" replace />} />
             <Route path="accounts" element={<AccountManager />} />
             <Route path="multisig" element={<MultisigSettings />} />
             <Route path="password" element={<PasswordSettings />} />

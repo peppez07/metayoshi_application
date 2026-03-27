@@ -5,7 +5,6 @@ import {
   IoCloudUploadOutline,
   IoColorPaletteOutline,
   IoGlobeOutline,
-  IoKeyOutline,
   IoLockClosedOutline,
   IoMoonOutline,
   IoPeopleOutline,
@@ -83,7 +82,7 @@ const MainSettings: React.FC = () => {
       items: [
         {
           label: 'Backup wallet',
-          description: 'Download encrypted vault or phrase',
+          description: 'Download encrypted backup, recovery phrase, or private key',
           path: '/settings/backup',
           icon: <IoCloudUploadOutline className="h-4.5 w-4.5" />,
           iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300'
@@ -106,19 +105,6 @@ const MainSettings: React.FC = () => {
           path: '/settings/blockchains',
           icon: <IoGlobeOutline className="h-4.5 w-4.5" />,
           iconClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300'
-        }
-      ]
-    },
-    {
-      title: 'Danger Zone',
-      items: [
-        {
-          label: 'Recovery phrase & private key',
-          description: 'View or export secret keys. Keep private.',
-          path: '/settings/show-secrets',
-          icon: <IoKeyOutline className="h-4.5 w-4.5" />,
-          iconClass: 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300',
-          tone: 'danger'
         }
       ]
     }
@@ -163,7 +149,7 @@ const MainSettings: React.FC = () => {
 
       {sections.map((section) => (
         <section key={section.title}>
-          <p className={`px-1 text-[11px] font-black uppercase tracking-[0.24em] ${section.title === 'Danger Zone' ? 'text-red-400' : 'text-gray-500'}`}>
+          <p className="px-1 text-[11px] font-black uppercase tracking-[0.24em] text-gray-500">
             {section.title}
           </p>
           <div className="wallet-surface mt-2 overflow-hidden p-0">
