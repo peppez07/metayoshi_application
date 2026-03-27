@@ -7,6 +7,7 @@ import { buildTxExplorerUrl } from '../../lib/txExplorer'
 
 interface TxResultState {
   txid: string
+  safeTxHash?: string
   networkId: string
   accountId?: string
   asset: string
@@ -33,8 +34,12 @@ const TxResult: React.FC = () => {
     [networks, txState?.networkId]
   )
   const explorerUrl = useMemo(
-    () => buildTxExplorerUrl(String(network?.explorerUrl || ''), String(txState?.networkId || ''), String(txState?.txid || '')),
-    [network?.explorerUrl, txState?.networkId, txState?.txid]
+    () => {
+      const isSafeProposal = Boolean(txState?.safeTxHash) && txState?.safeTxHash === txState?.txid
+      if (isSafeProposal) return ''
+      return buildTxExplorerUrl(String(network?.explorerUrl || ''), String(txState?.networkId || ''), String(txState?.txid || ''))
+    },
+    [network?.explorerUrl, txState?.networkId, txState?.txid, txState?.safeTxHash]
   )
 
   useEffect(() => {
@@ -57,6 +62,7 @@ const TxResult: React.FC = () => {
 
   const returnTo = String(txState.returnTo || '').trim()
   const returnLabel = String(txState.returnLabel || '').trim() || 'Home'
+  const isSafeProposal = Boolean(txState.safeTxHash) && txState.safeTxHash === txState.txid
 
   return (
     <div className="flex min-h-0 h-full flex-col bg-dark-800">
@@ -92,6 +98,7 @@ const TxResult: React.FC = () => {
         <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Transaction ID</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{isSafeProposal ? 'Safe Tx Hash' : 'Transaction ID'}</span>
             <button
               type="button"
               onClick={() => void copyValue('txid', txState.txid)}

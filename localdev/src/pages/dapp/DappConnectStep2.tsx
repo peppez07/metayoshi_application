@@ -7,6 +7,7 @@ import {
   type DappScope
 } from '../../lib/dappPermissions'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
 import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
@@ -38,18 +39,10 @@ const DappConnectStep2: React.FC = () => {
     () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
     [activeAccount, approvalNetworkId, activeNetworkId]
   )
+  const activeAccountKindLabel = getAccountKindLabel(activeAccount)
+  const isActiveMultisig = isMultisigAccount(activeAccount)
   const approvalAddress = useMemo(() => {
-    if (!activeAccount) return ''
-
-    const networkAddress = String(activeAccount.networkAddresses?.[approvalNetworkId] || '').trim()
-    if (networkAddress) return networkAddress
-
-    if (approvalNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
-    if (approvalNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
-    if (approvalNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
-    if (approvalNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
-
-    return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
+    return String(getAccountAddressForNetwork(activeAccount, approvalNetworkId, approvalNetwork?.coinType) || '').trim()
   }, [activeAccount, approvalNetwork, approvalNetworkId])
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
@@ -97,6 +90,11 @@ const DappConnectStep2: React.FC = () => {
           <div className="text-center">
             <h2 className="text-lg font-bold">Connect to {activeAccountName}</h2>
             <p className="text-xs text-gray-400">{pendingApproval.origin}</p>
+            <div className="mt-3 flex justify-center">
+              <span className="rounded-full border border-dark-600 bg-dark-800 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-gray-200">
+                {activeAccountKindLabel}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -116,6 +114,11 @@ const DappConnectStep2: React.FC = () => {
               This site will connect to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
               It will not receive a custom list of selected accounts from this approval.
             </p>
+            {isActiveMultisig && (
+              <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+                The selected account is multisig-aware metadata only. Dapps still receive a single public address.
+              </p>
+            )}
             <p className="break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
               {approvalAddress || 'No address available on the requested network'}
             </p>

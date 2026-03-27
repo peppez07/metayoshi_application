@@ -68,6 +68,29 @@ import { getTokenLogoForAsset } from '../coins/tokenlogos'
 import { createRequestCache } from '../lib/requestCache'
 import { estimateEvmTxFee } from '../lib/evmFee'
 import {
+  type AccountKind,
+  type MultisigCapabilities,
+  type MultisigMetadata,
+  createEmptyAccountAddresses,
+  getAccountAddressForNetwork,
+  getMultisigAddress,
+  isMultisigAccount,
+  isWatchOnlyAccount,
+  normalizeAccountKind
+} from '../lib/multisig'
+import {
+  calculateSafeTxHash,
+  confirmSafeTransaction,
+  executeSafeTransaction,
+  fetchSafeInfo,
+  listSafePendingTransactions,
+  proposeSafeTransaction,
+  type SafePendingTransactionSummary,
+  type SafeRpcAdapter,
+  type SafeOwnerSigner,
+  type SafeWalletTx
+} from '../lib/safe'
+import {
   fetchChainBalanceAndSync,
   type ChainBalanceSyncResult,
   resolveChainSendCustodyMode,
@@ -271,6 +294,10 @@ export interface FullBackupV1 {
   acceptedTermsAt?: number | null
 }
 
+export interface FullBackupV2 extends Omit<FullBackupV1, 'version'> {
+  version: 2
+}
+
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
 
 export interface SendListPreferenceBucket {
@@ -316,6 +343,7 @@ type RefreshActiveBalanceOptions = {
 export interface Account {
   id: string
   name: string
+  kind: AccountKind
   /** Per-network account labels, keyed by network id. */
   networkNames: Record<string, string>
   /** BIP44 account index used for deterministic derivation. */
@@ -326,6 +354,46 @@ export interface Account {
   /** Per-network cached balance strings, keyed by network id. */
   networkBalances: Record<string, string>
   balance: string
+  multisig?: MultisigMetadata
+}
+
+export type DerivedAccount = Account & {
+  kind: 'derived'
+  multisig?: undefined
+}
+
+export type WatchOnlyAccount = Account & {
+  kind: 'watch_only'
+  multisig?: undefined
+}
+
+export type MultisigAccount = Account & {
+  kind: 'multisig'
+  multisig: MultisigMetadata
+}
+
+export interface WalletAccountCapabilities {
+  canSend: boolean
+  canUseDappSend: boolean
+  canSignMessages: boolean
+  canSignTypedData: boolean
+  canUseBackendAuth: boolean
+  canImportWatchOnly: boolean
+}
+
+export interface AccountSignerContext {
+  mode: 'derived' | 'external' | 'multisig-owner'
+  signerAccountId: string | null
+  signerAddress: string | null
+  wallet?: ethers.HDNodeWallet | null
+  externalSigner?: Awaited<ReturnType<typeof resolveEvmExternalSigner>> | null
+}
+
+export interface MultisigOperationResult {
+  safeTxHash: string
+  nonce: number
+  status: 'proposed' | 'confirmed' | 'executed'
+  hash?: string
 }
 
 export interface Activity {
@@ -462,6 +530,9 @@ interface WalletState {
   ) => Promise<void>
   unlock: (password: string) => Promise<boolean>
   verifyPassword: (password: string) => Promise<boolean>
+  resolveAccountSpendAddress: (accountId: string, networkId: string) => Promise<string | null>
+  resolveAccountSignerContext: (accountId: string, networkId: string) => Promise<AccountSignerContext>
+  resolveAccountCapabilities: (accountId: string, networkId: string) => WalletAccountCapabilities
   resolveBackendAuthAddress: () => Promise<string>
   signBackendAuthMessage: (message: string) => Promise<{ address: string; signature: string }>
   lock: () => void
@@ -495,10 +566,35 @@ interface WalletState {
   
   // Account management
   addAccount: (name: string, networkId?: string) => Promise<void>
+  addMultisigAccount: (params: {
+    name: string
+    networkId: string
+    safeAddress: string
+    ownerSignerAccountId?: string | null
+  }) => Promise<void>
   removeAccount: (id: string) => void
   updateAccount: (id: string, updates: Partial<Account>) => void
   setNetworkAccountName: (accountId: string, networkId: string, name: string) => void
   setWatchOnlyAddress: (accountId: string, networkId: string, address: string) => void
+  updateMultisigOwnerSigner: (accountId: string, ownerSignerAccountId: string | null) => void
+  refreshMultisigMetadata: (accountId: string) => Promise<void>
+  listMultisigPendingTransactions: (accountId: string) => Promise<SafePendingTransactionSummary[]>
+  proposeMultisigTransaction: (params: {
+    accountId?: string
+    networkId?: string
+    tx: Omit<SafeWalletTx, 'nonce'> & { nonce?: number }
+    origin?: string
+  }) => Promise<MultisigOperationResult>
+  confirmMultisigTransaction: (params: {
+    accountId?: string
+    networkId?: string
+    safeTxHash: string
+  }) => Promise<MultisigOperationResult>
+  executeMultisigTransaction: (params: {
+    accountId?: string
+    networkId?: string
+    safeTxHash: string
+  }) => Promise<MultisigOperationResult>
   
   // Network management
   addNetwork: (network: Network) => void
@@ -536,7 +632,7 @@ interface WalletState {
     maxFeePerGas?: string
     maxPriorityFeePerGas?: string
     type?: 2
-  }) => Promise<{ hash: string }>
+  }) => Promise<{ hash: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }>
   sendPreparedEvmTransaction: (params: {
     networkId: string
     tx: {
@@ -547,10 +643,11 @@ interface WalletState {
       gasPrice?: string
       maxFeePerGas?: string
       maxPriorityFeePerGas?: string
+      nonce?: string | number
       chainId?: string | number
       type?: 2
     }
-  }) => Promise<{ hash: string }>
+  }) => Promise<{ hash: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }>
   sendXrpTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendCardanoTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
   sendMoneroTransaction: (params: { to: string; amount: string }) => Promise<{ hash: string }>
@@ -571,7 +668,7 @@ interface WalletState {
 
   // Full backup / restore
   fullRestore: (params: {
-    backup: FullBackupV1
+    backup: FullBackupV1 | FullBackupV2
     backupPassword: string
     newPassword: string
   }) => Promise<void>
@@ -623,7 +720,7 @@ interface WalletState {
     memo?: string
     changeAddress?: string
     assetChangeAddress?: string
-  }) => Promise<{ txid: string }>
+  }) => Promise<{ txid: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }>
   /** @deprecated Use sendAssetTransfer */
   sendRtmAsset: (params: {
     assetId: string
@@ -632,7 +729,7 @@ interface WalletState {
     memo?: string
     changeAddress?: string
     assetChangeAddress?: string
-  }) => Promise<{ txid: string }>
+  }) => Promise<{ txid: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }>
 }
 
 const BALANCE_UI_STABILIZE_MS = 650
@@ -1066,6 +1163,136 @@ function evmDerivationPath(accountIndex: number): string {
 
 function deriveEvmWallet(mnemonic: string, accountIndex: number): ethers.HDNodeWallet {
   return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
+}
+
+function buildSafeRpcAdapter(rpcConfig: UtxoRpcConfig): SafeRpcAdapter {
+  return {
+    call: async (method, params) => await callBridgeMethod(rpcConfig, method, params),
+    relaySignedTx: async (signedTxHex) => {
+      const relayed = await sendBridgeEvmSignedRelay(rpcConfig, {
+        kind: 'coin',
+        signedTxHex
+      })
+      return { txid: String(relayed.txid || '').trim() }
+    }
+  }
+}
+
+function resolveAccountByIdOrActive(state: WalletState, accountId?: string | null): Account | null {
+  const requestedId = String(accountId || '').trim()
+  if (requestedId) {
+    return state.accounts.find((account) => account.id === requestedId) || null
+  }
+  return state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0] || null
+}
+
+function resolveNetworkByIdOrActive(state: WalletState, networkId?: string | null): Network | null {
+  const requestedId = normalizeNetworkIdAlias(String(networkId || '').trim())
+  if (requestedId) {
+    return state.networks.find((network) => network.id === requestedId) || null
+  }
+  return state.networks.find((network) => network.id === state.activeNetworkId) || state.networks[0] || null
+}
+
+function getAccountCapabilitiesForNetwork(account: Account | null, network: Network | null): WalletAccountCapabilities {
+  const isMultisig = isMultisigAccount(account)
+  const isWatchOnly = isWatchOnlyAccount(account) || (network?.derivation?.status === 'unsupported' && !isMultisig)
+  return {
+    canSend: !isWatchOnly,
+    canUseDappSend: !isWatchOnly,
+    canSignMessages: isMultisig ? Boolean(account?.multisig?.capabilities?.canSignMessages) : !isWatchOnly,
+    canSignTypedData: isMultisig ? Boolean(account?.multisig?.capabilities?.canSignTypedData) : !isWatchOnly,
+    canUseBackendAuth: !isMultisig && !isWatchOnly,
+    canImportWatchOnly: Boolean(network?.derivation?.status === 'unsupported' && !isMultisig)
+  }
+}
+
+function buildSafeWalletTx(input: {
+  to: string
+  valueWei?: bigint
+  data?: string
+  nonce: number
+}): SafeWalletTx {
+  return {
+    to: ethers.getAddress(String(input.to || '').trim()),
+    value: String(input.valueWei ?? 0n),
+    data: String(input.data || '').trim() || '0x',
+    operation: 0,
+    safeTxGas: '0',
+    baseGas: '0',
+    gasPrice: '0',
+    gasToken: ethers.ZeroAddress,
+    refundReceiver: ethers.ZeroAddress,
+    nonce: input.nonce
+  }
+}
+
+async function dispatchSafeTransactionFlow(params: {
+  account: MultisigAccount
+  network: Network
+  rpcConfig: UtxoRpcConfig
+  tx: Omit<SafeWalletTx, 'nonce'> & { nonce?: number }
+  origin?: string
+  actions: Pick<
+    WalletState,
+    'proposeMultisigTransaction' | 'confirmMultisigTransaction' | 'executeMultisigTransaction'
+  >
+}): Promise<{ hash: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }> {
+  const chainId = Number(params.network.chainId || 0)
+  const safeInfo = await fetchSafeInfo({
+    chainId,
+    safeAddress: params.account.multisig.address,
+    rpc: buildSafeRpcAdapter(params.rpcConfig)
+  })
+  const candidateTx: SafeWalletTx = {
+    ...params.tx,
+    nonce: typeof params.tx.nonce === 'number' ? params.tx.nonce : safeInfo.nonce
+  }
+  const safeTxHash = await calculateSafeTxHash({
+    rpc: buildSafeRpcAdapter(params.rpcConfig),
+    safeAddress: params.account.multisig.address,
+    tx: candidateTx
+  })
+  const pending = await listSafePendingTransactions({
+    chainId,
+    safeAddress: params.account.multisig.address
+  }).catch(() => [])
+  const existing = pending.find((row) => row.safeTxHash.toLowerCase() === safeTxHash.toLowerCase())
+  if (!existing) {
+    const proposed = await params.actions.proposeMultisigTransaction({
+      accountId: params.account.id,
+      networkId: params.network.id,
+      tx: candidateTx,
+      origin: params.origin
+    })
+    return {
+      hash: proposed.hash || proposed.safeTxHash,
+      safeTxHash: proposed.safeTxHash,
+      status: proposed.status
+    }
+  }
+  if ((existing.confirmationsSubmitted + 1) >= safeInfo.threshold) {
+    const executed = await params.actions.executeMultisigTransaction({
+      accountId: params.account.id,
+      networkId: params.network.id,
+      safeTxHash
+    })
+    return {
+      hash: executed.hash || executed.safeTxHash,
+      safeTxHash: executed.safeTxHash,
+      status: executed.status
+    }
+  }
+  const confirmed = await params.actions.confirmMultisigTransaction({
+    accountId: params.account.id,
+    networkId: params.network.id,
+    safeTxHash
+  })
+  return {
+    hash: confirmed.hash || confirmed.safeTxHash,
+    safeTxHash: confirmed.safeTxHash,
+    status: confirmed.status
+  }
 }
 
 function isExternalEvmSignerEnabled(): boolean {
@@ -2954,34 +3181,112 @@ function getCachedBalanceForNetwork(
   return legacy || '0'
 }
 
+function defaultMultisigCapabilities(): MultisigCapabilities {
+  return {
+    canPropose: true,
+    canExecute: true,
+    canSignMessages: false,
+    canSignTypedData: false
+  }
+}
+
+function createEmptyAccountBalanceState(): Pick<Account, 'addresses' | 'networkAddresses' | 'networkBalances' | 'balance'> {
+  return {
+    addresses: createEmptyAccountAddresses(),
+    networkAddresses: {},
+    networkBalances: {},
+    balance: '0'
+  }
+}
+
+function normalizePersistedMultisigMetadata(value: unknown): MultisigMetadata | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<MultisigMetadata>
+  const family = candidate.family === 'safe' ? 'safe' : null
+  if (!family) return undefined
+  const address = String(candidate.address || '').trim()
+  const networkId = normalizeNetworkIdAlias(String(candidate.networkId || '').trim())
+  if (!address || !networkId) return undefined
+  return {
+    family,
+    networkId,
+    address: ethers.getAddress(address),
+    owners: Array.isArray(candidate.owners)
+      ? candidate.owners.map((row) => {
+        try {
+          return ethers.getAddress(String(row || '').trim())
+        } catch {
+          return ''
+        }
+      }).filter(Boolean)
+      : [],
+    threshold: Math.max(1, Number(candidate.threshold || 1)),
+    ownerSignerAccountId: typeof candidate.ownerSignerAccountId === 'string'
+      ? (candidate.ownerSignerAccountId.trim() || null)
+      : null,
+    capabilities: {
+      ...defaultMultisigCapabilities(),
+      ...(candidate.capabilities ?? {})
+    },
+    pendingProposalCount: Number.isFinite(Number(candidate.pendingProposalCount))
+      ? Math.max(0, Math.trunc(Number(candidate.pendingProposalCount)))
+      : undefined
+  }
+}
+
+function buildBaseAccount(candidate: Partial<Account>, index: number): Account {
+  const addresses = candidate.addresses ?? ({} as Record<CoinType, string>)
+  const networkAddresses = remapNetworkIdKeyedRecord(candidate.networkAddresses ?? {})
+  const networkNames = remapNetworkIdKeyedRecord(candidate.networkNames ?? {})
+  const networkBalances = remapNetworkIdKeyedRecord(candidate.networkBalances ?? {})
+  const kind = normalizeAccountKind(candidate.kind)
+
+  return {
+    id: typeof candidate.id === 'string' ? candidate.id : `acc-${index + 1}`,
+    name: typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`,
+    kind,
+    networkNames,
+    derivationIndex: resolveDerivationIndex(candidate, index),
+    addresses: {
+      EVM: addresses.EVM ?? '',
+      UTXO: addresses.UTXO ?? '',
+      BTC: addresses.BTC ?? '',
+      COSMOS: addresses.COSMOS ?? '',
+      SOL: addresses.SOL ?? '',
+      SUI: addresses.SUI ?? '',
+      XRP: addresses.XRP ?? ''
+    },
+    networkAddresses,
+    networkBalances,
+    balance: typeof candidate.balance === 'string' ? candidate.balance : '0'
+  }
+}
+
 function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
   if (!Array.isArray(rawAccounts)) return []
 
   return rawAccounts.map((raw, index) => {
     const candidate = (raw ?? {}) as Partial<Account>
-    const addresses = candidate.addresses ?? ({} as Record<CoinType, string>)
-    const networkAddresses = remapNetworkIdKeyedRecord(candidate.networkAddresses ?? {})
-    const networkNames = remapNetworkIdKeyedRecord(candidate.networkNames ?? {})
-    const networkBalances = remapNetworkIdKeyedRecord(candidate.networkBalances ?? {})
-
-    return {
-      id: typeof candidate.id === 'string' ? candidate.id : `acc-${index + 1}`,
-      name: typeof candidate.name === 'string' ? candidate.name : `Account ${index + 1}`,
-      networkNames: networkNames,
-      derivationIndex: resolveDerivationIndex(candidate, index),
-      addresses: {
-        EVM: addresses.EVM ?? '',
-        UTXO: addresses.UTXO ?? '',
-        BTC: addresses.BTC ?? '',
-        COSMOS: addresses.COSMOS ?? '',
-        SOL: addresses.SOL ?? '',
-        SUI: addresses.SUI ?? '',
-        XRP: addresses.XRP ?? ''
-      },
-      networkAddresses: networkAddresses,
-      networkBalances: networkBalances,
-      balance: typeof candidate.balance === 'string' ? candidate.balance : '0'
+    const base = buildBaseAccount(candidate, index)
+    const multisig = normalizePersistedMultisigMetadata((candidate as any).multisig)
+    if (base.kind === 'multisig' && multisig) {
+      return {
+        ...base,
+        networkAddresses: {
+          ...base.networkAddresses,
+          [multisig.networkId]: multisig.address
+        },
+        addresses: {
+          ...base.addresses,
+          EVM: multisig.address
+        },
+        multisig
+      }
     }
+    if (base.kind === 'watch_only') {
+      return { ...base, kind: 'watch_only' }
+    }
+    return { ...base, kind: 'derived' }
   })
 }
 
@@ -3185,6 +3490,7 @@ export const useWalletStore = create<WalletState>()(
         const initialAccount: Account = {
           id: 'acc-1',
           name: 'Account 1',
+          kind: 'derived',
           networkNames: {},
           derivationIndex: 0,
           addresses: derived.addresses,
@@ -3233,6 +3539,86 @@ export const useWalletStore = create<WalletState>()(
         }
       },
 
+      resolveAccountSpendAddress: async (accountId, networkId) => {
+        const state = get()
+        const network = resolveNetworkByIdOrActive(state, networkId)
+        const account = resolveAccountByIdOrActive(state, accountId)
+        if (!network || !account) return null
+        const direct = getAccountAddressForNetwork(account, network.id, network.coinType)
+        if (direct) return direct
+        if (isMultisigAccount(account)) return null
+        if (account.id === state.activeAccountId) {
+          return await get().ensureNetworkAddress(network.id)
+        }
+        return null
+      },
+
+      resolveAccountSignerContext: async (accountId, networkId) => {
+        const state = get()
+        const network = resolveNetworkByIdOrActive(state, networkId)
+        const account = resolveAccountByIdOrActive(state, accountId)
+        if (!network || !account) {
+          return { mode: 'derived', signerAccountId: null, signerAddress: null, wallet: null }
+        }
+        if (isMultisigAccount(account)) {
+          const linkedSignerAccountId = String(account.multisig.ownerSignerAccountId || '').trim()
+          if (isExternalEvmSignerEnabled()) {
+            const externalSigner = await resolveEvmExternalSigner()
+            const signerAddress = externalSigner ? ethers.getAddress(await externalSigner.getAddress()) : null
+            return {
+              mode: 'external',
+              signerAccountId: linkedSignerAccountId || null,
+              signerAddress,
+              externalSigner
+            }
+          }
+          if (state.isLocked || !state.sessionMnemonic) {
+            throw new Error('owner_signer_missing')
+          }
+          const signerAccount = linkedSignerAccountId
+            ? state.accounts.find((candidate) => candidate.id === linkedSignerAccountId) || null
+            : null
+          if (!signerAccount) {
+            throw new Error('owner_signer_missing')
+          }
+          const signerIndex = resolveDerivationIndex(signerAccount, state.accounts.findIndex((candidate) => candidate.id === signerAccount.id))
+          const wallet = deriveEvmWallet(state.sessionMnemonic, signerIndex)
+          return {
+            mode: 'multisig-owner',
+            signerAccountId: signerAccount.id,
+            signerAddress: ethers.getAddress(wallet.address),
+            wallet
+          }
+        }
+        if (isExternalEvmSignerEnabled()) {
+          const externalSigner = await resolveEvmExternalSigner()
+          const signerAddress = externalSigner ? ethers.getAddress(await externalSigner.getAddress()) : null
+          return {
+            mode: 'external',
+            signerAccountId: account.id,
+            signerAddress,
+            externalSigner
+          }
+        }
+        if (state.isLocked || !state.sessionMnemonic) throw new Error('Wallet is locked')
+        const derivationIndex = resolveDerivationIndex(account, state.accounts.findIndex((candidate) => candidate.id === account.id))
+        const wallet = deriveEvmWallet(state.sessionMnemonic, derivationIndex)
+        return {
+          mode: 'derived',
+          signerAccountId: account.id,
+          signerAddress: ethers.getAddress(wallet.address),
+          wallet
+        }
+      },
+
+      resolveAccountCapabilities: (accountId, networkId) => {
+        const state = get()
+        return getAccountCapabilitiesForNetwork(
+          resolveAccountByIdOrActive(state, accountId),
+          resolveNetworkByIdOrActive(state, networkId)
+        )
+      },
+
       resolveBackendAuthAddress: async () => {
         const { isLocked, sessionMnemonic, accounts, activeAccountId } = get()
         if (isExternalEvmSignerEnabled()) {
@@ -3244,6 +3630,9 @@ export const useWalletStore = create<WalletState>()(
 
         const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!activeAccount) throw new Error('No active account')
+        if (isMultisigAccount(activeAccount)) {
+          throw new Error('unsupported_method_for_multisig')
+        }
 
         const fallbackIndex = accounts.findIndex((a) => a.id === activeAccount.id)
         const derivationIndex = resolveDerivationIndex(activeAccount, fallbackIndex)
@@ -3263,6 +3652,9 @@ export const useWalletStore = create<WalletState>()(
 
         const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0]
         if (!activeAccount) throw new Error('No active account')
+        if (isMultisigAccount(activeAccount)) {
+          throw new Error('unsupported_method_for_multisig')
+        }
 
         const fallbackIndex = accounts.findIndex((a) => a.id === activeAccount.id)
         const derivationIndex = resolveDerivationIndex(activeAccount, fallbackIndex)
@@ -3283,12 +3675,10 @@ export const useWalletStore = create<WalletState>()(
             : [{
               id: 'acc-1',
               name: 'Account 1',
+              kind: 'derived',
               networkNames: {},
               derivationIndex: 0,
-              addresses: { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '' },
-              networkAddresses: {},
-              networkBalances: {},
-              balance: '0'
+              ...createEmptyAccountBalanceState()
             }]
 
           // Fast unlock path: restore persisted account state immediately.
@@ -3298,6 +3688,7 @@ export const useWalletStore = create<WalletState>()(
             const derivationIndex = resolveDerivationIndex(account, i)
             return {
               ...account,
+              kind: normalizeAccountKind(account.kind),
               derivationIndex,
               addresses: {
                 EVM: account.addresses?.EVM || '',
@@ -3311,7 +3702,8 @@ export const useWalletStore = create<WalletState>()(
               networkNames: { ...(account.networkNames ?? {}) },
               networkAddresses: { ...(account.networkAddresses ?? {}) },
               networkBalances: { ...(account.networkBalances ?? {}) },
-              balance: String(account.balance ?? '0')
+              balance: String(account.balance ?? '0'),
+              multisig: isMultisigAccount(account) ? normalizePersistedMultisigMetadata(account.multisig) : undefined
             }
           })
 
@@ -3413,6 +3805,9 @@ export const useWalletStore = create<WalletState>()(
         const net = networks.find(n => n.id === networkId)
         const acc = accounts.find(a => a.id === activeAccountId) || accounts[0]
         if (!net || !acc) return null
+        if (isMultisigAccount(acc)) {
+          return getMultisigAddress(acc, networkId) || null
+        }
         const modelId = resolveNetworkModelId(net)
         const existing = acc.networkAddresses?.[networkId]
         if (existing) {
@@ -5878,6 +6273,7 @@ export const useWalletStore = create<WalletState>()(
         if (net.coinType === 'EVM') {
           const recipient = String(toAddress || '').trim()
           if (!ethers.isAddress(recipient)) throw new Error('Invalid EVM recipient address')
+          const isSafeMultisig = isMultisigAccount(acc)
 
           const normalizedAssetId = String(assetId || '').trim()
           if (!normalizedAssetId) throw new Error('Token id is required')
@@ -5888,12 +6284,14 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           const modelPreferences = get().getNetworkModelPreferences(activeNetworkId)
-          const externalSigner = isExternalEvmSignerEnabled() ? await resolveEvmExternalSigner() : null
+          const externalSigner = !isSafeMultisig && isExternalEvmSignerEnabled() ? await resolveEvmExternalSigner() : null
           if (isExternalEvmSignerEnabled() && !externalSigner) {
-            throw new Error('External EVM signer is not available')
+            if (!isSafeMultisig) throw new Error('External EVM signer is not available')
           }
-          const wallet = externalSigner ? null : deriveEvmWallet(sessionMnemonic!, accountIndex)
-          const fromAddress = externalSigner
+          const wallet = (externalSigner || isSafeMultisig) ? null : deriveEvmWallet(sessionMnemonic!, accountIndex)
+          const fromAddress = isSafeMultisig
+            ? String(senderAddress || '').trim()
+            : externalSigner
             ? await externalSigner.getAddress()
             : String(wallet!.address || '').trim()
           const chainIdHex = await callBridgeMethod(rpcConfig, 'eth_chainId', [])
@@ -5963,6 +6361,31 @@ export const useWalletStore = create<WalletState>()(
                 '0x'
               ])
               relayAmount = qtyText
+            }
+
+            if (isSafeMultisig) {
+              const safeResult = await dispatchSafeTransactionFlow({
+                account: acc as MultisigAccount,
+                network: net,
+                rpcConfig,
+                tx: {
+                  to: tokenAddress,
+                  value: '0',
+                  data: transferData,
+                  operation: 0,
+                  safeTxGas: '0',
+                  baseGas: '0',
+                  gasPrice: '0',
+                  gasToken: ethers.ZeroAddress,
+                  refundReceiver: ethers.ZeroAddress
+                },
+                actions: get()
+              })
+              return {
+                txid: safeResult.hash,
+                safeTxHash: safeResult.safeTxHash,
+                status: safeResult.status
+              }
             }
 
             const feeQuote = await estimateEvmTxFee({
@@ -6066,6 +6489,30 @@ export const useWalletStore = create<WalletState>()(
           const amountRaw = ethers.parseUnits(String(qty || '').trim(), decimals)
           if (amountRaw <= 0n) throw new Error('Token amount must be greater than 0')
           const transferData = EVM_ERC20_TRANSFER_IFACE.encodeFunctionData('transfer', [recipient, amountRaw])
+          if (isSafeMultisig) {
+            const safeResult = await dispatchSafeTransactionFlow({
+              account: acc as MultisigAccount,
+              network: net,
+              rpcConfig,
+              tx: {
+                to: tokenAddress,
+                value: '0',
+                data: transferData,
+                operation: 0,
+                safeTxGas: '0',
+                baseGas: '0',
+                gasPrice: '0',
+                gasToken: ethers.ZeroAddress,
+                refundReceiver: ethers.ZeroAddress
+              },
+              actions: get()
+            })
+            return {
+              txid: safeResult.hash,
+              safeTxHash: safeResult.safeTxHash,
+              status: safeResult.status
+            }
+          }
           const feeQuote = await estimateEvmTxFee({
             rpcConfig,
             from: fromAddress,
@@ -6422,6 +6869,20 @@ export const useWalletStore = create<WalletState>()(
         const networks = get().networks
         const reHydratedAccounts: Account[] = []
         for (const acc of restoredAccounts) {
+          if (isMultisigAccount(acc)) {
+            reHydratedAccounts.push({
+              ...acc,
+              addresses: {
+                ...createEmptyAccountAddresses(),
+                EVM: acc.multisig.address
+              },
+              networkAddresses: {
+                ...(acc.networkAddresses ?? {}),
+                [acc.multisig.networkId]: acc.multisig.address
+              }
+            })
+            continue
+          }
           const derived = await deriveAccountAddresses(normalizedMnemonic, networks, acc.derivationIndex)
           reHydratedAccounts.push({
             ...acc,
@@ -6689,6 +7150,7 @@ export const useWalletStore = create<WalletState>()(
         const newAccount: Account = {
           id: `acc-${Date.now()}`,
           name: `Account ${derivationIndex + 1}`,
+          kind: 'derived',
           networkNames: { [selectedNetwork.id]: normalizedName },
           derivationIndex,
           addresses,
@@ -6702,6 +7164,62 @@ export const useWalletStore = create<WalletState>()(
           nextAccountIndex: derivationIndex + 1,
           lastActiveTimestamp: Date.now()
         })
+        await get().refreshActiveBalance()
+      },
+
+      addMultisigAccount: async ({ name, networkId, safeAddress, ownerSignerAccountId }) => {
+        const state = get()
+        const normalizedName = String(name || '').trim()
+        const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim())
+        if (!normalizedName) throw new Error('Account name is required')
+        const network = state.networks.find((candidate) => candidate.id === normalizedNetworkId)
+        if (!network || network.coinType !== 'EVM') {
+          throw new Error('wrong_network_for_safe')
+        }
+        const rpcConfig = await createUtxoRpcConfig(network, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const info = await fetchSafeInfo({
+          chainId: Number(network.chainId || 0),
+          safeAddress,
+          rpc: buildSafeRpcAdapter(rpcConfig)
+        })
+        const linkedOwnerId = String(ownerSignerAccountId || '').trim() || null
+        if (linkedOwnerId) {
+          const ownerAccount = state.accounts.find((account) => account.id === linkedOwnerId) || null
+          if (!ownerAccount) throw new Error('owner_signer_missing')
+          const ownerAddress = getAccountAddressForNetwork(ownerAccount, normalizedNetworkId, 'EVM')
+          if (!ownerAddress || !info.owners.some((owner) => owner.toLowerCase() === ownerAddress.toLowerCase())) {
+            throw new Error('owner_not_in_safe')
+          }
+        }
+        const newAccount: MultisigAccount = {
+          id: `safe-${Date.now()}`,
+          name: normalizedName,
+          kind: 'multisig',
+          networkNames: { [normalizedNetworkId]: normalizedName },
+          derivationIndex: -1,
+          addresses: { ...createEmptyAccountAddresses(), EVM: info.safeAddress },
+          networkAddresses: { [normalizedNetworkId]: info.safeAddress },
+          networkBalances: { [normalizedNetworkId]: '0' },
+          balance: '0',
+          multisig: {
+            family: 'safe',
+            networkId: normalizedNetworkId,
+            address: info.safeAddress,
+            owners: info.owners,
+            threshold: info.threshold,
+            ownerSignerAccountId: linkedOwnerId,
+            capabilities: defaultMultisigCapabilities(),
+            pendingProposalCount: info.pendingProposalCount
+          }
+        }
+        set((prev) => ({
+          accounts: [...prev.accounts, newAccount],
+          activeAccountId: newAccount.id,
+          activeNetworkId: normalizedNetworkId,
+          lastActiveTimestamp: Date.now()
+        }))
         await get().refreshActiveBalance()
       },
 
@@ -6760,6 +7278,7 @@ export const useWalletStore = create<WalletState>()(
             acc.id === accountId
               ? {
                   ...acc,
+                  kind: 'watch_only',
                   networkAddresses: {
                     ...(acc.networkAddresses ?? {}),
                     [networkId]: validation.normalized
@@ -6768,6 +7287,269 @@ export const useWalletStore = create<WalletState>()(
               : acc
           ))
         })
+      },
+
+      updateMultisigOwnerSigner: (accountId, ownerSignerAccountId) => {
+        set((state) => ({
+          accounts: state.accounts.map((account) => (
+            account.id === accountId && isMultisigAccount(account)
+              ? {
+                  ...account,
+                  multisig: {
+                    ...account.multisig,
+                    ownerSignerAccountId: String(ownerSignerAccountId || '').trim() || null
+                  }
+                }
+              : account
+          ))
+        }))
+      },
+
+      refreshMultisigMetadata: async (accountId) => {
+        const state = get()
+        const account = state.accounts.find((candidate) => candidate.id === accountId)
+        if (!isMultisigAccount(account)) throw new Error('unsupported_method_for_multisig')
+        const network = state.networks.find((candidate) => candidate.id === account.multisig.networkId)
+        if (!network || network.coinType !== 'EVM') throw new Error('wrong_network_for_safe')
+        const rpcConfig = await createUtxoRpcConfig(network, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const info = await fetchSafeInfo({
+          chainId: Number(network.chainId || 0),
+          safeAddress: account.multisig.address,
+          rpc: buildSafeRpcAdapter(rpcConfig)
+        })
+        set((prev) => ({
+          accounts: prev.accounts.map((candidate) => (
+            candidate.id === account.id && isMultisigAccount(candidate)
+              ? {
+                  ...candidate,
+                  addresses: { ...candidate.addresses, EVM: info.safeAddress },
+                  networkAddresses: {
+                    ...candidate.networkAddresses,
+                    [account.multisig.networkId]: info.safeAddress
+                  },
+                  multisig: {
+                    ...candidate.multisig,
+                    address: info.safeAddress,
+                    owners: info.owners,
+                    threshold: info.threshold,
+                    pendingProposalCount: info.pendingProposalCount
+                  }
+                }
+              : candidate
+          ))
+        }))
+      },
+
+      listMultisigPendingTransactions: async (accountId) => {
+        const state = get()
+        const account = state.accounts.find((candidate) => candidate.id === accountId)
+        if (!isMultisigAccount(account)) return []
+        const network = state.networks.find((candidate) => candidate.id === account.multisig.networkId)
+        if (!network || network.coinType !== 'EVM') return []
+        return await listSafePendingTransactions({
+          chainId: Number(network.chainId || 0),
+          safeAddress: account.multisig.address
+        })
+      },
+
+      proposeMultisigTransaction: async ({ accountId, networkId, tx, origin }) => {
+        const state = get()
+        const account = resolveAccountByIdOrActive(state, accountId)
+        if (!isMultisigAccount(account)) throw new Error('unsupported_method_for_multisig')
+        const network = resolveNetworkByIdOrActive(state, networkId || account.multisig.networkId)
+        if (!network || network.coinType !== 'EVM') throw new Error('wrong_network_for_safe')
+        const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
+        const signerAddress = String(signerContext.signerAddress || '').trim()
+        if (!signerAddress) throw new Error('owner_signer_missing')
+        if (!account.multisig.owners.some((owner) => owner.toLowerCase() === signerAddress.toLowerCase())) {
+          throw new Error('owner_not_in_safe')
+        }
+        const signer = signerContext.externalSigner
+          ? {
+              address: signerAddress,
+              signTypedData: signerContext.externalSigner.signTypedData,
+              sendTransaction: signerContext.externalSigner.sendTransaction
+            }
+          : signerContext.wallet
+          ? {
+              address: signerAddress,
+              signTypedData: async (domain: Record<string, unknown>, types: Record<string, unknown>, value: Record<string, unknown>) => await signerContext.wallet!.signTypedData(domain as any, types as any, value as any),
+              sendTransaction: async (input: {
+                to: string
+                valueWei: bigint
+                data?: string
+                gasLimit?: bigint
+                gasPrice?: bigint
+                maxFeePerGas?: bigint
+                maxPriorityFeePerGas?: bigint
+                type?: 2
+              }) => {
+                const prepared = {
+                  to: input.to,
+                  value: input.valueWei,
+                  data: input.data,
+                  gasLimit: input.gasLimit,
+                  gasPrice: input.gasPrice,
+                  maxFeePerGas: input.maxFeePerGas,
+                  maxPriorityFeePerGas: input.maxPriorityFeePerGas,
+                  type: input.type,
+                  chainId: network.chainId
+                } as Record<string, unknown>
+                const signedTx = await signerContext.wallet!.signTransaction(prepared as any)
+                const rpcConfig = await createUtxoRpcConfig(network, {
+                  secureBridgeSigner: get().signBackendAuthMessage
+                })
+                const relayed = await sendBridgeEvmSignedRelay(rpcConfig, { kind: 'coin', signedTxHex: signedTx })
+                return { hash: String(relayed.txid || '').trim() }
+              }
+            }
+          : null
+        if (!signer) throw new Error('owner_signer_missing')
+        const rpcConfig = await createUtxoRpcConfig(network, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const info = await fetchSafeInfo({
+          chainId: Number(network.chainId || 0),
+          safeAddress: account.multisig.address,
+          rpc: buildSafeRpcAdapter(rpcConfig)
+        })
+        const proposal = await proposeSafeTransaction({
+          chainId: Number(network.chainId || 0),
+          safeAddress: info.safeAddress,
+          tx: {
+            ...tx,
+            nonce: typeof tx.nonce === 'number' ? tx.nonce : info.nonce
+          },
+          rpc: buildSafeRpcAdapter(rpcConfig),
+          signer,
+          origin
+        })
+        await get().refreshMultisigMetadata(account.id)
+        return {
+          safeTxHash: proposal.safeTxHash,
+          nonce: proposal.nonce,
+          status: 'proposed'
+        }
+      },
+
+      confirmMultisigTransaction: async ({ accountId, networkId, safeTxHash }) => {
+        const state = get()
+        const account = resolveAccountByIdOrActive(state, accountId)
+        if (!isMultisigAccount(account)) throw new Error('unsupported_method_for_multisig')
+        const network = resolveNetworkByIdOrActive(state, networkId || account.multisig.networkId)
+        if (!network || network.coinType !== 'EVM') throw new Error('wrong_network_for_safe')
+        const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
+        const signerAddress = String(signerContext.signerAddress || '').trim()
+        if (!signerAddress) throw new Error('owner_signer_missing')
+        if (!account.multisig.owners.some((owner) => owner.toLowerCase() === signerAddress.toLowerCase())) {
+          throw new Error('owner_not_in_safe')
+        }
+        const signer = signerContext.externalSigner
+          ? {
+              address: signerAddress,
+              signTypedData: signerContext.externalSigner.signTypedData,
+              sendTransaction: signerContext.externalSigner.sendTransaction
+            }
+          : signerContext.wallet
+          ? {
+              address: signerAddress,
+              signTypedData: async (domain: Record<string, unknown>, types: Record<string, unknown>, value: Record<string, unknown>) => await signerContext.wallet!.signTypedData(domain as any, types as any, value as any),
+              sendTransaction: async () => {
+                throw new Error('execution_not_ready')
+              }
+            }
+          : null
+        if (!signer) throw new Error('owner_signer_missing')
+        const rpcConfig = await createUtxoRpcConfig(network, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const confirmation = await confirmSafeTransaction({
+          chainId: Number(network.chainId || 0),
+          safeAddress: account.multisig.address,
+          safeTxHash,
+          rpc: buildSafeRpcAdapter(rpcConfig),
+          signer
+        })
+        await get().refreshMultisigMetadata(account.id)
+        return {
+          safeTxHash: confirmation.safeTxHash,
+          nonce: confirmation.nonce,
+          status: 'confirmed'
+        }
+      },
+
+      executeMultisigTransaction: async ({ accountId, networkId, safeTxHash }) => {
+        const state = get()
+        const account = resolveAccountByIdOrActive(state, accountId)
+        if (!isMultisigAccount(account)) throw new Error('unsupported_method_for_multisig')
+        const network = resolveNetworkByIdOrActive(state, networkId || account.multisig.networkId)
+        if (!network || network.coinType !== 'EVM') throw new Error('wrong_network_for_safe')
+        const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
+        const signerAddress = String(signerContext.signerAddress || '').trim()
+        if (!signerAddress) throw new Error('owner_signer_missing')
+        const signer = signerContext.externalSigner
+          ? {
+              address: signerAddress,
+              signTypedData: signerContext.externalSigner.signTypedData,
+              sendTransaction: signerContext.externalSigner.sendTransaction
+            }
+          : signerContext.wallet
+          ? {
+              address: signerAddress,
+              signTypedData: async (domain: Record<string, unknown>, types: Record<string, unknown>, value: Record<string, unknown>) => await signerContext.wallet!.signTypedData(domain as any, types as any, value as any),
+              sendTransaction: async (input: {
+                to: string
+                valueWei: bigint
+                data?: string
+                gasLimit?: bigint
+                gasPrice?: bigint
+                maxFeePerGas?: bigint
+                maxPriorityFeePerGas?: bigint
+                type?: 2
+              }) => {
+                const txToSign: any = {
+                  to: input.to,
+                  value: input.valueWei,
+                  data: input.data,
+                  chainId: network.chainId
+                }
+                if (input.gasLimit !== undefined) txToSign.gasLimit = input.gasLimit
+                if (input.type === 2) {
+                  txToSign.type = 2
+                  if (input.maxFeePerGas !== undefined) txToSign.maxFeePerGas = input.maxFeePerGas
+                  if (input.maxPriorityFeePerGas !== undefined) txToSign.maxPriorityFeePerGas = input.maxPriorityFeePerGas
+                } else if (input.gasPrice !== undefined) {
+                  txToSign.gasPrice = input.gasPrice
+                }
+                const signedTxHex = await signerContext.wallet!.signTransaction(txToSign)
+                const rpcConfig = await createUtxoRpcConfig(network, {
+                  secureBridgeSigner: get().signBackendAuthMessage
+                })
+                const relayed = await sendBridgeEvmSignedRelay(rpcConfig, { kind: 'coin', signedTxHex })
+                return { hash: String(relayed.txid || '').trim() }
+              }
+            }
+          : null
+        if (!signer) throw new Error('owner_signer_missing')
+        const rpcConfig = await createUtxoRpcConfig(network, {
+          secureBridgeSigner: get().signBackendAuthMessage
+        })
+        const execution = await executeSafeTransaction({
+          chainId: Number(network.chainId || 0),
+          safeAddress: account.multisig.address,
+          safeTxHash,
+          rpc: buildSafeRpcAdapter(rpcConfig),
+          signer
+        })
+        await get().refreshMultisigMetadata(account.id)
+        return {
+          safeTxHash: execution.safeTxHash,
+          nonce: execution.nonce,
+          hash: execution.hash,
+          status: 'executed'
+        }
       },
 
       addNetwork: (network) => {
@@ -7593,6 +8375,7 @@ export const useWalletStore = create<WalletState>()(
 
         const net = networks.find((n) => n.id === activeNetworkId)
         const acc = accounts.find((a) => a.id === activeAccountId) || accounts[0]
+        const isSafeMultisig = isMultisigAccount(acc)
         const modelPreferences = get().getNetworkModelPreferences(activeNetworkId)
         if (!net || net.coinType !== 'EVM') throw new Error('Active network is not EVM')
         if (!acc?.addresses?.EVM && !isExternalEvmSignerEnabled()) throw new Error('No active account')
@@ -7610,6 +8393,31 @@ export const useWalletStore = create<WalletState>()(
         } else {
           if (!recipient) throw new Error('Destination address is required')
           if (!valueText) throw new Error('Amount is required')
+        }
+
+        if (isSafeMultisig) {
+          if (!recipient) throw new Error('unsupported_method_for_multisig')
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          const valueWei = parseEvmCoinAmountToWei(valueText || '0', isCustomEvmTx ? 'value' : 'amount')
+          return await dispatchSafeTransactionFlow({
+            account: acc as MultisigAccount,
+            network: net,
+            rpcConfig,
+            tx: {
+              to: recipient || ethers.ZeroAddress,
+              value: valueWei.toString(),
+              data: txData || '0x',
+              operation: 0,
+              safeTxGas: '0',
+              baseGas: '0',
+              gasPrice: '0',
+              gasToken: ethers.ZeroAddress,
+              refundReceiver: ethers.ZeroAddress
+            },
+            actions: get()
+          })
         }
 
         if (isExternalEvmSignerEnabled()) {
@@ -7752,6 +8560,7 @@ export const useWalletStore = create<WalletState>()(
         const normalizedNetworkId = normalizeNetworkIdAlias(String(networkId || '').trim())
         const net = networks.find((candidate) => candidate.id === normalizedNetworkId)
         const acc = accounts.find((account) => account.id === activeAccountId) || accounts[0]
+        const isSafeMultisig = isMultisigAccount(acc)
         const modelPreferences = get().getNetworkModelPreferences(normalizedNetworkId)
         if (!net || net.coinType !== 'EVM') throw new Error('Selected network is not EVM')
         if (!acc?.addresses?.EVM && !isExternalEvmSignerEnabled()) throw new Error('No active account')
@@ -7773,6 +8582,31 @@ export const useWalletStore = create<WalletState>()(
         const manualMaxPriorityFeePerGas = parseOptionalRpcQuantity(tx?.maxPriorityFeePerGas, 'maxPriorityFeePerGas')
         if (manualGasPrice !== undefined && (manualMaxFeePerGas !== undefined || manualMaxPriorityFeePerGas !== undefined)) {
           throw new Error('Use either gasPrice or EIP-1559 fee fields, not both')
+        }
+
+        if (isSafeMultisig) {
+          if (!recipient) throw new Error('unsupported_method_for_multisig')
+          const rpcConfig = await createUtxoRpcConfig(net, {
+            secureBridgeSigner: get().signBackendAuthMessage
+          })
+          return await dispatchSafeTransactionFlow({
+            account: acc as MultisigAccount,
+            network: net,
+            rpcConfig,
+            tx: {
+              to: recipient || ethers.ZeroAddress,
+              value: manualValue.toString(),
+              data: txData || '0x',
+              operation: 0,
+              safeTxGas: '0',
+              baseGas: '0',
+              gasPrice: '0',
+              gasToken: ethers.ZeroAddress,
+              refundReceiver: ethers.ZeroAddress,
+              nonce: tx?.nonce !== undefined ? Number(tx.nonce) : undefined
+            } as any,
+            actions: get()
+          })
         }
 
         if (isExternalEvmSignerEnabled()) {
@@ -8105,6 +8939,7 @@ export const useWalletStore = create<WalletState>()(
     {
       name: WALLET_STORAGE_KEY,
       storage: createJSONStorage(() => extensionStateStorage),
+      version: 2,
       partialize: (state) => ({
         isInitialized: state.isInitialized,
         hasVault: state.hasVault,
@@ -8129,6 +8964,7 @@ export const useWalletStore = create<WalletState>()(
         lastActiveTimestamp: state.lastActiveTimestamp,
         activity: trimPersistedActivityEntries(state.activity)
       }),
+      migrate: (persistedState) => persistedState as any,
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
         const merged = { ...currentState, ...persisted } as WalletState

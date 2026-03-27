@@ -8,6 +8,7 @@ import {
   type DappPendingRequest,
   type DappSendEvmTransactionPayload
 } from '../../lib/dappPermissions'
+import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
 import { useWalletStore } from '../../store/walletStore'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
@@ -68,6 +69,7 @@ const DappRequestConfirm: React.FC = () => {
   const location = useLocation()
   const {
     isLocked,
+    accounts,
     networks,
     activeNetworkId,
     activeAccountId,
@@ -112,6 +114,9 @@ const DappRequestConfirm: React.FC = () => {
   const requestModelId = resolveRuntimeModelId(requestNetwork)
   const requestPayload = asRecord(pendingRequest?.request)
   const requestMethod = String(pendingRequest?.method || '').trim()
+  const requestAccount = accounts.find((account) => account.id === pendingRequest?.accountId) || accounts[0]
+  const requestAccountKindLabel = getAccountKindLabel(requestAccount)
+  const requestAccountIsMultisig = isMultisigAccount(requestAccount)
   const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
   const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
   const requestIsSignMessage = requestMethod === 'wallet_signMessage'
@@ -123,7 +128,21 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsCosmosSignAmino = requestMethod === 'wallet_cosmosSignAmino'
   const requestIsCosmosSendTx = requestMethod === 'wallet_cosmosSendTx'
   const requestIsCosmosGetKey = requestMethod === 'wallet_cosmosGetKey'
-  const requestTypeLabel = requestIsAssetSend
+  const requestTypeLabel = requestAccountIsMultisig
+    ? (
+        requestIsSignMessage
+        || requestIsSignTypedData
+        || requestIsSignTransaction
+        || requestIsSignAllTransactions
+        || requestIsSignAndSendTransaction
+          ? 'Unsupported Multisig Signature'
+          : requestIsAssetSend
+          ? 'Multisig Asset Proposal'
+          : requestIsEvmTx
+          ? 'Multisig Proposal'
+          : 'Multisig Transfer'
+      )
+    : requestIsAssetSend
     ? 'Asset Transfer'
     : requestIsSignMessage
     ? 'Message Signature'
@@ -186,6 +205,9 @@ const DappRequestConfirm: React.FC = () => {
       || '0'
     )
     : String((pendingRequest?.request as any)?.amount || '')
+  const multisigUnsupportedReason = requestAccountIsMultisig
+    ? 'Multisig accounts only support proposal-based EVM sends in v1. Message signing, typed data, and raw transaction signatures stay disabled.'
+    : ''
   const requestMemo = String((pendingRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.assetId || '')
@@ -303,6 +325,18 @@ const DappRequestConfirm: React.FC = () => {
     setSubmitError('')
     if (sendBlockedBySync) {
       setSubmitError(syncBlockedReason)
+      return
+    }
+    if (requestAccountIsMultisig && (
+      requestIsSignMessage
+      || requestIsSignTypedData
+      || requestIsSignTransaction
+      || requestIsSignAllTransactions
+      || requestIsSignAndSendTransaction
+      || requestIsCosmosSignDirect
+      || requestIsCosmosSignAmino
+    )) {
+      setSubmitError('This multisig account only supports proposal-based EVM send requests in v1')
       return
     }
     setIsSubmitting(true)
@@ -548,21 +582,21 @@ const DappRequestConfirm: React.FC = () => {
           memo: requestMemo
         })
       const txHash = String((tx as any)?.hash || (tx as any)?.txid || (tx as any)?.signature || (tx as any)?.txhash || '').trim()
+      const safeTxHash = String((tx as any)?.safeTxHash || '').trim()
+      const txIdentifier = txHash || safeTxHash
 
-      if (txHash && !requestIsSignMessage && !requestIsSignTypedData && !requestIsSignTransaction && !requestIsSignAllTransactions && !requestIsCosmosSignDirect && !requestIsCosmosSignAmino && !requestIsCosmosGetKey) {
+      if (txIdentifier && !requestIsSignMessage && !requestIsSignTypedData && !requestIsSignTransaction && !requestIsSignAllTransactions && !requestIsCosmosSignDirect && !requestIsCosmosSignAmino && !requestIsCosmosGetKey) {
         const latestState = useWalletStore.getState()
         const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]
         const accountForActivity = latestState.accounts.find((a) => a.id === pendingRequest.accountId) || latestState.accounts[0]
         const senderAddress = String(
-          accountForActivity?.networkAddresses?.[pendingRequest.networkId]
-          || (networkForActivity?.coinType === 'EVM' ? accountForActivity?.addresses?.EVM : '')
-          || (networkForActivity?.coinType === 'XRP' ? accountForActivity?.addresses?.XRP : '')
+          getAccountAddressForNetwork(accountForActivity, pendingRequest.networkId, networkForActivity?.coinType)
           || ''
         ).trim()
 
         if (networkForActivity) {
           addActivity({
-            id: txHash,
+            id: txIdentifier,
             type: 'sent',
             asset: requestIsAssetSend ? requestAssetId : networkForActivity.symbol,
             assetId: requestIsAssetSend
@@ -576,7 +610,9 @@ const DappRequestConfirm: React.FC = () => {
             timestamp: Date.now(),
             networkId: networkForActivity.id
           })
-          trackActivityTransactionStatus({ txid: txHash, networkId: networkForActivity.id })
+          if (txHash) {
+            trackActivityTransactionStatus({ txid: txHash, networkId: networkForActivity.id })
+          }
         }
         await collectActiveNetworkData({ force: true, includeFiat: false })
       }
@@ -590,9 +626,9 @@ const DappRequestConfirm: React.FC = () => {
         }
       })
 
-      if (txHash) {
+      if (txIdentifier) {
         const resultState: TxResultState = {
-          txid: txHash,
+          txid: txIdentifier,
           networkId: pendingRequest.networkId,
           accountId: pendingRequest.accountId,
           asset: requestIsAssetSend ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX'),
@@ -602,7 +638,7 @@ const DappRequestConfirm: React.FC = () => {
           amount: requestAmount || '0',
           from: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : undefined,
           to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : (requestTo || undefined),
-          status: 'pending',
+          status: txHash ? 'pending' : String((tx as any)?.status || 'pending'),
           origin: pendingRequest.origin,
           requestMethod: requestMethod
         }
@@ -661,6 +697,11 @@ const DappRequestConfirm: React.FC = () => {
             <div className="space-y-2 text-center">
               <h2 className="text-lg font-bold">Approve transaction</h2>
               <p className="text-xs text-gray-400 break-all">{pendingRequest.origin}</p>
+              <div className="flex justify-center">
+                <span className="rounded-full border border-dark-600 bg-dark-800 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-gray-200">
+                  {requestAccountKindLabel}
+                </span>
+              </div>
             </div>
 
             <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50 space-y-3">
@@ -686,6 +727,12 @@ const DappRequestConfirm: React.FC = () => {
               {requestTxType ? <Row label="Tx Type" value={String(requestTxType)} mono /> : null}
             </div>
 
+            {requestAccountIsMultisig ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[11px] text-amber-100 leading-relaxed">
+                {multisigUnsupportedReason}
+              </div>
+            ) : null}
+
             {submitError ? (
               <p className="text-xs text-red-400 break-words">{submitError}</p>
             ) : null}
@@ -709,7 +756,7 @@ const DappRequestConfirm: React.FC = () => {
           className="flex-1 btn-primary"
           onClick={() => { void approveRequest() }}
           isLoading={isSubmitting}
-          disabled={!pendingRequest || sendBlockedBySync}
+          disabled={!pendingRequest || sendBlockedBySync || (requestAccountIsMultisig && (requestIsSignMessage || requestIsSignTypedData || requestIsSignTransaction || requestIsSignAllTransactions || requestIsSignAndSendTransaction || requestIsCosmosSignDirect || requestIsCosmosSignAmino))}
         >
           Approve
         </Button>

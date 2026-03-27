@@ -8,6 +8,7 @@ import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInform
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
@@ -53,6 +54,7 @@ interface TxState {
 
 interface TxResultState {
   txid: string
+  safeTxHash?: string
   networkId: string
   accountId?: string
   asset: string
@@ -238,9 +240,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activityAssetId = isAssetTransfer ? assetId : buildNativeActivityAssetId(displayNetworkId)
   const fromAddress = isDappTxRoute && currentDappRequest
     ? String(
-        activeAccount?.networkAddresses?.[displayNetworkId]
-        || (activeNetwork?.coinType === 'EVM' ? activeAccount?.addresses?.EVM : '')
-        || (activeNetwork?.coinType === 'XRP' ? activeAccount?.addresses?.XRP : '')
+        getAccountAddressForNetwork(activeAccount, displayNetworkId, activeNetwork?.coinType)
         || txState.from
         || ''
       ).trim()
@@ -253,6 +253,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activeModelId = resolveRuntimeModelId(activeNetwork)
   const isSolanaModel = activeNetwork.coinType === 'SOL' || activeModelId === 'sol' || activeModelId === 'solana'
   const activeAccountName = getAccountDisplayName(activeAccount, displayNetworkId, 'Account 1')
+  const activeAccountKindLabel = getAccountKindLabel(activeAccount)
+  const activeAccountIsMultisig = isMultisigAccount(activeAccount)
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -686,17 +688,19 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       } else {
         throw new Error(`Unsupported coin type: ${activeNetwork.coinType}`)
       }
-      if (!txHash) throw new Error('Transaction sent but hash is missing')
+      const safeTxHash = String((txResult as any)?.safeTxHash || '').trim()
+      const txIdentifier = txHash || safeTxHash
+      if (!txIdentifier) throw new Error('Transaction sent but identifier is missing')
       console.info(`[${sendTraceId}] transaction accepted`, {
         networkId: activeNetwork.id,
-        txHash,
+        txHash: txIdentifier,
         isAssetTransfer,
         assetId: isAssetTransfer ? assetId : undefined,
         sendAssetId: isAssetTransfer ? sendAssetId : undefined
       })
       
       addActivity({
-        id: txHash,
+        id: txIdentifier,
         type: 'sent',
         asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
         assetId: activityAssetId || undefined,
@@ -708,7 +712,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         timestamp: Date.now(),
         networkId: activeNetwork.id
       })
-      trackActivityTransactionStatus({ txid: txHash, networkId: activeNetwork.id })
+      if (txHash) {
+        trackActivityTransactionStatus({ txid: txHash, networkId: activeNetwork.id })
+      }
       void refreshActiveBalance({ fast: true, skipZeroBalanceRecheck: true }).catch((err) => {
         console.warn('Post-send fast balance refresh failed:', err)
       })
@@ -725,7 +731,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       }
 
       const resultState: TxResultState = {
-        txid: txHash,
+        txid: txIdentifier,
+        safeTxHash: safeTxHash || undefined,
         networkId: activeNetwork.id,
         accountId: activeAccount?.id,
         asset: isAssetTransfer ? (assetLabel || assetId || 'ASSET') : activeNetwork.symbol,
@@ -733,7 +740,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
         amount: amount || '0',
         from: fromAddress || '',
         to: toAddress || undefined,
-        status: 'pending',
+        status: txHash ? 'pending' : (String((txResult as any)?.status || 'pending')),
         origin: isDappTxRoute ? requestOrigin : undefined,
         requestMethod: isDappTxRoute ? currentDappRequest?.method : undefined,
         returnTo: txState.returnTo,
@@ -861,6 +868,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
                <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
                <span className="text-[9px] font-bold text-gray-300 uppercase">{activeNetwork.name}</span>
             </div>
+          </div>
+          <div className="flex justify-center">
+            <span className="rounded-full border border-dark-600 bg-dark-800 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-gray-200">
+              {activeAccountKindLabel}
+            </span>
           </div>
 
           <div className="flex items-center justify-center gap-3">
@@ -1050,10 +1062,19 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           </div>
         )}
 
-        {submitError && (
+          {submitError && (
           <div className="mx-2 p-3 bg-red-900/20 border border-red-500/30 rounded-xl flex items-center gap-2">
             <IoInformationCircle className="text-red-400 w-4 h-4 shrink-0" />
             <span className="text-xs font-bold text-red-300">{submitError}</span>
+          </div>
+        )}
+
+        {activeAccountIsMultisig && !submitError && (
+          <div className="mx-2 p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-center gap-2">
+            <IoInformationCircle className="text-amber-300 w-4 h-4 shrink-0" />
+            <span className="text-xs font-bold text-amber-200">
+              This account is a multisig contract account. Confirming here creates, confirms, or executes a Safe transaction depending on its current state.
+            </span>
           </div>
         )}
 
@@ -1089,7 +1110,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           }
           isLoading={isSubmitting}
         >
-          Confirm
+          {activeAccountIsMultisig ? 'Process Multisig' : 'Confirm'}
         </Button>
       </footer>
     </div>
@@ -1099,7 +1120,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     return (
       <PasswordGate
         title="Unlock to confirm transfer"
-        description="Unlock your wallet to review this website transfer and press Confirm."
+        description={activeAccountIsMultisig ? 'Unlock your wallet to review this website transfer and process the Safe transaction.' : 'Unlock your wallet to review this website transfer and press Confirm.'}
       >
         {content}
       </PasswordGate>

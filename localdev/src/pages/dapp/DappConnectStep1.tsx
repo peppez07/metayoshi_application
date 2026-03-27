@@ -6,6 +6,7 @@ import {
   type DappScope
 } from '../../lib/dappPermissions'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
 import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
@@ -37,18 +38,10 @@ const DappConnectStep1: React.FC = () => {
     () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
     [activeAccount, approvalNetworkId, activeNetworkId]
   )
+  const activeAccountKindLabel = getAccountKindLabel(activeAccount)
+  const isActiveMultisig = isMultisigAccount(activeAccount)
   const approvalAddress = useMemo(() => {
-    if (!activeAccount) return ''
-
-    const networkAddress = String(activeAccount.networkAddresses?.[approvalNetworkId] || '').trim()
-    if (networkAddress) return networkAddress
-
-    if (approvalNetwork?.coinType === 'EVM') return String(activeAccount.addresses?.EVM || '').trim()
-    if (approvalNetwork?.coinType === 'XRP') return String(activeAccount.addresses?.XRP || '').trim()
-    if (approvalNetwork?.coinType === 'COSMOS') return String(activeAccount.addresses?.COSMOS || '').trim()
-    if (approvalNetwork?.coinType === 'UTXO') return String(activeAccount.addresses?.UTXO || '').trim()
-
-    return String(activeAccount.addresses?.UTXO || activeAccount.addresses?.EVM || '').trim()
+    return String(getAccountAddressForNetwork(activeAccount, approvalNetworkId, approvalNetwork?.coinType) || '').trim()
   }, [activeAccount, approvalNetwork, approvalNetworkId])
 
   const rejectAndClose = async (): Promise<void> => {
@@ -83,6 +76,11 @@ const DappConnectStep1: React.FC = () => {
           <div className="text-center">
             <h2 className="text-lg font-bold">Connect With MetaYoshi</h2>
             <p className="text-xs text-gray-400">{pendingApproval.origin}</p>
+            <div className="mt-3 flex justify-center">
+              <span className="rounded-full border border-dark-600 bg-dark-800 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-gray-200">
+                {activeAccountKindLabel}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -118,6 +116,12 @@ const DappConnectStep1: React.FC = () => {
                 This approval connects the site to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
                 MetaYoshi does not apply this approval to a custom account list.
               </p>
+              {isActiveMultisig && (
+                <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+                  Multisig metadata is recognized separately from the public address. The site still only sees one account
+                  address here.
+                </p>
+              )}
               <p className="text-gray-400">
                 If the site later asks to change accounts, MetaYoshi will require a separate approval before switching
                 your active wallet account.

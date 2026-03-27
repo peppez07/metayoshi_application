@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
-import { useWalletStore, type FullBackupV1 } from '../../store/walletStore'
+import { useWalletStore, type FullBackupV1, type FullBackupV2 } from '../../store/walletStore'
 import { useNavigate } from 'react-router-dom'
 import { decryptVaultV1, type EncryptedVaultV1 } from '../../lib/vaultCrypto'
 import {
@@ -19,10 +19,10 @@ import {
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-function isFullBackup(v: unknown): v is FullBackupV1 {
+function isFullBackup(v: unknown): v is FullBackupV1 | FullBackupV2 {
   if (!v || typeof v !== 'object') return false
   const obj = v as Record<string, unknown>
-  return obj.type === 'metayoshi-full-backup' && obj.version === 1 && Boolean(obj.vault)
+  return obj.type === 'metayoshi-full-backup' && (obj.version === 1 || obj.version === 2) && Boolean(obj.vault)
 }
 
 function isVaultBackup(v: unknown): v is { vault: EncryptedVaultV1 } {
@@ -58,7 +58,7 @@ const RestoreSettings: React.FC = () => {
 
   // full backup mode
   const [fullBackupJson,   setFullBackupJson]   = useState('')
-  const [parsedBackup,     setParsedBackup]     = useState<FullBackupV1 | null>(null)
+  const [parsedBackup,     setParsedBackup]     = useState<(FullBackupV1 | FullBackupV2) | null>(null)
   const [backupParseError, setBackupParseError] = useState('')
 
   // phrase mode
@@ -99,7 +99,7 @@ const RestoreSettings: React.FC = () => {
     try {
       const parsed = JSON.parse(text)
       if (!isFullBackup(parsed)) {
-        setBackupParseError('File is not a MetaYoshi Full Backup (v1)')
+        setBackupParseError('File is not a MetaYoshi Full Backup (v1/v2)')
         return
       }
       setParsedBackup(parsed)

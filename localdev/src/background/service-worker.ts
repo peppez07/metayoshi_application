@@ -31,6 +31,7 @@ import {
   type DappRequestMethod,
   type DappScope
 } from '../lib/dappPermissions'
+import { getAccountAddressForNetwork, isMultisigAccount } from '../lib/multisig'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
@@ -148,6 +149,9 @@ interface WalletState {
   hasVault?: boolean
   accounts?: Array<{
     id: string
+    kind?: string
+    family?: string
+    multisig?: unknown
     addresses: { EVM?: string; UTXO?: string; XRP?: string; COSMOS?: string }
     networkAddresses?: Record<string, string>
   }>
@@ -400,29 +404,18 @@ function getActiveAddressFromState(state: WalletState, networkId: string): strin
   const network = state.networks?.find((n) => n.id === normalizedNetworkId)
   const account = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
   if (!network || !account) return null
+  return String(getAccountAddressForNetwork(account as any, normalizedNetworkId, network.coinType) || '').trim() || null
+}
 
-  const networkAddress = String(account.networkAddresses?.[normalizedNetworkId] || '').trim()
-  if (networkAddress) return networkAddress
+function getActiveAccountFromState(state: WalletState) {
+  return state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0] || null
+}
 
-  if (network.coinType === 'EVM') {
-    return account.addresses?.EVM || null
+function throwUnsupportedMultisigMethod(method: string): never {
+  throw {
+    code: -32603,
+    message: `${method} is not supported for multisig accounts in this build`
   }
-  if (network.coinType === 'XRP') {
-    return account.addresses?.XRP || null
-  }
-  if (network.coinType === 'COSMOS') {
-    return account.addresses?.COSMOS || null
-  }
-  if (network.coinType === 'UTXO') {
-    return account.addresses?.UTXO || null
-  }
-  if (network.coinType === 'SOL') {
-    return (account.addresses as any)?.SOL || null
-  }
-  if (network.coinType === 'SUI') {
-    return (account.addresses as any)?.SUI || null
-  }
-  return null
 }
 
 function findNetworkByCoinType(state: WalletState, coinType: string): DappNetworkEntry | undefined {
@@ -2033,9 +2026,12 @@ async function handleRpcMethod(
     if (!network) {
       throw { code: 4900, message: 'No network is available' }
     }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) {
       throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
     }
     const scopes: DappScope[] = ['read', 'sign']
     if (origin) {
@@ -2061,9 +2057,12 @@ async function handleRpcMethod(
     if (!network || network.coinType !== 'EVM') {
       throw { code: 4900, message: 'No EVM network is available' }
     }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) {
       throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
     }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
@@ -2085,8 +2084,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2107,8 +2109,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2129,8 +2134,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2151,8 +2159,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2173,8 +2184,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2195,8 +2209,11 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2217,8 +2234,14 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
     if (!network) throw { code: 4900, message: 'No network is available' }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throw {
+        code: -32603,
+        message: 'eth_sendTransaction is not available for multisig accounts in this build'
+      }
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }
@@ -2241,7 +2264,7 @@ async function handleRpcMethod(
     if (!network || network.coinType !== 'EVM') {
       throw { code: 4900, message: 'No EVM network is available' }
     }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
@@ -2265,9 +2288,12 @@ async function handleRpcMethod(
     if (!network || !resolveNetworkCapabilities(network).features.nativeSend) {
       throw { code: -32603, message: 'No supported send-capable network selected' }
     }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) {
       throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount) && network.coinType !== 'EVM') {
+      throwUnsupportedMultisigMethod(method)
     }
 
     if (origin) {
@@ -2297,9 +2323,12 @@ async function handleRpcMethod(
     if (!network || !resolveNetworkCapabilities(network).features.assetSend) {
       throw { code: -32603, message: 'No supported asset-send network selected' }
     }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+    const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) {
       throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
     }
 
     if (origin) {

@@ -7,6 +7,7 @@ import { IoAdd, IoTrashOutline, IoCheckmarkCircle } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 import { validateWatchOnlyAddress } from '../../lib/watchOnlyAddress'
 import { getAccountDisplayName } from '../../lib/accountName'
+import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount, isWatchOnlyAccount } from '../../lib/multisig'
 
 const AccountManager: React.FC = () => {
   const {
@@ -37,7 +38,8 @@ const AccountManager: React.FC = () => {
     () => accounts.find((a) => a.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
-  const watchOnlyImportEnabled = activeNetwork?.derivation?.status === 'unsupported'
+  const activeAccountKindLabel = getAccountKindLabel(activeAccount)
+  const watchOnlyImportEnabled = activeNetwork?.derivation?.status === 'unsupported' && !isMultisigAccount(activeAccount)
   const canAddAccount = accounts.length < MAX_WALLET_ACCOUNTS_PER_COIN
 
   useEffect(() => {
@@ -46,7 +48,7 @@ const AccountManager: React.FC = () => {
       setWatchOnlyError('')
       return
     }
-    setWatchOnlyAddressInput(activeAccount.networkAddresses?.[activeNetwork.id] || '')
+    setWatchOnlyAddressInput(getAccountAddressForNetwork(activeAccount, activeNetwork.id, activeNetwork.coinType))
     setWatchOnlyError('')
   }, [watchOnlyImportEnabled, activeAccount, activeNetwork])
 
@@ -211,6 +213,19 @@ const AccountManager: React.FC = () => {
           </div>
         )}
 
+        {activeAccount && activeNetwork && (isMultisigAccount(activeAccount) || isWatchOnlyAccount(activeAccount)) && (
+          <div className="p-4 border-b border-dark-600 bg-dark-900/35 space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+              {activeAccountKindLabel} account
+            </p>
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              {isMultisigAccount(activeAccount)
+                ? 'This account is treated as a contract-backed multisig account when multisig metadata becomes available.'
+                : 'This account is watch-only and does not have a local signing key.'}
+            </p>
+          </div>
+        )}
+
         {showAdd ? (
           <div className="p-6 space-y-6">
             <h3 className="text-sm font-bold text-gray-200">Create New Account</h3>
@@ -241,6 +256,9 @@ const AccountManager: React.FC = () => {
               >
                 Cancel
               </Button>
+              <Button variant="outline" className="flex-1" onClick={() => navigate('/settings/multisig')} disabled={isCreating}>
+                Multisig
+              </Button>
               {canAddAccount && (
                 <Button className="flex-1" onClick={() => void handleAddAccount()} isLoading={isCreating}>Create</Button>
               )}
@@ -263,12 +281,19 @@ const AccountManager: React.FC = () => {
                       <span className="text-xs font-bold text-gray-200">{getAccountDisplayName(account, activeNetworkId, account.name)}</span>
                       {activeAccountId === account.id && <IoCheckmarkCircle className="text-primary w-4 h-4 flex-shrink-0" />}
                     </div>
+                    <div className="flex flex-wrap gap-1">
+                      <span className="rounded-full border border-dark-600 bg-dark-800 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-gray-300">
+                        {getAccountKindLabel(account)}
+                      </span>
+                      {isMultisigAccount(account) ? (
+                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-200">
+                          multisig
+                        </span>
+                      ) : null}
+                    </div>
                     <span className="text-[10px] text-gray-500 font-mono truncate">
                       {(() => {
-                        const addr =
-                          account.networkAddresses?.[activeNetworkId]
-                          || (activeNetwork?.coinType === 'EVM' ? account.addresses.EVM : account.addresses.UTXO)
-                          || ''
+                        const addr = getAccountAddressForNetwork(account, activeNetworkId, activeNetwork?.coinType)
                         return addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : 'No address on this coin yet'
                       })()}
                     </span>

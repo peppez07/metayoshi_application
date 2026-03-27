@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { PasswordGate } from '../../components/PasswordGate'
 import { Button } from '../../components/Button'
-import { useWalletStore, type FullBackupV1 } from '../../store/walletStore'
+import { useWalletStore, type FullBackupV2 } from '../../store/walletStore'
 import {
   IoCopyOutline,
   IoCheckmarkCircle,
@@ -95,9 +95,9 @@ const BackupSettings: React.FC = () => {
       return
     }
 
-    const backup: FullBackupV1 = {
+    const backup: FullBackupV2 = {
       type:             'metayoshi-full-backup',
-      version:          1,
+      version:          2,
       createdAt:        createdAt ?? Date.now(),
       vault,
       accounts,

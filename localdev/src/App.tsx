@@ -48,6 +48,7 @@ import BackupSettings from './pages/settings/BackupSettings'
 import RestoreSettings from './pages/settings/RestoreSettings'
 import ShowSecrets from './pages/settings/ShowSecrets'
 import AccountManager from './pages/settings/AccountManager'
+import MultisigSettings from './pages/settings/MultisigSettings'
 import AuthorizedSites from './pages/settings/AuthorizedSites'
 import BlockchainVisibilitySettings from './pages/settings/BlockchainVisibilitySettings'
 import TermsAndRules from './pages/TermsAndRules'
@@ -374,10 +375,12 @@ function App() {
             <Route path="show-secrets" element={<ShowSecrets />} />
             <Route path="download-keys" element={<Navigate to="/settings/show-secrets" replace />} />
             <Route path="accounts" element={<AccountManager />} />
+            <Route path="multisig" element={<MultisigSettings />} />
             <Route path="password" element={<PasswordSettings />} />
             <Route path="autolock" element={<AutolockSettings />} />
             <Route path="authorized-sites" element={<AuthorizedSites />} />
             <Route path="blockchains" element={<BlockchainVisibilitySettings />} />
+            <Route path="multisig" element={<MultisigSettings />} />
             <Route path="rpc" element={<Navigate to="/settings" replace />} />
             <Route path="*" element={<Navigate to="/settings" replace />} />
           </Route>
