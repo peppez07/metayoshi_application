@@ -1873,9 +1873,22 @@ async function handleRpcMethod(
   if (CAPABILITIES_METHODS.has(method)) {
     const netCaps = resolveNetworkCapabilities(network || {})
     const methodMatrix = resolveDappMethodMatrix(network)
+    const activeAccount = getActiveAccountFromState(state)
+    const multisigActive = isMultisigAccount(activeAccount)
+    const advertisedMethods = multisigActive
+      ? methodMatrix.methods.filter((entry) => !(
+          SIGN_MESSAGE_METHODS.has(entry)
+          || ETHEREUM_SIGN_METHODS.has(entry)
+          || SIGN_TYPED_DATA_METHODS.has(entry)
+          || ETHEREUM_SIGN_TYPED_DATA_METHODS.has(entry)
+          || SIGN_TRANSACTION_METHODS.has(entry)
+          || SIGN_ALL_TRANSACTIONS_METHODS.has(entry)
+          || SIGN_AND_SEND_TRANSACTION_METHODS.has(entry)
+        ))
+      : methodMatrix.methods
     const features = {
-      nativeSend: Boolean(netCaps.features.nativeSend),
-      signMessage: Boolean(
+      nativeSend: multisigActive ? false : Boolean(netCaps.features.nativeSend),
+      signMessage: multisigActive ? false : Boolean(
         methodMatrix.signMessage
         || methodMatrix.signTypedData
         || methodMatrix.signTransaction
@@ -1885,8 +1898,8 @@ async function handleRpcMethod(
         || methodMatrix.cosmosSignDirect
         || methodMatrix.cosmosSignAmino
       ),
-      assetLayer: Boolean(netCaps.features.assetLayer),
-      assetSend: Boolean(netCaps.features.assetSend)
+      assetLayer: multisigActive ? false : Boolean(netCaps.features.assetLayer),
+      assetSend: multisigActive ? false : Boolean(netCaps.features.assetSend)
     }
     return {
       wallet: { isMetaYoshi: true, connected, unlocked },
@@ -1906,7 +1919,7 @@ async function handleRpcMethod(
         select_account: true,
         switch_network: true
       },
-      methods: methodMatrix.methods,
+      methods: advertisedMethods,
       networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === effectiveNetworkId))
     }
   }
@@ -2292,7 +2305,7 @@ async function handleRpcMethod(
     if (!activeAccount) {
       throw { code: -32603, message: 'No account available' }
     }
-    if (isMultisigAccount(activeAccount) && network.coinType !== 'EVM') {
+    if (isMultisigAccount(activeAccount)) {
       throwUnsupportedMultisigMethod(method)
     }
 
