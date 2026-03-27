@@ -7,6 +7,8 @@ const IP_CONTENT_CHANNEL = 'metayoshi:content'
 const IP_INPAGE_CHANNEL = 'metayoshi:inpage'
 const INIT_EVENT = 'metayoshi#initialized'
 const INPAGE_SINGLETON_KEY = '__metayoshi_inpage_provider_v1'
+const EIP6963_ANNOUNCE_EVENT = 'eip6963:announceProvider'
+const EIP6963_REQUEST_EVENT = 'eip6963:requestProvider'
 const PROVIDER_STATE_METHOD = 'metayoshi_getProviderState'
 const PROVIDER_ENABLE_METHOD = 'metayoshi_requestAccounts'
 const CONNECT_METHOD = 'metayoshi_connect'
@@ -34,6 +36,8 @@ const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_ge
 
 type InpageRuntimeState = {
   initialized: boolean
+  eip6963Bound?: boolean
+  solanaWalletStandardBound?: boolean
 }
 
 const inpageRuntime = (() => {
@@ -162,6 +166,11 @@ function emit(event: string, payload: any): void {
   }
 }
 
+function emitKeplrKeyStoreChange(): void {
+  emit('keplr_keystorechange', undefined)
+  window.dispatchEvent(new Event('keplr_keystorechange'))
+}
+
 function on(event: string, listener: Listener): void {
   const set = listeners.get(event) ?? new Set<Listener>()
   set.add(listener)
@@ -249,6 +258,16 @@ function toHexChainId(value: unknown): string | null {
   return null
 }
 
+function getCurrentEvmHexChainId(): string | null {
+  return toHexChainId(state.chainId)
+}
+
+function emitProviderConnectedIfReady(): void {
+  const chainId = getCurrentEvmHexChainId()
+  if (!state.connected || !chainId) return
+  emit('connect', { chainId })
+}
+
 function createPublicKeyLike(address: string) {
   const normalized = String(address || '').trim()
   return {
@@ -302,6 +321,9 @@ function request({ method, params }: { method: string; params?: any }): Promise<
       updateAccounts(normalizeAccountAddresses(result))
       const scopedState = await request({ method: PROVIDER_STATE_METHOD, params }).catch(() => null)
       if (scopedState) applyProviderState(scopedState)
+      emit('accountsChanged', state.accounts)
+      emit('ethereum#accountsChanged', state.accounts)
+      emitProviderConnectedIfReady()
     }
     if (ACCOUNTS_METHODS.has(method)) {
       updateAccounts(normalizeAccountAddresses(result))
@@ -309,6 +331,7 @@ function request({ method, params }: { method: string; params?: any }): Promise<
     if (CONNECT_METHODS.has(method) && (result as any)?.connected) {
       state.connected = true
       applyProviderState(result)
+      emitProviderConnectedIfReady()
     }
     if (SELECT_ACCOUNT_METHODS.has(method) && (result as any)?.selectedAddress) {
       state.selectedAddress = String((result as any).selectedAddress)
@@ -379,6 +402,7 @@ function installMessageBridge(): void {
         state.connected = state.accounts.length > 0
         emit('accountsChanged', payload)
         emit('ethereum#accountsChanged', state.accounts)
+        emitKeplrKeyStoreChange()
       }
 
       if (eventName === 'networkChanged') {
@@ -397,6 +421,7 @@ function installMessageBridge(): void {
         emit('networkChanged', payload)
         const hexChainId = toHexChainId(payload.chainId ?? state.chainId)
         if (hexChainId) emit('chainChanged', hexChainId)
+        emitKeplrKeyStoreChange()
       }
 
       if (eventName === 'lockChanged') {
@@ -407,6 +432,7 @@ function installMessageBridge(): void {
           state.selectedAddress = null
         }
         emit('lockChanged', payload)
+        emitKeplrKeyStoreChange()
         if (!state.unlocked) emit('disconnect', { code: 4900, message: 'Wallet locked' })
       }
 
@@ -531,6 +557,7 @@ const ethereumProvider = {
   on,
   removeListener,
   off: removeListener,
+  once,
   isConnected: () => state.connected,
   _metayoshi: provider._metayoshi
 }
@@ -604,16 +631,123 @@ const solanaProvider = {
   },
   on,
   removeListener,
-  off: removeListener
+  off: removeListener,
+  once
+}
+
+type SolanaWalletStandardWallet = {
+  version: string
+  name: string
+  icon: string
+  chains: string[]
+  features: Record<string, unknown>
+}
+
+function buildSolanaWalletStandardWallet(): SolanaWalletStandardWallet {
+  const wallet = {
+    version: '1.0.0',
+    name: 'MetaYoshi',
+    icon: 'https://web.metayoshi.app/favicon.ico',
+    chains: ['solana:mainnet'],
+    features: {
+      'standard:connect': {
+        version: '1.0.0',
+        connect: async () => {
+          const result = await solanaProvider.connect()
+          return { accounts: result?.publicKey ? [{ address: result.publicKey.toString(), publicKey: result.publicKey }] : [] }
+        }
+      },
+      'standard:disconnect': {
+        version: '1.0.0',
+        disconnect: async () => {
+          await solanaProvider.disconnect()
+        }
+      },
+      'standard:events': {
+        version: '1.0.0',
+        on: (event: string, listener: Listener) => {
+          on(event, listener)
+          return () => removeListener(event, listener)
+        }
+      },
+      'solana:signMessage': {
+        version: '1.0.0',
+        signMessage: async (input: { message: Uint8Array | ArrayBuffer | number[] }) => solanaProvider.signMessage(input.message)
+      },
+      'solana:signTransaction': {
+        version: '1.0.0',
+        signTransaction: async (input: { transaction: any }) => solanaProvider.signTransaction(input.transaction)
+      },
+      'solana:signAndSendTransaction': {
+        version: '1.0.0',
+        signAndSendTransaction: async (input: { transaction: any }) => solanaProvider.signAndSendTransaction(input.transaction)
+      }
+    }
+  }
+  return wallet
+}
+
+const EIP6963_PROVIDER_INFO = {
+  uuid: '2f0c6d35-b9e1-4e9d-9d2f-7f1d5f1f3a20',
+  name: 'MetaYoshi',
+  icon: 'https://web.metayoshi.app/favicon.ico',
+  rdns: 'app.metayoshi.wallet'
+}
+
+function announceEip6963Provider(): void {
+  window.dispatchEvent(new CustomEvent(EIP6963_ANNOUNCE_EVENT, {
+    detail: {
+      info: EIP6963_PROVIDER_INFO,
+      provider: ethereumProvider
+    }
+  }))
+}
+
+function installEip6963Bridge(): void {
+  if (inpageRuntime.eip6963Bound) return
+  inpageRuntime.eip6963Bound = true
+  window.addEventListener(EIP6963_REQUEST_EVENT, announceEip6963Provider as EventListener)
+  announceEip6963Provider()
+}
+
+function installSolanaWalletStandardBridge(): void {
+  if (inpageRuntime.solanaWalletStandardBound) return
+  inpageRuntime.solanaWalletStandardBound = true
+  const wallet = buildSolanaWalletStandardWallet()
+  const nav = window.navigator as any
+  try {
+    if (nav?.wallets?.register && typeof nav.wallets.register === 'function') {
+      nav.wallets.register(wallet)
+    }
+  } catch {
+    // ignore registration failures
+  }
+  window.addEventListener('wallet-standard:app-ready', (event: Event) => {
+    try {
+      const register = (event as CustomEvent<any>)?.detail?.register
+      if (typeof register === 'function') register(wallet)
+    } catch {
+      // ignore registration failures
+    }
+  })
+}
+
+function resolveCosmosNetworkParams(chainId: string | string[]): { networkId?: string; chainId?: string } {
+  if (Array.isArray(chainId)) {
+    const first = chainId.find((entry) => String(entry || '').trim())
+    return resolveCosmosNetworkParams(first || '')
+  }
+  const normalized = String(chainId || '').trim()
+  return normalized ? { chainId: normalized } : { networkId: 'cosmos' }
 }
 
 const keplrProvider = {
   isMetaYoshi: true,
-  enable: async (_chainId: string | string[]) => {
-    await request({ method: PROVIDER_ENABLE_METHOD, params: { networkId: 'cosmos' } })
+  enable: async (chainId: string | string[]) => {
+    await request({ method: PROVIDER_ENABLE_METHOD, params: resolveCosmosNetworkParams(chainId) })
   },
-  getKey: async (_chainId: string) => {
-    const key = await request({ method: COSMOS_GET_KEY_METHOD, params: { networkId: 'cosmos' } })
+  getKey: async (chainId: string) => {
+    const key = await request({ method: COSMOS_GET_KEY_METHOD, params: resolveCosmosNetworkParams(chainId) })
     const bech32Address = String(key?.bech32Address || key?.address || '')
     return {
       name: 'MetaYoshi',
@@ -623,24 +757,24 @@ const keplrProvider = {
       bech32Address
     }
   },
-  signDirect: async (_chainId: string, signer: string, signDoc: any) =>
+  signDirect: async (chainId: string, signer: string, signDoc: any) =>
     request({
       method: COSMOS_SIGN_DIRECT_METHOD,
-      params: { networkId: 'cosmos', signerAddress: signer, signDoc }
+      params: { ...resolveCosmosNetworkParams(chainId), signerAddress: signer, signDoc }
     }),
-  signAmino: async (_chainId: string, signer: string, signDoc: any) =>
+  signAmino: async (chainId: string, signer: string, signDoc: any) =>
     request({
       method: COSMOS_SIGN_AMINO_METHOD,
-      params: { networkId: 'cosmos', signerAddress: signer, signDoc }
+      params: { ...resolveCosmosNetworkParams(chainId), signerAddress: signer, signDoc }
     }),
-  sendTx: async (_chainId: string, tx: Uint8Array | ArrayBuffer | number[], mode: 'sync' | 'async' | 'block' = 'sync') => {
+  sendTx: async (chainId: string, tx: Uint8Array | ArrayBuffer | number[], mode: 'sync' | 'async' | 'block' = 'sync') => {
     const mappedMode = mode === 'block'
       ? 'BROADCAST_MODE_BLOCK'
       : (mode === 'async' ? 'BROADCAST_MODE_ASYNC' : 'BROADCAST_MODE_SYNC')
     const result = await request({
       method: COSMOS_SEND_TX_METHOD,
       params: {
-        networkId: 'cosmos',
+        ...resolveCosmosNetworkParams(chainId),
         txBytesBase64: toBase64(normalizeBytesLike(tx)),
         mode: mappedMode
       }
@@ -657,7 +791,7 @@ const keplrProvider = {
   },
   getOfflineSigner: (_chainId: string) => ({
     getAccounts: async () => {
-      const key = await request({ method: COSMOS_GET_KEY_METHOD, params: { networkId: 'cosmos' } })
+      const key = await request({ method: COSMOS_GET_KEY_METHOD, params: resolveCosmosNetworkParams(_chainId) })
       return [{
         address: String(key?.bech32Address || key?.address || ''),
         algo: String(key?.algo || 'secp256k1'),
@@ -708,7 +842,6 @@ if (!inpageRuntime.initialized) {
   inpageRuntime.initialized = true
   installMessageBridge()
 
-  // Inject only proprietary globals to avoid colliding with other extension wallets.
   if (!(window as any).metayoshi) {
     Object.defineProperty(window, 'metayoshi', {
       value: provider,
@@ -724,6 +857,33 @@ if (!inpageRuntime.initialized) {
       configurable: false
     })
   }
+
+  if (!(window as any).ethereum) {
+    Object.defineProperty(window, 'ethereum', {
+      value: ethereumProvider,
+      writable: false,
+      configurable: false
+    })
+  }
+
+  if (!(window as any).solana) {
+    Object.defineProperty(window, 'solana', {
+      value: solanaProvider,
+      writable: false,
+      configurable: false
+    })
+  }
+
+  if (!(window as any).keplr) {
+    Object.defineProperty(window, 'keplr', {
+      value: keplrProvider,
+      writable: false,
+      configurable: false
+    })
+  }
+
+  installEip6963Bridge()
+  installSolanaWalletStandardBridge()
 
   window.dispatchEvent(new Event(INIT_EVENT))
   initState()

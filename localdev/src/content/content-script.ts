@@ -135,6 +135,7 @@ const CS_CONTENT_CHANNEL = 'metayoshi:content'
 const CS_INPAGE_CHANNEL = 'metayoshi:inpage'
 const CS_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const INJECTION_ALLOWLIST_KEY = 'dapp_injection_allowlist_v1'
+const INJECTION_ALLOW_PRIVATE_ORIGINS_KEY = 'dapp_injection_allow_private_origins_v1'
 const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app']
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
@@ -183,27 +184,88 @@ function hostMatchesPattern(hostname: string, pattern: string): boolean {
   return false
 }
 
+function parseIpv4(hostname: string): number[] | null {
+  const parts = hostname.split('.')
+  if (parts.length !== 4) return null
+  const octets: number[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null
+    const value = Number(part)
+    if (!Number.isInteger(value) || value < 0 || value > 255) return null
+    octets.push(value)
+  }
+  return octets
+}
+
+function isPrivateOrLoopbackIpv4(hostname: string): boolean {
+  const octets = parseIpv4(hostname)
+  if (!octets) return false
+  const [a, b] = octets
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
+function normalizeIpv6(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').toLowerCase()
+}
+
+function isPrivateOrLoopbackIpv6(hostname: string): boolean {
+  const normalized = normalizeIpv6(hostname)
+  if (!normalized.includes(':')) return false
+  if (normalized === '::1' || normalized === '::') return true
+  if (normalized.startsWith('fe80:')) return true
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+  return false
+}
+
+function isBlockedInternalHostname(hostname: string): boolean {
+  const normalized = String(hostname || '').trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized === 'localhost' || normalized.endsWith('.localhost')) return true
+  if (normalized === 'local' || normalized.endsWith('.local')) return true
+  if (isPrivateOrLoopbackIpv4(normalized)) return true
+  if (isPrivateOrLoopbackIpv6(normalized)) return true
+  return false
+}
+
 async function shouldInjectOnCurrentHost(): Promise<boolean> {
+  const protocol = String(window.location.protocol || '').trim().toLowerCase()
+  if (protocol !== 'http:' && protocol !== 'https:') return false
+
   const hostname = String(window.location.hostname || '').trim().toLowerCase()
   if (!hostname) return false
-
   const defaults = DEFAULT_ALLOWED_HOSTS.map(normalizeHostPattern).filter(Boolean)
   
   try {
-    const config = await chrome.storage.local.get(INJECTION_ALLOWLIST_KEY)
+    const config = await chrome.storage.local.get([INJECTION_ALLOWLIST_KEY, INJECTION_ALLOW_PRIVATE_ORIGINS_KEY])
     const raw = config?.[INJECTION_ALLOWLIST_KEY]
+    const allowPrivateOrigins = config?.[INJECTION_ALLOW_PRIVATE_ORIGINS_KEY] === true
     const configured = Array.isArray(raw) 
       ? raw.map(normalizeHostPattern).filter(Boolean) 
-      : defaults
+      : []
+
+    if (isBlockedInternalHostname(hostname)) {
+      if (!allowPrivateOrigins) return false
+      if (configured.length === 0) return true
+    }
+
+    if (configured.length === 0) {
+      return true
+    }
 
     for (const pattern of configured) {
       if (hostMatchesPattern(hostname, pattern)) return true
     }
   } catch (err) {
-    // If storage fails, use defaults
+    if (isBlockedInternalHostname(hostname)) return false
     for (const pattern of defaults) {
       if (hostMatchesPattern(hostname, pattern)) return true
     }
+    return true
   }
   
   return false
@@ -315,45 +377,6 @@ function markContextInvalidated(message: string): void {
       data: { detail: String(message ?? 'Extension context invalidated') }
     }
   })
-}
-
-function parseIpv4(hostname: string): number[] | null {
-  const parts = hostname.split('.')
-  if (parts.length !== 4) return null
-  const octets: number[] = []
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) return null
-    const value = Number(part)
-    if (!Number.isInteger(value) || value < 0 || value > 255) return null
-    octets.push(value)
-  }
-  return octets
-}
-
-function isPrivateOrLoopbackIpv4(hostname: string): boolean {
-  const octets = parseIpv4(hostname)
-  if (!octets) return false
-  const [a, b] = octets
-  if (a === 10) return true
-  if (a === 127) return true
-  if (a === 192 && b === 168) return true
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 169 && b === 254) return true
-  return false
-}
-
-function normalizeIpv6(hostname: string): string {
-  return hostname.replace(/^\[|\]$/g, '').toLowerCase()
-}
-
-function isPrivateOrLoopbackIpv6(hostname: string): boolean {
-  const normalized = normalizeIpv6(hostname)
-  if (!normalized.includes(':')) return false
-  if (normalized === '::1') return true
-  if (normalized === '::') return true
-  if (normalized.startsWith('fe80:')) return true
-  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
-  return false
 }
 
 function isBlockedInternalOrigin(rawOrigin: string): boolean {

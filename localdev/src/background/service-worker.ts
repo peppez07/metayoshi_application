@@ -32,6 +32,7 @@ import {
   type DappScope
 } from '../lib/dappPermissions'
 import { getAccountAddressForNetwork, isMultisigAccount } from '../lib/multisig'
+import { callBridgeMethod, type UtxoRpcConfig } from '../lib/utxoRpc'
 import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
@@ -143,6 +144,42 @@ const ETHEREUM_ADD_CHAIN_METHODS = new Set(['wallet_addEthereumChain'])
 const ETHEREUM_SEND_TRANSACTION_METHODS = new Set(['eth_sendTransaction'])
 const ETHEREUM_SIGN_METHODS = new Set(['personal_sign', 'eth_sign'])
 const ETHEREUM_SIGN_TYPED_DATA_METHODS = new Set(['eth_signTypedData', 'eth_signTypedData_v3', 'eth_signTypedData_v4'])
+const ETHEREUM_GET_PERMISSIONS_METHODS = new Set(['wallet_getPermissions'])
+const ETHEREUM_REQUEST_PERMISSIONS_METHODS = new Set(['wallet_requestPermissions'])
+const EVM_WRITE_OR_SENSITIVE_RPC_METHODS = new Set([
+  'eth_sendrawtransaction',
+  'eth_sendtransaction',
+  'eth_sign',
+  'personal_sign',
+  'eth_signtypeddata',
+  'eth_signtypeddata_v3',
+  'eth_signtypeddata_v4',
+  'eth_signtransaction',
+  'eth_requestaccounts'
+])
+const COSMOS_CHAIN_ID_ALIASES: Record<string, string[]> = {
+  cosmoshub: ['cosmoshub', 'cosmoshub-4', 'atom', 'cosmos'],
+  osmosis: ['osmosis', 'osmosis-1', 'osmo'],
+  injective: ['injective', 'injective-1', 'inj'],
+  cro: ['cro', 'cronos', 'cronos-pos', 'cronosmainnet_25-1'],
+  kujira: ['kujira', 'kaiyo-1'],
+  noble: ['noble', 'noble-1'],
+  juno: ['juno', 'juno-1'],
+  stargaze: ['stargaze', 'stargaze-1'],
+  neutron: ['neutron', 'neutron-1'],
+  stride: ['stride', 'stride-1'],
+  saga: ['saga', 'saga-1'],
+  sei: ['sei', 'pacific-1', 'atlantic-2'],
+  regen: ['regen', 'regen-1'],
+  shentu: ['shentu', 'shentu-2'],
+  bitcanna: ['bitcanna', 'bitcanna-1'],
+  lumera: ['lumera', 'lumera-1'],
+  quicksilver: ['quicksilver', 'quicksilver-2'],
+  sentinel: ['sentinel', 'sentinelhub-2'],
+  nibiru: ['nibiru', 'cataclysm-1'],
+  nolus: ['nolus', 'pirin-1']
+}
+const EVM_CLIENT_VERSION = `MetaYoshi/${String(import.meta.env.VITE_APP_VERSION || 'dev').trim() || 'dev'}`
 
 type EventPortRecord = {
   origin: string | null
@@ -291,6 +328,8 @@ function resolveRequestedDappNetwork(
   const payload = getRpcParamObject(params)
   if (!payload) return { network: undefined, hintProvided: false, hintSummary: null }
 
+  const rawChainIdText = typeof payload.chainId === 'string' ? payload.chainId.trim() : ''
+
   const textHints = [
     payload.networkId,
     payload.coinId,
@@ -298,7 +337,8 @@ function resolveRequestedDappNetwork(
     payload.symbol,
     payload.runtimeModelId,
     payload.network,
-    payload.blockchain
+    payload.blockchain,
+    rawChainIdText && parseRequestedChainId(rawChainIdText) === null ? rawChainIdText : ''
   ]
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
@@ -311,16 +351,11 @@ function resolveRequestedDappNetwork(
   const normalizedTextHints = textHints.map((value) => value.toLowerCase())
   const symbolHints = textHints.map((value) => value.toUpperCase())
   const network = dappNetworks.find((entry) => {
-    const id = String(entry.id || '').trim().toLowerCase()
-    const runtimeModelId = String(entry.runtimeModelId || '').trim().toLowerCase()
-    const name = String(entry.name || '').trim().toLowerCase()
-    const symbol = String(entry.symbol || '').trim().toUpperCase()
+    const aliases = buildNetworkHintAliases(entry)
     const entryChainId = typeof entry.chainId === 'number' ? entry.chainId : null
 
-    if (normalizedTextHints.includes(id)) return true
-    if (runtimeModelId && normalizedTextHints.includes(runtimeModelId)) return true
-    if (name && normalizedTextHints.includes(name)) return true
-    if (symbol && symbolHints.includes(symbol)) return true
+    if (aliases.lowercase.some((alias) => normalizedTextHints.includes(alias))) return true
+    if (aliases.uppercase.some((alias) => symbolHints.includes(alias))) return true
     if (requestedChainId !== null && entryChainId === requestedChainId) return true
     return false
   })
@@ -1207,6 +1242,60 @@ function parseSendAssetParams(params: unknown): SendAssetParams {
   return memo ? { assetId, qty, toAddress, memo } : { assetId, qty, toAddress }
 }
 
+function buildNetworkHintAliases(network: DappNetworkEntry): { lowercase: string[]; uppercase: string[] } {
+  const base = [
+    String(network.id || '').trim(),
+    String(network.runtimeModelId || '').trim(),
+    String(network.name || '').trim(),
+    String(network.symbol || '').trim()
+  ].filter(Boolean)
+  const id = String(network.id || '').trim().toLowerCase()
+  const extra = COSMOS_CHAIN_ID_ALIASES[id] || []
+  return {
+    lowercase: Array.from(new Set([...base.map((value) => value.toLowerCase()), ...extra.map((value) => value.toLowerCase())])),
+    uppercase: Array.from(new Set(base.map((value) => value.toUpperCase())))
+  }
+}
+
+function buildEvmReadRpcConfig(network: DappNetworkEntry): UtxoRpcConfig {
+  const entry = network as DappNetworkEntry & Record<string, unknown>
+  return {
+    networkId: String(network.id || '').trim(),
+    coinSymbol: String(network.symbol || '').trim(),
+    rpcUrl: String(entry.rpcUrl || '').trim(),
+    rpcWallet: String(entry.rpcWallet || '').trim() || undefined,
+    rpcUsername: String(entry.rpcUsername || '').trim() || undefined,
+    rpcPassword: String(entry.rpcPassword || '').trim() || undefined,
+    bridgeUrl: String(entry.bridgeUrl || '').trim() || undefined,
+    bridgeUsername: String(entry.bridgeUsername || '').trim() || undefined,
+    bridgePassword: String(entry.bridgePassword || '').trim() || undefined,
+    secureBridgeApiBaseUrl: String(entry.secureBridgeApiBaseUrl || '').trim() || undefined,
+    secureBridgeWritesEnabled: Boolean(entry.secureBridgeWritesEnabled)
+  }
+}
+
+function isReadOnlyEvmRpcMethod(method: string): boolean {
+  const normalized = String(method || '').trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized === 'net_version' || normalized === 'web3_clientversion') return true
+  if (!normalized.startsWith('eth_')) return false
+  return !EVM_WRITE_OR_SENSITIVE_RPC_METHODS.has(normalized)
+}
+
+function buildEvmPermissionResponse(origin: string, state: WalletState, networkId: string | undefined): Array<Record<string, unknown>> {
+  const address = networkId ? getActiveAddressFromState(state, networkId) : null
+  return [{
+    invoker: origin,
+    parentCapability: 'eth_accounts',
+    ...(address ? {
+      caveats: [{
+        type: 'filterResponse',
+        value: [address]
+      }]
+    } : {})
+  }]
+}
+
 function parseRtmMarketActionParams(params: unknown): RtmMarketActionParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
@@ -1838,11 +1927,14 @@ async function handleRpcMethod(
     ETHEREUM_ACCOUNTS_METHODS.has(method)
     || ETHEREUM_REQUEST_ACCOUNTS_METHODS.has(method)
     || ETHEREUM_CHAIN_ID_METHODS.has(method)
+    || ETHEREUM_GET_PERMISSIONS_METHODS.has(method)
+    || ETHEREUM_REQUEST_PERMISSIONS_METHODS.has(method)
     || ETHEREUM_SWITCH_CHAIN_METHODS.has(method)
     || ETHEREUM_ADD_CHAIN_METHODS.has(method)
     || ETHEREUM_SEND_TRANSACTION_METHODS.has(method)
     || ETHEREUM_SIGN_METHODS.has(method)
     || ETHEREUM_SIGN_TYPED_DATA_METHODS.has(method)
+    || isReadOnlyEvmRpcMethod(method)
   )) {
     runtimeNetworkId = findNetworkByCoinType(walletState, 'EVM')?.id
   }
@@ -2042,6 +2134,29 @@ async function handleRpcMethod(
     return `0x${Number(network.chainId || 0).toString(16)}`
   }
 
+  if (ETHEREUM_GET_PERMISSIONS_METHODS.has(method)) {
+    if (!normalizedOrigin || !(await canExposeAccountsToOrigin(normalizedOrigin))) {
+      return []
+    }
+    if (!network || network.coinType !== 'EVM') {
+      return []
+    }
+    return buildEvmPermissionResponse(normalizedOrigin, state, effectiveNetworkId)
+  }
+
+  if (ETHEREUM_REQUEST_PERMISSIONS_METHODS.has(method)) {
+    const approvedOrigin = await requireDappScopes(origin, ['read'])
+    if (!network || network.coinType !== 'EVM') {
+      throw { code: 4900, message: 'No EVM network is available' }
+    }
+    const requested = Array.isArray(params) ? params[0] : params
+    const requestedCapabilities = requested && typeof requested === 'object' ? Object.keys(requested as Record<string, unknown>) : []
+    if (requestedCapabilities.length === 0 || !requestedCapabilities.includes('eth_accounts')) {
+      throw { code: 4200, message: 'Unsupported permission request' }
+    }
+    return buildEvmPermissionResponse(approvedOrigin, await getWalletState(), effectiveNetworkId)
+  }
+
   if (ETHEREUM_ACCOUNTS_METHODS.has(method)) {
     if (!(await canExposeAccountsToOrigin(normalizedOrigin))) {
       return []
@@ -2103,6 +2218,21 @@ async function handleRpcMethod(
       throw { code: 4902, message: `Unknown EVM chain ${chainId}` }
     }
     return null
+  }
+
+  if (isReadOnlyEvmRpcMethod(method)) {
+    if (!network || network.coinType !== 'EVM') {
+      throw { code: 4900, message: 'No EVM network is available' }
+    }
+    if (String(method).trim().toLowerCase() === 'net_version') {
+      return String(network.chainId ?? '')
+    }
+    if (String(method).trim().toLowerCase() === 'web3_clientversion') {
+      return EVM_CLIENT_VERSION
+    }
+    const rpcConfig = buildEvmReadRpcConfig(network)
+    const rpcParams = Array.isArray(params) ? params : (params === undefined ? [] : [params])
+    return await callBridgeMethod(rpcConfig, method, rpcParams)
   }
 
   if (SIGN_MESSAGE_METHODS.has(method) || ETHEREUM_SIGN_METHODS.has(method)) {
