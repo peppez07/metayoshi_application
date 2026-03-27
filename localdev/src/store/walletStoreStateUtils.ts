@@ -1,5 +1,6 @@
 import { DEFAULT_ACTIVE_NETWORK_ID } from '../coins'
 import type { Network } from '../coins'
+import { getTestedModelIds } from '../buildConfig'
 import { buildNativeActivityAssetId, normalizeActivityAssetId } from '../lib/activityIdentity'
 import { isCroCosmosNetwork } from '../lib/runtimeModel'
 import { resolveCosmosAddressConfig } from '../lib/cosmosAddress'
@@ -97,7 +98,7 @@ const PREVIOUS_DEFAULT_VISIBLE_NETWORK_IDS = [
   'zec',
   'cosmos'
 ]
-const DEFAULT_VISIBLE_NETWORK_IDS = [
+const CURATED_DEFAULT_VISIBLE_NETWORK_IDS = [
   'rtm',
   'srv--bitcoin',
   'eth',
@@ -109,6 +110,7 @@ const DEFAULT_VISIBLE_NETWORK_IDS = [
   'polygon',
   'zksync'
 ]
+const DEFAULT_VISIBLE_NETWORK_IDS = getTestedModelIds()
 const FORCE_DISABLED_NETWORK_IDS = new Set<string>(['ada', 'xmr', 'xrp'])
 
 export const MAX_ACTIVE_REFRESH_NETWORKS = 20
@@ -285,7 +287,11 @@ export function migrateLegacyDefaultDisabledNetworkIds(disabledNetworkIds: unkno
   }
 
   const previousDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(networks, PREVIOUS_DEFAULT_VISIBLE_NETWORK_IDS)
-  if (!areSameNetworkIdSet(normalizedDisabled, previousDefaultDisabled)) return normalizedDisabled
+  const curatedDefaultDisabled = resolvePreferredDefaultDisabledNetworkIds(networks, CURATED_DEFAULT_VISIBLE_NETWORK_IDS)
+  if (
+    !areSameNetworkIdSet(normalizedDisabled, previousDefaultDisabled)
+    && !areSameNetworkIdSet(normalizedDisabled, curatedDefaultDisabled)
+  ) return normalizedDisabled
 
   return resolvePreferredDefaultDisabledNetworkIds(networks, DEFAULT_VISIBLE_NETWORK_IDS)
 }
