@@ -2,7 +2,7 @@ export type AccountKind = 'derived' | 'watch_only' | 'multisig'
 export const SAFE_MULTISIG_SUPPORTED_CHAIN_IDS = [1, 10, 100, 137, 8453, 42161, 43114] as const
 const SAFE_MULTISIG_SUPPORTED_CHAIN_ID_SET = new Set<number>(SAFE_MULTISIG_SUPPORTED_CHAIN_IDS)
 
-export type MultisigFamily = 'safe' | 'btc-psbt-v1'
+export type MultisigFamily = 'safe' | 'btc-psbt-v1' | 'rtm-utxo-asset-multisig-v1'
 export type PlannedMultisigFamily = 'btcz-transparent-multisig' | 'rtm-utxo-asset-multisig'
 export type WalletMultisigFamily = MultisigFamily | PlannedMultisigFamily
 export type MultisigReadinessStatus = 'wallet-ready' | 'planned' | 'partial'
@@ -12,6 +12,9 @@ export interface MultisigCapabilities {
   canExecute: boolean
   canSignMessages: boolean
   canSignTypedData: boolean
+  nativeRtm?: boolean
+  assets?: boolean
+  dappSend?: boolean
 }
 
 export interface NetworkMultisigCapability {
@@ -52,7 +55,26 @@ export interface BtcMultisigMetadata {
   capabilities: MultisigCapabilities
 }
 
-export type MultisigMetadata = SafeMultisigMetadata | BtcMultisigMetadata
+export interface RtmMultisigSigner {
+  pubkey: string
+  fingerprint?: string
+  derivationPath?: string
+  label?: string
+}
+
+export interface RtmMultisigMetadata {
+  family: 'rtm-utxo-asset-multisig-v1'
+  networkId: 'rtm'
+  address: string
+  threshold: number
+  scriptType: 'p2sh'
+  redeemScriptHex: string
+  signers: RtmMultisigSigner[]
+  linkedSignerAccountIds: string[]
+  capabilities: MultisigCapabilities
+}
+
+export type MultisigMetadata = SafeMultisigMetadata | BtcMultisigMetadata | RtmMultisigMetadata
 
 export interface AccountAddresses {
   EVM: string
@@ -109,12 +131,20 @@ export function isBtcMultisigMetadata(value: unknown): value is BtcMultisigMetad
   return Boolean(value && typeof value === 'object' && (value as BtcMultisigMetadata).family === 'btc-psbt-v1')
 }
 
+export function isRtmMultisigMetadata(value: unknown): value is RtmMultisigMetadata {
+  return Boolean(value && typeof value === 'object' && (value as RtmMultisigMetadata).family === 'rtm-utxo-asset-multisig-v1')
+}
+
 export function isSafeMultisigAccount<T extends BaseAccountShape>(account: T | null | undefined): account is T & { kind: 'multisig'; multisig: SafeMultisigMetadata } {
   return isMultisigAccount(account) && isSafeMultisigMetadata(account.multisig)
 }
 
 export function isBtcMultisigAccount<T extends BaseAccountShape>(account: T | null | undefined): account is T & { kind: 'multisig'; multisig: BtcMultisigMetadata } {
   return isMultisigAccount(account) && isBtcMultisigMetadata(account.multisig)
+}
+
+export function isRtmMultisigAccount<T extends BaseAccountShape>(account: T | null | undefined): account is T & { kind: 'multisig'; multisig: RtmMultisigMetadata } {
+  return isMultisigAccount(account) && isRtmMultisigMetadata(account.multisig)
 }
 
 export function isWatchOnlyAccount<T extends BaseAccountShape>(account: T | null | undefined): account is T & { kind: 'watch_only' } {
@@ -237,11 +267,11 @@ export function getMultisigCapabilityForNetwork(
   }
   if (matchesPlannedNetwork(network, PLANNED_RTM_MULTISIG_KEYS)) {
     return {
-      family: 'rtm-utxo-asset-multisig',
-      walletReady: false,
-      status: 'planned',
-      label: 'RTM asset multisig',
-      reason: 'Raptoreum relay and asset support exist, but descriptor, PSBT, and threshold multisig coordination are not implemented yet.'
+      family: 'rtm-utxo-asset-multisig-v1',
+      walletReady: true,
+      status: 'wallet-ready',
+      label: 'RTM multisig v1',
+      reason: 'Imported Raptoreum script-hash multisig can validate redeem scripts, sign native RTM and asset transfers locally, and relay the finalized transaction through the existing RTM path.'
     }
   }
   return null

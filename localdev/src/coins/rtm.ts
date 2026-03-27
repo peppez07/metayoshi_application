@@ -17,7 +17,8 @@ export const RTM_CAPABILITIES: NetworkCapabilitiesInput = {
 
 export const RTM_ADDRESS_SPEC: UtxoAddressSpec = {
   bip44CoinType: 175,
-  p2pkhVersion: 0x3c
+  p2pkhVersion: 0x3c,
+  p2shVersion: 0x10
 }
 
 // RTM relay fee baseline is ~0.0001 RTM/kB. We keep a conservative margin.

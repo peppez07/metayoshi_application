@@ -8,7 +8,7 @@ import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInform
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { getAccountDisplayName } from '../../lib/accountName'
-import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
+import { getAccountAddressForNetwork, getAccountKindLabel, isBtcMultisigAccount, isMultisigAccount, isRtmMultisigAccount, isSafeMultisigAccount } from '../../lib/multisig'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import { estimateNetworkFeeUi } from '../../lib/estimateNetworkFeeUi'
 import { estimateTransactionFeePreview, type TransactionFeePreviewResult } from '../../lib/transactionFeePreview'
@@ -255,6 +255,13 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const activeAccountName = getAccountDisplayName(activeAccount, displayNetworkId, 'Account 1')
   const activeAccountKindLabel = getAccountKindLabel(activeAccount)
   const activeAccountIsMultisig = isMultisigAccount(activeAccount)
+  const multisigInfoText = isSafeMultisigAccount(activeAccount)
+    ? 'This account is a multisig contract account. Confirming here creates, confirms, or executes a Safe transaction depending on its current state.'
+    : isBtcMultisigAccount(activeAccount)
+      ? 'This account is a wallet-local Bitcoin multisig account. Confirming here finalizes and relays the transaction only when the linked local signer threshold is satisfied.'
+      : isRtmMultisigAccount(activeAccount)
+        ? 'This account is a wallet-local RTM multisig account. Confirming here finalizes and relays the RTM coin or asset transaction only when the linked local signer threshold is satisfied.'
+        : ''
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -1073,7 +1080,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           <div className="mx-2 p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-center gap-2">
             <IoInformationCircle className="text-amber-300 w-4 h-4 shrink-0" />
             <span className="text-xs font-bold text-amber-200">
-              This account is a multisig contract account. Confirming here creates, confirms, or executes a Safe transaction depending on its current state.
+              {multisigInfoText}
             </span>
           </div>
         )}
@@ -1120,7 +1127,7 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     return (
       <PasswordGate
         title="Unlock to confirm transfer"
-        description={activeAccountIsMultisig ? 'Unlock your wallet to review this website transfer and process the Safe transaction.' : 'Unlock your wallet to review this website transfer and press Confirm.'}
+        description={activeAccountIsMultisig ? 'Unlock your wallet to review this website transfer and process the multisig transaction.' : 'Unlock your wallet to review this website transfer and press Confirm.'}
       >
         {content}
       </PasswordGate>

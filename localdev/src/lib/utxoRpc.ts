@@ -2519,6 +2519,21 @@ interface NonCustodialAssetSendParams {
   feePerByteSats?: number
 }
 
+export interface PrepareRtmAssetTransactionParams {
+  fromAddress: string
+  assetId: string
+  qty: string
+  toAddress: string
+  changeAddress?: string
+  assetChangeAddress?: string
+  feePerByteSats?: number
+}
+
+export interface PreparedRtmAssetTransaction {
+  rawHex: string
+  signingInputs: UnsignedTxInput[]
+}
+
 interface ResolvedAssetIdentity {
   canonicalName: string
   canonicalId: string
@@ -2662,16 +2677,15 @@ function buildMixedOutputsObject(params: {
  *   - sign client-side with account private key
  *   - broadcast signed hex via sendrawtransaction
  */
-export async function sendRtmAssetNonCustodial(
+export async function prepareRtmAssetNonCustodialTransaction(
   config: UtxoRpcConfig,
-  params: NonCustodialAssetSendParams
-): Promise<string> {
+  params: PrepareRtmAssetTransactionParams
+): Promise<PreparedRtmAssetTransaction> {
   const fromAddress = String(params.fromAddress || '').trim()
   const toAddress = String(params.toAddress || '').trim()
   if (!fromAddress) throw new Error('Sender address is required')
   if (!toAddress) throw new Error('Destination address is required')
 
-  const privateKeyHex = normalizeHexKey(params.fromPrivateKeyHex)
   const qtyNum = parseRpcDecimalAmount(params.qty, 8, 'Asset quantity')
   const assetIdentity = await resolveAssetIdentity(config, params.assetId)
 
@@ -2935,7 +2949,27 @@ export async function sendRtmAssetNonCustodial(
     }))
   ]
 
-  const signedHex = await signLegacyP2pkhTransaction(String(rawHex), signingInputs, privateKeyHex)
+  return {
+    rawHex: String(rawHex),
+    signingInputs
+  }
+}
+
+export async function sendRtmAssetNonCustodial(
+  config: UtxoRpcConfig,
+  params: NonCustodialAssetSendParams
+): Promise<string> {
+  const privateKeyHex = normalizeHexKey(params.fromPrivateKeyHex)
+  const prepared = await prepareRtmAssetNonCustodialTransaction(config, {
+    fromAddress: params.fromAddress,
+    assetId: params.assetId,
+    qty: params.qty,
+    toAddress: params.toAddress,
+    changeAddress: params.changeAddress,
+    assetChangeAddress: params.assetChangeAddress,
+    feePerByteSats: params.feePerByteSats
+  })
+  const signedHex = await signLegacyP2pkhTransaction(prepared.rawHex, prepared.signingInputs, privateKeyHex)
   return await sendRawTransaction(config, signedHex)
 }
 

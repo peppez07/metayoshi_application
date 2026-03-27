@@ -206,7 +206,7 @@ const DappRequestConfirm: React.FC = () => {
     )
     : String((pendingRequest?.request as any)?.amount || '')
   const multisigUnsupportedReason = requestAccountIsMultisig
-    ? 'Multisig accounts only support proposal-based EVM sends in v1. Message signing, typed data, and raw transaction signatures stay disabled.'
+    ? 'Multisig accounts are wallet-managed only in this build. Dapp message signing, typed data, and direct transaction requests stay disabled.'
     : ''
   const requestMemo = String((pendingRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
@@ -336,7 +336,7 @@ const DappRequestConfirm: React.FC = () => {
       || requestIsCosmosSignDirect
       || requestIsCosmosSignAmino
     )) {
-      setSubmitError('This multisig account only supports proposal-based EVM send requests in v1')
+      setSubmitError('This multisig account does not support dapp-driven signing or send requests in this build')
       return
     }
     setIsSubmitting(true)

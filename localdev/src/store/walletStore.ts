@@ -73,6 +73,7 @@ import {
   type BtcMultisigMetadata,
   type MultisigCapabilities,
   type MultisigMetadata,
+  type RtmMultisigMetadata,
   type SafeMultisigMetadata,
   createEmptyAccountAddresses,
   getAccountAddressForNetwork,
@@ -80,6 +81,8 @@ import {
   getMultisigCapabilityForNetwork,
   isBtcMultisigAccount,
   isBtcMultisigMetadata,
+  isRtmMultisigAccount,
+  isRtmMultisigMetadata,
   isWalletReadyMultisigNetwork,
   isSafeMultisigAccount,
   isSafeMultisigMetadata,
@@ -89,6 +92,7 @@ import {
   normalizeAccountKind
 } from '../lib/multisig'
 import { parseBtcP2wshMultisig, sendBtcP2wshMultisigTransaction } from '../lib/btcMultisig'
+import { parseRtmP2shMultisig, sendRtmP2shMultisigAssetTransaction, sendRtmP2shMultisigTransaction } from '../lib/rtmMultisig'
 import {
   type SafePendingTransactionSummary,
   type SafeWalletTx
@@ -430,6 +434,14 @@ export type AddMultisigAccountInput =
       networkId: string
       address: string
       witnessScriptHex: string
+      linkedSignerAccountIds: string[]
+    }
+  | {
+      family: 'rtm-utxo-asset-multisig-v1'
+      name: string
+      networkId: string
+      address: string
+      redeemScriptHex: string
       linkedSignerAccountIds: string[]
     }
 
@@ -3264,6 +3276,18 @@ function defaultBtcMultisigCapabilities(localSignerCount: number, threshold: num
   }
 }
 
+function defaultRtmMultisigCapabilities(localSignerCount: number, threshold: number): MultisigCapabilities {
+  return {
+    canPropose: false,
+    canExecute: localSignerCount >= threshold,
+    canSignMessages: false,
+    canSignTypedData: false,
+    nativeRtm: true,
+    assets: true,
+    dappSend: false
+  }
+}
+
 function createEmptyAccountBalanceState(): Pick<Account, 'addresses' | 'networkAddresses' | 'networkBalances' | 'balance'> {
   return {
     addresses: createEmptyAccountAddresses(),
@@ -3276,7 +3300,7 @@ function createEmptyAccountBalanceState(): Pick<Account, 'addresses' | 'networkA
 function normalizePersistedMultisigMetadata(value: unknown): MultisigMetadata | undefined {
   if (!value || typeof value !== 'object') return undefined
   const candidate = value as Partial<MultisigMetadata>
-  const family = candidate.family === 'safe' || candidate.family === 'btc-psbt-v1'
+  const family = candidate.family === 'safe' || candidate.family === 'btc-psbt-v1' || candidate.family === 'rtm-utxo-asset-multisig-v1'
     ? candidate.family
     : null
   if (!family) return undefined
@@ -3310,6 +3334,37 @@ function normalizePersistedMultisigMetadata(value: unknown): MultisigMetadata | 
       linkedSignerAccountIds,
       capabilities: {
         ...defaultBtcMultisigCapabilities(linkedSignerAccountIds.length, threshold),
+        ...(candidate.capabilities ?? {})
+      }
+    }
+  }
+  if (family === 'rtm-utxo-asset-multisig-v1') {
+    const threshold = Math.max(1, Number((candidate as RtmMultisigMetadata).threshold || 1))
+    const linkedSignerAccountIds = Array.isArray((candidate as RtmMultisigMetadata).linkedSignerAccountIds)
+      ? Array.from(new Set((candidate as RtmMultisigMetadata).linkedSignerAccountIds.map((entry) => String(entry || '').trim()).filter(Boolean)))
+      : []
+    const redeemScriptHex = String((candidate as RtmMultisigMetadata).redeemScriptHex || '').trim().toLowerCase().replace(/^0x/i, '')
+    if (!redeemScriptHex || !/^[0-9a-f]+$/i.test(redeemScriptHex)) return undefined
+    return {
+      family,
+      networkId: 'rtm',
+      address,
+      threshold,
+      scriptType: 'p2sh',
+      redeemScriptHex,
+      signers: Array.isArray((candidate as RtmMultisigMetadata).signers)
+        ? (candidate as RtmMultisigMetadata).signers
+            .map((row) => ({
+              pubkey: String(row?.pubkey || '').trim().toLowerCase(),
+              fingerprint: String(row?.fingerprint || '').trim() || undefined,
+              derivationPath: String(row?.derivationPath || '').trim() || undefined,
+              label: String(row?.label || '').trim() || undefined
+            }))
+            .filter((row) => /^[0-9a-f]{66}$/i.test(row.pubkey))
+        : [],
+      linkedSignerAccountIds,
+      capabilities: {
+        ...defaultRtmMultisigCapabilities(linkedSignerAccountIds.length, threshold),
         ...(candidate.capabilities ?? {})
       }
     }
@@ -3385,6 +3440,8 @@ function normalizePersistedAccounts(rawAccounts: unknown): Account[] {
       } else if (isBtcMultisigMetadata(multisig)) {
         nextAddresses.UTXO = multisig.address
         nextAddresses.BTC = multisig.address
+      } else if (isRtmMultisigMetadata(multisig)) {
+        nextAddresses.UTXO = multisig.address
       }
       return {
         ...base,
@@ -3411,6 +3468,21 @@ async function deriveLocalBtcSignerMaterial(
   const fallbackIndex = accounts.findIndex((candidate) => candidate.id === account.id)
   const derivationIndex = resolveDerivationIndex(account, fallbackIndex)
   const derived = await deriveUtxoAddress(mnemonic, 'BTC', derivationIndex)
+  return {
+    accountId: account.id,
+    pubkeyHex: String(derived.pubHex || '').trim().toLowerCase(),
+    privHex: String(derived.privHex || '').trim().toLowerCase()
+  }
+}
+
+async function deriveLocalRtmSignerMaterial(
+  mnemonic: string,
+  accounts: Account[],
+  account: Account
+): Promise<{ accountId: string; pubkeyHex: string; privHex: string }> {
+  const fallbackIndex = accounts.findIndex((candidate) => candidate.id === account.id)
+  const derivationIndex = resolveDerivationIndex(account, fallbackIndex)
+  const derived = await deriveUtxoAddress(mnemonic, 'RTM', derivationIndex)
   return {
     accountId: account.id,
     pubkeyHex: String(derived.pubHex || '').trim().toLowerCase(),
@@ -3717,6 +3789,9 @@ export const useWalletStore = create<WalletState>()(
         if (isBtcMultisigAccount(account)) {
           throw new Error('backend_auth_not_supported_for_btc_multisig')
         }
+        if (isRtmMultisigAccount(account)) {
+          throw new Error('backend_auth_not_supported_for_rtm_multisig')
+        }
         if (isExternalEvmSignerEnabled()) {
           const externalSigner = await resolveEvmExternalSigner()
           const signerAddress = externalSigner ? ethers.getAddress(await externalSigner.getAddress()) : null
@@ -3764,6 +3839,9 @@ export const useWalletStore = create<WalletState>()(
         if (isBtcMultisigAccount(activeAccount)) {
           throw new Error('backend_auth_not_supported_for_btc_multisig')
         }
+        if (isRtmMultisigAccount(activeAccount)) {
+          throw new Error('backend_auth_not_supported_for_rtm_multisig')
+        }
         if (isExternalEvmSignerEnabled()) {
           const signer = await resolveEvmExternalSigner()
           if (!signer) throw new Error('External EVM signer is not available')
@@ -3795,6 +3873,9 @@ export const useWalletStore = create<WalletState>()(
         }
         if (isBtcMultisigAccount(activeAccount)) {
           throw new Error('backend_auth_not_supported_for_btc_multisig')
+        }
+        if (isRtmMultisigAccount(activeAccount)) {
+          throw new Error('backend_auth_not_supported_for_rtm_multisig')
         }
         if (isExternalEvmSignerEnabled()) {
           const signer = await resolveEvmExternalSigner()
@@ -7039,8 +7120,6 @@ export const useWalletStore = create<WalletState>()(
           return { txid: sent.txid }
         }
 
-        const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
-
         const rpcConfig = await createUtxoRpcConfig(net, {
           useLocalRpc: ulr2,
           localRpcOverride: lro2[net.id],
@@ -7049,6 +7128,48 @@ export const useWalletStore = create<WalletState>()(
         const rawFeePerByteCoins = net.feePerByte ?? estimateNetworkFee(net.id, 1) ?? 0.0000002
         let feePerByteSats = Math.max(1, Math.round(Number(rawFeePerByteCoins) * 1e8))
         if (feePerByteSats > 500) feePerByteSats = Math.max(1, Math.round(feePerByteSats / 1000))
+
+        if (isRtmMultisigAccount(acc)) {
+          if (activeNetworkId !== acc.multisig.networkId || net.id !== acc.multisig.networkId) {
+            throw new Error('wrong_network_for_rtm_multisig')
+          }
+          if (String(net.coinSymbol || '').trim().toUpperCase() !== 'RTM') {
+            throw new Error('rtm_multisig_only_supported_on_raptoreum')
+          }
+          const signerMaterials = []
+          for (const signerAccountId of acc.multisig.linkedSignerAccountIds) {
+            const signerAccount = accounts.find((account) => account.id === signerAccountId) || null
+            if (!signerAccount || isMultisigAccount(signerAccount) || isWatchOnlyAccount(signerAccount)) {
+              throw new Error('linked_rtm_signer_missing')
+            }
+            const derivedSigner = await deriveLocalRtmSignerMaterial(sessionMnemonic!, accounts, signerAccount)
+            if (!acc.multisig.signers.some((signer) => signer.pubkey.toLowerCase() === derivedSigner.pubkeyHex.toLowerCase())) {
+              throw new Error(`Linked RTM signer ${signerAccount.name || signerAccount.id} no longer matches the imported redeem script`)
+            }
+            signerMaterials.push({
+              accountId: derivedSigner.accountId,
+              pubkeyHex: derivedSigner.pubkeyHex,
+              privHex: derivedSigner.privHex,
+              label: signerAccount.name
+            })
+          }
+          const sent = await sendRtmP2shMultisigAssetTransaction({
+            rpcConfig,
+            senderAddress,
+            assetId,
+            qty,
+            toAddress,
+            redeemScriptHex: acc.multisig.redeemScriptHex,
+            signerMaterials,
+            changeAddress,
+            assetChangeAddress,
+            feePerByteSats
+          })
+          await get().collectActiveNetworkData({ force: true, includeFiat: false })
+          return { txid: sent.hash }
+        }
+
+        const derived = await deriveUtxoAddress(sessionMnemonic!, net.coinSymbol, accountIndex, 0, 0)
 
         const txid = await sendRtmAssetNonCustodial(rpcConfig, {
           fromAddress: senderAddress,
@@ -7091,6 +7212,8 @@ export const useWalletStore = create<WalletState>()(
                 ? { EVM: acc.multisig.address }
                 : isBtcMultisigMetadata(acc.multisig)
                   ? { UTXO: acc.multisig.address, BTC: acc.multisig.address }
+                  : isRtmMultisigMetadata(acc.multisig)
+                    ? { UTXO: acc.multisig.address }
                   : {})
             }
             reHydratedAccounts.push({
@@ -7502,6 +7625,65 @@ export const useWalletStore = create<WalletState>()(
               signers,
               linkedSignerAccountIds: matchedSignerIds,
               capabilities: defaultBtcMultisigCapabilities(matchedSignerIds.length, parsed.threshold)
+            }
+          }
+        } else if (capability.family === 'rtm-utxo-asset-multisig-v1') {
+          if (normalizedNetworkId !== 'rtm') throw new Error('rtm_multisig_only_supported_on_raptoreum')
+          if (state.isLocked || !state.sessionMnemonic) throw new Error('Wallet is locked')
+          const parsed = parseRtmP2shMultisig(
+            'redeemScriptHex' in params ? params.redeemScriptHex : '',
+            'address' in params ? params.address : ''
+          )
+          const linkedSignerIds = 'linkedSignerAccountIds' in params
+            ? Array.from(new Set(params.linkedSignerAccountIds.map((entry) => String(entry || '').trim()).filter(Boolean)))
+            : []
+          if (linkedSignerIds.length === 0) throw new Error('linked_rtm_signer_missing')
+
+          const matchedSignerIds: string[] = []
+          const signerPubkeys = new Set<string>()
+          for (const signerId of linkedSignerIds) {
+            const signerAccount = state.accounts.find((account) => account.id === signerId) || null
+            if (!signerAccount || isMultisigAccount(signerAccount) || isWatchOnlyAccount(signerAccount)) {
+              throw new Error('linked_rtm_signer_missing')
+            }
+            const derived = await deriveLocalRtmSignerMaterial(state.sessionMnemonic, state.accounts, signerAccount)
+            if (!parsed.signers.some((signer) => signer.pubkey.toLowerCase() === derived.pubkeyHex.toLowerCase())) {
+              throw new Error(`Linked signer ${signerAccount.name || signerAccount.id} does not match the imported RTM redeem script`)
+            }
+            if (signerPubkeys.has(derived.pubkeyHex)) continue
+            signerPubkeys.add(derived.pubkeyHex)
+            matchedSignerIds.push(signerAccount.id)
+          }
+
+          const signers = parsed.signers.map((signer, index) => {
+            const matchedAccount = matchedSignerIds
+              .map((accountId) => state.accounts.find((account) => account.id === accountId) || null)
+              .find((account) => account ? true : false)
+            return {
+              pubkey: signer.pubkey,
+              label: matchedAccount?.name || `Signer ${index + 1}`
+            }
+          })
+          newAccount = {
+            id: `rtmms-${Date.now()}`,
+            name: normalizedName,
+            kind: 'multisig',
+            networkNames: { [normalizedNetworkId]: normalizedName },
+            derivationIndex: -1,
+            addresses: { ...createEmptyAccountAddresses(), UTXO: parsed.address },
+            networkAddresses: { [normalizedNetworkId]: parsed.address },
+            networkBalances: { [normalizedNetworkId]: '0' },
+            balance: '0',
+            multisig: {
+              family: 'rtm-utxo-asset-multisig-v1',
+              networkId: 'rtm',
+              address: parsed.address,
+              threshold: parsed.threshold,
+              scriptType: 'p2sh',
+              redeemScriptHex: parsed.redeemScriptHex,
+              signers,
+              linkedSignerAccountIds: matchedSignerIds,
+              capabilities: defaultRtmMultisigCapabilities(matchedSignerIds.length, parsed.threshold)
             }
           }
         } else {
@@ -9230,6 +9412,14 @@ export const useWalletStore = create<WalletState>()(
             throw new Error('btc_multisig_only_supported_on_bitcoin')
           }
         }
+        if (isRtmMultisigAccount(acc)) {
+          if (activeNetworkId !== acc.multisig.networkId || net.id !== acc.multisig.networkId) {
+            throw new Error('wrong_network_for_rtm_multisig')
+          }
+          if (String(net.coinSymbol || '').trim().toUpperCase() !== 'RTM') {
+            throw new Error('rtm_multisig_only_supported_on_raptoreum')
+          }
+        }
         const accountIndex = resolveDerivationIndex(acc, accounts.findIndex((a) => a.id === acc.id))
 
         // Always use the network-specific address, not the generic UTXO slot
@@ -9305,6 +9495,37 @@ export const useWalletStore = create<WalletState>()(
             amount,
             threshold: acc.multisig.threshold,
             witnessScriptHex: acc.multisig.witnessScriptHex,
+            signerMaterials,
+            donation,
+            feePreset: get().getNetworkModelPreferences(activeNetworkId).utxoFeePreset,
+            inputStrategy: get().getNetworkModelPreferences(activeNetworkId).utxoInputStrategy
+          })
+        }
+        if (isRtmMultisigAccount(acc)) {
+          const signerMaterials = []
+          for (const signerAccountId of acc.multisig.linkedSignerAccountIds) {
+            const signerAccount = accounts.find((account) => account.id === signerAccountId) || null
+            if (!signerAccount || isMultisigAccount(signerAccount) || isWatchOnlyAccount(signerAccount)) {
+              throw new Error('linked_rtm_signer_missing')
+            }
+            const derived = await deriveLocalRtmSignerMaterial(sessionMnemonic, accounts, signerAccount)
+            if (!acc.multisig.signers.some((signer) => signer.pubkey.toLowerCase() === derived.pubkeyHex.toLowerCase())) {
+              throw new Error(`Linked RTM signer ${signerAccount.name || signerAccount.id} no longer matches the imported redeem script`)
+            }
+            signerMaterials.push({
+              accountId: derived.accountId,
+              pubkeyHex: derived.pubkeyHex,
+              privHex: derived.privHex,
+              label: signerAccount.name
+            })
+          }
+          return await sendRtmP2shMultisigTransaction({
+            network: net,
+            rpcConfig,
+            senderAddress,
+            to,
+            amount,
+            redeemScriptHex: acc.multisig.redeemScriptHex,
             signerMaterials,
             donation,
             feePreset: get().getNetworkModelPreferences(activeNetworkId).utxoFeePreset,

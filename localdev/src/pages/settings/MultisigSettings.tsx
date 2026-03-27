@@ -20,6 +20,7 @@ import {
   getMultisigCapabilityForNetwork,
   isBtcMultisigAccount,
   isMultisigAccount,
+  isRtmMultisigAccount,
   isSafeMultisigAccount,
   isWalletReadyMultisigNetwork,
   isWatchOnlyAccount
@@ -99,6 +100,8 @@ const MultisigSettings: React.FC = () => {
   const [ownerSignerAccountId, setOwnerSignerAccountId] = useState('')
   const [btcAddress, setBtcAddress] = useState('')
   const [witnessScriptHex, setWitnessScriptHex] = useState('')
+  const [rtmAddress, setRtmAddress] = useState('')
+  const [redeemScriptHex, setRedeemScriptHex] = useState('')
   const [linkedSignerAccountIds, setLinkedSignerAccountIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -167,6 +170,8 @@ const MultisigSettings: React.FC = () => {
     setOwnerSignerAccountId('')
     setBtcAddress('')
     setWitnessScriptHex('')
+    setRtmAddress('')
+    setRedeemScriptHex('')
     setLinkedSignerAccountIds([])
   }
 
@@ -229,6 +234,25 @@ const MultisigSettings: React.FC = () => {
           linkedSignerAccountIds
         })
         showToast('Bitcoin multisig account imported', 'success')
+      } else if (selectedCapability.family === 'rtm-utxo-asset-multisig-v1') {
+        if (!rtmAddress.trim()) {
+          throw new Error('RTM multisig address is required.')
+        }
+        if (!redeemScriptHex.trim()) {
+          throw new Error('Redeem script hex is required.')
+        }
+        if (linkedSignerAccountIds.length === 0) {
+          throw new Error('Choose at least one linked local RTM signer.')
+        }
+        await addMultisigAccount({
+          family: 'rtm-utxo-asset-multisig-v1',
+          name: accountName.trim(),
+          networkId,
+          address: rtmAddress.trim(),
+          redeemScriptHex: redeemScriptHex.trim(),
+          linkedSignerAccountIds
+        })
+        showToast('RTM multisig account imported', 'success')
       } else {
         throw new Error('Unsupported multisig family.')
       }
@@ -256,7 +280,7 @@ const MultisigSettings: React.FC = () => {
               </span>
             </div>
             <p className="mt-2 break-words text-xs leading-relaxed text-gray-500">
-              This page controls wallet policy for wallet-ready multisig networks. Today that means imported Safe accounts on supported EVM chains and imported Bitcoin p2wsh multisig on Bitcoin.
+              This page controls wallet policy for wallet-ready multisig networks. Today that means imported Safe accounts on supported EVM chains, imported Bitcoin p2wsh multisig on Bitcoin, and imported RTM script-hash multisig on Raptoreum.
             </p>
           </div>
           <button
@@ -419,8 +443,8 @@ const MultisigSettings: React.FC = () => {
             <p className="mt-2 text-xs text-gray-500">Imported Bitcoin p2wsh multisig can be validated, signed locally with linked wallet signers, finalized, and relayed through the existing Bitcoin path.</p>
           </div>
           <div className="rounded-2xl border border-dark-600 bg-dark-800/70 p-4">
-            <p className="text-sm font-semibold text-gray-100">BTCZ and RTM</p>
-            <p className="mt-2 text-xs text-gray-500">Planned later. They do not appear in multisig options until a dedicated wallet-ready multisig family exists for each chain.</p>
+            <p className="text-sm font-semibold text-gray-100">RTM Multisig v1</p>
+            <p className="mt-2 text-xs text-gray-500">Imported RTM script-hash multisig can sign native RTM and RTM asset transfers locally with linked wallet signers, then relay the finalized transaction through the existing RTM path.</p>
           </div>
         </div>
       </div>
@@ -432,7 +456,9 @@ const MultisigSettings: React.FC = () => {
             <p className="mt-1 break-words text-xs text-gray-500">
               {selectedCapability?.family === 'btc-psbt-v1'
                 ? 'Import an existing Bitcoin p2wsh multisig. The witness script must match the address, and enough linked local BTC signers must be available to satisfy the threshold.'
-                : 'Import an existing Safe on a supported EVM chain. A linked local owner signer is required for server auth and proposal approval.'}
+                : selectedCapability?.family === 'rtm-utxo-asset-multisig-v1'
+                  ? 'Import an existing RTM script-hash multisig. The redeem script must match the RTM address, and enough linked local RTM signers must be available to satisfy the threshold for native RTM and asset sends.'
+                  : 'Import an existing Safe on a supported EVM chain. A linked local owner signer is required for server auth and proposal approval.'}
             </p>
           </div>
           <span className={`inline-flex max-w-full self-start rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] sm:self-auto ${
@@ -486,7 +512,13 @@ const MultisigSettings: React.FC = () => {
             label="Account name"
             value={accountName}
             onChange={(event) => setAccountName(event.target.value)}
-            placeholder={selectedCapability?.family === 'btc-psbt-v1' ? 'Treasury BTC Multisig' : 'Treasury Safe'}
+            placeholder={
+              selectedCapability?.family === 'btc-psbt-v1'
+                ? 'Treasury BTC Multisig'
+                : selectedCapability?.family === 'rtm-utxo-asset-multisig-v1'
+                  ? 'Treasury RTM Multisig'
+                  : 'Treasury Safe'
+            }
           />
           {selectedCapability?.family === 'btc-psbt-v1' ? (
             <>
@@ -547,6 +579,65 @@ const MultisigSettings: React.FC = () => {
                 </div>
               </div>
             </>
+          ) : selectedCapability?.family === 'rtm-utxo-asset-multisig-v1' ? (
+            <>
+              <Input
+                label="RTM multisig address"
+                value={rtmAddress}
+                onChange={(event) => setRtmAddress(event.target.value)}
+                placeholder="7..."
+                className="font-mono text-xs"
+              />
+              <Input
+                label="Redeem script hex"
+                value={redeemScriptHex}
+                onChange={(event) => setRedeemScriptHex(event.target.value)}
+                placeholder="5221..."
+                className="font-mono text-xs"
+              />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-400">Linked local RTM signers</span>
+                  <span className="rounded-full border border-dark-600 bg-dark-900/80 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-gray-300">
+                    {linkedSignerAccountIds.length} selected
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {standardAccounts.length === 0 ? (
+                    <div className="rounded-2xl border border-dark-600 bg-dark-800/70 p-3 text-xs text-gray-500">
+                      No local signing accounts are available yet.
+                    </div>
+                  ) : standardAccounts.map((account) => {
+                    const checked = linkedSignerAccountIds.includes(account.id)
+                    const signerAddress = getAccountAddressForNetwork(account, 'rtm', 'UTXO') || account.addresses?.UTXO || ''
+                    return (
+                      <button
+                        key={account.id}
+                        type="button"
+                        onClick={() => toggleLinkedSigner(account.id)}
+                        className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition-colors ${
+                          checked ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dark-600 bg-dark-800/70 hover:bg-dark-700/70'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-100">
+                            {getAccountDisplayName(account, networkId || 'rtm', account.name)}
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-gray-500">
+                            {signerAddress || 'RTM address unavailable'}
+                          </p>
+                        </div>
+                        <div className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${
+                          checked ? 'border-emerald-400 bg-emerald-400 text-dark-950' : 'border-dark-500 bg-dark-900'
+                        }`}>
+                          {checked ? <IoCheckmarkCircle className="h-4 w-4" /> : null}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <Input label="Safe address" value={safeAddress} onChange={(event) => setSafeAddress(event.target.value)} placeholder="0x..." className="font-mono text-xs" />
@@ -569,7 +660,15 @@ const MultisigSettings: React.FC = () => {
           )}
           {error ? <p className="text-xs font-bold text-red-300">{error}</p> : null}
           <Button onClick={() => void handleImport()} isLoading={busy} disabled={!multisigSettings.enabled || allowedNetworks.length === 0}>
-            {multisigSettings.enabled ? (selectedCapability?.family === 'btc-psbt-v1' ? 'Import Bitcoin multisig' : 'Import Safe') : 'Enable multisig first'}
+            {multisigSettings.enabled
+              ? (
+                selectedCapability?.family === 'btc-psbt-v1'
+                  ? 'Import Bitcoin multisig'
+                  : selectedCapability?.family === 'rtm-utxo-asset-multisig-v1'
+                    ? 'Import RTM multisig'
+                    : 'Import Safe'
+              )
+              : 'Enable multisig first'}
           </Button>
         </div>
       </div>
@@ -600,7 +699,7 @@ const MultisigSettings: React.FC = () => {
           <div className="flex gap-3 rounded-2xl border border-dark-600 bg-dark-800/70 p-4">
             <IoInformationCircleOutline className="mt-0.5 h-4.5 w-4.5 shrink-0 text-sky-300" />
             <p className="text-xs leading-relaxed text-gray-300">
-              Imported Safe and Bitcoin multisig accounts will appear here with their current readiness and actions.
+              Imported Safe, Bitcoin, and RTM multisig accounts will appear here with their current readiness and actions.
             </p>
           </div>
         ) : multisigAccounts.map((account) => {
@@ -683,6 +782,89 @@ const MultisigSettings: React.FC = () => {
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Execution model</p>
                   <p className="mt-2 text-xs leading-relaxed text-gray-300">
                     Bitcoin multisig stays wallet-local in v1. The wallet validates the p2wsh witness script, signs with linked local BTC accounts, finalizes only when the threshold is satisfied, and then relays the fully signed transaction through the existing Bitcoin path.
+                  </p>
+                </div>
+              </div>
+            )
+          }
+          if (isRtmMultisigAccount(account)) {
+            const linkedAccounts = account.multisig.linkedSignerAccountIds
+              .map((accountId) => accounts.find((candidate) => candidate.id === accountId) || null)
+              .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+            const ready = linkedAccounts.length >= account.multisig.threshold
+            return (
+              <div key={account.id} className="space-y-3 rounded-2xl border border-dark-600 bg-dark-800/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-100">{getAccountDisplayName(account, account.multisig.networkId, account.name)}</p>
+                      <span className="rounded-full border border-dark-600 bg-dark-900/80 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-gray-300">
+                        RTM Multisig v1
+                      </span>
+                    </div>
+                    <p className="mt-1 break-words text-[11px] text-gray-500">
+                      {network?.name || account.multisig.networkId || 'Raptoreum'} | {account.multisig.threshold} of {account.multisig.signers.length}
+                    </p>
+                  </div>
+                  <div className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
+                    ready
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                  }`}>
+                    {ready ? <IoCheckmarkCircle className="h-3.5 w-3.5" /> : <IoWarningOutline className="h-3.5 w-3.5" />}
+                    {ready ? 'Ready' : 'Threshold not met'}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-dark-600 bg-dark-900/70 px-3 py-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">RTM multisig address</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-gray-300">
+                    {getAccountAddressForNetwork(account, account.multisig.networkId, network?.coinType) || account.multisig.address}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-dark-600 bg-dark-900/70 px-3 py-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Redeem script</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-gray-300">
+                    {account.multisig.redeemScriptHex}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-dark-600 bg-dark-900/50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Imported signers</p>
+                    <div className="mt-2 space-y-1">
+                      {account.multisig.signers.map((signer, index) => (
+                        <div key={`${signer.pubkey}:${index}`} className="space-y-1">
+                          <p className="break-all font-mono text-[11px] text-gray-400">{signer.pubkey}</p>
+                          {signer.label ? <p className="text-[11px] text-gray-500">{signer.label}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-dark-600 bg-dark-900/50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Linked local signers</p>
+                    <div className="mt-2 space-y-2">
+                      {linkedAccounts.length === 0 ? (
+                        <p className="text-xs text-gray-500">No linked local RTM signers.</p>
+                      ) : linkedAccounts.map((linkedAccount) => (
+                        <div key={linkedAccount.id} className="rounded-xl border border-dark-600 bg-dark-900/70 px-3 py-2">
+                          <p className="text-xs font-semibold text-gray-200">
+                            {getAccountDisplayName(linkedAccount, account.multisig.networkId, linkedAccount.name)}
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-gray-500">
+                            {getAccountAddressForNetwork(linkedAccount, account.multisig.networkId, 'UTXO') || linkedAccount.addresses?.UTXO || 'RTM address unavailable'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-dark-600 bg-dark-900/50 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Execution model</p>
+                  <p className="mt-2 text-xs leading-relaxed text-gray-300">
+                    RTM multisig stays wallet-local in v1. The wallet validates the script-hash redeem script, signs native RTM and asset transfers with linked local RTM accounts, finalizes only when the threshold is satisfied, and then relays the fully signed transaction through the existing RTM path.
                   </p>
                 </div>
               </div>
@@ -822,7 +1004,7 @@ const MultisigSettings: React.FC = () => {
           <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[0.24em] text-gray-400">Cross-family Status</p>
             <p className="mt-1 break-words text-xs text-gray-500">
-              Multisig execution stays scoped to imported Safe accounts on supported EVM chains and imported Bitcoin p2wsh multisig on Bitcoin. Cross-chain, BTCZ, and RTM multisig flows are not executable in this build.
+              Multisig execution stays scoped to imported Safe accounts on supported EVM chains, imported Bitcoin p2wsh multisig on Bitcoin, and imported RTM script-hash multisig on Raptoreum. Cross-chain and BTCZ multisig flows are not executable in this build.
             </p>
           </div>
         </div>

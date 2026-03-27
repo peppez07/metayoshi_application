@@ -10,7 +10,7 @@ import {
   DEFAULT_UTXO_COIN_SYMBOL,
   getAllUtxoAddressSpecs,
   getUtxoAddressSpec
-} from '../coins'
+} from '../coins/utxoAddressSpecs'
 import type { UtxoAddressSpec } from '../coins/types'
 
 const UTXO_ADDRESS_SPECS = getAllUtxoAddressSpecs()
@@ -23,6 +23,10 @@ export const BIP44_COIN_TYPES: Record<string, number> = Object.fromEntries(
 // P2PKH version bytes resolved from per-coin modules.
 export const P2PKH_VERSIONS: Record<string, number | number[]> = Object.fromEntries(
   Object.entries(UTXO_ADDRESS_SPECS).map(([symbol, spec]) => [symbol, spec.p2pkhVersion])
+)
+
+export const P2SH_VERSIONS: Record<string, number | number[] | undefined> = Object.fromEntries(
+  Object.entries(UTXO_ADDRESS_SPECS).map(([symbol, spec]) => [symbol, spec.p2shVersion])
 )
 
 function concatBytes(...arrs: Uint8Array[]): Uint8Array {
@@ -148,6 +152,36 @@ export function addressToP2pkhScriptPubKeyHex(address: string, coinType: string)
   script.set(hash160, 3)
   script[23] = 0x88
   script[24] = 0xac
+  return bytesToHex(script)
+}
+
+export function redeemScriptToP2shAddress(redeemScriptHex: string, coinType: string): string {
+  const spec = getUtxoAddressSpec(coinType.toUpperCase())
+  if (!spec) throw new Error(`Unknown UTXO coin type: ${coinType}`)
+  if (spec.p2shVersion === undefined) {
+    throw new Error(`${coinType} does not define a P2SH version byte`)
+  }
+  const normalized = String(redeemScriptHex || '').trim().replace(/^0x/i, '')
+  if (!normalized || normalized.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(normalized)) {
+    throw new Error('Redeem script must be valid hex')
+  }
+  const scriptBytes = hexToBytes(normalized)
+  const scriptHash = ripemd160(sha256(scriptBytes))
+  const payload = concatBytes(versionToBytes(spec.p2shVersion), scriptHash)
+  return base58Check(payload)
+}
+
+export function redeemScriptToP2shScriptPubKeyHex(redeemScriptHex: string): string {
+  const normalized = String(redeemScriptHex || '').trim().replace(/^0x/i, '')
+  if (!normalized || normalized.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(normalized)) {
+    throw new Error('Redeem script must be valid hex')
+  }
+  const scriptHash = ripemd160(sha256(hexToBytes(normalized)))
+  const script = new Uint8Array(23)
+  script[0] = 0xa9
+  script[1] = 0x14
+  script.set(scriptHash, 2)
+  script[22] = 0x87
   return bytesToHex(script)
 }
 

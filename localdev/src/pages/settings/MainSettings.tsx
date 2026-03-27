@@ -48,7 +48,7 @@ const MainSettings: React.FC = () => {
         },
         {
           label: 'Multisig',
-          description: 'Enable multisig, pick chains, and manage Safe accounts',
+          description: 'Enable multisig, pick chains, and manage Safe, BTC, or RTM accounts',
           path: '/settings/multisig',
           icon: <IoShieldCheckmarkOutline className="h-4.5 w-4.5" />,
           iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',

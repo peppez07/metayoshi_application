@@ -3,6 +3,7 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 import { sha256 } from '@noble/hashes/sha256'
 import { hmac } from '@noble/hashes/hmac'
 import { blake2b } from '@noble/hashes/blake2b'
+import { ripemd160 } from '@noble/hashes/ripemd160'
 import * as secp from '@noble/secp256k1'
 
 // noble v3 requires hash helpers to be wired by host app.
@@ -105,6 +106,27 @@ function encodeVarInt(n: number): Uint8Array {
 function pushData(data: Uint8Array): Uint8Array {
   if (data.length > 0xff) throw new Error('Pushdata too large')
   return concatBytes(new Uint8Array([data.length]), data)
+}
+
+function parseSmallIntegerOpcode(opcode: number): number {
+  if (opcode === 0x00) return 0
+  if (opcode >= 0x51 && opcode <= 0x60) return opcode - 0x50
+  throw new Error('Unsupported multisig small integer opcode')
+}
+
+function readSmallPushData(script: Uint8Array, offset: number): { data: Uint8Array; nextOffset: number } {
+  if (offset >= script.length) throw new Error('Unexpected end of redeem script')
+  const pushLength = script[offset]
+  if (pushLength < 1 || pushLength > 75) {
+    throw new Error('Only direct push multisig redeem scripts are supported')
+  }
+  const start = offset + 1
+  const end = start + pushLength
+  if (end > script.length) throw new Error('Unexpected end of redeem script push')
+  return {
+    data: script.slice(start, end),
+    nextOffset: end
+  }
 }
 
 function reverseBytes(bytes: Uint8Array): Uint8Array {
@@ -286,6 +308,61 @@ export interface UnsignedTxInput {
   amountSats: number
 }
 
+function normalizeHex(value: string): string {
+  return String(value || '').trim().toLowerCase().replace(/^0x/i, '')
+}
+
+function parseLegacyP2shMultisigRedeemScript(redeemScriptHex: string): {
+  redeemScriptHex: string
+  threshold: number
+  signers: string[]
+  scriptPubKeyHex: string
+} {
+  const normalizedRedeemScriptHex = normalizeHex(redeemScriptHex)
+  if (!normalizedRedeemScriptHex || normalizedRedeemScriptHex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(normalizedRedeemScriptHex)) {
+    throw new Error('Redeem script must be valid hex')
+  }
+  const redeemScriptBytes = hexToBytes(normalizedRedeemScriptHex)
+  if (redeemScriptBytes.length < 1 || redeemScriptBytes[redeemScriptBytes.length - 1] !== 0xae) {
+    throw new Error('Redeem script must end with OP_CHECKMULTISIG')
+  }
+
+  const threshold = parseSmallIntegerOpcode(redeemScriptBytes[0])
+  let offset = 1
+  const signers: string[] = []
+  while (offset < redeemScriptBytes.length - 2) {
+    const { data, nextOffset } = readSmallPushData(redeemScriptBytes, offset)
+    if (data.length !== 33 || (data[0] !== 0x02 && data[0] !== 0x03)) {
+      throw new Error('Redeem script contains a non-compressed public key')
+    }
+    signers.push(bytesToHex(data))
+    offset = nextOffset
+  }
+  if (signers.length === 0) throw new Error('Redeem script must contain at least one signer')
+  const signerCount = parseSmallIntegerOpcode(redeemScriptBytes[offset])
+  if (offset + 2 !== redeemScriptBytes.length) {
+    throw new Error('Redeem script contains unsupported trailing data')
+  }
+  if (signerCount !== signers.length) {
+    throw new Error('Redeem script signer count does not match embedded public keys')
+  }
+  if (threshold < 1 || threshold > signerCount) {
+    throw new Error('Redeem script threshold is invalid')
+  }
+  const scriptHash = ripemd160(sha256(redeemScriptBytes))
+  const scriptPubKey = new Uint8Array(23)
+  scriptPubKey[0] = 0xa9
+  scriptPubKey[1] = 0x14
+  scriptPubKey.set(scriptHash, 2)
+  scriptPubKey[22] = 0x87
+  return {
+    redeemScriptHex: normalizedRedeemScriptHex,
+    threshold,
+    signers,
+    scriptPubKeyHex: bytesToHex(scriptPubKey)
+  }
+}
+
 export interface UnsignedTxOutpoint {
   txid: string
   vout: number
@@ -367,6 +444,81 @@ export async function signLegacyP2pkhTransaction(
   }
   tx.inputs = signedInputs
 
+  return bytesToHex(serializeTx(tx))
+}
+
+export async function signLegacyP2shMultisigTransaction(
+  unsignedHex: string,
+  inputs: UnsignedTxInput[],
+  redeemScriptHex: string,
+  signerPrivateKeysHex: string[]
+): Promise<string> {
+  const tx = parseLegacyTx(unsignedHex)
+  if (tx.inputs.length !== inputs.length) {
+    throw new Error('Prepared transaction input count mismatch')
+  }
+
+  const parsedRedeemScript = parseLegacyP2shMultisigRedeemScript(redeemScriptHex)
+  const redeemScriptBytes = hexToBytes(parsedRedeemScript.redeemScriptHex)
+  const matchedSigners = Array.from(
+    new Map(
+      signerPrivateKeysHex.map((privateKeyHex) => {
+        const priv = hexToBytes(normalizeHex(privateKeyHex))
+        const pubHex = bytesToHex(secp.getPublicKey(priv, true)).toLowerCase()
+        return [pubHex, { priv, pubHex }]
+      })
+    ).values()
+  ).filter((entry) => parsedRedeemScript.signers.includes(entry.pubHex))
+
+  if (matchedSigners.length < parsedRedeemScript.threshold) {
+    throw new Error(
+      `Not enough linked local RTM signers to satisfy this ${parsedRedeemScript.threshold}-of-${parsedRedeemScript.signers.length} wallet yet`
+    )
+  }
+
+  const orderedSignerSet = new Set(
+    parsedRedeemScript.signers.filter((pubHex) => matchedSigners.some((entry) => entry.pubHex === pubHex)).slice(0, parsedRedeemScript.threshold)
+  )
+
+  const signedInputs: TxInput[] = []
+  for (let i = 0; i < tx.inputs.length; i++) {
+    const vin = tx.inputs[i]
+    const prev = inputs[i]
+    if (vin.txid !== prev.txid || vin.vout !== prev.vout) {
+      throw new Error('Prepared transaction input outpoint mismatch')
+    }
+    if (normalizeHex(prev.scriptPubKeyHex) !== parsedRedeemScript.scriptPubKeyHex) {
+      throw new Error('Prepared transaction input does not match the imported RTM multisig redeem script')
+    }
+
+    const sighash = signatureHashLegacy(tx, i, redeemScriptBytes, SIGHASH_ALL)
+    const signatures = parsedRedeemScript.signers
+      .filter((pubHex) => orderedSignerSet.has(pubHex))
+      .map((pubHex) => {
+        const signer = matchedSigners.find((entry) => entry.pubHex === pubHex)
+        if (!signer) return null
+        const compactSig = secp.sign(sighash, signer.priv, { prehash: false, lowS: true, format: 'compact' })
+        return concatBytes(compactToDer(compactSig), new Uint8Array([SIGHASH_ALL]))
+      })
+      .filter((value): value is Uint8Array => Boolean(value))
+
+    if (signatures.length < parsedRedeemScript.threshold) {
+      throw new Error('Not enough RTM multisig signatures were collected to finalize this transaction')
+    }
+
+    const scriptParts = [
+      new Uint8Array([0x00]),
+      ...signatures.map((signature) => pushData(signature)),
+      pushData(redeemScriptBytes)
+    ]
+
+    signedInputs.push({
+      ...vin,
+      scriptSig: concatBytes(...scriptParts)
+    })
+  }
+
+  tx.inputs = signedInputs
   return bytesToHex(serializeTx(tx))
 }
 

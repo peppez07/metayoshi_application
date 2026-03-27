@@ -51,6 +51,7 @@ export interface Network {
 export interface UtxoAddressSpec {
   bip44CoinType: number
   p2pkhVersion: number | number[]
+  p2shVersion?: number | number[]
 }
 
 export interface CoinRuntimeContext {
