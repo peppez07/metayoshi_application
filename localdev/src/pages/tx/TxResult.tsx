@@ -22,6 +22,10 @@ interface TxResultState {
   returnLabel?: string
 }
 
+function isAuthSignatureMethod(method?: string): boolean {
+  return String(method || '').trim() === 'wallet_signMessage'
+}
+
 const TxResult: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
@@ -63,12 +67,16 @@ const TxResult: React.FC = () => {
   const returnTo = String(txState.returnTo || '').trim()
   const returnLabel = String(txState.returnLabel || '').trim() || 'Home'
   const isSafeProposal = Boolean(txState.safeTxHash) && txState.safeTxHash === txState.txid
+  const isAuthSignature = isAuthSignatureMethod(txState.requestMethod)
+  const pageTitle = isAuthSignature ? 'Auth Signature Details' : 'Transaction Details'
+  const submittedLabel = isAuthSignature ? 'Signed' : 'Submitted'
+  const submittedValue = isAuthSignature ? (txState.amount || 'Signature recorded') : `${txState.amount} ${txState.asset}`.trim()
 
   return (
     <div className="flex min-h-0 h-full flex-col bg-dark-800">
       <header className="shrink-0 px-4 py-3 bg-dark-900 border-b border-dark-600 flex items-center justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-widest text-gray-200">Transaction Details</p>
+          <p className="text-xs font-black uppercase tracking-widest text-gray-200">{pageTitle}</p>
           <p className="text-[10px] text-gray-500 uppercase tracking-widest">{network?.name || txState.networkId}</p>
         </div>
         <IoCheckmarkCircle className="w-6 h-6 text-green-400" />
@@ -76,12 +84,10 @@ const TxResult: React.FC = () => {
 
       <div className="flex-1 min-h-0 p-4 space-y-4 overflow-y-auto custom-scrollbar">
         <div className="rounded-2xl border border-green-500/25 bg-green-500/10 p-4 space-y-1">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-green-300">Submitted</p>
-          <p className="text-sm font-bold text-white">
-            {txState.amount} {txState.asset}
-          </p>
+          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-green-300">{submittedLabel}</p>
+          <p className="text-sm font-bold text-white">{submittedValue}</p>
           <p className="text-[11px] text-gray-300">
-            Status: <span className="font-bold capitalize">{txState.status || 'pending'}</span>
+            Status: <span className="font-bold capitalize">{txState.status || (isAuthSignature ? 'signed' : 'pending')}</span>
           </p>
           {txState.origin ? (
             <p className="text-[11px] text-gray-400 break-all">Requested by {txState.origin}</p>
@@ -89,21 +95,23 @@ const TxResult: React.FC = () => {
         </div>
 
         <DetailRow label="Network" value={`${network?.name || txState.networkId}${network?.symbol ? ` (${network.symbol})` : ''}`} />
-        <DetailRow label="Asset" value={txState.asset} />
-        <DetailRow label="Amount" value={txState.amount} />
+        <DetailRow label={isAuthSignature ? 'Type' : 'Asset'} value={isAuthSignature ? 'Auth Signature' : txState.asset} />
+        <DetailRow label={isAuthSignature ? 'Message Size' : 'Amount'} value={txState.amount} />
         <DetailRow label="From" value={txState.from || '-'} mono />
-        <DetailRow label="To" value={txState.to || 'Contract creation / network broadcast'} mono />
+        <DetailRow label={isAuthSignature ? 'Signer' : 'To'} value={txState.to || (isAuthSignature ? '-' : 'Contract creation / network broadcast')} mono />
         {txState.requestMethod ? <DetailRow label="Method" value={txState.requestMethod} mono /> : null}
 
         <div className="rounded-xl border border-dark-600 bg-dark-700/30 p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Transaction ID</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{isSafeProposal ? 'Safe Tx Hash' : 'Transaction ID'}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+              {isAuthSignature ? 'Signature' : (isSafeProposal ? 'Safe Tx Hash' : 'Transaction ID')}
+            </span>
             <button
               type="button"
               onClick={() => void copyValue('txid', txState.txid)}
               className="p-1.5 rounded-lg hover:bg-dark-600 transition-colors"
-              title="Copy transaction id"
+              title={isAuthSignature ? 'Copy signature' : 'Copy transaction id'}
             >
               {copiedField === 'txid'
                 ? <IoCheckmark className="w-4 h-4 text-green-400" />
@@ -114,7 +122,7 @@ const TxResult: React.FC = () => {
           <p className="text-[11px] font-mono break-all text-gray-200">{txState.txid}</p>
         </div>
 
-        {explorerUrl ? (
+        {explorerUrl && !isAuthSignature ? (
           <a
             href={explorerUrl}
             target="_blank"

@@ -875,7 +875,9 @@ const DappRequestConfirm: React.FC = () => {
           txid: txIdentifier,
           networkId: pendingRequest.networkId,
           accountId: pendingRequest.accountId,
-          asset: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX'),
+          asset: requestIsSignMessage
+            ? 'Auth Signature'
+            : ((requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX')),
           assetId: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId))
             ? (requestAssetId || undefined)
             : (buildNativeActivityAssetId(pendingRequest.networkId) || undefined),
