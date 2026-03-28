@@ -400,7 +400,8 @@ function installMessageBridge(): void {
           state.selectedAddress = String(payload.address)
         }
         state.connected = state.accounts.length > 0
-        emit('accountsChanged', payload)
+        // EIP-1193 consumers expect an array of addresses, not the internal bridge payload object.
+        emit('accountsChanged', state.accounts)
         emit('ethereum#accountsChanged', state.accounts)
         emitKeplrKeyStoreChange()
       }

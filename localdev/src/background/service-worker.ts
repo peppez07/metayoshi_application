@@ -1886,7 +1886,10 @@ function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string
     || dappNetworks[0]
   const preferredNetworkId = preferredNetwork?.id || DEFAULT_NETWORK_ID
   const preferredAddress = getActiveAddressFromState(state, preferredNetworkId)
-  const network = preferredAddress || explicitlyRequestedNetwork
+  // If the requested or active network has no address for the selected account,
+  // fall back to the first network that does. This keeps connect flows usable
+  // when a dapp hints one network but the current account only has another.
+  const network = preferredAddress
     ? preferredNetwork
     : findFirstNetworkWithActiveAddress(state, dappNetworks) || preferredNetwork
   const effectiveNetworkId = network?.id || DEFAULT_NETWORK_ID
