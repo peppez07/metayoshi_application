@@ -765,8 +765,11 @@ export async function fetchBridgeAddressAssetUtxos(
         const hasMoreBases = baseIndex < apiBases.length - 1
         const shouldTryAlternateRoute =
           hasMoreRoutesOnBase
-          && res.status === 404
-          && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail)
+          && (
+            (res.status === 404 && /route[_ ]?not[_ ]?available[_ ]?on[_ ]?host/i.test(compactDetail))
+            || res.status === 401
+            || res.status === 403
+          )
         const shouldTryAlternateBase =
           hasMoreBases
           && (
@@ -992,6 +995,43 @@ async function fetchBridgeAddressAssets(
     const scaled = BigInt(scaledText || '0')
     return scaled > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(scaled)
   }
+  const normalizeHostedAssetRows = (json: any): Array<Record<string, unknown>> => {
+    if (Array.isArray(json?.assets)) return json.assets as Array<Record<string, unknown>>
+    if (Array.isArray(json?.items)) return json.items as Array<Record<string, unknown>>
+
+    const assets = json?.assets
+    if (!assets || typeof assets !== 'object') return []
+
+    const rows: Array<Record<string, unknown>> = []
+    const append = (value: unknown) => {
+      if (!Array.isArray(value)) return
+      for (const row of value) {
+        if (row && typeof row === 'object') rows.push(row as Record<string, unknown>)
+      }
+    }
+
+    append(assets.tokens)
+    append(assets.erc20)
+    append(assets.splTokenAccounts)
+    append(assets.balances)
+    append(assets.items)
+
+    return rows
+  }
+  const isExplicitHostedAssetEnvelope = (json: any): boolean => {
+    if (!json || typeof json !== 'object') return false
+    if (Array.isArray(json?.assets) || Array.isArray(json?.items)) return true
+    const assets = json?.assets
+    if (!assets || typeof assets !== 'object') return false
+    return (
+      Array.isArray(assets.tokens)
+      || Array.isArray(assets.erc20)
+      || Array.isArray(assets.splTokenAccounts)
+      || Array.isArray(assets.balances)
+      || Array.isArray(assets.items)
+      || Object.prototype.hasOwnProperty.call(assets, 'native')
+    )
+  }
 
   for (let i = 0; i < apiBases.length; i += 1) {
     const url = `${apiBases[i]}/v1/address/${encodeURIComponent(address)}/assets?${params.toString()}`
@@ -1012,17 +1052,9 @@ async function fetchBridgeAddressAssets(
         if (i < apiBases.length - 1) continue
         return null
       }
-      const rows = Array.isArray(json?.assets)
-        ? json.assets
-        : Array.isArray(json?.items)
-          ? json.items
-          : []
+      const rows = normalizeHostedAssetRows(json)
       if (rows.length <= 0) {
-        const hasExplicitEmptyPayload =
-          Boolean(json && typeof json === 'object' && (
-            Array.isArray(json?.assets)
-            || Array.isArray(json?.items)
-          ))
+        const hasExplicitEmptyPayload = isExplicitHostedAssetEnvelope(json)
         if (!hasExplicitEmptyPayload && i < apiBases.length - 1) continue
         return {}
       }
@@ -1030,24 +1062,53 @@ async function fetchBridgeAddressAssets(
       const balances: Record<string, number> = {}
       for (const row of rows) {
         const item = row as Record<string, unknown>
-        const assetName = String(
+        const tokenType = String(item.tokenType || item.type || item.assetType || '').trim().toLowerCase()
+        const tokenId = String(
           item.assetName
           || item.assetId
-          || item.name
+          || item.tokenId
+          || item.coinType
+          || item.denom
+          || item.mint
+          || item.contractAddress
+          || item.tokenAddress
+          || item.policyId
+          || item.currency
           || item.symbol
+          || item.name
           || ''
+        ).trim()
+        if (!tokenId) continue
+        if (tokenType === 'native' || tokenId.toLowerCase() === 'native') continue
+
+        const issuer = String(
+          item.issuer
+          || item.account
+          || item.assetIssuer
+          || item.asset_issuer
+          || ''
+        ).trim()
+        const assetName = String(
+          issuer && tokenId && !tokenId.includes('|')
+            ? `${tokenId}|${issuer}`
+            : tokenId
         ).trim()
 
         let rawAmount = Number(
           item.amountSat
           ?? item.satoshis
           ?? item.balanceSat
+          ?? item.balanceRaw
+          ?? item.amountRaw
+          ?? item.totalBalance
           ?? 0
         )
         if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
           // The hosted address-assets endpoint may only expose human-readable
-          // amount/balance fields. The RTM UI store expects sat-like raw units.
-          rawAmount = scaleDisplayAmountToSats(item.amount ?? item.balance, 8)
+          // amount/balance fields. Normalize them to sat-like raw units.
+          const decimalsRaw = Number(item.decimals)
+          const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 30 ? decimalsRaw : 8
+          rawAmount = scaleDisplayAmountToSats(item.amount ?? item.balance, decimals)
         }
         if (!assetName || !Number.isFinite(rawAmount) || rawAmount <= 0) continue
         balances[assetName] = Math.trunc(rawAmount)

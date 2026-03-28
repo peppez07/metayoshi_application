@@ -5771,12 +5771,41 @@ export const useWalletStore = create<WalletState>()(
 
         try {
           const assets = await listAssetBalancesByAddress(rpcConfig, address)
+          const labels: Record<string, string> = {}
+          const logos: Record<string, string> = {}
+          const metadataResponse = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null)
+          const metadataAssets = metadataResponse?.ok && metadataResponse.json?.assets && typeof metadataResponse.json.assets === 'object'
+            ? metadataResponse.json.assets as Record<string, unknown>
+            : null
+          const metadataRows = metadataAssets
+            ? [
+                ...(Array.isArray(metadataAssets.tokens) ? metadataAssets.tokens as Array<Record<string, unknown>> : []),
+                ...(Array.isArray(metadataAssets.balances) ? metadataAssets.balances as Array<Record<string, unknown>> : [])
+              ]
+            : []
+          for (const row of metadataRows) {
+            const tokenId = String(
+              row.assetName
+              || row.assetId
+              || row.tokenId
+              || row.coinType
+              || row.denom
+              || row.policyId
+              || row.currency
+              || ''
+            ).trim()
+            if (!tokenId || !(tokenId in (assets || {}))) continue
+            const label = String(row.symbol || row.name || tokenId).trim()
+            if (label) labels[tokenId] = label
+            const logoUri = extractAssetLogoUri(row)
+            if (logoUri) logos[tokenId] = logoUri
+          }
           applyAssetSnapshot({
             assets: assets ?? {},
-            logos: {},
-            labels: {},
+            logos,
+            labels,
             evmNfts: {}
-          }, 'rpc:listassetbalancesbyaddress', {
+          }, metadataRows.length > 0 ? 'rpc:listassetbalancesbyaddress+server-metadata' : 'rpc:listassetbalancesbyaddress', {
             emptyAuthoritative: true
           })
         } catch (err) {
