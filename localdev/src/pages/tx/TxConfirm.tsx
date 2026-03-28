@@ -86,6 +86,23 @@ function parseCoinAmount(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function isRtmMempoolConflictMessage(message: string): boolean {
+  return /pending unconfirmed spend|txn-mempool-conflict|mempool conflict|mempool.*conflict/i.test(String(message || ''))
+}
+
+function formatRtmSendUiError(message: string, options: { traceId: string; isSelfSend: boolean }): string {
+  const traceSuffix = ` [trace ${options.traceId}]`
+  if (!isRtmMempoolConflictMessage(message)) return `${message}${traceSuffix}`
+
+  const intro = options.isSelfSend
+    ? 'A previous RTM self-send or consolidation transaction from this address is still pending in the mempool.'
+    : 'A previous RTM transaction from this address is still pending in the mempool.'
+  const hint = options.isSelfSend
+    ? 'View the pending transaction in activity or your explorer, then retry after it confirms.'
+    : 'View the pending transaction in activity or your explorer, then retry after at least 1 confirmation.'
+  return `${intro} ${hint}${traceSuffix}`
+}
+
 const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -265,6 +282,11 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const caps = resolveNetworkCapabilities(activeNetwork)
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
   const syncBlockedReason = getSendBlockedSyncReason(isSyncing, syncPercent, isConnected, lowSyncStreak)
+  const isRtmSelfSend = activeModelId === 'rtm'
+    && !isAssetTransfer
+    && Boolean(fromAddress)
+    && Boolean(toAddress)
+    && String(fromAddress).trim() === String(toAddress).trim()
 
   const enteredAmountNumRaw = Number((isDappTxRoute ? amount : txState.enteredAmount) ?? amount)
   const enteredAmount = Number.isFinite(enteredAmountNumRaw) && enteredAmountNumRaw > 0 ? enteredAmountNumRaw : safeAmount
@@ -756,7 +778,9 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
       navigate('/tx/result', { replace: true, state: resultState })
     } catch (e: any) {
       const message = String(e?.message ?? 'Transaction failed')
-      const tracedMessage = `${message} [trace ${sendTraceId}]`
+      const tracedMessage = activeModelId === 'rtm'
+        ? formatRtmSendUiError(message, { traceId: sendTraceId, isSelfSend: isRtmSelfSend })
+        : `${message} [trace ${sendTraceId}]`
       console.error(`[${sendTraceId}] transaction failed`, {
         networkId: activeNetwork.id,
         isAssetTransfer,
@@ -1089,6 +1113,15 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
           <div className="mx-2 p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-xl flex items-center gap-2">
             <IoInformationCircle className="text-yellow-300 w-4 h-4 shrink-0" />
             <span className="text-xs font-bold text-yellow-200">{syncBlockedReason}</span>
+          </div>
+        )}
+
+        {!submitError && !sendBlockedBySync && isRtmSelfSend && (
+          <div className="mx-2 p-3 bg-blue-900/20 border border-blue-500/30 rounded-xl flex items-center gap-2">
+            <IoInformationCircle className="text-blue-300 w-4 h-4 shrink-0" />
+            <span className="text-xs font-bold text-blue-200">
+              This RTM transfer sends funds back to the same address. The wallet treats this as a self-send or consolidation-style transaction. If one is already pending in the mempool, wait for confirmation before retrying.
+            </span>
           </div>
         )}
 
