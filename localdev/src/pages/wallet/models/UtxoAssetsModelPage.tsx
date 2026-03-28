@@ -10,6 +10,7 @@ const UtxoAssetsModelPage: React.FC = () => {
     activeNetworkId,
     networkAssets,
     accountNetworkAssets,
+    accountNetworkAssetSnapshotStatus,
     fetchNetworkAssets,
     networks,
     getNetworkModelPreferences,
@@ -28,10 +29,12 @@ const UtxoAssetsModelPage: React.FC = () => {
     accountNetworkAssets,
     accountNetworkAssetLogos: {},
     accountNetworkAssetLabels: {},
-    accountNetworkEvmNftAssets: {}
+    accountNetworkEvmNftAssets: {},
+    accountNetworkAssetSnapshotStatus
   }, String(activeAccount?.id || ''), String(activeNetworkId || '')).assets, [
     activeAccount?.id,
     activeNetworkId,
+    accountNetworkAssetSnapshotStatus,
     accountNetworkAssets,
     networkAssets
   ])

@@ -374,7 +374,8 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     accountNetworkAssets: accountNetworkAssets || {},
     accountNetworkAssetLogos: {},
     accountNetworkAssetLabels: {},
-    accountNetworkEvmNftAssets: {}
+    accountNetworkEvmNftAssets: {},
+    accountNetworkAssetSnapshotStatus: {}
   }, String(activeAccount?.id || ''), String(displayNetworkId || '')).assets?.[assetId] ?? 0)
   const nativeUsdPerCoin = useMemo(() => {
     if (!Number.isFinite(scopedNativeFiatUsd) || scopedNativeFiatUsd <= 0) return null

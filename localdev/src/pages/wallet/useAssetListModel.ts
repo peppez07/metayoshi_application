@@ -33,6 +33,7 @@ export function useAssetListModel() {
     accountNetworkAssetLogos,
     accountNetworkAssetLabels,
     accountNetworkEvmNftAssets,
+    accountNetworkAssetSnapshotStatus,
     accountNetworkFiatAssets,
     collectActiveNetworkData,
     fetchAssetDetails,
@@ -71,7 +72,8 @@ export function useAssetListModel() {
     accountNetworkAssets,
     accountNetworkAssetLogos,
     accountNetworkAssetLabels,
-    accountNetworkEvmNftAssets
+    accountNetworkEvmNftAssets,
+    accountNetworkAssetSnapshotStatus
   }, String(activeAccountId || ''), String(activeNetworkId || '')), [
     activeAccountId,
     activeNetworkId,
@@ -79,6 +81,7 @@ export function useAssetListModel() {
     accountNetworkAssetLogos,
     accountNetworkAssets,
     accountNetworkEvmNftAssets,
+    accountNetworkAssetSnapshotStatus,
     evmNftAssets,
     networkAssetLabels,
     networkAssetLogos,

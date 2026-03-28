@@ -466,6 +466,13 @@ function getActiveAccountFromState(state: WalletState) {
   return state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0] || null
 }
 
+function findFirstNetworkWithActiveAddress(
+  state: WalletState,
+  dappNetworks: DappNetworkEntry[]
+): DappNetworkEntry | undefined {
+  return dappNetworks.find((entry) => Boolean(getActiveAddressFromState(state, entry.id)))
+}
+
 function throwUnsupportedMultisigMethod(method: string): never {
   throw {
     code: -32603,
@@ -1873,9 +1880,15 @@ type DappRuntimeContext = {
 function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string): DappRuntimeContext {
   const dappNetworks = resolveDappNetworks(state)
   const normalizedRequestedNetworkId = String(requestedNetworkId || '').trim()
-  const network = dappNetworks.find((n) => n.id === normalizedRequestedNetworkId)
+  const explicitlyRequestedNetwork = dappNetworks.find((n) => n.id === normalizedRequestedNetworkId)
+  const preferredNetwork = explicitlyRequestedNetwork
     || dappNetworks.find((n) => n.id === state.activeNetworkId)
     || dappNetworks[0]
+  const preferredNetworkId = preferredNetwork?.id || DEFAULT_NETWORK_ID
+  const preferredAddress = getActiveAddressFromState(state, preferredNetworkId)
+  const network = preferredAddress || explicitlyRequestedNetwork
+    ? preferredNetwork
+    : findFirstNetworkWithActiveAddress(state, dappNetworks) || preferredNetwork
   const effectiveNetworkId = network?.id || DEFAULT_NETWORK_ID
   const address = getActiveAddressFromState(state, effectiveNetworkId)
   const connected = !(state.isLocked ?? true) && (state.isInitialized ?? false) && address !== null

@@ -38,6 +38,12 @@ import {
   fetchDiscoveredRuntimeHealth
 } from '../lib/backendHelp'
 import { fetchServerAddressJson, normalizeServerAddress } from '../lib/serverAddressApi'
+import {
+  buildScopedAssetSnapshotStatus,
+  shouldPreferNetworkAssetSnapshot,
+  shouldRetainActiveNetworkProjection,
+  type ScopedAssetSnapshotStatus
+} from './assetScopeState'
 import { createStellarBridgeClient } from '../lib/stellarBridgeClient'
 import { appendOptionalServerAuthHeaders } from '../lib/serverRequestAuth'
 import { resolveEvmExternalSigner, resolveEvmExternalSignerMode } from '../lib/evmExternalSigner'
@@ -538,6 +544,8 @@ interface WalletState {
   accountNetworkAssetLabels: Record<string, Record<string, string>>
   /** Account+network scoped EVM NFT metadata keyed by `${accountId}::${networkId}`. */
   accountNetworkEvmNftAssets: Record<string, Record<string, EvmNftHolding>>
+  /** Scope-local trust state for empty asset snapshots keyed by `${accountId}::${networkId}`. */
+  accountNetworkAssetSnapshotStatus: Record<string, ScopedAssetSnapshotStatus>
   /** Account+network scoped portfolio totals in fiat. */
   accountNetworkFiatTotals: Record<string, FiatValueMap>
   /** Account+network scoped native coin fiat value. */
@@ -1528,6 +1536,7 @@ export function getScopedAssetView(
     | 'accountNetworkAssetLogos'
     | 'accountNetworkAssetLabels'
     | 'accountNetworkEvmNftAssets'
+    | 'accountNetworkAssetSnapshotStatus'
   >,
   accountId: string,
   networkId: string
@@ -1537,11 +1546,41 @@ export function getScopedAssetView(
   labels: Record<string, string>
   evmNfts: Record<string, EvmNftHolding>
 } {
+  const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  const scopedSnapshot = {
+    assets: getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || {},
+    logos: getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || {},
+    labels: getScopedAssetBucket(state.accountNetworkAssetLabels, accountId, networkId) || {},
+    evmNfts: getScopedAssetBucket(state.accountNetworkEvmNftAssets, accountId, networkId) || {}
+  }
+  const networkSnapshot = {
+    assets: state.networkAssets?.[networkId] || {},
+    logos: state.networkAssetLogos?.[networkId] || {},
+    labels: state.networkAssetLabels?.[networkId] || {},
+    evmNfts: state.evmNftAssets?.[networkId] || {}
+  }
+  const scopedPresent = hasScopedAssetSnapshot(state, accountId, networkId)
+  const snapshotStatus = state.accountNetworkAssetSnapshotStatus?.[scopeKey] || null
+
+  if (shouldPreferNetworkAssetSnapshot({
+    scopedPresent,
+    scoped: scopedSnapshot,
+    network: networkSnapshot,
+    status: snapshotStatus
+  })) {
+    return {
+      assets: networkSnapshot.assets,
+      logos: networkSnapshot.logos,
+      labels: networkSnapshot.labels,
+      evmNfts: networkSnapshot.evmNfts
+    }
+  }
+
   return {
-    assets: getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || state.networkAssets?.[networkId] || {},
-    logos: getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || state.networkAssetLogos?.[networkId] || {},
-    labels: getScopedAssetBucket(state.accountNetworkAssetLabels, accountId, networkId) || state.networkAssetLabels?.[networkId] || {},
-    evmNfts: getScopedAssetBucket(state.accountNetworkEvmNftAssets, accountId, networkId) || state.evmNftAssets?.[networkId] || {}
+    assets: scopedSnapshot.assets || networkSnapshot.assets || {},
+    logos: scopedSnapshot.logos || networkSnapshot.logos || {},
+    labels: scopedSnapshot.labels || networkSnapshot.labels || {},
+    evmNfts: scopedSnapshot.evmNfts || networkSnapshot.evmNfts || {}
   }
 }
 
@@ -1572,22 +1611,54 @@ function buildScopedAssetProjection(
   const hasScopedLogos = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLogos, scopeKey)
   const hasScopedLabels = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLabels, scopeKey)
   const hasScopedNfts = Object.prototype.hasOwnProperty.call(state.accountNetworkEvmNftAssets, scopeKey)
+  const useNetworkFallback = shouldPreferNetworkAssetSnapshot({
+    scopedPresent: hasScopedAssets || hasScopedLogos || hasScopedLabels || hasScopedNfts,
+    scoped: {
+      assets: state.accountNetworkAssets[scopeKey] || {},
+      logos: state.accountNetworkAssetLogos[scopeKey] || {},
+      labels: state.accountNetworkAssetLabels[scopeKey] || {},
+      evmNfts: state.accountNetworkEvmNftAssets[scopeKey] || {}
+    },
+    network: {
+      assets: state.networkAssets[networkId] || {},
+      logos: state.networkAssetLogos[networkId] || {},
+      labels: state.networkAssetLabels[networkId] || {},
+      evmNfts: state.evmNftAssets[networkId] || {}
+    },
+    status: state.accountNetworkAssetSnapshotStatus?.[scopeKey] || null
+  })
   return {
     networkAssets: {
       ...state.networkAssets,
-      [networkId]: hasScopedAssets ? (state.accountNetworkAssets[scopeKey] || {}) : (state.networkAssets[networkId] || {})
+      [networkId]: useNetworkFallback
+        ? (state.networkAssets[networkId] || {})
+        : hasScopedAssets
+          ? (state.accountNetworkAssets[scopeKey] || {})
+          : (state.networkAssets[networkId] || {})
     },
     networkAssetLogos: {
       ...state.networkAssetLogos,
-      [networkId]: hasScopedLogos ? (state.accountNetworkAssetLogos[scopeKey] || {}) : (state.networkAssetLogos[networkId] || {})
+      [networkId]: useNetworkFallback
+        ? (state.networkAssetLogos[networkId] || {})
+        : hasScopedLogos
+          ? (state.accountNetworkAssetLogos[scopeKey] || {})
+          : (state.networkAssetLogos[networkId] || {})
     },
     networkAssetLabels: {
       ...state.networkAssetLabels,
-      [networkId]: hasScopedLabels ? (state.accountNetworkAssetLabels[scopeKey] || {}) : (state.networkAssetLabels[networkId] || {})
+      [networkId]: useNetworkFallback
+        ? (state.networkAssetLabels[networkId] || {})
+        : hasScopedLabels
+          ? (state.accountNetworkAssetLabels[scopeKey] || {})
+          : (state.networkAssetLabels[networkId] || {})
     },
     evmNftAssets: {
       ...state.evmNftAssets,
-      [networkId]: hasScopedNfts ? (state.accountNetworkEvmNftAssets[scopeKey] || {}) : (state.evmNftAssets[networkId] || {})
+      [networkId]: useNetworkFallback
+        ? (state.evmNftAssets[networkId] || {})
+        : hasScopedNfts
+          ? (state.accountNetworkEvmNftAssets[scopeKey] || {})
+          : (state.evmNftAssets[networkId] || {})
     }
   }
 }
@@ -1596,9 +1667,19 @@ function buildScopedAssetStateUpdate(
   state: WalletState,
   accountId: string,
   networkId: string,
-  payload: ScopedAssetBuckets
+  payload: ScopedAssetBuckets,
+  options?: {
+    emptyAuthoritative?: boolean
+    source?: string
+  }
 ): Partial<WalletState> {
   const scopeKey = buildAssetStateScopeKey(accountId, networkId)
+  const snapshotStatus = buildScopedAssetSnapshotStatus({
+    snapshot: payload,
+    emptyAuthoritative: options?.emptyAuthoritative === true,
+    source: options?.source,
+    updatedAt: Date.now()
+  })
   const next: Partial<WalletState> = {
     accountNetworkAssets: {
       ...state.accountNetworkAssets,
@@ -1615,10 +1696,28 @@ function buildScopedAssetStateUpdate(
     accountNetworkEvmNftAssets: {
       ...state.accountNetworkEvmNftAssets,
       [scopeKey]: payload.evmNfts
+    },
+    accountNetworkAssetSnapshotStatus: {
+      ...state.accountNetworkAssetSnapshotStatus,
+      [scopeKey]: snapshotStatus
     }
   }
 
-  if (state.activeAccountId === accountId && state.activeNetworkId === networkId) {
+  const retainActiveProjection =
+    state.activeAccountId === accountId
+    && state.activeNetworkId === networkId
+    && shouldRetainActiveNetworkProjection({
+      currentNetwork: {
+        assets: state.networkAssets[networkId] || {},
+        logos: state.networkAssetLogos[networkId] || {},
+        labels: state.networkAssetLabels[networkId] || {},
+        evmNfts: state.evmNftAssets[networkId] || {}
+      },
+      nextScoped: payload,
+      status: snapshotStatus
+    })
+
+  if (state.activeAccountId === accountId && state.activeNetworkId === networkId && !retainActiveProjection) {
     Object.assign(next, {
       networkAssets: {
         ...state.networkAssets,
@@ -3685,6 +3784,7 @@ export const useWalletStore = create<WalletState>()(
       accountNetworkAssetLogos: {},
       accountNetworkAssetLabels: {},
       accountNetworkEvmNftAssets: {},
+      accountNetworkAssetSnapshotStatus: {},
       accountNetworkFiatTotals: {},
       accountNetworkFiatNative: {},
       accountNetworkFiatAssets: {},
@@ -4039,6 +4139,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
@@ -4371,8 +4472,15 @@ export const useWalletStore = create<WalletState>()(
         let resolveInFlight: (() => void) | null = null
         const inFlightSignal = new Promise<void>((resolve) => { resolveInFlight = resolve })
         networkAssetsInFlightByKey.set(cacheKey, inFlightSignal)
-        const applyAssetSnapshot = (payload: ScopedAssetBuckets, source = 'unknown'): void => {
-          set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, payload))
+        const applyAssetSnapshot = (
+          payload: ScopedAssetBuckets,
+          source = 'unknown',
+          options?: { emptyAuthoritative?: boolean }
+        ): void => {
+          set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, payload, {
+            emptyAuthoritative: options?.emptyAuthoritative === true,
+            source
+          }))
           networkAssetsCache.get(
             cacheKey,
             async () => ({
@@ -4415,7 +4523,9 @@ export const useWalletStore = create<WalletState>()(
                 logos: cached.logos,
                 labels: cached.labels,
                 evmNfts: cached.evmNfts || {}
-              }, 'cache:memory')
+              }, 'cache:memory', {
+                emptyAuthoritative: false
+              })
               if (!staleWhileRefresh) return
             }
             const repositoryCached = await readCachedAssetSnapshot({
@@ -4429,7 +4539,9 @@ export const useWalletStore = create<WalletState>()(
                 logos: repositoryCached.logos,
                 labels: repositoryCached.labels,
                 evmNfts: repositoryCached.evmNfts as Record<string, EvmNftHolding>
-              }, 'cache:indexeddb')
+              }, 'cache:indexeddb', {
+                emptyAuthoritative: false
+              })
               if (!staleWhileRefresh) return
             }
           }
@@ -4976,7 +5088,9 @@ export const useWalletStore = create<WalletState>()(
               logos: fungibleAssetLogos,
               labels: fungibleAssetLabels,
               evmNfts: nftLookup
-            }, 'evm:rpc+server-hybrid')
+            }, 'evm:rpc+server-hybrid', {
+              emptyAuthoritative: !missingBridgeCredentialsMessage
+            })
           } catch (err) {
             if (isTransientBridgeFailure(err)) setTransientBridgeCooldown(activeNetworkId)
             console.warn(
@@ -5069,14 +5183,18 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: true
+            })
           } catch {
             applyAssetSnapshot({
               assets: {},
               logos: {},
               labels: {},
               evmNfts: {}
-            }, 'error:fallback-empty')
+            }, 'error:fallback-empty', {
+              emptyAuthoritative: false
+            })
           }
           return
         }
@@ -5213,7 +5331,9 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: nftLookup
-            }, 'server:/v1/address/assets')
+            }, 'server:/v1/address/assets', {
+              emptyAuthoritative: true
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Sui) failed:`, err)
           }
@@ -5233,6 +5353,7 @@ export const useWalletStore = create<WalletState>()(
             const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
               ? response.json.assets as Record<string, unknown>
               : null
+            const recognizedServerAssets = Boolean(serverAssets && ('tokens' in serverAssets || 'balances' in serverAssets))
             if (serverAssets) {
               rows = [
                 ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
@@ -5287,7 +5408,9 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: recognizedServerAssets || source !== 'server:/v1/address/assets'
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Stellar) failed:`, err)
           }
@@ -5307,6 +5430,7 @@ export const useWalletStore = create<WalletState>()(
             const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
               ? response.json.assets as Record<string, unknown>
               : null
+            const recognizedServerAssets = Boolean(serverAssets && ('tokens' in serverAssets || 'balances' in serverAssets))
             if (serverAssets) {
               rows = [
                 ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
@@ -5352,7 +5476,9 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: recognizedServerAssets || source !== 'server:/v1/address/assets'
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (XRP) failed:`, err)
           }
@@ -5372,6 +5498,7 @@ export const useWalletStore = create<WalletState>()(
             const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
               ? response.json.assets as Record<string, unknown>
               : null
+            const recognizedServerAssets = Boolean(serverAssets && ('tokens' in serverAssets || 'assets' in serverAssets))
             if (serverAssets) {
               rows = [
                 ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
@@ -5406,7 +5533,9 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: recognizedServerAssets || source !== 'server:/v1/address/assets'
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cardano) failed:`, err)
           }
@@ -5432,6 +5561,8 @@ export const useWalletStore = create<WalletState>()(
             const serverAssets = response.ok && response.json?.assets && typeof response.json.assets === 'object'
               ? response.json.assets as Record<string, unknown>
               : null
+            const recognizedServerAssets = Array.isArray(serverAssets)
+              || Boolean(serverAssets && ('tokens' in serverAssets || 'nfts' in serverAssets))
             const serverRows = Array.isArray(serverAssets)
               ? serverAssets as Array<Record<string, unknown>>
               : [
@@ -5497,7 +5628,9 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: recognizedServerAssets || source !== 'server:/v1/address/assets'
+            })
           } catch (err) {
             const message = String((err as Error | undefined)?.message || '').trim()
             if (message && message.includes('Bridge credentials are not configured')) return
@@ -5515,6 +5648,7 @@ export const useWalletStore = create<WalletState>()(
           try {
             let rows: SolanaWalletAssetRow[] = []
             let source = 'server:/v1/address/assets'
+            let recognizedServerAssets = false
 
             const rpcConfig = await createUtxoRpcConfig(net, {
               useLocalRpc: ulr,
@@ -5525,6 +5659,12 @@ export const useWalletStore = create<WalletState>()(
             try {
               const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
               if (response.ok) {
+                const assetsPayload = response.json?.assets
+                recognizedServerAssets = Boolean(
+                  assetsPayload
+                  && typeof assetsPayload === 'object'
+                  && ('splTokenAccounts' in (assetsPayload as Record<string, unknown>) || 'nfts' in (assetsPayload as Record<string, unknown>))
+                )
                 rows = extractSolanaAssetRowsFromServerJson(response.json)
               }
             } catch {
@@ -5601,7 +5741,9 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: {}
-            }, source)
+            }, source, {
+              emptyAuthoritative: recognizedServerAssets || source !== 'server:/v1/address/assets'
+            })
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Solana) failed:`, err)
           }
@@ -5627,7 +5769,9 @@ export const useWalletStore = create<WalletState>()(
             logos: {},
             labels: {},
             evmNfts: {}
-          }, 'rpc:listassetbalancesbyaddress')
+          }, 'rpc:listassetbalancesbyaddress', {
+            emptyAuthoritative: true
+          })
         } catch (err) {
           console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
         }
@@ -6204,6 +6348,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLogos,
           accountNetworkAssetLabels,
           accountNetworkEvmNftAssets,
+          accountNetworkAssetSnapshotStatus,
           sendListPreferences
         } = get()
 
@@ -6278,14 +6423,28 @@ export const useWalletStore = create<WalletState>()(
         addOrMergeItem(nativeRow, [requestedNetworkId])
 
         const isActiveScope = requestedAccountId === String(activeAccountId || '').trim()
-        const rawAssets = getScopedAssetBucket(accountNetworkAssets, account.id, requestedNetworkId)
-          || (isActiveScope ? (networkAssets?.[requestedNetworkId] || {}) : {})
-        const rawLogos = getScopedAssetBucket(accountNetworkAssetLogos, account.id, requestedNetworkId)
-          || (isActiveScope ? (networkAssetLogos?.[requestedNetworkId] || {}) : {})
-        const rawLabels = getScopedAssetBucket(accountNetworkAssetLabels, account.id, requestedNetworkId)
-          || (isActiveScope ? (networkAssetLabels?.[requestedNetworkId] || {}) : {})
-        const nftLookup = getScopedAssetBucket(accountNetworkEvmNftAssets, account.id, requestedNetworkId)
-          || (isActiveScope ? (evmNftAssets?.[requestedNetworkId] || {}) : {})
+        const scopedAssetView = isActiveScope
+          ? getScopedAssetView({
+              networkAssets,
+              networkAssetLogos,
+              networkAssetLabels,
+              evmNftAssets,
+              accountNetworkAssets,
+              accountNetworkAssetLogos,
+              accountNetworkAssetLabels,
+              accountNetworkEvmNftAssets,
+              accountNetworkAssetSnapshotStatus
+            }, account.id, requestedNetworkId)
+          : {
+              assets: getScopedAssetBucket(accountNetworkAssets, account.id, requestedNetworkId) || {},
+              logos: getScopedAssetBucket(accountNetworkAssetLogos, account.id, requestedNetworkId) || {},
+              labels: getScopedAssetBucket(accountNetworkAssetLabels, account.id, requestedNetworkId) || {},
+              evmNfts: getScopedAssetBucket(accountNetworkEvmNftAssets, account.id, requestedNetworkId) || {}
+            }
+        const rawAssets = scopedAssetView.assets
+        const rawLogos = scopedAssetView.logos
+        const rawLabels = scopedAssetView.labels
+        const nftLookup = scopedAssetView.evmNfts
 
         for (const [assetIdRaw, rawAmountValue] of Object.entries(rawAssets)) {
           const assetId = String(assetIdRaw || '').trim()
@@ -7403,6 +7562,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLabels: {},
           evmNftAssets: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},
@@ -9781,6 +9941,7 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},
           accountNetworkFiatAssets: {},

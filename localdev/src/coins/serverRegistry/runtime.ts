@@ -32,6 +32,7 @@ type DiscoveredChainRow = {
   chainKey?: unknown
   isEnabled?: unknown
   supportsBalances?: unknown
+  supportsNormalizedBalances?: unknown
   supportsSend?: unknown
   supportsSwap?: unknown
 }
@@ -104,7 +105,7 @@ function resolveDiscoveredChainRecord(
   return items.find((item) => normalizeDiscoveredChainKey(item.chainKey) === expectedKey) || null
 }
 
-function applyDiscoveredChainCapabilities(
+export function applyDiscoveredChainCapabilities(
   capabilities: Network['capabilities'],
   chainRecord: DiscoveredChainRow | null
 ): Network['capabilities'] {
@@ -118,6 +119,9 @@ function applyDiscoveredChainCapabilities(
   }
 
   const supportsBalances = chainRecord.supportsBalances !== false
+  const supportsNormalizedBalances = typeof chainRecord.supportsNormalizedBalances === 'boolean'
+    ? chainRecord.supportsNormalizedBalances === true
+    : supportsBalances
   const supportsSend = chainRecord.supportsSend !== false
   const supportsSwap = chainRecord.supportsSwap === true
 
@@ -126,15 +130,15 @@ function applyDiscoveredChainCapabilities(
       ...baseFeatures,
       nativeSend: Boolean(baseFeatures.nativeSend) && supportsSend,
       assetSend: Boolean(baseFeatures.assetSend) && supportsSend,
-      activity: Boolean(baseFeatures.activity) && supportsBalances,
+      activity: Boolean(baseFeatures.activity) && supportsNormalizedBalances,
       swap: Boolean(baseFeatures.swap) && supportsSwap
     },
     ui: {
       ...baseUi,
-      showAssetsTab: Boolean(baseUi.showAssetsTab) && supportsBalances,
-      showAssetsAction: Boolean(baseUi.showAssetsAction) && supportsBalances,
+      showAssetsTab: Boolean(baseUi.showAssetsTab),
+      showAssetsAction: Boolean(baseUi.showAssetsAction),
       showSendAction: Boolean(baseUi.showSendAction) && supportsSend,
-      showActivityTab: Boolean(baseUi.showActivityTab) && supportsBalances,
+      showActivityTab: Boolean(baseUi.showActivityTab) && supportsNormalizedBalances,
       showSwapAction: Boolean(baseUi.showSwapAction) && supportsSwap
     }
   }
