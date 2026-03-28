@@ -71,6 +71,14 @@ function formatBpsPercent(bps: number): string {
   return `${(bps / 100).toFixed(2).replace(/\.?0+$/, '')}%`
 }
 
+function isAuthSignatureMessage(value: unknown): boolean {
+  const text = String(value || '').trim().toLowerCase()
+  if (!text) return false
+  return text.includes('metayoshi secure bridge auth')
+    || text.includes('action=session')
+    || text.includes('secure bridge auth')
+}
+
 interface TxResultState {
   txid: string
   networkId: string
@@ -160,6 +168,7 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsCosmosSignAmino = requestMethod === 'wallet_cosmosSignAmino'
   const requestIsCosmosSendTx = requestMethod === 'wallet_cosmosSendTx'
   const requestIsCosmosGetKey = requestMethod === 'wallet_cosmosGetKey'
+  const requestIsAuthSignature = requestIsSignMessage && isAuthSignatureMessage(requestPayload?.message)
   const requestTypeLabel = requestAccountIsMultisig
     ? (
         requestIsSignMessage
@@ -176,6 +185,8 @@ const DappRequestConfirm: React.FC = () => {
       )
     : requestIsAssetSend
     ? 'Asset Transfer'
+    : requestIsAuthSignature
+    ? 'Auth Signature'
     : requestIsSignMessage
     ? 'Message Signature'
     : requestIsSignTypedData
@@ -207,6 +218,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String(rtmMarketAction?.toAddress || rtmMarketAction?.fromAddress || '')
     : requestIsRtmIssuerAction
     ? String(rtmIssuerAction?.ownerAddress || '')
+    : requestIsAuthSignature
+    ? ''
     : requestIsSignMessage
     ? String(requestPayload?.address || requestPayload?.signer || '')
     : requestIsSignTypedData
@@ -228,6 +241,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String(rtmMarketAction?.qty || rtmMarketAction?.amount || '')
     : requestIsRtmIssuerAction
     ? String(rtmIssuerAction?.initialSupply || '')
+    : requestIsAuthSignature
+    ? `${String(requestPayload?.message || '').length} bytes`
     : requestIsSignMessage
     ? `${String(requestPayload?.message || '').length} bytes`
     : requestIsSignTypedData
@@ -938,12 +953,21 @@ const DappRequestConfirm: React.FC = () => {
               <Row label="Runtime Model" value={String(requestNetwork?.runtimeModelId || requestNetwork?.id || 'unknown')} mono />
               <Row label="Method" value={requestMethod} mono />
               <Row label="Type" value={requestTypeLabel} />
+              {requestIsAuthSignature ? (
+                <Row
+                  label="Signer"
+                  value={String(requestPayload?.address || requestPayload?.signer || requestAccount?.networkAddresses?.[pendingRequest.networkId] || '') || 'Selected wallet account'}
+                  mono
+                />
+              ) : null}
               {requestTo ? <Row label="To" value={requestTo} mono /> : null}
               {(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || (requestIsRtmIssuerAction && !!requestAssetId)) ? <Row label="Asset" value={requestAssetId} mono /> : null}
               {requestAmount ? (
                 <Row
-                  label={requestIsEvmTx ? 'Value' : 'Amount'}
-                  value={`${requestAmount} ${(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || requestIsRtmIssuerAction) ? '' : (requestNetwork?.symbol || '')}`.trim()}
+                  label={requestIsAuthSignature ? 'Message Size' : (requestIsEvmTx ? 'Value' : 'Amount')}
+                  value={requestIsAuthSignature
+                    ? requestAmount
+                    : `${requestAmount} ${(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || requestIsRtmIssuerAction) ? '' : (requestNetwork?.symbol || '')}`.trim()}
                 />
               ) : null}
               {requestIsRtmMarketAction && rtmGrossAmount ? <Row label="Gross Order Amount" value={`${rtmGrossAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
