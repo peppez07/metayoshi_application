@@ -3119,13 +3119,21 @@ async function fetchEvmTokensFromAddressAssets(
         || ''
       ).trim())
       if (!address || out.has(address)) continue
-      const symbol = String(row?.symbol || row?.ticker || row?.name || '').trim().toUpperCase() || shortAddress(address)
-      const decimalsRaw = Number(row?.decimals)
+      const symbol = String(
+        row?.symbol
+        || row?.tokenSymbol
+        || row?.ticker
+        || row?.name
+        || row?.tokenName
+        || ''
+      ).trim().toUpperCase() || shortAddress(address)
+      const decimalsRaw = Number(row?.decimals ?? row?.tokenDecimal)
       const balanceRawCandidate = String(
         row?.balanceRaw
         ?? row?.rawBalance
         ?? row?.amountRaw
         ?? row?.rawAmount
+        ?? row?.tokenBalance
         ?? ''
       ).trim()
       out.set(address, {
