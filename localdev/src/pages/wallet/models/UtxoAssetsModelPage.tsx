@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { IoCubeOutline, IoFunnelOutline, IoGitCompareOutline } from 'react-icons/io5'
 import { resolveNetworkModelControls } from '../../../lib/coinFeatureModel'
-import { useWalletStore } from '../../../store/walletStore'
+import { getScopedAssetView, useWalletStore } from '../../../store/walletStore'
 
 const UtxoAssetsModelPage: React.FC = () => {
   const {
@@ -20,8 +20,21 @@ const UtxoAssetsModelPage: React.FC = () => {
   const activeNetwork = networks.find((network) => network.id === activeNetworkId) || networks[0]
   const composer = getNetworkModelPreferences(activeNetworkId).utxoTransferComposer || 'single'
   const controls = activeNetwork ? resolveNetworkModelControls(activeNetwork) : []
-  const assetScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
-  const assetsMap = accountNetworkAssets?.[assetScopeKey] || networkAssets?.[activeNetworkId] || {}
+  const assetsMap = useMemo(() => getScopedAssetView({
+    networkAssets,
+    networkAssetLogos: {},
+    networkAssetLabels: {},
+    evmNftAssets: {},
+    accountNetworkAssets,
+    accountNetworkAssetLogos: {},
+    accountNetworkAssetLabels: {},
+    accountNetworkEvmNftAssets: {}
+  }, String(activeAccount?.id || ''), String(activeNetworkId || '')).assets, [
+    activeAccount?.id,
+    activeNetworkId,
+    accountNetworkAssets,
+    networkAssets
+  ])
   const assetRows = useMemo(
     () => Object.entries(assetsMap).map(([symbol, rawAmount]) => ({ symbol, amount: Number(rawAmount) })),
     [assetsMap]

@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Button } from '../../components/Button'
 import { PasswordGate } from '../../components/PasswordGate'
 import { Tabs } from '../../components/Tabs'
-import { formatFiatValue, useWalletStore } from '../../store/walletStore'
+import { formatFiatValue, getScopedAssetView, useWalletStore } from '../../store/walletStore'
 import { IoArrowBack, IoArrowForward, IoCheckmarkCircle, IoHomeOutline, IoInformationCircle } from 'react-icons/io5'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
@@ -366,7 +366,16 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
   const fiatScopeKey = `${String(activeAccount?.id || '').trim().toLowerCase()}::${String(displayNetworkId || '').trim().toLowerCase()}`
   const scopedNativeFiatUsd = Number(accountNetworkFiatNative?.[fiatScopeKey]?.usd)
   const scopedAssetFiatUsd = Number(accountNetworkFiatAssets?.[fiatScopeKey]?.[assetId]?.usd)
-  const scopedAssetRaw = Number(accountNetworkAssets?.[fiatScopeKey]?.[assetId] ?? 0)
+  const scopedAssetRaw = Number(getScopedAssetView({
+    networkAssets: {},
+    networkAssetLogos: {},
+    networkAssetLabels: {},
+    evmNftAssets: {},
+    accountNetworkAssets: accountNetworkAssets || {},
+    accountNetworkAssetLogos: {},
+    accountNetworkAssetLabels: {},
+    accountNetworkEvmNftAssets: {}
+  }, String(activeAccount?.id || ''), String(displayNetworkId || '')).assets?.[assetId] ?? 0)
   const nativeUsdPerCoin = useMemo(() => {
     if (!Number.isFinite(scopedNativeFiatUsd) || scopedNativeFiatUsd <= 0) return null
     if (!Number.isFinite(availableNativeBalance) || availableNativeBalance <= 0) return null

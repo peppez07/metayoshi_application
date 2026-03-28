@@ -1,6 +1,6 @@
 import type { Network } from '../types'
 import type { NetworkCandidate, ServerCoinNetworkRow, ServerCoinRow } from './types'
-import { EVM_MODEL_NETWORK_IDS, normalizeServerCoinSymbol, sanitizeServerCoinId } from './mappings'
+import { COSMOS_MODEL_NETWORK_IDS, EVM_MODEL_NETWORK_IDS, normalizeServerCoinSymbol, sanitizeServerCoinId } from './mappings'
 
 export function resolveActiveServerNetwork(networks: ServerCoinNetworkRow[] | undefined): ServerCoinNetworkRow | null {
   const rows = Array.isArray(networks) ? networks.filter((n) => n && n.isActive !== false) : []
@@ -60,10 +60,20 @@ export function inferBridgeCapabilities(
   serverCapabilities?: ServerCoinRow['capabilities']
 ): Network['capabilities'] {
   const methods = new Set(flattenServerMethodGroups(methodGroups))
-  const isEvmModel = Boolean(modelNetworkId && EVM_MODEL_NETWORK_IDS.has(modelNetworkId))
-  const isRtm = coinId === 'raptoreum'
-  const isCardano = coinId === 'cardano' || modelNetworkId === 'ada'
-  const isStellar = coinId === 'stellar' || coinId === 'xlm' || modelNetworkId === 'xlm'
+  const normalizedCoinId = String(coinId || '').trim().toLowerCase()
+  const normalizedModelId = String(modelNetworkId || '').trim().toLowerCase()
+  const isEvmModel = Boolean(normalizedModelId && EVM_MODEL_NETWORK_IDS.has(normalizedModelId))
+  const isRtm = normalizedCoinId === 'raptoreum' || normalizedModelId === 'rtm'
+  const isCardano = normalizedCoinId === 'cardano' || normalizedModelId === 'ada'
+  const isStellar = normalizedCoinId === 'stellar' || normalizedCoinId === 'xlm' || normalizedModelId === 'xlm'
+  const isSolana = normalizedCoinId === 'solana' || normalizedModelId === 'sol'
+  const isSui = normalizedCoinId === 'sui' || normalizedModelId === 'sui'
+  const isTron = normalizedCoinId === 'tron' || normalizedModelId === 'tron'
+  const isXrp = normalizedCoinId === 'xrp' || normalizedCoinId === 'ripple' || normalizedModelId === 'xrp'
+  const isCosmosLike = Boolean(normalizedModelId && COSMOS_MODEL_NETWORK_IDS.has(normalizedModelId))
+    || methods.has('abci_info')
+    || methods.has('broadcast_tx_sync')
+    || methods.has('broadcasttxsync')
 
   const canSendCoin =
     serverCapabilities?.send === true
@@ -74,8 +84,8 @@ export function inferBridgeCapabilities(
     || methods.has('submit')
     || methods.has('submittransaction')
 
-  const assetLayer = isEvmModel || isRtm || isCardano || isStellar
-  const assetSend = isEvmModel || isRtm || isCardano || isStellar || methods.has('sendasset')
+  const assetLayer = isEvmModel || isRtm || isCardano || isStellar || isSolana || isSui || isCosmosLike || isTron || isXrp
+  const assetSend = isEvmModel || isRtm || isCardano || isStellar || isSolana || isSui || isCosmosLike || isTron || isXrp || methods.has('sendasset')
 
   return {
     features: {

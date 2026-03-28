@@ -117,8 +117,8 @@ function applyDiscoveredChainCapabilities(
     }
   }
 
-  const supportsBalances = chainRecord.supportsBalances === true
-  const supportsSend = chainRecord.supportsSend === true
+  const supportsBalances = chainRecord.supportsBalances !== false
+  const supportsSend = chainRecord.supportsSend !== false
   const supportsSwap = chainRecord.supportsSwap === true
 
   return {
