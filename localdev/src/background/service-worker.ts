@@ -283,7 +283,15 @@ function resolveDappNetworks(state: WalletState): DappNetworkEntry[] {
 function getRpcParamObject(params: unknown): Record<string, unknown> | null {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') return null
-  return candidate as Record<string, unknown>
+  const payload = candidate as Record<string, unknown>
+  const nestedIntent = payload.intent
+  if (nestedIntent && typeof nestedIntent === 'object' && !Array.isArray(nestedIntent)) {
+    return {
+      ...payload,
+      ...(nestedIntent as Record<string, unknown>)
+    }
+  }
+  return payload
 }
 
 function resolveDappProtocol(network?: DappNetworkEntry | null): DappProtocol {
@@ -1276,8 +1284,15 @@ function buildNetworkHintAliases(network: DappNetworkEntry): { lowercase: string
   ].filter(Boolean)
   const id = String(network.id || '').trim().toLowerCase()
   const extra = COSMOS_CHAIN_ID_ALIASES[id] || []
+  const aliasOverrides = id === 'rtm' || id === 'raptoreum'
+    ? ['rtm', 'raptoreum']
+    : []
   return {
-    lowercase: Array.from(new Set([...base.map((value) => value.toLowerCase()), ...extra.map((value) => value.toLowerCase())])),
+    lowercase: Array.from(new Set([
+      ...base.map((value) => value.toLowerCase()),
+      ...extra.map((value) => value.toLowerCase()),
+      ...aliasOverrides.map((value) => value.toLowerCase())
+    ])),
     uppercase: Array.from(new Set(base.map((value) => value.toUpperCase())))
   }
 }
@@ -2820,7 +2835,11 @@ async function handleRpcMethod(
     
     const currentState = await getWalletState()
     const normalizedNetworkId = String(networkId).trim()
-    const network = resolveDappNetworks(currentState).find((n) => n.id === normalizedNetworkId)
+    const normalizedRequestedAlias = normalizedNetworkId.toLowerCase()
+    const network = resolveDappNetworks(currentState).find((n) => {
+      if (String(n.id || '').trim() === normalizedNetworkId) return true
+      return buildNetworkHintAliases(n).lowercase.includes(normalizedRequestedAlias)
+    })
     if (!network) {
       throw { code: -32602, message: `Unsupported network for MetaYoshi DApp SDK: ${networkId}` }
     }
@@ -2828,20 +2847,20 @@ async function handleRpcMethod(
     // Update active network in storage
     await updateWalletStateInStorage((current) => ({
       ...current,
-      activeNetworkId: normalizedNetworkId
+      activeNetworkId: String(network.id || '').trim() || normalizedNetworkId
     }))
     
     // Broadcast network change event
     void broadcastEvent('networkChanged', {
-      networkId: normalizedNetworkId,
+      networkId: String(network.id || '').trim() || normalizedNetworkId,
       networkLabel: network.name,
       coinId: network.id,
       coinName: network.name,
       coinSymbol: network.symbol,
       coinDecimals: resolveCoinDecimals(network)
     })
-    
-    return { networkId: normalizedNetworkId, networkLabel: network.name }
+
+    return { networkId: String(network.id || '').trim() || normalizedNetworkId, networkLabel: network.name }
   }
   
   // Unsupported method
