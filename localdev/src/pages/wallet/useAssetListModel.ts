@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveNetworkCapabilities } from '../../lib/networkCapabilities'
 import { parseSolanaAssetType } from '../../lib/assetTypes'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
-import { useWalletStore } from '../../store/walletStore'
+import { getScopedAssetView, useWalletStore } from '../../store/walletStore'
 
 export function formatAssetAmount(raw: number): string {
   return (raw / 1e8).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 })
@@ -63,10 +63,31 @@ export function useAssetListModel() {
   const canOpenAssetSend = caps.features.assetSend
 
   const fiatScopeKey = `${String(activeAccountId || '').trim().toLowerCase()}::${String(activeNetworkId || '').trim().toLowerCase()}`
-  const rawAssets = accountNetworkAssets[fiatScopeKey] ?? networkAssets[activeNetworkId] ?? {}
-  const assetLogos = accountNetworkAssetLogos[fiatScopeKey] ?? networkAssetLogos[activeNetworkId] ?? {}
-  const assetLabels = accountNetworkAssetLabels[fiatScopeKey] ?? networkAssetLabels[activeNetworkId] ?? {}
-  const nftLookup = accountNetworkEvmNftAssets[fiatScopeKey] ?? evmNftAssets[activeNetworkId] ?? {}
+  const scopedAssetView = useMemo(() => getScopedAssetView({
+    networkAssets,
+    networkAssetLogos,
+    networkAssetLabels,
+    evmNftAssets,
+    accountNetworkAssets,
+    accountNetworkAssetLogos,
+    accountNetworkAssetLabels,
+    accountNetworkEvmNftAssets
+  }, String(activeAccountId || ''), String(activeNetworkId || '')), [
+    activeAccountId,
+    activeNetworkId,
+    accountNetworkAssetLabels,
+    accountNetworkAssetLogos,
+    accountNetworkAssets,
+    accountNetworkEvmNftAssets,
+    evmNftAssets,
+    networkAssetLabels,
+    networkAssetLogos,
+    networkAssets
+  ])
+  const rawAssets = scopedAssetView.assets
+  const assetLogos = scopedAssetView.logos
+  const assetLabels = scopedAssetView.labels
+  const nftLookup = scopedAssetView.evmNfts
   const fiatByAsset = accountNetworkFiatAssets[fiatScopeKey] ?? {}
   const allEntries = useMemo(() => Object.entries(rawAssets), [rawAssets])
 

@@ -1509,12 +1509,40 @@ export function formatFiatValue(value: number | null | undefined, currency: Fiat
   }).format(numeric)
 }
 
-function getScopedAssetBucket<T>(
+export function getScopedAssetBucket<T>(
   buckets: Record<string, T> | undefined,
   accountId: string,
   networkId: string
 ): T | undefined {
   return buckets?.[buildAssetStateScopeKey(accountId, networkId)]
+}
+
+export function getScopedAssetView(
+  state: Pick<
+    WalletState,
+    | 'networkAssets'
+    | 'networkAssetLogos'
+    | 'networkAssetLabels'
+    | 'evmNftAssets'
+    | 'accountNetworkAssets'
+    | 'accountNetworkAssetLogos'
+    | 'accountNetworkAssetLabels'
+    | 'accountNetworkEvmNftAssets'
+  >,
+  accountId: string,
+  networkId: string
+): {
+  assets: Record<string, number>
+  logos: Record<string, string>
+  labels: Record<string, string>
+  evmNfts: Record<string, EvmNftHolding>
+} {
+  return {
+    assets: getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || state.networkAssets?.[networkId] || {},
+    logos: getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || state.networkAssetLogos?.[networkId] || {},
+    labels: getScopedAssetBucket(state.accountNetworkAssetLabels, accountId, networkId) || state.networkAssetLabels?.[networkId] || {},
+    evmNfts: getScopedAssetBucket(state.accountNetworkEvmNftAssets, accountId, networkId) || state.evmNftAssets?.[networkId] || {}
+  }
 }
 
 function hasScopedAssetSnapshot(
@@ -2242,8 +2270,9 @@ function buildPortfolioFiatBuckets(
   portfolio: Record<string, unknown>
 ): PortfolioAssetFiatBuckets {
   const networkId = String(network.id || '').trim()
-  const assetsForScope = getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || {}
-  const logosForScope = getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || {}
+  const scopedAssetView = getScopedAssetView(state, accountId, networkId)
+  const assetsForScope = scopedAssetView.assets
+  const logosForScope = scopedAssetView.logos
   const assetIds = Object.keys(assetsForScope)
   const out: PortfolioAssetFiatBuckets = {
     totals: normalizeFiatValueMap(portfolio.totals),
@@ -4317,7 +4346,14 @@ export const useWalletStore = create<WalletState>()(
         const bridgeCooldownMs = getTransientBridgeCooldownRemainingMs(activeNetworkId)
         if (bridgeCooldownMs > 0 && options?.force !== true) return
         const activeModelId = String(net.runtimeModelId || net.id || '').trim().toLowerCase()
-        if (!resolveNetworkCapabilities(net).features.assetLayer) return
+        if (!resolveNetworkCapabilities(net).features.assetLayer) {
+          console.debug(`[assets][${requestNetworkId}] skipped fetchNetworkAssets because assetLayer=false`, {
+            accountId: requestAccountId,
+            networkId: requestNetworkId,
+            modelId: activeModelId
+          })
+          return
+        }
 
         let address = String(acc.networkAddresses?.[activeNetworkId] || '').trim()
         if (!address) {
@@ -4335,7 +4371,7 @@ export const useWalletStore = create<WalletState>()(
         let resolveInFlight: (() => void) | null = null
         const inFlightSignal = new Promise<void>((resolve) => { resolveInFlight = resolve })
         networkAssetsInFlightByKey.set(cacheKey, inFlightSignal)
-        const applyAssetSnapshot = (payload: ScopedAssetBuckets): void => {
+        const applyAssetSnapshot = (payload: ScopedAssetBuckets, source = 'unknown'): void => {
           set((state) => buildScopedAssetStateUpdate(state, requestAccountId, requestNetworkId, payload))
           networkAssetsCache.get(
             cacheKey,
@@ -4358,6 +4394,14 @@ export const useWalletStore = create<WalletState>()(
             labels: payload.labels,
             evmNfts: payload.evmNfts
           }).catch(() => {})
+          console.debug(`[assets][${requestNetworkId}] applied asset snapshot`, {
+            accountId: requestAccountId,
+            networkId: requestNetworkId,
+            address,
+            source,
+            assetCount: Object.keys(payload.assets || {}).length,
+            nftCount: Object.keys(payload.evmNfts || {}).length
+          })
         }
         try {
           const force = options?.force === true
@@ -4371,7 +4415,7 @@ export const useWalletStore = create<WalletState>()(
                 logos: cached.logos,
                 labels: cached.labels,
                 evmNfts: cached.evmNfts || {}
-              })
+              }, 'cache:memory')
               if (!staleWhileRefresh) return
             }
             const repositoryCached = await readCachedAssetSnapshot({
@@ -4385,7 +4429,7 @@ export const useWalletStore = create<WalletState>()(
                 logos: repositoryCached.logos,
                 labels: repositoryCached.labels,
                 evmNfts: repositoryCached.evmNfts as Record<string, EvmNftHolding>
-              })
+              }, 'cache:indexeddb')
               if (!staleWhileRefresh) return
             }
           }
@@ -4932,7 +4976,7 @@ export const useWalletStore = create<WalletState>()(
               logos: fungibleAssetLogos,
               labels: fungibleAssetLabels,
               evmNfts: nftLookup
-            })
+            }, 'evm:rpc+server-hybrid')
           } catch (err) {
             if (isTransientBridgeFailure(err)) setTransientBridgeCooldown(activeNetworkId)
             console.warn(
@@ -4950,9 +4994,11 @@ export const useWalletStore = create<WalletState>()(
           })
           try {
             const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig })
+            let source = 'server:/v1/address/assets'
             const rows = response.ok && Array.isArray((response.json?.assets as any)?.erc20)
               ? (response.json?.assets as any).erc20 as Array<Record<string, unknown>>
               : await (async () => {
+                  source = 'bridge:token.balance'
                   const serverOwner = await normalizeServerAddress(net, address)
                   return await fetchBridgeTokenBalances(rpcConfig, {
                     coin: 'tron',
@@ -5023,14 +5069,14 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: {}
-            })
+            }, source)
           } catch {
             applyAssetSnapshot({
               assets: {},
               logos: {},
               labels: {},
               evmNfts: {}
-            })
+            }, 'error:fallback-empty')
           }
           return
         }
@@ -5167,7 +5213,7 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: nftLookup
-            })
+            }, 'server:/v1/address/assets')
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Sui) failed:`, err)
           }
@@ -5181,13 +5227,28 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const stellarClient = createStellarBridgeClient({
-              bridgeUrl: rpcConfig.bridgeUrl,
-              bridgeUsername: rpcConfig.bridgeUsername,
-              bridgePassword: rpcConfig.bridgePassword,
-              timeoutMs: Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
-            })
-            const rows = await stellarClient.getAssetBalances(address) as Array<Record<string, unknown>>
+            let source = 'server:/v1/address/assets'
+            let rows: Array<Record<string, unknown>> = []
+            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null)
+            const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
+              ? response.json.assets as Record<string, unknown>
+              : null
+            if (serverAssets) {
+              rows = [
+                ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
+                ...(Array.isArray(serverAssets.balances) ? serverAssets.balances as Array<Record<string, unknown>> : [])
+              ]
+            }
+            if (rows.length === 0) {
+              const stellarClient = createStellarBridgeClient({
+                bridgeUrl: rpcConfig.bridgeUrl,
+                bridgeUsername: rpcConfig.bridgeUsername,
+                bridgePassword: rpcConfig.bridgePassword,
+                timeoutMs: Number(rpcConfig.timeoutMs ?? DEFAULT_WALLET_SERVER_TIMEOUT_MS)
+              })
+              rows = await stellarClient.getAssetBalances(address) as Array<Record<string, unknown>>
+              source = 'bridge:stellar.getAssetBalances'
+            }
             const assets: Record<string, number> = {}
             const labels: Record<string, string> = {}
             for (const row of rows) {
@@ -5226,7 +5287,7 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            })
+            }, source)
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Stellar) failed:`, err)
           }
@@ -5240,32 +5301,58 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const raw = await callBridgeMethod(rpcConfig, 'account_lines', [{
-              account: address,
-              ledger_index: 'validated'
-            }])
-            const lines =
-              raw?.lines
-              ?? raw?.result?.lines
-              ?? raw?.result?.result?.lines
-              ?? []
-            const rows: any[] = Array.isArray(lines) ? lines : []
+            let source = 'server:/v1/address/assets'
+            let rows: Array<Record<string, unknown>> = []
+            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null)
+            const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
+              ? response.json.assets as Record<string, unknown>
+              : null
+            if (serverAssets) {
+              rows = [
+                ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
+                ...(Array.isArray(serverAssets.balances) ? serverAssets.balances as Array<Record<string, unknown>> : [])
+              ]
+            }
+            if (rows.length === 0) {
+              const raw = await callBridgeMethod(rpcConfig, 'account_lines', [{
+                account: address,
+                ledger_index: 'validated'
+              }])
+              const lines =
+                raw?.lines
+                ?? raw?.result?.lines
+                ?? raw?.result?.result?.lines
+                ?? []
+              rows = Array.isArray(lines) ? lines as Array<Record<string, unknown>> : []
+              source = 'bridge:account_lines'
+            }
             const assets: Record<string, number> = {}
+            const labels: Record<string, string> = {}
             for (const line of rows) {
-              const currency = String(line?.currency || '').trim().toUpperCase()
+              const currency = String(line?.currency || line?.symbol || line?.tokenId || '').trim().toUpperCase()
               const issuer = String(line?.account || line?.issuer || '').trim()
-              const balText = String(line?.balance ?? '').trim()
-              if (!currency || !issuer || !/^-?\\d+(\\.\\d+)?$/.test(balText)) continue
-              const balNum = Number(balText)
-              if (!Number.isFinite(balNum) || balNum === 0) continue
-              assets[`${currency}|${issuer}`] = Math.round(Math.abs(balNum) * 1e8)
+              const balText = String(line?.balanceRaw || line?.amountRaw || line?.balance || '').trim()
+              if (!currency || !issuer || !/^-?\d+(\.\d+)?$/.test(balText)) continue
+              const decimalsRaw = Number(line?.decimals)
+              const decimals = Number.isInteger(decimalsRaw) && decimalsRaw >= 0 && decimalsRaw <= 18 ? decimalsRaw : 6
+              const assetKey = `${currency}|${issuer}`
+              if (/^\d+$/.test(balText)) {
+                const displaySats = toAssetDisplaySats(BigInt(balText), decimals)
+                if (!Number.isFinite(displaySats) || displaySats <= 0) continue
+                assets[assetKey] = displaySats
+              } else {
+                const balNum = Number(balText)
+                if (!Number.isFinite(balNum) || balNum === 0) continue
+                assets[assetKey] = Math.round(Math.abs(balNum) * 1e8)
+              }
+              labels[assetKey] = String(line?.symbol || line?.name || currency).trim() || currency
             }
             applyAssetSnapshot({
               assets,
               logos: {},
-              labels: {},
+              labels,
               evmNfts: {}
-            })
+            }, source)
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (XRP) failed:`, err)
           }
@@ -5279,29 +5366,47 @@ export const useWalletStore = create<WalletState>()(
             secureBridgeSigner: get().signBackendAuthMessage
           })
           try {
-            const rows = await fetchBridgeTokenBalances(rpcConfig, {
-              coin: 'cardano',
-              chain: 'main',
-              owner: address,
-              wallet: String(net.rpcWallet || '').trim() || undefined
-            })
+            let source = 'server:/v1/address/assets'
+            let rows: Array<Record<string, unknown>> = []
+            const response = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null)
+            const serverAssets = response?.ok && response.json?.assets && typeof response.json.assets === 'object'
+              ? response.json.assets as Record<string, unknown>
+              : null
+            if (serverAssets) {
+              rows = [
+                ...(Array.isArray(serverAssets.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
+                ...(Array.isArray(serverAssets.assets) ? serverAssets.assets as Array<Record<string, unknown>> : [])
+              ]
+            }
+            if (rows.length === 0) {
+              rows = await fetchBridgeTokenBalances(rpcConfig, {
+                coin: 'cardano',
+                chain: 'main',
+                owner: address,
+                wallet: String(net.rpcWallet || '').trim() || undefined
+              }) as Array<Record<string, unknown>>
+              source = 'bridge:token.balance'
+            }
             const assets: Record<string, number> = {}
+            const labels: Record<string, string> = {}
             for (const row of rows) {
-              const tokenId = String(row.tokenId || '').trim()
+              const tokenId = String(row.tokenId || row.assetId || row.policyId || '').trim()
               if (!tokenId) continue
-              const rawQtyText = String(row.balanceRaw || row.balance || '0').trim()
+              const rawQtyText = String(row.balanceRaw || row.amountRaw || row.quantity || row.balance || '0').trim()
               if (!/^\d+(\.\d+)?$/.test(rawQtyText)) continue
               const qty = Number(rawQtyText)
               if (!Number.isFinite(qty) || qty <= 0) continue
               // UI asset renderer expects sat-like integer scale.
               assets[tokenId] = Math.round(qty * 1e8)
+              const label = String(row.symbol || row.name || tokenId).trim()
+              if (label) labels[tokenId] = label
             }
             applyAssetSnapshot({
               assets,
               logos: {},
-              labels: {},
+              labels,
               evmNfts: {}
-            })
+            }, source)
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Cardano) failed:`, err)
           }
@@ -5333,6 +5438,7 @@ export const useWalletStore = create<WalletState>()(
                   ...(Array.isArray(serverAssets?.tokens) ? serverAssets.tokens as Array<Record<string, unknown>> : []),
                   ...(Array.isArray(serverAssets?.nfts) ? serverAssets.nfts as Array<Record<string, unknown>> : [])
                 ]
+            const source = serverAssets ? 'server:/v1/address/assets' : 'bridge:token.balance'
             const rows = serverAssets
               ? serverRows
               : missingBridgeCredentialsMessage
@@ -5391,7 +5497,7 @@ export const useWalletStore = create<WalletState>()(
               logos: {},
               labels,
               evmNfts: {}
-            })
+            }, source)
           } catch (err) {
             const message = String((err as Error | undefined)?.message || '').trim()
             if (message && message.includes('Bridge credentials are not configured')) return
@@ -5408,6 +5514,7 @@ export const useWalletStore = create<WalletState>()(
         if (isSolNetwork) {
           try {
             let rows: SolanaWalletAssetRow[] = []
+            let source = 'server:/v1/address/assets'
 
             const rpcConfig = await createUtxoRpcConfig(net, {
               useLocalRpc: ulr,
@@ -5425,6 +5532,7 @@ export const useWalletStore = create<WalletState>()(
             }
 
             if (rows.length === 0) {
+              source = 'bridge:token.balance'
               const bridgeRows = await fetchBridgeTokenBalances(rpcConfig, {
                 coin: String(net.serverCoinId || 'solana').trim() || 'solana',
                 chain: String(net.serverChain || 'main').trim() || 'main',
@@ -5493,7 +5601,7 @@ export const useWalletStore = create<WalletState>()(
               logos,
               labels,
               evmNfts: {}
-            })
+            }, source)
           } catch (err) {
             console.warn(`[${net.symbol}] fetchNetworkAssets (Solana) failed:`, err)
           }
@@ -5519,7 +5627,7 @@ export const useWalletStore = create<WalletState>()(
             logos: {},
             labels: {},
             evmNfts: {}
-          })
+          }, 'rpc:listassetbalancesbyaddress')
         } catch (err) {
           console.warn(`[${net.symbol}] fetchNetworkAssets failed:`, err)
         }
