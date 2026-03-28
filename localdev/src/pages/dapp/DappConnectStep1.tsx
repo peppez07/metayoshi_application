@@ -11,6 +11,42 @@ import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
+function resolveConnectApprovalTarget(
+  activeAccount: Parameters<typeof getAccountAddressForNetwork>[0],
+  networks: Array<{ id: string; name?: string; coinType?: string }>,
+  preferredNetworkId: string
+) {
+  const preferredNetwork = networks.find((network) => network.id === preferredNetworkId) || null
+  const preferredAddress = String(
+    getAccountAddressForNetwork(activeAccount, preferredNetworkId, preferredNetwork?.coinType) || ''
+  ).trim()
+
+  if (preferredNetwork && preferredAddress) {
+    return {
+      network: preferredNetwork,
+      networkId: preferredNetworkId,
+      address: preferredAddress
+    }
+  }
+
+  for (const network of networks) {
+    const address = String(getAccountAddressForNetwork(activeAccount, network.id, network.coinType) || '').trim()
+    if (address) {
+      return {
+        network,
+        networkId: network.id,
+        address
+      }
+    }
+  }
+
+  return {
+    network: preferredNetwork || networks[0] || null,
+    networkId: preferredNetworkId,
+    address: ''
+  }
+}
+
 function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'Read wallet addresses and balances'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
@@ -30,19 +66,22 @@ const DappConnectStep1: React.FC = () => {
     [accounts, activeAccountId]
   )
   const approvalNetworkId = String(pendingApproval?.networkId || activeNetworkId || '').trim()
-  const approvalNetwork = useMemo(
-    () => networks.find((network) => network.id === approvalNetworkId) || networks.find((network) => network.id === activeNetworkId) || networks[0],
-    [networks, approvalNetworkId, activeNetworkId]
+  const approvalTarget = useMemo(
+    () => resolveConnectApprovalTarget(
+      activeAccount,
+      networks,
+      approvalNetworkId || String(activeNetworkId || '').trim()
+    ),
+    [activeAccount, networks, approvalNetworkId, activeNetworkId]
   )
+  const approvalNetwork = approvalTarget.network || networks.find((network) => network.id === activeNetworkId) || networks[0]
   const activeAccountName = useMemo(
-    () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
-    [activeAccount, approvalNetworkId, activeNetworkId]
+    () => getAccountDisplayName(activeAccount, approvalTarget.networkId || approvalNetworkId || activeNetworkId, 'Account'),
+    [activeAccount, approvalTarget.networkId, approvalNetworkId, activeNetworkId]
   )
   const activeAccountKindLabel = getAccountKindLabel(activeAccount)
   const isActiveMultisig = isMultisigAccount(activeAccount)
-  const approvalAddress = useMemo(() => {
-    return String(getAccountAddressForNetwork(activeAccount, approvalNetworkId, approvalNetwork?.coinType) || '').trim()
-  }, [activeAccount, approvalNetwork, approvalNetworkId])
+  const approvalAddress = approvalTarget.address
 
   const rejectAndClose = async (): Promise<void> => {
     if (canUseChromeStorage() && pendingApproval) {
@@ -102,7 +141,7 @@ const DappConnectStep1: React.FC = () => {
                   <div className="w-10 h-10 rounded-full bg-yellow-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold truncate">{activeAccountName}</p>
-                    <p className="text-[10px] text-gray-400">{approvalNetwork?.name || 'Requested network'}</p>
+                  <p className="text-[10px] text-gray-400">{approvalNetwork?.name || 'Requested network'}</p>
                   </div>
                 </div>
                 <p className="mt-3 break-all rounded-lg bg-dark-900/70 px-3 py-2 font-mono text-[10px] text-gray-300">
@@ -116,6 +155,12 @@ const DappConnectStep1: React.FC = () => {
                 This approval connects the site to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
                 MetaYoshi does not apply this approval to a custom account list.
               </p>
+              {approvalTarget.networkId && approvalTarget.networkId !== approvalNetworkId && (
+                <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                  MetaYoshi is using {approvalNetwork?.name || approvalTarget.networkId} because the current requested network
+                  does not have an address for this account.
+                </p>
+              )}
               {isActiveMultisig && (
                 <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
                   Multisig metadata is recognized separately from the public address. The site still only sees one account
