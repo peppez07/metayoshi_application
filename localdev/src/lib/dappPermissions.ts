@@ -11,6 +11,7 @@ export type DappRequestMethod =
   | 'wallet_sendTransaction'
   | 'wallet_sendAsset'
   | 'wallet_rtmMarketAction'
+  | 'wallet_rtmIssuerAction'
   | 'wallet_signMessage'
   | 'wallet_signTypedData'
   | 'wallet_signTransaction'
@@ -90,6 +91,7 @@ export const DAPP_REQUEST_METHODS: DappRequestMethod[] = [
   'wallet_sendTransaction',
   'wallet_sendAsset',
   'wallet_rtmMarketAction',
+  'wallet_rtmIssuerAction',
   'wallet_signMessage',
   'wallet_signTypedData',
   'wallet_signTransaction',

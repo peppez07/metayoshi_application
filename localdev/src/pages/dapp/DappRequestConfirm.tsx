@@ -18,6 +18,13 @@ import {
   type RtmMarketAction,
   type RtmMarketOrderSnapshot
 } from '../../lib/rtmHtlc'
+import {
+  executeRtmIssuerAction,
+  loadRtmIssuerDraft,
+  assertRtmIssuerActionMatchesDraft,
+  type RtmIssuerAction,
+  type RtmIssuerDraftSnapshot
+} from '../../lib/rtmIssuer'
 import { useWalletStore } from '../../store/walletStore'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
@@ -114,6 +121,9 @@ const DappRequestConfirm: React.FC = () => {
   const [rtmMarketOrder, setRtmMarketOrder] = useState<RtmMarketOrderSnapshot | null>(null)
   const [rtmMarketVerificationError, setRtmMarketVerificationError] = useState('')
   const [rtmMarketVerificationLoading, setRtmMarketVerificationLoading] = useState(false)
+  const [rtmIssuerDraft, setRtmIssuerDraft] = useState<RtmIssuerDraftSnapshot | null>(null)
+  const [rtmIssuerVerificationError, setRtmIssuerVerificationError] = useState('')
+  const [rtmIssuerVerificationLoading, setRtmIssuerVerificationLoading] = useState(false)
 
   const requestedId = useMemo(
     () => new URLSearchParams(location.search).get('id') || '',
@@ -136,8 +146,10 @@ const DappRequestConfirm: React.FC = () => {
   const requestAccountIsMultisig = isMultisigAccount(requestAccount)
   const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
   const requestIsRtmMarketAction = requestMethod === 'wallet_rtmMarketAction'
+  const requestIsRtmIssuerAction = requestMethod === 'wallet_rtmIssuerAction'
   const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
   const rtmMarketAction = (requestIsRtmMarketAction ? pendingRequest?.request : null) as RtmMarketAction | null
+  const rtmIssuerAction = (requestIsRtmIssuerAction ? pendingRequest?.request : null) as RtmIssuerAction | null
   const requestIsSignMessage = requestMethod === 'wallet_signMessage'
   const requestIsSignTypedData = requestMethod === 'wallet_signTypedData'
   const requestIsSignTransaction = requestMethod === 'wallet_signTransaction'
@@ -183,6 +195,8 @@ const DappRequestConfirm: React.FC = () => {
     ? 'Cosmos Broadcast'
     : requestIsRtmMarketAction
     ? `RTM Market Action${rtmMarketAction?.kind ? ` (${String(rtmMarketAction.kind).replaceAll('_', ' ')})` : ''}`
+    : requestIsRtmIssuerAction
+    ? `RTM Issuer Action${rtmIssuerAction?.kind ? ` (${String(rtmIssuerAction.kind).replaceAll('_', ' ')})` : ''}`
     : requestIsEvmTx
     ? (String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() ? 'Contract Call' : 'Contract Deployment')
     : 'Native Coin Transfer'
@@ -190,6 +204,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String((pendingRequest?.request as any)?.toAddress || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.toAddress || rtmMarketAction?.fromAddress || '')
+    : requestIsRtmIssuerAction
+    ? String(rtmIssuerAction?.ownerAddress || '')
     : requestIsSignMessage
     ? String(requestPayload?.address || requestPayload?.signer || '')
     : requestIsSignTypedData
@@ -209,6 +225,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String((pendingRequest?.request as any)?.qty || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.qty || rtmMarketAction?.amount || '')
+    : requestIsRtmIssuerAction
+    ? String(rtmIssuerAction?.initialSupply || '')
     : requestIsSignMessage
     ? `${String(requestPayload?.message || '').length} bytes`
     : requestIsSignTypedData
@@ -238,6 +256,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String((pendingRequest?.request as any)?.assetId || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.assetId || '')
+    : requestIsRtmIssuerAction
+    ? String(rtmIssuerAction?.subName ? `${rtmIssuerAction.rootName}|${rtmIssuerAction.subName}` : rtmIssuerAction?.rootName || '')
     : ''
   const requestData = requestIsEvmTx
     ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.data || '').trim()
@@ -271,6 +291,8 @@ const DappRequestConfirm: React.FC = () => {
     ? previewJson({ mode: requestPayload?.mode, txBytesBase64: String(requestPayload?.txBytesBase64 || '').slice(0, 48) })
     : requestIsRtmMarketAction
     ? previewJson(rtmMarketAction)
+    : requestIsRtmIssuerAction
+    ? previewJson(rtmIssuerAction)
     : ''
   const rtmFeeBps = requestIsRtmMarketAction ? Number(rtmMarketAction?.feeBps ?? rtmMarketOrder?.platformFeeBps ?? 0) : 0
   const rtmFeeAmount = requestIsRtmMarketAction ? String(rtmMarketAction?.feeAmount ?? rtmMarketOrder?.platformFeeAmountRtm ?? '') : ''
@@ -375,6 +397,38 @@ const DappRequestConfirm: React.FC = () => {
     }
   }, [requestIsRtmMarketAction, rtmMarketAction])
 
+  useEffect(() => {
+    if (!requestIsRtmIssuerAction || !rtmIssuerAction?.draftId) {
+      setRtmIssuerDraft(null)
+      setRtmIssuerVerificationError('')
+      setRtmIssuerVerificationLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setRtmIssuerVerificationLoading(true)
+    setRtmIssuerVerificationError('')
+
+    void (async () => {
+      try {
+        const draft = await loadRtmIssuerDraft(rtmIssuerAction.draftId)
+        assertRtmIssuerActionMatchesDraft(rtmIssuerAction, draft)
+        if (cancelled) return
+        setRtmIssuerDraft(draft)
+      } catch (error) {
+        if (cancelled) return
+        setRtmIssuerDraft(null)
+        setRtmIssuerVerificationError(error instanceof Error ? error.message : String(error))
+      } finally {
+        if (!cancelled) setRtmIssuerVerificationLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [requestIsRtmIssuerAction, rtmIssuerAction])
+
   const rejectRequest = async (): Promise<void> => {
     if (canUseChromeStorage() && pendingRequest) {
       await chrome.storage.local.set({
@@ -405,6 +459,7 @@ const DappRequestConfirm: React.FC = () => {
       || requestIsCosmosSignDirect
       || requestIsCosmosSignAmino
       || requestIsRtmMarketAction
+      || requestIsRtmIssuerAction
     )) {
       setSubmitError('This multisig account does not support dapp-driven signing or send requests in this build')
       return
@@ -420,6 +475,22 @@ const DappRequestConfirm: React.FC = () => {
         assertRtmMarketActionMatchesOrder(action, verifiedOrder)
         setRtmMarketOrder(verifiedOrder)
         setRtmMarketVerificationError('')
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : String(error))
+        return
+      }
+    }
+    if (requestIsRtmIssuerAction) {
+      const action = rtmIssuerAction
+      if (!action) {
+        setSubmitError('Missing RTM issuer action payload')
+        return
+      }
+      try {
+        const verifiedDraft = await loadRtmIssuerDraft(action.draftId)
+        assertRtmIssuerActionMatchesDraft(action, verifiedDraft)
+        setRtmIssuerDraft(verifiedDraft)
+        setRtmIssuerVerificationError('')
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : String(error))
         return
@@ -514,6 +585,30 @@ const DappRequestConfirm: React.FC = () => {
               action,
               rpcConfig: createRtmMarketRpcConfig(requestNetwork, signBackendAuthMessage),
               privateKeyHex: derived.privHex
+            })
+          })()
+        : requestIsRtmIssuerAction
+        ? await (async () => {
+            if (String(requestNetwork?.id || '').trim() !== 'rtm') {
+              throw new Error('RTM issuer actions require the RTM network')
+            }
+            if (!accountForRequest) {
+              throw new Error('No account available for RTM issuer action')
+            }
+            const senderAddress = String(
+              getAccountAddressForNetwork(accountForRequest, requestNetwork.id, requestNetwork.coinType) || ''
+            ).trim()
+            if (!senderAddress) {
+              throw new Error('No RTM address available for RTM issuer action')
+            }
+            const action = rtmIssuerAction
+            if (!action) throw new Error('Missing RTM issuer action payload')
+            if (senderAddress !== String(action.ownerAddress || '').trim()) {
+              throw new Error('Issuer owner address does not match the selected wallet account')
+            }
+            return await executeRtmIssuerAction({
+              action,
+              rpcConfig: createRtmMarketRpcConfig(requestNetwork, signBackendAuthMessage)
             })
           })()
         : requestIsSignMessage
@@ -723,8 +818,8 @@ const DappRequestConfirm: React.FC = () => {
           addActivity({
             id: txIdentifier,
             type: 'sent',
-            asset: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? requestAssetId : networkForActivity.symbol,
-            assetId: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId))
+            asset: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || (requestIsRtmIssuerAction && !!requestAssetId)) ? requestAssetId : networkForActivity.symbol,
+            assetId: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || (requestIsRtmIssuerAction && !!requestAssetId))
               ? (requestAssetId || undefined)
               : (buildNativeActivityAssetId(networkForActivity.id) || undefined),
             amount: requestAmount || '0',
@@ -835,11 +930,11 @@ const DappRequestConfirm: React.FC = () => {
               <Row label="Method" value={requestMethod} mono />
               <Row label="Type" value={requestTypeLabel} />
               {requestTo ? <Row label="To" value={requestTo} mono /> : null}
-              {(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? <Row label="Asset" value={requestAssetId} mono /> : null}
+              {(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || (requestIsRtmIssuerAction && !!requestAssetId)) ? <Row label="Asset" value={requestAssetId} mono /> : null}
               {requestAmount ? (
                 <Row
                   label={requestIsEvmTx ? 'Value' : 'Amount'}
-                  value={`${requestAmount} ${(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? '' : (requestNetwork?.symbol || '')}`.trim()}
+                  value={`${requestAmount} ${(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || requestIsRtmIssuerAction) ? '' : (requestNetwork?.symbol || '')}`.trim()}
                 />
               ) : null}
               {requestIsRtmMarketAction && rtmGrossAmount ? <Row label="Gross Order Amount" value={`${rtmGrossAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
@@ -856,6 +951,20 @@ const DappRequestConfirm: React.FC = () => {
                       ? `Failed: ${rtmMarketVerificationError}`
                       : rtmMarketOrder
                       ? 'Verified against server order'
+                      : 'Pending'
+                  }
+                />
+              ) : null}
+              {requestIsRtmIssuerAction ? (
+                <Row
+                  label="Draft Verification"
+                  value={
+                    rtmIssuerVerificationLoading
+                      ? 'Checking server draft'
+                      : rtmIssuerVerificationError
+                      ? `Failed: ${rtmIssuerVerificationError}`
+                      : rtmIssuerDraft
+                      ? 'Verified against server draft'
                       : 'Pending'
                   }
                 />
@@ -882,6 +991,9 @@ const DappRequestConfirm: React.FC = () => {
             {!submitError && requestIsRtmMarketAction && rtmMarketVerificationError ? (
               <p className="text-xs text-red-400 break-words">{rtmMarketVerificationError}</p>
             ) : null}
+            {!submitError && requestIsRtmIssuerAction && rtmIssuerVerificationError ? (
+              <p className="text-xs text-red-400 break-words">{rtmIssuerVerificationError}</p>
+            ) : null}
             {!submitError && sendBlockedBySync ? (
               <p className="text-xs text-yellow-300 break-words">{syncBlockedReason}</p>
             ) : null}
@@ -902,7 +1014,7 @@ const DappRequestConfirm: React.FC = () => {
           className="flex-1 btn-primary"
           onClick={() => { void approveRequest() }}
           isLoading={isSubmitting}
-          disabled={!pendingRequest || sendBlockedBySync || rtmMarketVerificationLoading || (requestIsRtmMarketAction && !!rtmMarketVerificationError) || (requestAccountIsMultisig && (requestIsSignMessage || requestIsSignTypedData || requestIsSignTransaction || requestIsSignAllTransactions || requestIsSignAndSendTransaction || requestIsCosmosSignDirect || requestIsCosmosSignAmino))}
+          disabled={!pendingRequest || sendBlockedBySync || rtmMarketVerificationLoading || rtmIssuerVerificationLoading || (requestIsRtmMarketAction && !!rtmMarketVerificationError) || (requestIsRtmIssuerAction && !!rtmIssuerVerificationError) || (requestAccountIsMultisig && (requestIsSignMessage || requestIsSignTypedData || requestIsSignTransaction || requestIsSignAllTransactions || requestIsSignAndSendTransaction || requestIsCosmosSignDirect || requestIsCosmosSignAmino))}
         >
           Approve
         </Button>

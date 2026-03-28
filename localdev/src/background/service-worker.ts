@@ -114,6 +114,14 @@ type RtmMarketActionParams = {
   [key: string]: unknown
 }
 
+type RtmIssuerActionParams = {
+  version: 1
+  kind: string
+  draftId: string
+  networkId: string
+  [key: string]: unknown
+}
+
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
 const OPEN_WALLET_METHODS = new Set(['wallet_openWallet', 'metayoshi_openWallet', 'rtm_openWallet'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
@@ -133,6 +141,7 @@ const COSMOS_SEND_TX_METHODS = new Set(['wallet_cosmosSendTx'])
 const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
 const RTM_MARKET_ACTION_METHODS = new Set(['wallet_rtmMarketAction'])
+const RTM_ISSUER_ACTION_METHODS = new Set(['wallet_rtmIssuerAction'])
 const RTM_GET_PUBLIC_KEY_METHODS = new Set(['wallet_rtmGetPublicKey'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
@@ -1316,6 +1325,26 @@ function parseRtmMarketActionParams(params: unknown): RtmMarketActionParams {
   return payload as RtmMarketActionParams
 }
 
+function parseRtmIssuerActionParams(params: unknown): RtmIssuerActionParams {
+  const candidate = Array.isArray(params) ? params[0] : params
+  if (!candidate || typeof candidate !== 'object') {
+    throw { code: -32602, message: 'wallet_rtmIssuerAction requires an action payload' }
+  }
+
+  const payload = candidate as Record<string, unknown>
+  const version = Number(payload.version ?? 0)
+  const kind = String(payload.kind ?? '').trim()
+  const draftId = String(payload.draftId ?? '').trim()
+  const networkId = String(payload.networkId ?? '').trim()
+
+  if (version !== 1) throw { code: -32602, message: 'wallet_rtmIssuerAction requires version 1' }
+  if (!kind) throw { code: -32602, message: 'wallet_rtmIssuerAction requires `kind`' }
+  if (!draftId) throw { code: -32602, message: 'wallet_rtmIssuerAction requires `draftId`' }
+  if (networkId !== 'rtm') throw { code: -32602, message: 'wallet_rtmIssuerAction is only supported on RTM' }
+
+  return payload as RtmIssuerActionParams
+}
+
 function parseSignMessageParams(params: unknown): {
   ecosystem: 'evm' | 'solana'
   message?: string
@@ -1394,6 +1423,7 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
     'metayoshi_sendAsset',
     'rtm_sendAsset',
     'wallet_rtmMarketAction',
+    'wallet_rtmIssuerAction',
     'wallet_rtmGetPublicKey'
   ])
   const protocol = resolveDappProtocol(network)
@@ -2603,6 +2633,40 @@ async function handleRpcMethod(
       network.id,
       activeAccount.id,
       'wallet_rtmMarketAction' as any,
+      parsedAction,
+      surfaceTarget
+    )
+  }
+
+  if (RTM_ISSUER_ACTION_METHODS.has(method)) {
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if (!network || String(network.id || '').trim() !== 'rtm') {
+      throw { code: -32603, message: 'wallet_rtmIssuerAction requires the RTM network' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
+
+    const parsedAction = parseRtmIssuerActionParams(params)
+    if (origin) {
+      const approved = await requestScopes(origin, ['read', 'send_asset'] as any, { networkId: effectiveNetworkId, surfaceTarget })
+      if (!approved) {
+        throw { code: 4001, message: 'User rejected the request' }
+      }
+      await touchLastConnected(origin)
+    }
+
+    return await requestDappActionApproval(
+      origin || 'unknown',
+      network.id,
+      activeAccount.id,
+      'wallet_rtmIssuerAction' as any,
       parsedAction,
       surfaceTarget
     )
