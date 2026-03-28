@@ -27,6 +27,7 @@ import {
 } from '../../lib/rtmIssuer'
 import { useWalletStore } from '../../store/walletStore'
 import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
+import { getDappRequestDisplayType, isAuthSignatureMessage, isNonBroadcastRequestMethod } from '../../lib/dappRequestDescriptors'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
 import {
@@ -69,14 +70,6 @@ function previewJson(value: unknown, maxLength = 240): string {
 
 function formatBpsPercent(bps: number): string {
   return `${(bps / 100).toFixed(2).replace(/\.?0+$/, '')}%`
-}
-
-function isAuthSignatureMessage(value: unknown): boolean {
-  const text = String(value || '').trim().toLowerCase()
-  if (!text) return false
-  return text.includes('metayoshi secure bridge auth')
-    || text.includes('action=session')
-    || text.includes('secure bridge auth')
 }
 
 interface TxResultState {
@@ -156,10 +149,12 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
   const requestIsRtmMarketAction = requestMethod === 'wallet_rtmMarketAction'
   const requestIsRtmIssuerAction = requestMethod === 'wallet_rtmIssuerAction'
+  const requestIsRtmGetPublicKey = requestMethod === 'wallet_rtmGetPublicKey'
+  const requestIsRtmSignMessage = requestMethod === 'wallet_rtmSignMessage'
   const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
   const rtmMarketAction = (requestIsRtmMarketAction ? pendingRequest?.request : null) as RtmMarketAction | null
   const rtmIssuerAction = (requestIsRtmIssuerAction ? pendingRequest?.request : null) as RtmIssuerAction | null
-  const requestIsSignMessage = requestMethod === 'wallet_signMessage'
+  const requestIsSignMessage = requestMethod === 'wallet_signMessage' || requestIsRtmSignMessage
   const requestIsSignTypedData = requestMethod === 'wallet_signTypedData'
   const requestIsSignTransaction = requestMethod === 'wallet_signTransaction'
   const requestIsSignAllTransactions = requestMethod === 'wallet_signAllTransactions'
@@ -169,6 +164,7 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsCosmosSendTx = requestMethod === 'wallet_cosmosSendTx'
   const requestIsCosmosGetKey = requestMethod === 'wallet_cosmosGetKey'
   const requestIsAuthSignature = requestIsSignMessage && isAuthSignatureMessage(requestPayload?.message)
+  const normalizedRequestTypeLabel = getDappRequestDisplayType(pendingRequest)
   const requestTypeLabel = requestAccountIsMultisig
     ? (
         requestIsSignMessage
@@ -211,13 +207,15 @@ const DappRequestConfirm: React.FC = () => {
     ? `RTM Issuer Action${rtmIssuerAction?.kind ? ` (${String(rtmIssuerAction.kind).replaceAll('_', ' ')})` : ''}`
     : requestIsEvmTx
     ? (String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() ? 'Contract Call' : 'Contract Deployment')
-    : 'Native Coin Transfer'
+    : normalizedRequestTypeLabel
   const requestTo = requestIsAssetSend
     ? String((pendingRequest?.request as any)?.toAddress || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.toAddress || rtmMarketAction?.fromAddress || '')
     : requestIsRtmIssuerAction
     ? String(rtmIssuerAction?.ownerAddress || '')
+    : requestIsRtmGetPublicKey
+    ? String(requestPayload?.address || '')
     : requestIsAuthSignature
     ? ''
     : requestIsSignMessage
@@ -241,6 +239,8 @@ const DappRequestConfirm: React.FC = () => {
     ? String(rtmMarketAction?.qty || rtmMarketAction?.amount || '')
     : requestIsRtmIssuerAction
     ? String(rtmIssuerAction?.initialSupply || '')
+    : requestIsRtmGetPublicKey
+    ? 'Public key access'
     : requestIsAuthSignature
     ? `${String(requestPayload?.message || '').length} bytes`
     : requestIsSignMessage
@@ -295,6 +295,8 @@ const DappRequestConfirm: React.FC = () => {
     : undefined
   const requestPreview = requestIsSignMessage
     ? previewJson(requestPayload?.message || '')
+    : requestIsRtmGetPublicKey
+    ? previewJson({ networkId: requestPayload?.networkId || 'rtm', address: requestPayload?.address || '' })
     : requestIsSignTypedData
     ? previewJson(requestPayload?.typedData)
     : requestIsSignTransaction || requestIsSignAndSendTransaction
@@ -472,6 +474,7 @@ const DappRequestConfirm: React.FC = () => {
       || requestIsSignTransaction
       || requestIsSignAllTransactions
       || requestIsSignAndSendTransaction
+      || requestIsRtmGetPublicKey
       || requestIsCosmosSignDirect
       || requestIsCosmosSignAmino
       || requestIsRtmMarketAction
@@ -550,6 +553,7 @@ const DappRequestConfirm: React.FC = () => {
           || requestIsSignTransaction
           || requestIsSignAllTransactions
           || requestIsSignAndSendTransaction
+          || requestIsRtmGetPublicKey
           || requestIsCosmosSignDirect
           || requestIsCosmosSignAmino)
         && !mnemonic
@@ -630,7 +634,7 @@ const DappRequestConfirm: React.FC = () => {
         : requestIsSignMessage
         ? await (async () => {
             const ecosystem = String(requestPayload?.ecosystem || '').trim().toLowerCase()
-            if (ecosystem === 'rtm' || String(requestNetwork?.id || '').trim() === 'rtm') {
+            if (requestIsRtmSignMessage || ecosystem === 'rtm' || String(requestNetwork?.id || '').trim() === 'rtm') {
               return await signRtmMessage({
                 mnemonic,
                 accountIndex,
@@ -652,6 +656,17 @@ const DappRequestConfirm: React.FC = () => {
                 message: String(requestPayload?.message || ''),
                 encoding: String(requestPayload?.encoding || 'utf8').trim().toLowerCase() === 'hex' ? 'hex' : 'utf8'
               })
+            }
+          })()
+        : requestIsRtmGetPublicKey
+        ? await (async () => {
+            const derived = await deriveUtxoAddress(mnemonic, 'RTM', accountIndex)
+            return {
+              networkId: 'rtm',
+              accountId: accountForRequest?.id || pendingRequest.accountId,
+              address: derived.address,
+              pubkeyHex: derived.pubHex,
+              status: 'completed'
             }
           })()
         : requestIsSignTypedData
@@ -825,11 +840,11 @@ const DappRequestConfirm: React.FC = () => {
           amount: requestAmount,
           memo: requestMemo
         })
-      const txHash = String((tx as any)?.hash || (tx as any)?.txid || (tx as any)?.signature || (tx as any)?.txhash || '').trim()
+      const txHash = String((tx as any)?.hash || (tx as any)?.txid || (tx as any)?.signature || (tx as any)?.txhash || (tx as any)?.pubkeyHex || '').trim()
       const safeTxHash = String((tx as any)?.safeTxHash || '').trim()
       const txIdentifier = txHash || safeTxHash
 
-      if (txIdentifier && !requestIsSignMessage && !requestIsSignTypedData && !requestIsSignTransaction && !requestIsSignAllTransactions && !requestIsCosmosSignDirect && !requestIsCosmosSignAmino && !requestIsCosmosGetKey) {
+      if (txIdentifier && !isNonBroadcastRequestMethod(requestMethod) && !requestIsCosmosGetKey) {
         const latestState = useWalletStore.getState()
         const networkForActivity = latestState.networks.find((n) => n.id === pendingRequest.networkId) || latestState.networks[0]
         const accountForActivity = latestState.accounts.find((a) => a.id === pendingRequest.accountId) || latestState.accounts[0]
@@ -875,16 +890,20 @@ const DappRequestConfirm: React.FC = () => {
           txid: txIdentifier,
           networkId: pendingRequest.networkId,
           accountId: pendingRequest.accountId,
-          asset: requestIsSignMessage
-            ? 'Auth Signature'
+          asset: isNonBroadcastRequestMethod(requestMethod)
+            ? requestTypeLabel
             : ((requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId)) ? (requestAssetId || 'ASSET') : (requestNetwork?.symbol || 'TX')),
           assetId: (requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId))
             ? (requestAssetId || undefined)
             : (buildNativeActivityAssetId(pendingRequest.networkId) || undefined),
           amount: requestAmount || '0',
           from: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : undefined,
-          to: requestIsEvmTx && requestTo === 'Contract Creation' ? undefined : (requestTo || undefined),
-          status: txHash ? 'pending' : String((tx as any)?.status || 'pending'),
+          to: requestIsEvmTx && requestTo === 'Contract Creation'
+            ? undefined
+            : (requestTo || String((tx as any)?.address || '').trim() || undefined),
+          status: isNonBroadcastRequestMethod(requestMethod)
+            ? String((tx as any)?.status || 'completed')
+            : (txHash ? 'pending' : String((tx as any)?.status || 'pending')),
           origin: pendingRequest.origin,
           requestMethod: requestMethod
         }
@@ -926,7 +945,7 @@ const DappRequestConfirm: React.FC = () => {
   const content = (
     <div className="flex flex-col h-full bg-dark-800">
       <header className="p-4 flex items-center justify-between border-b border-dark-600">
-        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Dapp Transaction Request</span>
+        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Dapp Request</span>
       </header>
 
       <div className="flex-1 p-6 space-y-6 overflow-y-auto custom-scrollbar">
@@ -1049,7 +1068,7 @@ const DappRequestConfirm: React.FC = () => {
           className="flex-1 btn-primary"
           onClick={() => { void approveRequest() }}
           isLoading={isSubmitting}
-          disabled={!pendingRequest || sendBlockedBySync || rtmMarketVerificationLoading || rtmIssuerVerificationLoading || (requestIsRtmMarketAction && !!rtmMarketVerificationError) || (requestIsRtmIssuerAction && !!rtmIssuerVerificationError) || (requestAccountIsMultisig && (requestIsSignMessage || requestIsSignTypedData || requestIsSignTransaction || requestIsSignAllTransactions || requestIsSignAndSendTransaction || requestIsCosmosSignDirect || requestIsCosmosSignAmino))}
+          disabled={!pendingRequest || sendBlockedBySync || rtmMarketVerificationLoading || rtmIssuerVerificationLoading || (requestIsRtmMarketAction && !!rtmMarketVerificationError) || (requestIsRtmIssuerAction && !!rtmIssuerVerificationError) || (requestAccountIsMultisig && (requestIsSignMessage || requestIsSignTypedData || requestIsSignTransaction || requestIsSignAllTransactions || requestIsSignAndSendTransaction || requestIsRtmGetPublicKey || requestIsCosmosSignDirect || requestIsCosmosSignAmino))}
         >
           Approve
         </Button>

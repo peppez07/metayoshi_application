@@ -10,6 +10,8 @@ export type DappRequestStatus = 'pending' | 'approved' | 'rejected' | 'executed'
 export type DappRequestMethod =
   | 'wallet_sendTransaction'
   | 'wallet_sendAsset'
+  | 'wallet_rtmSignMessage'
+  | 'wallet_rtmGetPublicKey'
   | 'wallet_rtmMarketAction'
   | 'wallet_rtmIssuerAction'
   | 'wallet_signMessage'
@@ -67,6 +69,65 @@ export interface DappSendAssetRequestPayload {
   memo?: string
 }
 
+export interface DappSignMessageRequestPayload {
+  ecosystem?: 'evm' | 'solana' | 'rtm'
+  address?: string
+  signer?: string
+  message?: string
+  messageBase64?: string
+  encoding?: 'utf8' | 'hex'
+}
+
+export interface DappSignTypedDataRequestPayload {
+  address?: string
+  signer?: string
+  typedData: unknown
+}
+
+export interface DappSignTransactionRequestPayload {
+  ecosystem?: 'evm' | 'solana'
+  tx?: Record<string, unknown>
+  serializedTxBase64?: string
+  serializedTxsBase64?: string[]
+  to?: string
+  address?: string
+  value?: string
+  amount?: string
+}
+
+export interface DappRtmPublicKeyRequestPayload {
+  networkId?: string
+}
+
+export interface DappCosmosGetKeyRequestPayload {
+  chainId?: string
+}
+
+export interface DappCosmosSignRequestPayload {
+  chainId?: string
+  signerAddress?: string
+  address?: string
+  signDoc?: unknown
+}
+
+export interface DappCosmosSendTxRequestPayload {
+  chainId?: string
+  txBytesBase64?: string
+  mode?: string
+}
+
+export type DappKnownRequestPayload =
+  | DappSendRequestPayload
+  | DappSendAssetRequestPayload
+  | DappSignMessageRequestPayload
+  | DappSignTypedDataRequestPayload
+  | DappSignTransactionRequestPayload
+  | DappRtmPublicKeyRequestPayload
+  | DappCosmosGetKeyRequestPayload
+  | DappCosmosSignRequestPayload
+  | DappCosmosSendTxRequestPayload
+  | Record<string, unknown>
+
 export interface DappRequestError {
   code: number
   message: string
@@ -78,7 +139,7 @@ export interface DappPendingRequest {
   method: DappRequestMethod
   networkId: string
   accountId: string
-  request: unknown
+  request: DappKnownRequestPayload
   status: DappRequestStatus
   requestedAt: number
   updatedAt: number
@@ -90,6 +151,8 @@ export interface DappPendingRequest {
 export const DAPP_REQUEST_METHODS: DappRequestMethod[] = [
   'wallet_sendTransaction',
   'wallet_sendAsset',
+  'wallet_rtmSignMessage',
+  'wallet_rtmGetPublicKey',
   'wallet_rtmMarketAction',
   'wallet_rtmIssuerAction',
   'wallet_signMessage',
@@ -312,6 +375,114 @@ function parseDappSendAssetRequest(raw: unknown): DappSendAssetRequestPayload | 
   return memo ? { assetId, qty, toAddress, memo } : { assetId, qty, toAddress }
 }
 
+function parseRecord(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+}
+
+function parseDappSignMessageRequest(raw: unknown): DappSignMessageRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate) return null
+  const ecosystemRaw = String(candidate.ecosystem || '').trim().toLowerCase()
+  const ecosystem = ecosystemRaw === 'solana' || ecosystemRaw === 'rtm' ? ecosystemRaw : 'evm'
+  const message = parseOptionalNonEmptyString(candidate.message)
+  const messageBase64 = parseOptionalNonEmptyString(candidate.messageBase64)
+  if (!message && !messageBase64) return null
+  const address = parseOptionalNonEmptyString(candidate.address)
+  const signer = parseOptionalNonEmptyString(candidate.signer)
+  const encoding = String(candidate.encoding || '').trim().toLowerCase() === 'hex' ? 'hex' : 'utf8'
+  return {
+    ecosystem,
+    ...(address ? { address } : {}),
+    ...(signer ? { signer } : {}),
+    ...(message ? { message } : {}),
+    ...(messageBase64 ? { messageBase64 } : {}),
+    ...(message ? { encoding } : {})
+  }
+}
+
+function parseDappSignTypedDataRequest(raw: unknown): DappSignTypedDataRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate || candidate.typedData === undefined) return null
+  const address = parseOptionalNonEmptyString(candidate.address)
+  const signer = parseOptionalNonEmptyString(candidate.signer)
+  return {
+    typedData: candidate.typedData,
+    ...(address ? { address } : {}),
+    ...(signer ? { signer } : {})
+  }
+}
+
+function parseDappSignTransactionRequest(raw: unknown): DappSignTransactionRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate) return null
+  const ecosystemRaw = String(candidate.ecosystem || '').trim().toLowerCase()
+  const ecosystem = ecosystemRaw === 'solana' ? 'solana' : 'evm'
+  const serializedTxBase64 = parseOptionalNonEmptyString(candidate.serializedTxBase64)
+  const serializedTxsBase64 = Array.isArray(candidate.serializedTxsBase64)
+    ? candidate.serializedTxsBase64.map((entry) => String(entry || '')).filter(Boolean)
+    : undefined
+  const tx = parseRecord(candidate.tx) || undefined
+  const to = parseOptionalNonEmptyString(candidate.to)
+  const address = parseOptionalNonEmptyString(candidate.address)
+  const value = parseOptionalNonEmptyString(candidate.value)
+  const amount = parseOptionalNonEmptyString(candidate.amount)
+  if (!tx && !serializedTxBase64 && !serializedTxsBase64?.length && !to && !address && !value && !amount) return null
+  return {
+    ecosystem,
+    ...(tx ? { tx } : {}),
+    ...(serializedTxBase64 ? { serializedTxBase64 } : {}),
+    ...(serializedTxsBase64?.length ? { serializedTxsBase64 } : {}),
+    ...(to ? { to } : {}),
+    ...(address ? { address } : {}),
+    ...(value ? { value } : {}),
+    ...(amount ? { amount } : {})
+  }
+}
+
+function parseDappRtmPublicKeyRequest(raw: unknown): DappRtmPublicKeyRequestPayload | null {
+  if (raw === undefined || raw === null) return {}
+  const candidate = parseRecord(raw)
+  if (!candidate) return null
+  const networkId = parseOptionalNonEmptyString(candidate.networkId)
+  return networkId ? { networkId } : {}
+}
+
+function parseDappCosmosGetKeyRequest(raw: unknown): DappCosmosGetKeyRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate) return {}
+  const chainId = parseOptionalNonEmptyString(candidate.chainId)
+  return chainId ? { chainId } : {}
+}
+
+function parseDappCosmosSignRequest(raw: unknown): DappCosmosSignRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate) return null
+  const chainId = parseOptionalNonEmptyString(candidate.chainId)
+  const signerAddress = parseOptionalNonEmptyString(candidate.signerAddress)
+  const address = parseOptionalNonEmptyString(candidate.address)
+  if (candidate.signDoc === undefined && !chainId && !signerAddress && !address) return null
+  return {
+    ...(chainId ? { chainId } : {}),
+    ...(signerAddress ? { signerAddress } : {}),
+    ...(address ? { address } : {}),
+    ...(candidate.signDoc !== undefined ? { signDoc: candidate.signDoc } : {})
+  }
+}
+
+function parseDappCosmosSendTxRequest(raw: unknown): DappCosmosSendTxRequestPayload | null {
+  const candidate = parseRecord(raw)
+  if (!candidate) return null
+  const chainId = parseOptionalNonEmptyString(candidate.chainId)
+  const txBytesBase64 = parseOptionalNonEmptyString(candidate.txBytesBase64)
+  const mode = parseOptionalNonEmptyString(candidate.mode)
+  if (!chainId && !txBytesBase64 && !mode) return null
+  return {
+    ...(chainId ? { chainId } : {}),
+    ...(txBytesBase64 ? { txBytesBase64 } : {}),
+    ...(mode ? { mode } : {})
+  }
+}
+
 function parseDappRequestError(raw: unknown): DappRequestError | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const candidate = raw as Partial<DappRequestError>
@@ -343,6 +514,34 @@ export function parseDappPendingRequest(raw: unknown): DappPendingRequest | null
   } else if (method === 'wallet_sendTransaction') {
     request = parseDappSendRequest(candidate.request)
     if (!request) return null
+  } else if (method === 'wallet_signMessage' || method === 'wallet_rtmSignMessage') {
+    request = parseDappSignMessageRequest(candidate.request)
+    if (!request) return null
+  } else if (method === 'wallet_signTypedData') {
+    request = parseDappSignTypedDataRequest(candidate.request)
+    if (!request) return null
+  } else if (
+    method === 'wallet_signTransaction'
+    || method === 'wallet_signAllTransactions'
+    || method === 'wallet_signAndSendTransaction'
+  ) {
+    request = parseDappSignTransactionRequest(candidate.request)
+    if (!request) return null
+  } else if (method === 'wallet_rtmGetPublicKey') {
+    request = parseDappRtmPublicKeyRequest(candidate.request)
+    if (!request) return null
+  } else if (method === 'wallet_cosmosGetKey') {
+    request = parseDappCosmosGetKeyRequest(candidate.request)
+    if (!request) return null
+  } else if (method === 'wallet_cosmosSignDirect' || method === 'wallet_cosmosSignAmino') {
+    request = parseDappCosmosSignRequest(candidate.request)
+    if (!request) return null
+  } else if (method === 'wallet_cosmosSendTx') {
+    request = parseDappCosmosSendTxRequest(candidate.request)
+    if (!request) return null
+  } else {
+    request = parseRecord(candidate.request)
+    if (!request) return null
   }
 
   const now = Date.now()
@@ -356,7 +555,7 @@ export function parseDappPendingRequest(raw: unknown): DappPendingRequest | null
     method: method as DappRequestMethod,
     networkId,
     accountId,
-    request,
+    request: request as DappKnownRequestPayload,
     status: parseDappRequestStatus(candidate.status),
     requestedAt,
     updatedAt,

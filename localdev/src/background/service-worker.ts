@@ -29,6 +29,7 @@ import {
   type DappPendingApproval,
   type DappPendingRequest,
   type DappPermission,
+  type DappKnownRequestPayload,
   type DappRequestError,
   type DappRequestMethod,
   type DappScope
@@ -44,7 +45,7 @@ import {
   WALLET_STORAGE_KEY
 } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
-import { INITIAL_NETWORKS } from '../coins'
+import { INITIAL_NETWORKS, type Network } from '../coins'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 ;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer ??= Buffer
@@ -136,6 +137,10 @@ const OPEN_WALLET_METHODS = new Set(['wallet_openWallet', 'metayoshi_openWallet'
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const CAPABILITIES_METHODS = new Set(['wallet_getCapabilities', 'metayoshi_getCapabilities', 'rtm_getCapabilities'])
 const NETWORKS_METHODS = new Set(['wallet_getNetworks', 'metayoshi_getNetworks', 'rtm_getNetworks'])
+const ACCOUNT_INFO_METHODS = new Set(['wallet_getAccount', 'metayoshi_getAccount', 'rtm_getAccount'])
+const BALANCE_METHODS = new Set(['wallet_getBalance', 'metayoshi_getBalance', 'rtm_getBalance'])
+const ASSET_BALANCES_METHODS = new Set(['wallet_getAssetBalances', 'metayoshi_getAssetBalances', 'rtm_getAssetBalances'])
+const PORTFOLIO_METHODS = new Set(['wallet_getPortfolio', 'metayoshi_getPortfolio', 'rtm_getPortfolio'])
 const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
 const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
 const SIGN_MESSAGE_METHODS = new Set(['wallet_signMessage', 'metayoshi_signMessage', 'rtm_signMessage'])
@@ -160,11 +165,14 @@ const ETHEREUM_REQUEST_ACCOUNTS_METHODS = new Set(['eth_requestAccounts'])
 const ETHEREUM_CHAIN_ID_METHODS = new Set(['eth_chainId'])
 const ETHEREUM_SWITCH_CHAIN_METHODS = new Set(['wallet_switchEthereumChain'])
 const ETHEREUM_ADD_CHAIN_METHODS = new Set(['wallet_addEthereumChain'])
+const ETHEREUM_WATCH_ASSET_METHODS = new Set(['wallet_watchAsset'])
 const ETHEREUM_SEND_TRANSACTION_METHODS = new Set(['eth_sendTransaction'])
+const ETHEREUM_SIGN_TRANSACTION_METHODS = new Set(['eth_signTransaction'])
 const ETHEREUM_SIGN_METHODS = new Set(['personal_sign', 'eth_sign'])
 const ETHEREUM_SIGN_TYPED_DATA_METHODS = new Set(['eth_signTypedData', 'eth_signTypedData_v3', 'eth_signTypedData_v4'])
 const ETHEREUM_GET_PERMISSIONS_METHODS = new Set(['wallet_getPermissions'])
 const ETHEREUM_REQUEST_PERMISSIONS_METHODS = new Set(['wallet_requestPermissions'])
+const ETHEREUM_REVOKE_PERMISSIONS_METHODS = new Set(['wallet_revokePermissions'])
 const EVM_WRITE_OR_SENSITIVE_RPC_METHODS = new Set([
   'eth_sendrawtransaction',
   'eth_sendtransaction',
@@ -216,16 +224,26 @@ interface WalletState {
   hasVault?: boolean
   accounts?: Array<{
     id: string
+    name?: string
     kind?: string
     family?: string
+    derivationIndex?: number
     multisig?: unknown
     addresses: { EVM?: string; UTXO?: string; XRP?: string; COSMOS?: string }
     networkAddresses?: Record<string, string>
+    networkBalances?: Record<string, string>
+    balance?: string
   }>
   activeAccountId?: string | null
   activeNetworkId?: string
   authorizedSites?: string[]
   networks?: Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
+  networkAssets?: Record<string, Record<string, number>>
+  networkAssetLogos?: Record<string, Record<string, string>>
+  networkAssetLabels?: Record<string, Record<string, string>>
+  accountNetworkAssets?: Record<string, Record<string, number>>
+  accountNetworkAssetLogos?: Record<string, Record<string, string>>
+  accountNetworkAssetLabels?: Record<string, Record<string, string>>
 }
 
 type DappNetworkEntry = { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }
@@ -1361,6 +1379,133 @@ function buildEvmPermissionResponse(origin: string, state: WalletState, networkI
   }]
 }
 
+function buildAssetScopeKey(accountId: string, networkId: string): string {
+  return `${String(accountId || '').trim().toLowerCase()}::${String(networkId || '').trim().toLowerCase()}`
+}
+
+function readScopedAssetMap(
+  state: WalletState,
+  accountId: string,
+  networkId: string
+): {
+  assets: Record<string, number>
+  labels: Record<string, string>
+  logos: Record<string, string>
+} {
+  const scopeKey = buildAssetScopeKey(accountId, networkId)
+  return {
+    assets: state.accountNetworkAssets?.[scopeKey] || state.networkAssets?.[networkId] || {},
+    labels: state.accountNetworkAssetLabels?.[scopeKey] || state.networkAssetLabels?.[networkId] || {},
+    logos: state.accountNetworkAssetLogos?.[scopeKey] || state.networkAssetLogos?.[networkId] || {}
+  }
+}
+
+function buildWalletAssetRows(
+  state: WalletState,
+  accountId: string,
+  networkId: string
+): Array<Record<string, unknown>> {
+  const scoped = readScopedAssetMap(state, accountId, networkId)
+  return Object.entries(scoped.assets)
+    .map(([assetId, rawAmount]) => ({
+      assetId,
+      rawAmount: Number(rawAmount || 0),
+      label: String(scoped.labels?.[assetId] || assetId).trim() || assetId,
+      logo: String(scoped.logos?.[assetId] || '').trim() || undefined
+    }))
+    .sort((a, b) => Number(b.rawAmount || 0) - Number(a.rawAmount || 0))
+}
+
+function buildWalletAccountSnapshot(
+  state: WalletState,
+  network: DappNetworkEntry | undefined,
+  accountId: string
+): Record<string, unknown> {
+  const account = state.accounts?.find((entry) => entry.id === accountId) || state.accounts?.[0]
+  const networkId = String(network?.id || state.activeNetworkId || '').trim()
+  const address = account ? getAccountAddressForNetwork(account, networkId, network?.coinType) : ''
+  const balance = String(account?.networkBalances?.[networkId] || account?.balance || '0').trim() || '0'
+  return {
+    accountId: String(account?.id || '').trim() || null,
+    name: String(account?.name || '').trim() || null,
+    kind: String(account?.kind || '').trim() || null,
+    derivationIndex: Number.isInteger((account as any)?.derivationIndex) ? Number((account as any).derivationIndex) : 0,
+    networkId: networkId || null,
+    coinType: String(network?.coinType || '').trim() || null,
+    address: address || null,
+    balance,
+    assets: account ? buildWalletAssetRows(state, account.id, networkId) : []
+  }
+}
+
+function parseAddEthereumChainPayload(params: unknown): Network | null {
+  const payload = (Array.isArray(params) ? params[0] : params) as Record<string, unknown> | null
+  if (!payload || typeof payload !== 'object') return null
+  const rawChainId = (payload as Record<string, unknown>).chainId
+  const chainId = parseRequestedChainId(rawChainId)
+  if (chainId === null) return null
+  const rpcUrls = Array.isArray(payload.rpcUrls) ? payload.rpcUrls.map((entry) => String(entry || '').trim()).filter(Boolean) : []
+  const chainName = String(payload.chainName || '').trim()
+  const nativeCurrency = (payload.nativeCurrency && typeof payload.nativeCurrency === 'object')
+    ? payload.nativeCurrency as Record<string, unknown>
+    : null
+  const symbol = String(nativeCurrency?.symbol || payload.symbol || chainName || `EVM ${chainId}`).trim() || `EVM ${chainId}`
+  const name = chainName || String(nativeCurrency?.name || symbol).trim() || `EVM Chain ${chainId}`
+  const networkId = `evm-${chainId}`
+  return {
+    id: networkId,
+    runtimeModelId: 'eth',
+    serverCoinId: `custom-evm-${chainId}`,
+    serverChain: 'main',
+    displayChain: 'main',
+    name,
+    symbol,
+    coinType: 'EVM',
+    chainId,
+    rpcUrl: rpcUrls[0] || '',
+    explorerUrl: Array.isArray(payload.blockExplorerUrls) ? String(payload.blockExplorerUrls[0] || '').trim() || undefined : undefined,
+    coinSymbol: symbol,
+    supportsAssets: true,
+    capabilities: {
+      features: {
+        nativeSend: true,
+        assetLayer: true,
+        assetSend: true,
+        activity: true,
+        swap: true
+      },
+      ui: {
+        showAssetsTab: true,
+        showAssetsAction: true,
+        showSendAction: true,
+        showActivityTab: true,
+        showSwapAction: true
+      }
+    }
+  }
+}
+
+function parseWatchAssetPayload(params: unknown): {
+  assetId: string
+  label: string
+  logo?: string
+} | null {
+  const payload = (Array.isArray(params) ? params[0] : params) as Record<string, unknown> | null
+  if (!payload || typeof payload !== 'object') return null
+  const type = String(payload.type || '').trim().toUpperCase()
+  const options = payload.options && typeof payload.options === 'object' ? payload.options as Record<string, unknown> : payload
+  const address = String(options.address || '').trim()
+  if (!address) return null
+  if (type && type !== 'ERC20') return null
+  const symbol = String(options.symbol || '').trim()
+  const image = String(options.image || '').trim()
+  return {
+    assetId: `EVMTOKEN:${address}`,
+    label: symbol || address,
+    ...(image ? { logo: image } : {})
+  }
+}
+
 function parseRtmMarketActionParams(params: unknown): RtmMarketActionParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
@@ -1479,6 +1624,18 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
     'wallet_getProviderState',
     'metayoshi_getProviderState',
     'rtm_getProviderState',
+    'wallet_getAccount',
+    'metayoshi_getAccount',
+    'rtm_getAccount',
+    'wallet_getBalance',
+    'metayoshi_getBalance',
+    'rtm_getBalance',
+    'wallet_getAssetBalances',
+    'metayoshi_getAssetBalances',
+    'rtm_getAssetBalances',
+    'wallet_getPortfolio',
+    'metayoshi_getPortfolio',
+    'rtm_getPortfolio',
     'wallet_requestAccounts',
     'metayoshi_requestAccounts',
     'rtm_requestAccounts',
@@ -1537,9 +1694,14 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
       'eth_accounts',
       'eth_requestAccounts',
       'eth_chainId',
+      'wallet_getPermissions',
+      'wallet_requestPermissions',
+      'wallet_revokePermissions',
       'wallet_switchEthereumChain',
       'wallet_addEthereumChain',
+      'wallet_watchAsset',
       'eth_sendTransaction',
+      'eth_signTransaction',
       'personal_sign',
       'eth_sign',
       'eth_signTypedData',
@@ -1560,7 +1722,8 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
   } else if (protocol === 'rtm-jsonrpc') {
     matrix.signMessage = true
     ;[
-      'wallet_rtmSignMessage'
+      'wallet_rtmSignMessage',
+      'wallet_rtmGetPublicKey'
     ].forEach((method) => methods.add(method))
   } else if (protocol === 'cosmos-rest-bridge') {
     matrix.cosmosGetKey = true
@@ -1686,7 +1849,7 @@ async function requestDappActionApproval(
   networkId: string,
   accountId: string,
   method: DappRequestMethod,
-  request: unknown,
+  request: DappKnownRequestPayload,
   surfaceTarget?: ExtensionSurfaceTarget
 ): Promise<unknown> {
   const actionKey = [
@@ -2057,9 +2220,12 @@ async function handleRpcMethod(
     || ETHEREUM_CHAIN_ID_METHODS.has(method)
     || ETHEREUM_GET_PERMISSIONS_METHODS.has(method)
     || ETHEREUM_REQUEST_PERMISSIONS_METHODS.has(method)
+    || ETHEREUM_REVOKE_PERMISSIONS_METHODS.has(method)
     || ETHEREUM_SWITCH_CHAIN_METHODS.has(method)
     || ETHEREUM_ADD_CHAIN_METHODS.has(method)
+    || ETHEREUM_WATCH_ASSET_METHODS.has(method)
     || ETHEREUM_SEND_TRANSACTION_METHODS.has(method)
+    || ETHEREUM_SIGN_TRANSACTION_METHODS.has(method)
     || ETHEREUM_SIGN_METHODS.has(method)
     || ETHEREUM_SIGN_TYPED_DATA_METHODS.has(method)
     || isReadOnlyEvmRpcMethod(method)
@@ -2180,6 +2346,63 @@ async function handleRpcMethod(
   if (NETWORKS_METHODS.has(method)) {
     return dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === effectiveNetworkId))
   }
+
+  if (ACCOUNT_INFO_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read'])
+    const activeAccount = getActiveAccountFromState(state)
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false) || !activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    return buildWalletAccountSnapshot(state, network, activeAccount.id)
+  }
+
+  if (BALANCE_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read'])
+    const activeAccount = getActiveAccountFromState(state)
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false) || !activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    const snapshot = buildWalletAccountSnapshot(state, network, activeAccount.id)
+    return {
+      networkId: snapshot.networkId,
+      address: snapshot.address,
+      balance: snapshot.balance,
+      symbol: network?.symbol || null
+    }
+  }
+
+  if (ASSET_BALANCES_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read'])
+    const activeAccount = getActiveAccountFromState(state)
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false) || !activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    return buildWalletAssetRows(state, activeAccount.id, effectiveNetworkId)
+  }
+
+  if (PORTFOLIO_METHODS.has(method)) {
+    await requireDappScopes(origin, ['read'])
+    const activeAccount = getActiveAccountFromState(state)
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false) || !activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    const snapshot = buildWalletAccountSnapshot(state, network, activeAccount.id)
+    return {
+      wallet: {
+        connected,
+        unlocked,
+        origin: normalizedOrigin
+      },
+      network: {
+        id: network?.id || null,
+        name: network?.name || null,
+        symbol: network?.symbol || null,
+        coinType: network?.coinType || null,
+        runtimeModelId: String((network as any)?.runtimeModelId || '').trim() || null
+      },
+      account: snapshot
+    }
+  }
   
   // Request accounts / enable
   if (REQUEST_ACCOUNTS_METHODS.has(method)) {
@@ -2216,7 +2439,7 @@ async function handleRpcMethod(
   }
 
   if (RTM_GET_PUBLIC_KEY_METHODS.has(method)) {
-    const approvedOrigin = await requireDappScopes(origin, ['read'])
+    const approvedOrigin = await requireDappScopes(origin, ['read', 'sign'])
     if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
       throw { code: -32603, message: 'Wallet is not initialized' }
     }
@@ -2247,12 +2470,14 @@ async function handleRpcMethod(
       throw { code: -32603, message: 'Active RTM signer does not match the selected account' }
     }
     await touchLastConnected(approvedOrigin)
-    return {
-      networkId: 'rtm',
-      accountId: activeAccount.id,
-      address: derived.address,
-      pubkeyHex: derived.pubHex
-    }
+    return await requestDappActionApproval(
+      approvedOrigin,
+      'rtm',
+      activeAccount.id,
+      'wallet_rtmGetPublicKey',
+      { networkId: 'rtm', address: derived.address },
+      surfaceTarget
+    )
   }
 
   if (ETHEREUM_CHAIN_ID_METHODS.has(method)) {
@@ -2283,6 +2508,25 @@ async function handleRpcMethod(
       throw { code: 4200, message: 'Unsupported permission request' }
     }
     return buildEvmPermissionResponse(approvedOrigin, await getWalletState(), effectiveNetworkId)
+  }
+
+  if (ETHEREUM_REVOKE_PERMISSIONS_METHODS.has(method)) {
+    if (!normalizedOrigin) return []
+    const requested = Array.isArray(params) ? params[0] : params
+    const requestedCapabilities = requested && typeof requested === 'object' ? Object.keys(requested as Record<string, unknown>) : []
+    if (requestedCapabilities.length === 0 || !requestedCapabilities.includes('eth_accounts')) {
+      return []
+    }
+    const permissionMap = await getDappPermissionMap()
+    if (permissionMap[normalizedOrigin]) {
+      delete permissionMap[normalizedOrigin]
+      await setDappPermissionMap(permissionMap)
+    }
+    await updateWalletStateInStorage((current) => ({
+      ...current,
+      authorizedSites: normalizeAuthorizedSites((current.authorizedSites || []).filter((entry) => normalizeDappOrigin(entry) !== normalizedOrigin))
+    }))
+    return []
   }
 
   if (ETHEREUM_ACCOUNTS_METHODS.has(method)) {
@@ -2336,16 +2580,85 @@ async function handleRpcMethod(
   }
 
   if (ETHEREUM_ADD_CHAIN_METHODS.has(method)) {
-    const payload = Array.isArray(params) ? params[0] : params
-    const chainId = parseRequestedChainId((payload as Record<string, unknown> | null)?.chainId)
-    if (chainId === null) {
+    const nextNetwork = parseAddEthereumChainPayload(params)
+    if (!nextNetwork || !Number.isInteger(nextNetwork.chainId) || Number(nextNetwork.chainId) <= 0) {
       throw { code: -32602, message: 'wallet_addEthereumChain requires `chainId`' }
     }
-    const knownNetwork = resolveDappNetworks(state).find((entry) => entry.coinType === 'EVM' && entry.chainId === chainId)
-    if (!knownNetwork) {
-      throw { code: 4902, message: `Unknown EVM chain ${chainId}` }
+    if (!String(nextNetwork.rpcUrl || '').trim()) {
+      throw { code: -32602, message: 'wallet_addEthereumChain requires at least one RPC URL' }
     }
+    await updateWalletStateInStorage((current) => {
+      const existing = (current.networks || []).find((entry) => entry.coinType === 'EVM' && entry.chainId === nextNetwork.chainId)
+      if (existing) return current
+      return {
+        ...current,
+        networks: [...(current.networks || []), nextNetwork]
+      }
+    })
     return null
+  }
+
+  if (ETHEREUM_WATCH_ASSET_METHODS.has(method)) {
+    const approvedOrigin = await requireDappScopes(origin, ['read'])
+    if (!network || network.coinType !== 'EVM') {
+      throw { code: 4900, message: 'No EVM network is available' }
+    }
+    const watched = parseWatchAssetPayload(params)
+    if (!watched) {
+      throw { code: -32602, message: 'wallet_watchAsset requires an ERC20 asset payload' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    const scopeKey = buildAssetScopeKey(activeAccount.id, network.id)
+    await updateWalletStateInStorage((current) => ({
+      ...current,
+      networkAssets: {
+        ...current.networkAssets,
+        [network.id]: {
+          ...(current.networkAssets?.[network.id] || {}),
+          [watched.assetId]: Number(current.networkAssets?.[network.id]?.[watched.assetId] || 0)
+        }
+      },
+      networkAssetLabels: {
+        ...current.networkAssetLabels,
+        [network.id]: {
+          ...(current.networkAssetLabels?.[network.id] || {}),
+          [watched.assetId]: watched.label
+        }
+      },
+      networkAssetLogos: {
+        ...current.networkAssetLogos,
+        [network.id]: {
+          ...(current.networkAssetLogos?.[network.id] || {}),
+          ...(watched.logo ? { [watched.assetId]: watched.logo } : {})
+        }
+      },
+      accountNetworkAssets: {
+        ...current.accountNetworkAssets,
+        [scopeKey]: {
+          ...(current.accountNetworkAssets?.[scopeKey] || {}),
+          [watched.assetId]: Number(current.accountNetworkAssets?.[scopeKey]?.[watched.assetId] || 0)
+        }
+      },
+      accountNetworkAssetLabels: {
+        ...current.accountNetworkAssetLabels,
+        [scopeKey]: {
+          ...(current.accountNetworkAssetLabels?.[scopeKey] || {}),
+          [watched.assetId]: watched.label
+        }
+      },
+      accountNetworkAssetLogos: {
+        ...current.accountNetworkAssetLogos,
+        [scopeKey]: {
+          ...(current.accountNetworkAssetLogos?.[scopeKey] || {}),
+          ...(watched.logo ? { [watched.assetId]: watched.logo } : {})
+        }
+      }
+    }))
+    await touchLastConnected(approvedOrigin)
+    return true
   }
 
   if (isReadOnlyEvmRpcMethod(method)) {
@@ -2430,7 +2743,7 @@ async function handleRpcMethod(
       origin || 'unknown',
       network.id,
       activeAccount.id,
-      'wallet_signMessage',
+      'wallet_rtmSignMessage',
       {
         ecosystem: 'rtm',
         address: derived.address,
@@ -2490,6 +2803,33 @@ async function handleRpcMethod(
       activeAccount.id,
       'wallet_signTransaction',
       parseSignTransactionParams(params),
+      surfaceTarget
+    )
+  }
+
+  if (ETHEREUM_SIGN_TRANSACTION_METHODS.has(method)) {
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if (!network || network.coinType !== 'EVM') {
+      throw { code: 4900, message: 'No EVM network is available' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
+    if (origin) {
+      const approved = await requestScopes(origin, ['read', 'sign'], { networkId: effectiveNetworkId, surfaceTarget })
+      if (!approved) throw { code: 4001, message: 'User rejected the request' }
+      await touchLastConnected(origin)
+    }
+    return await requestDappActionApproval(
+      origin || 'unknown',
+      network.id,
+      activeAccount.id,
+      'wallet_signTransaction',
+      { ecosystem: 'evm', tx: parseEvmTransactionRequest(params).tx },
       surfaceTarget
     )
   }

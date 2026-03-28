@@ -15,6 +15,10 @@ const CONNECT_METHOD = 'metayoshi_connect'
 const OPEN_WALLET_METHOD = 'metayoshi_openWallet'
 const GET_NETWORKS_METHOD = 'metayoshi_getNetworks'
 const GET_CAPABILITIES_METHOD = 'metayoshi_getCapabilities'
+const GET_ACCOUNT_METHOD = 'metayoshi_getAccount'
+const GET_BALANCE_METHOD = 'metayoshi_getBalance'
+const GET_ASSET_BALANCES_METHOD = 'metayoshi_getAssetBalances'
+const GET_PORTFOLIO_METHOD = 'metayoshi_getPortfolio'
 const SIGN_MESSAGE_METHOD = 'metayoshi_signMessage'
 const SIGN_TYPED_DATA_METHOD = 'metayoshi_signTypedData'
 const SIGN_TRANSACTION_METHOD = 'metayoshi_signTransaction'
@@ -27,6 +31,8 @@ const COSMOS_GET_KEY_METHOD = 'wallet_cosmosGetKey'
 const COSMOS_SIGN_DIRECT_METHOD = 'wallet_cosmosSignDirect'
 const COSMOS_SIGN_AMINO_METHOD = 'wallet_cosmosSignAmino'
 const COSMOS_SEND_TX_METHOD = 'wallet_cosmosSendTx'
+const RTM_GET_PUBLIC_KEY_METHOD = 'wallet_rtmGetPublicKey'
+const RTM_SIGN_MESSAGE_METHOD = 'wallet_rtmSignMessage'
 
 const REQUEST_ACCOUNTS_METHODS = new Set(['wallet_requestAccounts', 'metayoshi_requestAccounts', 'rtm_requestAccounts'])
 const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
@@ -117,6 +123,18 @@ type ProviderNetworkRequest = {
   coin?: string
   symbol?: string
   chainId?: string | number
+}
+
+type ProviderAccountSnapshot = {
+  accountId: string | null
+  name: string | null
+  kind: string | null
+  derivationIndex: number
+  networkId: string | null
+  coinType: string | null
+  address: string | null
+  balance: string
+  assets: Array<Record<string, unknown>>
 }
 
 type ProviderSendCoinParams = {
@@ -500,6 +518,13 @@ const provider = {
   getProviderState: (params?: ProviderNetworkRequest) => request({ method: PROVIDER_STATE_METHOD, params }),
   getNetworks: (): Promise<ProviderNetwork[]> => request({ method: GET_NETWORKS_METHOD }),
   getCapabilities: (params?: ProviderNetworkRequest): Promise<ProviderCapabilities> => request({ method: GET_CAPABILITIES_METHOD, params }),
+  getAccount: (params?: ProviderNetworkRequest): Promise<ProviderAccountSnapshot> => request({ method: GET_ACCOUNT_METHOD, params }),
+  getBalance: (params?: ProviderNetworkRequest): Promise<{ networkId: string | null; address: string | null; balance: string; symbol: string | null }> =>
+    request({ method: GET_BALANCE_METHOD, params }),
+  getAssetBalances: (params?: ProviderNetworkRequest): Promise<Array<Record<string, unknown>>> =>
+    request({ method: GET_ASSET_BALANCES_METHOD, params }),
+  getPortfolio: (params?: ProviderNetworkRequest): Promise<Record<string, unknown>> =>
+    request({ method: GET_PORTFOLIO_METHOD, params }),
   signMessage: (params: { message: string; encoding?: 'utf8' | 'hex' } & ProviderNetworkRequest) =>
     request({ method: SIGN_MESSAGE_METHOD, params }),
   signTypedData: (params: { typedData: unknown } & ProviderNetworkRequest) =>
@@ -543,6 +568,45 @@ const provider = {
   }
 }
 
+function withRtmNetwork(params?: any): any {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return params
+  return { ...params, networkId: 'rtm' }
+}
+
+const rtmProvider = {
+  isMetaYoshi: true,
+  isRtm: true,
+  get selectedAddress() {
+    return state.selectedAddress
+  },
+  get isConnected() {
+    return state.connected
+  },
+  request: ({ method, params }: { method: string; params?: any }) => request({ method, params: withRtmNetwork(params) }),
+  send: (payload: { method: string; params?: any }) => request({ method: payload.method, params: withRtmNetwork(payload.params) }),
+  enable: () => request({ method: PROVIDER_ENABLE_METHOD, params: { networkId: 'rtm' } }),
+  connect: () => request({ method: CONNECT_METHOD, params: { networkId: 'rtm' } }),
+  getProviderState: () => request({ method: PROVIDER_STATE_METHOD, params: { networkId: 'rtm' } }),
+  getCapabilities: (): Promise<ProviderCapabilities> => request({ method: GET_CAPABILITIES_METHOD, params: { networkId: 'rtm' } }),
+  getAccount: (): Promise<ProviderAccountSnapshot> => request({ method: GET_ACCOUNT_METHOD, params: { networkId: 'rtm' } }),
+  getBalance: (): Promise<{ networkId: string | null; address: string | null; balance: string; symbol: string | null }> =>
+    request({ method: GET_BALANCE_METHOD, params: { networkId: 'rtm' } }),
+  getAssetBalances: (): Promise<Array<Record<string, unknown>>> =>
+    request({ method: GET_ASSET_BALANCES_METHOD, params: { networkId: 'rtm' } }),
+  getPortfolio: (): Promise<Record<string, unknown>> =>
+    request({ method: GET_PORTFOLIO_METHOD, params: { networkId: 'rtm' } }),
+  getPublicKey: (): Promise<Record<string, unknown>> => request({ method: RTM_GET_PUBLIC_KEY_METHOD, params: { networkId: 'rtm' } }),
+  signMessage: (params: { address?: string; message: string }) => request({ method: RTM_SIGN_MESSAGE_METHOD, params: withRtmNetwork(params) }),
+  sendTransaction: (params: ProviderSendCoinParams) => request({ method: SEND_TRANSACTION_METHOD, params: withRtmNetwork(params) }),
+  sendAsset: (params: { assetId: string; qty: string; toAddress: string; memo?: string }) =>
+    request({ method: SEND_ASSET_METHOD, params: withRtmNetwork(params) }),
+  on,
+  removeListener,
+  off: removeListener,
+  once,
+  _metayoshi: provider._metayoshi
+}
+
 const ethereumProvider = {
   isMetaYoshi: true,
   isMetaMask: false,
@@ -555,6 +619,10 @@ const ethereumProvider = {
   request: ({ method, params }: { method: string; params?: any }) => request({ method, params }),
   send: (payload: { method: string; params?: any }) => request({ method: payload.method, params: payload.params }),
   enable: () => request({ method: 'eth_requestAccounts' }),
+  requestPermissions: (params: any) => request({ method: 'wallet_requestPermissions', params }),
+  getPermissions: () => request({ method: 'wallet_getPermissions' }),
+  revokePermissions: (params: any) => request({ method: 'wallet_revokePermissions', params }),
+  watchAsset: (params: any) => request({ method: 'wallet_watchAsset', params }),
   on,
   removeListener,
   off: removeListener,
@@ -822,6 +890,11 @@ Object.defineProperties(provider, {
     writable: false,
     configurable: false
   },
+  rtm: {
+    value: rtmProvider,
+    writable: false,
+    configurable: false
+  },
   solana: {
     value: solanaProvider,
     writable: false,
@@ -853,7 +926,7 @@ if (!inpageRuntime.initialized) {
 
   if (!(window as any).rtm) {
     Object.defineProperty(window, 'rtm', {
-      value: provider,
+      value: rtmProvider,
       writable: false,
       configurable: false
     })
