@@ -1,6 +1,8 @@
 // Background Service Worker for MetaYoshi Wallet Extension
 // Handles DApp RPC requests and message passing
 
+import { Buffer } from 'buffer'
+
 import {
   clearRuntimeErrorLog,
   getRuntimeErrorLog,
@@ -45,6 +47,7 @@ import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { INITIAL_NETWORKS } from '../coins'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
+;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer ??= Buffer
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
 const OPEN_WALLET_COMMAND = 'open-wallet'
