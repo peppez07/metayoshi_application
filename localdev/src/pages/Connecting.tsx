@@ -154,7 +154,14 @@ async function runRaptoreumHandshake(network?: Network): Promise<void> {
 
 const Connecting: React.FC = () => {
   const navigate = useNavigate()
-  const { ensureNetworkAddress, refreshActiveBalance, activeNetworkId, networks, onboardingCompleted } = useWalletStore()
+  const {
+    ensureNetworkAddress,
+    refreshActiveBalance,
+    collectActiveNetworkData,
+    activeNetworkId,
+    networks,
+    onboardingCompleted
+  } = useWalletStore()
 
   const [status, setStatus] = useState('Initialising wallet...')
   const [phase, setPhase] = useState<Phase>('connecting')
@@ -219,8 +226,35 @@ const Connecting: React.FC = () => {
       await sleep(3000)
     }
 
+    try {
+      setStatus(`Loading ${activeNetwork?.name ?? activeNetworkId} assets...`)
+      await collectActiveNetworkData({
+        force: true,
+        includeBalance: false,
+        includeAssets: true,
+        includeFiat: true
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setBridgeWarning((prev) =>
+        prev
+          ? `${prev}\n\nAsset refresh warning: ${msg}\nAsset rows may stay stale until the next refresh.`
+          : `Asset refresh warning: ${msg}\nAsset rows may stay stale until the next refresh.`
+      )
+      setPhase('bridge-warning')
+      await sleep(1500)
+    }
+
     navigate(onboardingCompleted ? '/wallet/assets' : '/welcome')
-  }, [ensureNetworkAddress, refreshActiveBalance, activeNetworkId, activeNetwork, navigate, onboardingCompleted])
+  }, [
+    ensureNetworkAddress,
+    refreshActiveBalance,
+    collectActiveNetworkData,
+    activeNetworkId,
+    activeNetwork,
+    navigate,
+    onboardingCompleted
+  ])
 
   useEffect(() => {
     const timer = setTimeout(() => { void connect() }, 300)

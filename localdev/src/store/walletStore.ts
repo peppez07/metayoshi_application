@@ -4091,6 +4091,13 @@ export const useWalletStore = create<WalletState>()(
           void get().refreshBackendSnapshot().catch((err) => {
             console.warn('Backend snapshot refresh after unlock failed:', err)
           })
+          void (async () => {
+            const { activeNetworkId: unlockedNetworkId } = get()
+            await get().ensureNetworkAddress(unlockedNetworkId).catch(() => null)
+            await get().collectActiveNetworkData({ force: true }).catch((err) => {
+              console.warn('Active network refresh after unlock failed:', err)
+            })
+          })()
           return true
         } catch {
           return false
