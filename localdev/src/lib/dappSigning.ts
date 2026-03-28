@@ -1,6 +1,7 @@
 import { ethers } from 'ethers'
 import * as secp from '@noble/secp256k1'
 import { sha256 } from '@noble/hashes/sha256'
+import { hmac } from '@noble/hashes/hmac'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 import nacl from 'tweetnacl'
 import {
@@ -11,10 +12,21 @@ import {
 import { resolveEvmExternalSigner } from './evmExternalSigner'
 import { deriveSolanaAddress } from './solanaAddress'
 import { deriveCosmosAddress, resolveCosmosAddressConfig } from './cosmosAddress'
+import { deriveUtxoAddress } from './utxoAddress'
 import type { Network } from '../coins'
 import { sendBridgeEvmSignedRelay, sendBridgeSolanaSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
 type JsonObject = Record<string, any>
+
+const RTM_SIGNED_MESSAGE_MAGIC = 'Raptoreum Signed Message:\n'
+
+// noble v3 requires host apps to wire hash helpers before using sync signing APIs.
+if (!secp.hashes.sha256) {
+  secp.hashes.sha256 = (msg: Uint8Array) => sha256(msg)
+}
+if (!secp.hashes.hmacSha256) {
+  secp.hashes.hmacSha256 = (key: Uint8Array, msg: Uint8Array) => hmac(sha256, key, msg)
+}
 
 function utf8(input: string): Uint8Array {
   return new TextEncoder().encode(String(input || ''))
@@ -121,6 +133,45 @@ function encodeVarint(value: bigint): Uint8Array {
   return new Uint8Array(out)
 }
 
+function encodeCompactSize(value: number): Uint8Array {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('Compact size requires a non-negative safe integer')
+  }
+  if (value < 253) return Uint8Array.from([value])
+  if (value <= 0xffff) {
+    return Uint8Array.from([253, value & 0xff, (value >> 8) & 0xff])
+  }
+  if (value <= 0xffffffff) {
+    return Uint8Array.from([
+      254,
+      value & 0xff,
+      (value >> 8) & 0xff,
+      (value >> 16) & 0xff,
+      (value >> 24) & 0xff
+    ])
+  }
+  let next = BigInt(value)
+  const out = new Uint8Array(9)
+  out[0] = 255
+  for (let i = 1; i < out.length; i += 1) {
+    out[i] = Number(next & 0xffn)
+    next >>= 8n
+  }
+  return out
+}
+
+function buildRtmMessageDigest(message: string): Uint8Array {
+  const magicBytes = utf8(RTM_SIGNED_MESSAGE_MAGIC)
+  const messageBytes = utf8(message)
+  const payload = concatBytes(
+    encodeCompactSize(magicBytes.length),
+    magicBytes,
+    encodeCompactSize(messageBytes.length),
+    messageBytes
+  )
+  return sha256(sha256(payload))
+}
+
 function fieldKey(fieldNo: number, wireType: 0 | 2): Uint8Array {
   return encodeVarint(BigInt((fieldNo << 3) | wireType))
 }
@@ -191,6 +242,41 @@ export async function signEvmMessage(input: {
   }
   const wallet = deriveEvmWallet(input.mnemonic, resolveAccountIndex(input.accountIndex))
   return wallet.signMessage(messageBytes)
+}
+
+export async function signRtmMessage(input: {
+  mnemonic: string
+  accountIndex?: number
+  message: string
+  address?: string
+}): Promise<{
+  address: string
+  signature: string
+  signingScheme: 'rtm-signmessage'
+}> {
+  const derived = await deriveUtxoAddress(input.mnemonic, 'RTM', resolveAccountIndex(input.accountIndex))
+  const expectedAddress = String(input.address || '').trim()
+  if (expectedAddress && expectedAddress !== derived.address) {
+    throw new Error('Requested RTM address does not match the selected wallet account')
+  }
+
+  const digest = buildRtmMessageDigest(String(input.message || ''))
+  const recovered = secp.sign(digest, hexToBytes(derived.privHex), {
+    prehash: false,
+    lowS: true,
+    format: 'recovered'
+  })
+  const parsed = secp.Signature.fromBytes(recovered, 'recovered')
+  if (typeof parsed.recovery !== 'number') {
+    throw new Error('Failed to derive RTM recovery id')
+  }
+  const compact = parsed.toBytes('compact')
+  const header = Uint8Array.from([27 + parsed.recovery + 4])
+  return {
+    address: derived.address,
+    signature: toBase64(concatBytes(header, compact)),
+    signingScheme: 'rtm-signmessage'
+  }
 }
 
 export async function signEvmTypedData(input: {

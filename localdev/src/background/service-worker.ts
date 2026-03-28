@@ -140,6 +140,7 @@ const COSMOS_SIGN_AMINO_METHODS = new Set(['wallet_cosmosSignAmino'])
 const COSMOS_SEND_TX_METHODS = new Set(['wallet_cosmosSendTx'])
 const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
+const RTM_SIGN_MESSAGE_METHODS = new Set(['wallet_rtmSignMessage'])
 const RTM_MARKET_ACTION_METHODS = new Set(['wallet_rtmMarketAction'])
 const RTM_ISSUER_ACTION_METHODS = new Set(['wallet_rtmIssuerAction'])
 const RTM_GET_PUBLIC_KEY_METHODS = new Set(['wallet_rtmGetPublicKey'])
@@ -248,7 +249,7 @@ type DappMethodMatrix = {
   methods: string[]
 }
 
-type DappProtocol = 'evm-jsonrpc' | 'solana-jsonrpc' | 'cosmos-rest-bridge' | 'generic'
+type DappProtocol = 'evm-jsonrpc' | 'solana-jsonrpc' | 'cosmos-rest-bridge' | 'rtm-jsonrpc' | 'generic'
 
 function buildDappNetworkDescriptor(
   network: DappNetworkEntry,
@@ -291,6 +292,14 @@ function resolveDappProtocol(network?: DappNetworkEntry | null): DappProtocol {
   const networkId = String(network?.id || '').trim().toLowerCase()
 
   if (coinType === 'EVM') return 'evm-jsonrpc'
+  if (
+    networkId === 'rtm'
+    || runtimeModelId === 'rtm'
+    || runtimeModelId === 'raptoreum'
+    || (coinType === 'UTXO' && networkId === 'raptoreum')
+  ) {
+    return 'rtm-jsonrpc'
+  }
   if (
     coinType === 'SOL'
     || runtimeModelId === 'sol'
@@ -1353,7 +1362,8 @@ function parseRtmIssuerActionParams(params: unknown): RtmIssuerActionParams {
 }
 
 function parseSignMessageParams(params: unknown): {
-  ecosystem: 'evm' | 'solana'
+  ecosystem: 'evm' | 'solana' | 'rtm'
+  address?: string
   message?: string
   messageBase64?: string
   encoding?: 'utf8' | 'hex'
@@ -1395,6 +1405,33 @@ function parseSignMessageParams(params: unknown): {
     message,
     encoding: String(payload.encoding || '').trim().toLowerCase() === 'hex' || /^0x[0-9a-f]*$/i.test(message) ? 'hex' : 'utf8'
   }
+}
+
+function parseRtmSignMessageParams(params: unknown): {
+  ecosystem: 'rtm'
+  address?: string
+  message: string
+} {
+  if (Array.isArray(params)) {
+    const address = String(params[0] ?? '').trim()
+    const message = String(params[1] ?? '').trim()
+    if (!message) {
+      throw { code: -32602, message: 'wallet_rtmSignMessage requires [address, message]' }
+    }
+    return { ecosystem: 'rtm', address: address || undefined, message }
+  }
+
+  const candidate = params && typeof params === 'object' ? params : null
+  if (!candidate) {
+    throw { code: -32602, message: 'wallet_rtmSignMessage requires an RTM message payload' }
+  }
+  const payload = candidate as Record<string, unknown>
+  const message = String(payload.message ?? '').trim()
+  if (!message) {
+    throw { code: -32602, message: 'wallet_rtmSignMessage requires `message`' }
+  }
+  const address = String(payload.address ?? '').trim()
+  return { ecosystem: 'rtm', address: address || undefined, message }
 }
 
 function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodMatrix {
@@ -1479,6 +1516,11 @@ function resolveDappMethodMatrix(network?: DappNetworkEntry | null): DappMethodM
       'wallet_signTransaction',
       'wallet_signAllTransactions',
       'wallet_signAndSendTransaction'
+    ].forEach((method) => methods.add(method))
+  } else if (protocol === 'rtm-jsonrpc') {
+    matrix.signMessage = true
+    ;[
+      'wallet_rtmSignMessage'
     ].forEach((method) => methods.add(method))
   } else if (protocol === 'cosmos-rest-bridge') {
     matrix.cosmosGetKey = true
@@ -2308,6 +2350,52 @@ async function handleRpcMethod(
       activeAccount.id,
       'wallet_signMessage',
       signPayload,
+      surfaceTarget
+    )
+  }
+
+  if (RTM_SIGN_MESSAGE_METHODS.has(method)) {
+    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+      throw { code: -32603, message: 'Wallet is not initialized' }
+    }
+    if (!network || String(network.id || '').trim() !== 'rtm') {
+      throw { code: 4900, message: 'wallet_rtmSignMessage requires the RTM network' }
+    }
+    const activeAccount = getActiveAccountFromState(state)
+    if (!activeAccount) {
+      throw { code: -32603, message: 'No account available' }
+    }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
+    const scopes: DappScope[] = ['read', 'sign']
+    if (origin) {
+      const approved = await requestScopes(origin, scopes, { networkId: effectiveNetworkId, surfaceTarget })
+      if (!approved) throw { code: 4001, message: 'User rejected the request' }
+      await touchLastConnected(origin)
+    }
+    const signPayload = parseRtmSignMessageParams(params)
+    const mnemonic = String((state as any).sessionMnemonic || '').trim()
+    if (!mnemonic) {
+      throw { code: -32603, message: 'Wallet is locked' }
+    }
+    const accountIndex = Number.isInteger((activeAccount as any)?.derivationIndex)
+      ? Number((activeAccount as any).derivationIndex)
+      : Math.max(0, (state.accounts || []).findIndex((entry) => entry.id === activeAccount.id))
+    const derived = await deriveUtxoAddress(mnemonic, 'RTM', accountIndex)
+    if (signPayload.address && signPayload.address !== derived.address) {
+      throw { code: -32602, message: 'wallet_rtmSignMessage address does not match the selected RTM account' }
+    }
+    return await requestDappActionApproval(
+      origin || 'unknown',
+      network.id,
+      activeAccount.id,
+      'wallet_signMessage',
+      {
+        ecosystem: 'rtm',
+        address: derived.address,
+        message: signPayload.message
+      },
       surfaceTarget
     )
   }

@@ -35,6 +35,7 @@ import {
   deriveCosmosKeyData,
   signCosmosDirect,
   signEvmMessage,
+  signRtmMessage,
   signEvmTransaction,
   signEvmTypedData,
   signAndSendEvmTransaction,
@@ -614,6 +615,14 @@ const DappRequestConfirm: React.FC = () => {
         : requestIsSignMessage
         ? await (async () => {
             const ecosystem = String(requestPayload?.ecosystem || '').trim().toLowerCase()
+            if (ecosystem === 'rtm' || String(requestNetwork?.id || '').trim() === 'rtm') {
+              return await signRtmMessage({
+                mnemonic,
+                accountIndex,
+                address: String(requestPayload?.address || '').trim() || undefined,
+                message: String(requestPayload?.message || '')
+              })
+            }
             if (ecosystem === 'solana' || requestModelId === 'sol') {
               return await signSolanaMessage({
                 mnemonic,
