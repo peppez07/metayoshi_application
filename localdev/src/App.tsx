@@ -22,7 +22,6 @@ import AssetsPage from './pages/wallet/AssetsPage'
 import AssetPreviewPage from './pages/wallet/AssetPreviewPage'
 import Activity from './pages/wallet/Activity'
 import Send from './pages/wallet/Send'
-import Swap from './pages/wallet/Swap'
 import Sync from './pages/wallet/Sync'
 import Disconnected from './pages/wallet/Disconnected'
 import EvmModelPage from './pages/wallet/models/EvmModelPage'
@@ -345,7 +344,7 @@ function App() {
             <Route path="model/monero" element={<MoneroModelPage />} />
             <Route path="model/generic" element={<GenericModelPage />} />
             <Route path="send" element={<SendRouteGate />} />
-            <Route path="swap" element={<Swap />} />
+            <Route path="swap" element={<Navigate to="/wallet/assets" replace />} />
             <Route path="sync" element={<Sync />} />
             <Route path="disconnected" element={<Disconnected />} />
           </Route>

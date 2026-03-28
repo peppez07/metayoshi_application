@@ -239,7 +239,13 @@ async function shouldInjectOnCurrentHost(): Promise<boolean> {
   const hostname = String(window.location.hostname || '').trim().toLowerCase()
   if (!hostname) return false
   const defaults = DEFAULT_ALLOWED_HOSTS.map(normalizeHostPattern).filter(Boolean)
-  
+  const matchesAnyPattern = (patterns: string[]): boolean => {
+    for (const pattern of patterns) {
+      if (hostMatchesPattern(hostname, pattern)) return true
+    }
+    return false
+  }
+
   try {
     const config = await chrome.storage.local.get([INJECTION_ALLOWLIST_KEY, INJECTION_ALLOW_PRIVATE_ORIGINS_KEY])
     const raw = config?.[INJECTION_ALLOWLIST_KEY]
@@ -247,28 +253,18 @@ async function shouldInjectOnCurrentHost(): Promise<boolean> {
     const configured = Array.isArray(raw) 
       ? raw.map(normalizeHostPattern).filter(Boolean) 
       : []
+    const allowedHosts = configured.length > 0 ? configured : defaults
 
     if (isBlockedInternalHostname(hostname)) {
       if (!allowPrivateOrigins) return false
-      if (configured.length === 0) return true
+      return configured.length === 0 ? true : matchesAnyPattern(configured)
     }
 
-    if (configured.length === 0) {
-      return true
-    }
-
-    for (const pattern of configured) {
-      if (hostMatchesPattern(hostname, pattern)) return true
-    }
-  } catch (err) {
+    return matchesAnyPattern(allowedHosts)
+  } catch {
     if (isBlockedInternalHostname(hostname)) return false
-    for (const pattern of defaults) {
-      if (hostMatchesPattern(hostname, pattern)) return true
-    }
-    return true
+    return matchesAnyPattern(defaults)
   }
-  
-  return false
 }
 
 function injectInpage(): void {

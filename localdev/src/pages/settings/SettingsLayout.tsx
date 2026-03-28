@@ -1,6 +1,6 @@
 import React from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
-import { IoArrowBack, IoGridOutline, IoPulseOutline, IoSettingsOutline, IoSwapHorizontalOutline } from 'react-icons/io5'
+import { IoArrowBack, IoGridOutline, IoPulseOutline, IoSettingsOutline } from 'react-icons/io5'
 import { PageTransition } from '../../components/PageTransition'
 import logo from '../../MetayoshiLogo.png'
 
@@ -46,13 +46,6 @@ const SettingsLayout: React.FC = () => {
                 icon: <IoGridOutline className="h-4.5 w-4.5" />,
                 active: false,
                 onClick: () => navigate('/wallet/assets')
-              },
-              {
-                id: 'swap',
-                label: 'Swap',
-                icon: <IoSwapHorizontalOutline className="h-4.5 w-4.5" />,
-                active: false,
-                onClick: () => navigate('/wallet/swap')
               },
               {
                 id: 'activity',

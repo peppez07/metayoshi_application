@@ -11,15 +11,13 @@ import {
   IoLayersOutline,
   IoPulseOutline,
   IoSearchOutline,
-  IoSettingsOutline,
-  IoSwapHorizontalOutline
+  IoSettingsOutline
 } from 'react-icons/io5'
 import { PageTransition } from '../../components/PageTransition'
 import { resolveNetworkCapabilities, type NetworkCapabilitiesInput } from '../../lib/networkCapabilities'
 import { coinModelFamilyToRouteKey, compareNetworksByModelFamily, resolveCoinModelFamily } from '../../lib/coinModel'
 import { getModelIconRingClass } from '../../buildConfig'
 import { getEnabledNetworks, getNetworkChainGroup, splitNetworksByChain } from '../../lib/networkVisibility'
-import { isSwapActionEnabledNetwork } from '../../lib/swapEligibility'
 import { MAX_ACTIVE_REFRESH_NETWORKS } from '../../store/walletStoreStateUtils'
 import { normalizeActivityNetworkId } from '../../lib/txExplorer'
 import { formatFiatValue, useWalletStore } from '../../store/walletStore'
@@ -88,10 +86,6 @@ const WalletLayout: React.FC = () => {
     accountNetworkFiatTotals[fiatScopeKey]?.usd
     ?? accountNetworkFiatNative[fiatScopeKey]?.usd
   const displayFiatValue = formatFiatValue(portfolioFiatValue)
-  const showSwapAction = Boolean(
-    activeNetwork
-    && isSwapActionEnabledNetwork(activeNetwork)
-  )
   const rankedNetworks = useMemo(() => {
     const usageByNetwork = new Map<string, number>()
     for (const row of activity) {
@@ -299,11 +293,9 @@ const WalletLayout: React.FC = () => {
               returnLabel: 'Wallet'
             }
           })}
-          onSwap={() => navigate('/wallet/swap')}
           onActivity={() => navigate('/wallet/activity')}
           onSettings={() => navigate('/settings')}
           showAssets={caps.ui.showAssetsTab}
-          showSwap={showSwapAction}
           showActivity={caps.ui.showActivityTab}
         />
       ) : null}
@@ -450,11 +442,9 @@ interface WalletBottomNavProps {
   pathname: string
   onAssets: () => void
   onSend: () => void
-  onSwap: () => void
   onActivity: () => void
   onSettings: () => void
   showAssets: boolean
-  showSwap: boolean
   showActivity: boolean
 }
 
@@ -462,11 +452,9 @@ const WalletBottomNav: React.FC<WalletBottomNavProps> = ({
   pathname,
   onAssets,
   onSend,
-  onSwap,
   onActivity,
   onSettings,
   showAssets,
-  showSwap,
   showActivity
 }) => {
   const items = [
@@ -486,15 +474,6 @@ const WalletBottomNav: React.FC<WalletBottomNavProps> = ({
       onClick: onSend,
       icon: <IoArrowUpOutline className="h-4.5 w-4.5" />
     },
-    showSwap
-      ? {
-          id: 'swap',
-          label: 'Swap',
-          active: pathname.startsWith('/wallet/swap'),
-          onClick: onSwap,
-          icon: <IoSwapHorizontalOutline className="h-4.5 w-4.5" />
-        }
-      : null,
     showActivity
       ? {
           id: 'activity',
