@@ -37,6 +37,7 @@ import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
+import { INITIAL_NETWORKS } from '../coins'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
@@ -251,6 +252,18 @@ type DappMethodMatrix = {
 
 type DappProtocol = 'evm-jsonrpc' | 'solana-jsonrpc' | 'cosmos-rest-bridge' | 'rtm-jsonrpc' | 'generic'
 
+function buildFallbackDappNetworks(): DappNetworkEntry[] {
+  return (INITIAL_NETWORKS || []).map((network) => ({
+    id: String(network?.id || '').trim(),
+    runtimeModelId: String(network?.runtimeModelId || '').trim() || undefined,
+    coinType: String(network?.coinType || '').trim(),
+    name: String(network?.name || '').trim(),
+    symbol: String(network?.symbol || '').trim(),
+    chainId: typeof network?.chainId === 'number' ? network.chainId : undefined,
+    capabilities: network?.capabilities
+  })).filter((network) => Boolean(network.id))
+}
+
 function buildDappNetworkDescriptor(
   network: DappNetworkEntry,
   active: boolean
@@ -274,10 +287,12 @@ function buildDappNetworkDescriptor(
 }
 
 function resolveDappNetworks(state: WalletState): DappNetworkEntry[] {
-  return (state.networks || []).filter((network) => {
+  const configured = (state.networks || []).filter((network) => {
     const id = String(network?.id || '').trim()
     return Boolean(id)
   })
+  if (configured.length > 0) return configured
+  return buildFallbackDappNetworks()
 }
 
 function getRpcParamObject(params: unknown): Record<string, unknown> | null {
@@ -419,7 +434,7 @@ function createDefaultWalletState(): WalletState {
     activeAccountId: null,
     activeNetworkId: DEFAULT_NETWORK_ID,
     authorizedSites: [],
-    networks: []
+    networks: buildFallbackDappNetworks()
   }
 }
 
