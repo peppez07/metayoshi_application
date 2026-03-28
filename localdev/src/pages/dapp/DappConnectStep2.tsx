@@ -12,6 +12,42 @@ import { useWalletStore } from '../../store/walletStore'
 import DappApprovalStatus from './DappApprovalStatus'
 import { canUseChromeStorage, usePendingDappApproval } from './usePendingDappApproval'
 
+function resolveConnectApprovalTarget(
+  activeAccount: Parameters<typeof getAccountAddressForNetwork>[0],
+  networks: Array<{ id: string; name?: string; coinType?: string }>,
+  preferredNetworkId: string
+) {
+  const preferredNetwork = networks.find((network) => network.id === preferredNetworkId) || null
+  const preferredAddress = String(
+    getAccountAddressForNetwork(activeAccount, preferredNetworkId, preferredNetwork?.coinType) || ''
+  ).trim()
+
+  if (preferredNetwork && preferredAddress) {
+    return {
+      network: preferredNetwork,
+      networkId: preferredNetworkId,
+      address: preferredAddress
+    }
+  }
+
+  for (const network of networks) {
+    const address = String(getAccountAddressForNetwork(activeAccount, network.id, network.coinType) || '').trim()
+    if (address) {
+      return {
+        network,
+        networkId: network.id,
+        address
+      }
+    }
+  }
+
+  return {
+    network: preferredNetwork || networks[0] || null,
+    networkId: preferredNetworkId,
+    address: ''
+  }
+}
+
 function scopeLabel(scope: DappScope): string {
   if (scope === 'read') return 'View your wallet address and balances'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
@@ -31,19 +67,22 @@ const DappConnectStep2: React.FC = () => {
     [accounts, activeAccountId]
   )
   const approvalNetworkId = String(pendingApproval?.networkId || activeNetworkId || '').trim()
-  const approvalNetwork = useMemo(
-    () => networks.find((network) => network.id === approvalNetworkId) || networks.find((network) => network.id === activeNetworkId) || networks[0],
-    [networks, approvalNetworkId, activeNetworkId]
+  const approvalTarget = useMemo(
+    () => resolveConnectApprovalTarget(
+      activeAccount,
+      networks,
+      approvalNetworkId || String(activeNetworkId || '').trim()
+    ),
+    [activeAccount, networks, approvalNetworkId, activeNetworkId]
   )
+  const approvalNetwork = approvalTarget.network || networks.find((network) => network.id === activeNetworkId) || networks[0]
   const activeAccountName = useMemo(
-    () => getAccountDisplayName(activeAccount, approvalNetworkId || activeNetworkId, 'Account'),
-    [activeAccount, approvalNetworkId, activeNetworkId]
+    () => getAccountDisplayName(activeAccount, approvalTarget.networkId || approvalNetworkId || activeNetworkId, 'Account'),
+    [activeAccount, approvalTarget.networkId, approvalNetworkId, activeNetworkId]
   )
   const activeAccountKindLabel = getAccountKindLabel(activeAccount)
   const isActiveMultisig = isMultisigAccount(activeAccount)
-  const approvalAddress = useMemo(() => {
-    return String(getAccountAddressForNetwork(activeAccount, approvalNetworkId, approvalNetwork?.coinType) || '').trim()
-  }, [activeAccount, approvalNetwork, approvalNetworkId])
+  const approvalAddress = approvalTarget.address
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
     if (!pendingApproval || !canUseChromeStorage()) {
@@ -114,6 +153,12 @@ const DappConnectStep2: React.FC = () => {
               This site will connect to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
               It will not receive a custom list of selected accounts from this approval.
             </p>
+            {approvalTarget.networkId && approvalTarget.networkId !== approvalNetworkId && (
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                MetaYoshi is using {approvalNetwork?.name || approvalTarget.networkId} because the current requested network
+                does not have an address for this account.
+              </p>
+            )}
             {isActiveMultisig && (
               <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
                 The selected account is multisig-aware metadata only. Dapps still receive a single public address.
