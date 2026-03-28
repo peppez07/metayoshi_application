@@ -35,7 +35,12 @@ import { getAccountAddressForNetwork, isMultisigAccount } from '../lib/multisig'
 import { callBridgeMethod, type UtxoRpcConfig } from '../lib/utxoRpc'
 import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
-import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
+import {
+  isPersistedStateEnvelope,
+  readSessionMnemonicFromExtensionStorage,
+  unwrapPersistedState,
+  WALLET_STORAGE_KEY
+} from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { INITIAL_NETWORKS } from '../coins'
 
@@ -463,10 +468,12 @@ async function getWalletState(): Promise<WalletState> {
   const raw = await getWalletStorageRecord()
   const parsed = unwrapPersistedState<WalletState>(raw)
   if (!parsed) return createDefaultWalletState()
+  const sessionMnemonic = await readSessionMnemonicFromExtensionStorage()
 
   return {
     ...createDefaultWalletState(),
     ...parsed,
+    ...(sessionMnemonic ? { sessionMnemonic } : {}),
     authorizedSites: normalizeAuthorizedSites(parsed.authorizedSites)
   }
 }

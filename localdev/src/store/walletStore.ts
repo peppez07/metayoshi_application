@@ -3,7 +3,12 @@ import { persist, createJSONStorage, type StateStorage } from 'zustand/middlewar
 import { ethers } from 'ethers'
 import { decryptVaultV1, encryptVaultV1, type EncryptedVaultV1 } from '../lib/vaultCrypto'
 import { normalizeDappOrigin } from '../lib/dappPermissions'
-import { WALLET_STORAGE_KEY } from '../lib/walletStorage'
+import {
+  WALLET_STORAGE_KEY,
+  clearSessionMnemonicFromExtensionStorage,
+  readSessionMnemonicFromExtensionStorage,
+  writeSessionMnemonicToExtensionStorage
+} from '../lib/walletStorage'
 import {
   callBridgeMethod,
   sendBridgeEvmSignedRelay,
@@ -3692,6 +3697,30 @@ function isChromeStorageNoSpaceError(error: unknown): boolean {
 
 let hasLoggedChromeStorageNoSpace = false
 
+async function attachSessionMnemonicToPersistedValue(raw: unknown): Promise<unknown> {
+  const sessionMnemonic = await readSessionMnemonicFromExtensionStorage()
+  if (!sessionMnemonic || !raw || typeof raw !== 'object') return raw
+
+  if ('state' in (raw as Record<string, unknown>)) {
+    const envelope = raw as Record<string, unknown>
+    const state = envelope.state
+    if (state && typeof state === 'object') {
+      return {
+        ...envelope,
+        state: {
+          ...(state as Record<string, unknown>),
+          sessionMnemonic
+        }
+      }
+    }
+  }
+
+  return {
+    ...(raw as Record<string, unknown>),
+    sessionMnemonic
+  }
+}
+
 const extensionStateStorage: StateStorage = {
   getItem: async (name) => {
     if (hasChromeStorageLocal()) {
@@ -3699,11 +3728,17 @@ const extensionStateStorage: StateStorage = {
       const raw = stored[name]
 
       if (raw !== undefined) {
-        if (typeof raw === 'string') return raw
-        if (raw && typeof raw === 'object' && 'state' in (raw as Record<string, unknown>)) {
-          return JSON.stringify(raw)
+        if (typeof raw === 'string') {
+          try {
+            return JSON.stringify(await attachSessionMnemonicToPersistedValue(JSON.parse(raw)))
+          } catch {
+            return raw
+          }
         }
-        return JSON.stringify({ state: raw, version: 0 })
+        if (raw && typeof raw === 'object' && 'state' in (raw as Record<string, unknown>)) {
+          return JSON.stringify(await attachSessionMnemonicToPersistedValue(raw))
+        }
+        return JSON.stringify(await attachSessionMnemonicToPersistedValue({ state: raw, version: 0 }))
       }
 
       const legacy = readLocalStorageSafe(name)
@@ -3859,6 +3894,7 @@ export const useWalletStore = create<WalletState>()(
           lastActiveTimestamp: Date.now(),
           ...visibilityPatch
         })
+        void writeSessionMnemonicToExtensionStorage(normalizedMnemonic)
 
         void get().refreshActiveBalance().catch((err) => {
           console.warn('Initial balance refresh failed:', err)
@@ -4096,6 +4132,7 @@ export const useWalletStore = create<WalletState>()(
             activeAccountId: safeActiveAccountId,
             lastActiveTimestamp: Date.now()
           })
+          void writeSessionMnemonicToExtensionStorage(normalizedMnemonic)
           void get().refreshBackendSnapshot().catch((err) => {
             console.warn('Backend snapshot refresh after unlock failed:', err)
           })
@@ -4112,8 +4149,16 @@ export const useWalletStore = create<WalletState>()(
         }
       },
 
-      lock: () => set({ isLocked: true, sessionMnemonic: null }),
-      setLocked: (locked) => set({ isLocked: locked }),
+      lock: () => {
+        set({ isLocked: true, sessionMnemonic: null })
+        void clearSessionMnemonicFromExtensionStorage()
+      },
+      setLocked: (locked) => {
+        set({ isLocked: locked })
+        if (locked) {
+          void clearSessionMnemonicFromExtensionStorage()
+        }
+      },
       setInitialized: (initialized) => set({ isInitialized: initialized }),
       setBackupConfirmed: (confirmed) => set({ backupConfirmed: confirmed }),
       setOnboardingCompleted: (completed) => set({ onboardingCompleted: completed }),
@@ -4121,7 +4166,7 @@ export const useWalletStore = create<WalletState>()(
         acceptedTermsVersion: String(version || '').trim() || null,
         acceptedTermsAt: typeof acceptedAt === 'number' ? acceptedAt : Date.now()
       }),
-      wipeVault: () =>
+      wipeVault: () => {
         set({
           isInitialized: false,
           hasVault: false,
@@ -4162,7 +4207,9 @@ export const useWalletStore = create<WalletState>()(
           rememberedSendSelection: {},
           networkModelPreferences: {},
           activity: []
-        }),
+        })
+        void clearSessionMnemonicFromExtensionStorage()
+      },
 
       setActiveAccount: (id) => {
         const { activeNetworkId } = get()
