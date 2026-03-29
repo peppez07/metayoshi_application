@@ -18,7 +18,9 @@ import { sendBridgeEvmSignedRelay, sendBridgeSolanaSignedRelay, type UtxoRpcConf
 
 type JsonObject = Record<string, any>
 
-const RTM_SIGNED_MESSAGE_MAGIC = 'Raptoreum Signed Message:\n'
+// Raptoreum Core still verifies compact signed messages with Dash's historical
+// magic prefix, so RTM dapp auth must match that exact envelope.
+const RTM_SIGNED_MESSAGE_MAGIC = 'DarkCoin Signed Message:\n'
 
 // noble v3 requires host apps to wire hash helpers before using sync signing APIs.
 if (!secp.hashes.sha256) {
