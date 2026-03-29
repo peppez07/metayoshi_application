@@ -858,15 +858,45 @@ async function openOrFocusExtensionTab(
   })
 }
 
+async function openOrFocusExtensionPopup(
+  routePath: string,
+  target?: ExtensionSurfaceTarget
+): Promise<void> {
+  const resolvedTarget = await resolveExtensionSurfaceTarget(target)
+  const url = buildExtensionRouteUrl(routePath)
+  const existingTab = await findManagedExtensionTab()
+
+  if (typeof existingTab?.id === 'number') {
+    await chrome.tabs.update(existingTab.id, { url, active: true })
+    if (typeof existingTab.windowId === 'number') {
+      try {
+        await chrome.windows.update(existingTab.windowId, { focused: true })
+      } catch {
+        // Ignore popup focus normalization failures.
+      }
+    }
+    return
+  }
+
+  await chrome.windows.create({
+    url,
+    type: 'popup',
+    focused: true,
+    width: 440,
+    height: 760
+  })
+}
+
 async function openExtensionSurface(
   routePath: string,
   target?: ExtensionSurfaceTarget,
-  options?: { fallbackToTabOnSidePanelFailure?: boolean }
+  options?: { fallbackToTabOnSidePanelFailure?: boolean; preferPopupWindow?: boolean }
 ): Promise<void> {
   const resolvedTarget = await resolveExtensionSurfaceTarget(target)
   const sidePanel = getSidePanelApi()
   const sidebarAction = getSidebarActionApi()
   const fallbackToTabOnSidePanelFailure = options?.fallbackToTabOnSidePanelFailure ?? true
+  const preferPopupWindow = options?.preferPopupWindow ?? false
   let sidePanelFailure: Error | null = null
   await setExtensionSurfaceRoute(routePath)
 
@@ -887,6 +917,10 @@ async function openExtensionSurface(
   if (!sidePanel) {
     if (!fallbackToTabOnSidePanelFailure) {
       throw createExtensionSurfaceError('sidePanel API unavailable')
+    }
+    if (preferPopupWindow) {
+      await openOrFocusExtensionPopup(routePath, resolvedTarget)
+      return
     }
     await openOrFocusExtensionTab(routePath, resolvedTarget)
     return
@@ -946,6 +980,10 @@ async function openExtensionSurface(
 
   if (sidePanelFailure) {
     if (fallbackToTabOnSidePanelFailure) {
+      if (preferPopupWindow) {
+        await openOrFocusExtensionPopup(routePath, resolvedTarget)
+        return
+      }
       await openOrFocusExtensionTab(routePath, resolvedTarget)
       return
     }
@@ -955,7 +993,8 @@ async function openExtensionSurface(
 
 async function openApprovalSurface(target?: ExtensionSurfaceTarget): Promise<void> {
   await openExtensionSurface(buildApprovalRoutePath(), target, {
-    fallbackToTabOnSidePanelFailure: true
+    fallbackToTabOnSidePanelFailure: true,
+    preferPopupWindow: true
   })
 }
 
@@ -965,7 +1004,8 @@ async function openRequestSurface(
   target?: ExtensionSurfaceTarget
 ): Promise<void> {
   await openExtensionSurface(buildRequestRoutePath(requestId, method), target, {
-    fallbackToTabOnSidePanelFailure: true
+    fallbackToTabOnSidePanelFailure: true,
+    preferPopupWindow: true
   })
 }
 
