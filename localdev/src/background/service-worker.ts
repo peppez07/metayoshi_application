@@ -119,7 +119,8 @@ type SendAssetParams = {
 type RtmMarketActionParams = {
   version: 1
   kind: string
-  orderId: string
+  orderId?: string
+  listingId?: string
   networkId: string
   [key: string]: unknown
 }
@@ -158,6 +159,28 @@ const RTM_SIGN_MESSAGE_METHODS = new Set(['wallet_rtmSignMessage'])
 const RTM_MARKET_ACTION_METHODS = new Set(['wallet_rtmMarketAction'])
 const RTM_ISSUER_ACTION_METHODS = new Set(['wallet_rtmIssuerAction'])
 const RTM_GET_PUBLIC_KEY_METHODS = new Set(['wallet_rtmGetPublicKey'])
+const RTM_ORDER_MARKET_ACTION_KINDS = new Set([
+  'fund_seller_asset',
+  'fund_seller_fee',
+  'fund_buyer_rtm',
+  'claim_buyer_rtm',
+  'claim_seller_asset',
+  'refund_seller_asset',
+  'refund_buyer_rtm'
+])
+const RTM_LISTING_MARKET_ACTION_KINDS = new Set([
+  'lock_listing_asset',
+  'unlock_listing_asset',
+  'refund_listing_asset'
+])
+const RTM_ASSET_MARKET_ACTION_KINDS = new Set([
+  'fund_seller_asset',
+  'claim_seller_asset',
+  'refund_seller_asset',
+  'lock_listing_asset',
+  'unlock_listing_asset',
+  'refund_listing_asset'
+])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
 const ETHEREUM_ACCOUNTS_METHODS = new Set(['eth_accounts'])
@@ -1556,12 +1579,24 @@ function parseRtmMarketActionParams(params: unknown): RtmMarketActionParams {
   const version = Number(payload.version ?? 0)
   const kind = String(payload.kind ?? '').trim()
   const orderId = String(payload.orderId ?? '').trim()
+  const listingId = String(payload.listingId ?? '').trim()
   const networkId = String(payload.networkId ?? '').trim()
 
   if (version !== 1) throw { code: -32602, message: 'wallet_rtmMarketAction requires version 1' }
   if (!kind) throw { code: -32602, message: 'wallet_rtmMarketAction requires `kind`' }
-  if (!orderId) throw { code: -32602, message: 'wallet_rtmMarketAction requires `orderId`' }
   if (networkId !== 'rtm') throw { code: -32602, message: 'wallet_rtmMarketAction is only supported on RTM' }
+  if (!RTM_ORDER_MARKET_ACTION_KINDS.has(kind) && !RTM_LISTING_MARKET_ACTION_KINDS.has(kind)) {
+    throw { code: -32602, message: `wallet_rtmMarketAction does not support kind \`${kind}\`` }
+  }
+  if (RTM_ORDER_MARKET_ACTION_KINDS.has(kind) && !orderId) {
+    throw { code: -32602, message: 'wallet_rtmMarketAction requires `orderId` for order actions' }
+  }
+  if (RTM_LISTING_MARKET_ACTION_KINDS.has(kind) && !listingId) {
+    throw { code: -32602, message: 'wallet_rtmMarketAction requires `listingId` for listing actions' }
+  }
+  if (orderId && listingId) {
+    throw { code: -32602, message: 'wallet_rtmMarketAction accepts either `orderId` or `listingId`, not both' }
+  }
 
   return payload as RtmMarketActionParams
 }
@@ -3138,11 +3173,9 @@ async function handleRpcMethod(
 
     const parsedAction = parseRtmMarketActionParams(params)
     const actionKind = String(parsedAction.kind || '').trim()
-    const scopes = (
-      actionKind === 'fund_seller_asset'
-      || actionKind === 'claim_seller_asset'
-      || actionKind === 'refund_seller_asset'
-    ) ? ['read', 'send_asset'] : ['read', 'send_coin']
+    const scopes = RTM_ASSET_MARKET_ACTION_KINDS.has(actionKind)
+      ? ['read', 'send_asset']
+      : ['read', 'send_coin']
 
     if (origin) {
       const approved = await requestScopes(origin, scopes as any, { networkId: effectiveNetworkId, surfaceTarget })

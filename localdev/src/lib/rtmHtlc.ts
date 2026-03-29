@@ -17,7 +17,7 @@ if (!secp.hashes.hmacSha256) {
   secp.hashes.hmacSha256 = (key: Uint8Array, msg: Uint8Array) => hmac(sha256, key, msg)
 }
 
-export type RtmMarketActionKind =
+export type RtmOrderMarketActionKind =
   | 'fund_seller_asset'
   | 'fund_seller_fee'
   | 'fund_buyer_rtm'
@@ -26,12 +26,19 @@ export type RtmMarketActionKind =
   | 'refund_seller_asset'
   | 'refund_buyer_rtm'
 
-export type RtmMarketAction = {
+export type RtmListingMarketActionKind =
+  | 'lock_listing_asset'
+  | 'unlock_listing_asset'
+  | 'refund_listing_asset'
+
+export type RtmMarketActionKind = RtmOrderMarketActionKind | RtmListingMarketActionKind
+
+type RtmMarketActionBase = {
   version: 1
   kind: RtmMarketActionKind
-  orderId: string
   networkId: 'rtm'
   orderDigest?: string
+  listingDigest?: string
   toAddress?: string
   amount?: string
   grossAmount?: string
@@ -46,6 +53,20 @@ export type RtmMarketAction = {
   secretHash?: string
   secret?: string
 }
+
+export type RtmOrderMarketAction = RtmMarketActionBase & {
+  kind: RtmOrderMarketActionKind
+  orderId: string
+  listingId?: never
+}
+
+export type RtmListingMarketAction = RtmMarketActionBase & {
+  kind: RtmListingMarketActionKind
+  listingId: string
+  orderId?: never
+}
+
+export type RtmMarketAction = RtmOrderMarketAction | RtmListingMarketAction
 
 export type RtmMarketOrderSnapshot = {
   orderId: string
@@ -69,6 +90,23 @@ export type RtmMarketOrderSnapshot = {
   secretHash: string
   revealedSecret?: string
   platformFeeConfigured?: boolean
+}
+
+export type RtmMarketListingSnapshot = {
+  listingId: string
+  listingDigest: string
+  sellerAddress: string
+  sellerPubkeyHex: string
+  assetId: string
+  qty: string
+  availableQty?: string
+  remainingQty?: string
+  status?: string
+  secretHash: string
+  listingLockAddress: string
+  listingLockRedeemScriptHex: string
+  listingRefundLocktime: number
+  revealedSecret?: string
 }
 
 type TxInput = {
@@ -464,6 +502,51 @@ export async function loadRtmMarketOrder(orderId: string): Promise<RtmMarketOrde
   return await fetchMarketJson<RtmMarketOrderSnapshot>(`/v1/market/rtm/orders/${encodeURIComponent(orderId)}`)
 }
 
+function normalizeRtmMarketListingSnapshot(raw: Record<string, unknown>): RtmMarketListingSnapshot {
+  const listingRefundLocktime = Math.max(0, Math.trunc(Number(raw.listingRefundLocktime ?? raw.refundLocktime ?? 0)))
+  const sellerPubkeyHex = String(raw.sellerPubkeyHex ?? '').trim()
+  const secretHash = String(raw.secretHash ?? '').trim()
+  const computedRedeemScriptHex = (
+    sellerPubkeyHex
+    && secretHash
+    && listingRefundLocktime > 0
+  )
+    ? buildRtmHtlcRedeemScriptHex({
+        secretHashHex: secretHash,
+        claimPubkeyHex: sellerPubkeyHex,
+        refundPubkeyHex: sellerPubkeyHex,
+        refundLocktime: listingRefundLocktime
+      })
+    : ''
+  const listingLockRedeemScriptHex = String(raw.listingLockRedeemScriptHex ?? computedRedeemScriptHex).trim()
+  const listingLockAddress = String(
+    raw.listingLockAddress
+    ?? (listingLockRedeemScriptHex ? redeemScriptToRtmP2shAddress(listingLockRedeemScriptHex) : '')
+  ).trim()
+
+  return {
+    listingId: String(raw.listingId ?? '').trim(),
+    listingDigest: String(raw.listingDigest ?? raw.orderDigest ?? '').trim(),
+    sellerAddress: String(raw.sellerAddress ?? '').trim(),
+    sellerPubkeyHex,
+    assetId: String(raw.assetId ?? '').trim(),
+    qty: String(raw.qty ?? raw.availableQty ?? raw.remainingQty ?? '').trim(),
+    availableQty: raw.availableQty == null ? undefined : String(raw.availableQty).trim(),
+    remainingQty: raw.remainingQty == null ? undefined : String(raw.remainingQty).trim(),
+    status: raw.status == null ? undefined : String(raw.status).trim(),
+    secretHash,
+    listingLockAddress,
+    listingLockRedeemScriptHex,
+    listingRefundLocktime,
+    revealedSecret: raw.revealedSecret == null ? undefined : String(raw.revealedSecret).trim()
+  }
+}
+
+export async function loadRtmMarketListing(listingId: string): Promise<RtmMarketListingSnapshot> {
+  const raw = await fetchMarketJson<Record<string, unknown>>(`/v1/market/rtm/listings/${encodeURIComponent(listingId)}`)
+  return normalizeRtmMarketListingSnapshot(raw)
+}
+
 function assertEqualString(actual: unknown, expected: unknown, label: string) {
   const left = String(actual ?? '').trim()
   const right = String(expected ?? '').trim()
@@ -474,7 +557,24 @@ function assertEqualNumber(actual: unknown, expected: unknown, label: string) {
   if (Number(actual) !== Number(expected)) throw new Error(`${label}_mismatch`)
 }
 
-export function assertRtmMarketActionMatchesOrder(action: RtmMarketAction, order: RtmMarketOrderSnapshot): void {
+function assertSecretMatchesSecretHash(secretHex: unknown, secretHashHex: unknown, label: string) {
+  const normalizedSecret = normalizeHex(String(secretHex || ''), label)
+  const normalizedSecretHash = normalizeHex(String(secretHashHex || ''), `${label}_hash`)
+  const actualHash = bytesToHex(sha256(hexToBytes(normalizedSecret)))
+  if (actualHash !== normalizedSecretHash) {
+    throw new Error(`${label}_hash_mismatch`)
+  }
+}
+
+export function isRtmOrderMarketAction(action: RtmMarketAction): action is RtmOrderMarketAction {
+  return 'orderId' in action && typeof action.orderId === 'string' && String(action.orderId || '').trim().length > 0
+}
+
+export function isRtmListingMarketAction(action: RtmMarketAction): action is RtmListingMarketAction {
+  return 'listingId' in action && typeof action.listingId === 'string' && String(action.listingId || '').trim().length > 0
+}
+
+export function assertRtmMarketActionMatchesOrder(action: RtmOrderMarketAction, order: RtmMarketOrderSnapshot): void {
   assertEqualString(action.orderId, order.orderId, 'order_id')
   if (action.orderDigest) {
     assertEqualString(action.orderDigest, order.orderDigest, 'order_digest')
@@ -541,10 +641,66 @@ export function assertRtmMarketActionMatchesOrder(action: RtmMarketAction, order
   }
 }
 
-export async function verifyRtmMarketAction(action: RtmMarketAction): Promise<RtmMarketOrderSnapshot> {
+export function assertRtmMarketActionMatchesListing(action: RtmListingMarketAction, listing: RtmMarketListingSnapshot): void {
+  assertEqualString(action.listingId, listing.listingId, 'listing_id')
+  if (action.listingDigest || action.orderDigest) {
+    assertEqualString(action.listingDigest || action.orderDigest, listing.listingDigest, 'listing_digest')
+  }
+
+  switch (action.kind) {
+    case 'lock_listing_asset':
+      if (!listing.listingLockAddress) throw new Error('listing_lock_address_missing')
+      assertEqualString(action.toAddress, listing.listingLockAddress, 'listing_lock_address')
+      assertEqualString(action.assetId, listing.assetId, 'asset_id')
+      assertEqualString(action.qty, listing.qty, 'asset_qty')
+      break
+    case 'unlock_listing_asset':
+      if (!listing.listingLockAddress) throw new Error('listing_lock_address_missing')
+      if (!listing.listingLockRedeemScriptHex) throw new Error('listing_lock_redeem_script_missing')
+      if (!listing.listingRefundLocktime) throw new Error('listing_refund_locktime_missing')
+      assertEqualString(action.fromAddress, listing.listingLockAddress, 'listing_lock_address')
+      assertEqualString(action.toAddress, listing.sellerAddress, 'seller_unlock_address')
+      assertEqualString(action.redeemScriptHex, listing.listingLockRedeemScriptHex, 'listing_lock_redeem_script')
+      assertEqualString(action.assetId, listing.assetId, 'asset_id')
+      assertEqualString(action.qty, listing.qty, 'asset_qty')
+      assertEqualString(action.secretHash, listing.secretHash, 'secret_hash')
+      assertEqualNumber(action.refundLocktime, listing.listingRefundLocktime, 'listing_refund_locktime')
+      if (action.secret) {
+        assertSecretMatchesSecretHash(action.secret, listing.secretHash, 'secret')
+      }
+      break
+    case 'refund_listing_asset':
+      if (!listing.listingLockAddress) throw new Error('listing_lock_address_missing')
+      if (!listing.listingLockRedeemScriptHex) throw new Error('listing_lock_redeem_script_missing')
+      if (!listing.listingRefundLocktime) throw new Error('listing_refund_locktime_missing')
+      assertEqualString(action.fromAddress, listing.listingLockAddress, 'listing_lock_address')
+      assertEqualString(action.toAddress, listing.sellerAddress, 'seller_refund_address')
+      assertEqualString(action.redeemScriptHex, listing.listingLockRedeemScriptHex, 'listing_lock_redeem_script')
+      assertEqualString(action.assetId, listing.assetId, 'asset_id')
+      assertEqualString(action.qty, listing.qty, 'asset_qty')
+      assertEqualNumber(action.refundLocktime, listing.listingRefundLocktime, 'listing_refund_locktime')
+      break
+    default:
+      throw new Error('unsupported_rtm_market_listing_action')
+  }
+}
+
+async function verifyRtmOrderMarketAction(action: RtmOrderMarketAction): Promise<RtmMarketOrderSnapshot> {
   const order = await loadRtmMarketOrder(action.orderId)
   assertRtmMarketActionMatchesOrder(action, order)
   return order
+}
+
+async function verifyRtmListingMarketAction(action: RtmListingMarketAction): Promise<RtmMarketListingSnapshot> {
+  const listing = await loadRtmMarketListing(action.listingId)
+  assertRtmMarketActionMatchesListing(action, listing)
+  return listing
+}
+
+export async function verifyRtmMarketAction(action: RtmMarketAction): Promise<RtmMarketOrderSnapshot | RtmMarketListingSnapshot> {
+  if (isRtmOrderMarketAction(action)) return await verifyRtmOrderMarketAction(action)
+  if (isRtmListingMarketAction(action)) return await verifyRtmListingMarketAction(action)
+  throw new Error('invalid_rtm_market_action_scope')
 }
 
 export async function executeRtmMarketAction(params: {
@@ -554,7 +710,8 @@ export async function executeRtmMarketAction(params: {
 }): Promise<{ hash: string; signedTxHex?: string }> {
   const action = params.action
   if (action.kind === 'claim_buyer_rtm' || action.kind === 'refund_buyer_rtm') {
-    const verifiedOrder = await verifyRtmMarketAction(action)
+    if (!isRtmOrderMarketAction(action)) throw new Error('invalid_rtm_order_market_action_scope')
+    const verifiedOrder = await verifyRtmOrderMarketAction(action)
     const lockAddress = String(action.fromAddress || '').trim()
     const toAddress = String(action.toAddress || '').trim()
     const redeemScriptHex = String(action.redeemScriptHex || '').trim()
@@ -606,8 +763,18 @@ export async function executeRtmMarketAction(params: {
     return { hash, signedTxHex }
   }
 
-  if (action.kind === 'claim_seller_asset' || action.kind === 'refund_seller_asset') {
-    await verifyRtmMarketAction(action)
+  if (
+    action.kind === 'claim_seller_asset'
+    || action.kind === 'refund_seller_asset'
+    || action.kind === 'unlock_listing_asset'
+    || action.kind === 'refund_listing_asset'
+  ) {
+    const verified = isRtmOrderMarketAction(action)
+      ? await verifyRtmOrderMarketAction(action)
+      : isRtmListingMarketAction(action)
+      ? await verifyRtmListingMarketAction(action)
+      : null
+    if (!verified) throw new Error('invalid_rtm_market_action_scope')
     const lockAddress = String(action.fromAddress || '').trim()
     const toAddress = String(action.toAddress || '').trim()
     const redeemScriptHex = String(action.redeemScriptHex || '').trim()
@@ -630,7 +797,7 @@ export async function executeRtmMarketAction(params: {
       signingInputs: prepared.signingInputs,
       redeemScriptHex,
       privHex: params.privateKeyHex,
-      mode: action.kind === 'refund_seller_asset' ? 'refund' : 'claim',
+      mode: (action.kind === 'refund_seller_asset' || action.kind === 'refund_listing_asset') ? 'refund' : 'claim',
       secretHex: action.secret,
       refundLocktime: action.refundLocktime
     })

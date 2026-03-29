@@ -13,9 +13,14 @@ import { deriveUtxoAddress } from '../../lib/utxoAddress'
 import {
   createRtmMarketRpcConfig,
   executeRtmMarketAction,
+  loadRtmMarketListing,
   loadRtmMarketOrder,
+  assertRtmMarketActionMatchesListing,
   assertRtmMarketActionMatchesOrder,
+  isRtmListingMarketAction,
+  isRtmOrderMarketAction,
   type RtmMarketAction,
+  type RtmMarketListingSnapshot,
   type RtmMarketOrderSnapshot
 } from '../../lib/rtmHtlc'
 import {
@@ -121,6 +126,7 @@ const DappRequestConfirm: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [rtmMarketOrder, setRtmMarketOrder] = useState<RtmMarketOrderSnapshot | null>(null)
+  const [rtmMarketListing, setRtmMarketListing] = useState<RtmMarketListingSnapshot | null>(null)
   const [rtmMarketVerificationError, setRtmMarketVerificationError] = useState('')
   const [rtmMarketVerificationLoading, setRtmMarketVerificationLoading] = useState(false)
   const [rtmIssuerDraft, setRtmIssuerDraft] = useState<RtmIssuerDraftSnapshot | null>(null)
@@ -153,6 +159,8 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsRtmSignMessage = requestMethod === 'wallet_rtmSignMessage'
   const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
   const rtmMarketAction = (requestIsRtmMarketAction ? pendingRequest?.request : null) as RtmMarketAction | null
+  const rtmMarketActionIsListingScoped = Boolean(requestIsRtmMarketAction && rtmMarketAction && isRtmListingMarketAction(rtmMarketAction))
+  const rtmMarketActionIsOrderScoped = Boolean(requestIsRtmMarketAction && rtmMarketAction && isRtmOrderMarketAction(rtmMarketAction))
   const rtmIssuerAction = (requestIsRtmIssuerAction ? pendingRequest?.request : null) as RtmIssuerAction | null
   const requestIsSignMessage = requestMethod === 'wallet_signMessage' || requestIsRtmSignMessage
   const requestIsSignTypedData = requestMethod === 'wallet_signTypedData'
@@ -264,6 +272,15 @@ const DappRequestConfirm: React.FC = () => {
       || '0'
     )
     : String((pendingRequest?.request as any)?.amount || '')
+  const rtmMarketReferenceId = !requestIsRtmMarketAction || !rtmMarketAction
+    ? ''
+    : rtmMarketActionIsListingScoped
+    ? String(rtmMarketAction.listingId || '')
+    : String((rtmMarketAction as any).orderId || '')
+  const rtmMarketVerificationLabel = rtmMarketActionIsListingScoped ? 'Listing Verification' : 'Order Verification'
+  const rtmMarketVerificationSuccess = rtmMarketActionIsListingScoped
+    ? 'Verified against server listing snapshot'
+    : 'Verified against server order'
   const multisigUnsupportedReason = requestAccountIsMultisig
     ? 'Multisig accounts are wallet-managed only in this build. Dapp message signing, typed data, and direct transaction requests stay disabled.'
     : ''
@@ -312,12 +329,12 @@ const DappRequestConfirm: React.FC = () => {
     : requestIsRtmIssuerAction
     ? previewJson(rtmIssuerAction)
     : ''
-  const rtmFeeBps = requestIsRtmMarketAction ? Number(rtmMarketAction?.feeBps ?? rtmMarketOrder?.platformFeeBps ?? 0) : 0
-  const rtmFeeAmount = requestIsRtmMarketAction ? String(rtmMarketAction?.feeAmount ?? rtmMarketOrder?.platformFeeAmountRtm ?? '') : ''
-  const rtmFeeRecipient = requestIsRtmMarketAction
+  const rtmFeeBps = requestIsRtmMarketAction && rtmMarketActionIsOrderScoped ? Number(rtmMarketAction?.feeBps ?? rtmMarketOrder?.platformFeeBps ?? 0) : 0
+  const rtmFeeAmount = requestIsRtmMarketAction && rtmMarketActionIsOrderScoped ? String(rtmMarketAction?.feeAmount ?? rtmMarketOrder?.platformFeeAmountRtm ?? '') : ''
+  const rtmFeeRecipient = requestIsRtmMarketAction && rtmMarketActionIsOrderScoped
     ? String(rtmMarketAction?.feeRecipientAddress ?? rtmMarketOrder?.platformFeeAddress ?? '')
     : ''
-  const rtmGrossAmount = requestIsRtmMarketAction
+  const rtmGrossAmount = requestIsRtmMarketAction && rtmMarketActionIsOrderScoped
     ? String(rtmMarketAction?.grossAmount ?? rtmMarketOrder?.priceRtm ?? '')
     : ''
   const sendBlockedBySync = isSendBlockedBySync(isSyncing, syncPercent, isConnected, lowSyncStreak)
@@ -384,8 +401,9 @@ const DappRequestConfirm: React.FC = () => {
   }, [navigate, pendingRequest, requestIsEvmTx])
 
   useEffect(() => {
-    if (!requestIsRtmMarketAction || !rtmMarketAction?.orderId) {
+    if (!requestIsRtmMarketAction || !rtmMarketAction) {
       setRtmMarketOrder(null)
+      setRtmMarketListing(null)
       setRtmMarketVerificationError('')
       setRtmMarketVerificationLoading(false)
       return
@@ -397,13 +415,27 @@ const DappRequestConfirm: React.FC = () => {
 
     void (async () => {
       try {
-        const order = await loadRtmMarketOrder(rtmMarketAction.orderId)
-        assertRtmMarketActionMatchesOrder(rtmMarketAction, order)
-        if (cancelled) return
-        setRtmMarketOrder(order)
+        if (isRtmListingMarketAction(rtmMarketAction)) {
+          const listing = await loadRtmMarketListing(rtmMarketAction.listingId)
+          assertRtmMarketActionMatchesListing(rtmMarketAction, listing)
+          if (cancelled) return
+          setRtmMarketListing(listing)
+          setRtmMarketOrder(null)
+          return
+        }
+        if (isRtmOrderMarketAction(rtmMarketAction)) {
+          const order = await loadRtmMarketOrder(rtmMarketAction.orderId)
+          assertRtmMarketActionMatchesOrder(rtmMarketAction, order)
+          if (cancelled) return
+          setRtmMarketOrder(order)
+          setRtmMarketListing(null)
+          return
+        }
+        throw new Error('invalid_rtm_market_action_scope')
       } catch (error) {
         if (cancelled) return
         setRtmMarketOrder(null)
+        setRtmMarketListing(null)
         setRtmMarketVerificationError(error instanceof Error ? error.message : String(error))
       } finally {
         if (!cancelled) setRtmMarketVerificationLoading(false)
@@ -490,9 +522,19 @@ const DappRequestConfirm: React.FC = () => {
         return
       }
       try {
-        const verifiedOrder = await loadRtmMarketOrder(action.orderId)
-        assertRtmMarketActionMatchesOrder(action, verifiedOrder)
-        setRtmMarketOrder(verifiedOrder)
+        if (isRtmListingMarketAction(action)) {
+          const verifiedListing = await loadRtmMarketListing(action.listingId)
+          assertRtmMarketActionMatchesListing(action, verifiedListing)
+          setRtmMarketListing(verifiedListing)
+          setRtmMarketOrder(null)
+        } else if (isRtmOrderMarketAction(action)) {
+          const verifiedOrder = await loadRtmMarketOrder(action.orderId)
+          assertRtmMarketActionMatchesOrder(action, verifiedOrder)
+          setRtmMarketOrder(verifiedOrder)
+          setRtmMarketListing(null)
+        } else {
+          throw new Error('invalid_rtm_market_action_scope')
+        }
         setRtmMarketVerificationError('')
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : String(error))
@@ -588,7 +630,7 @@ const DappRequestConfirm: React.FC = () => {
             }
             const action = rtmMarketAction
             if (!action) throw new Error('Missing RTM market action payload')
-            if (action.kind === 'fund_seller_asset') {
+            if (action.kind === 'fund_seller_asset' || action.kind === 'lock_listing_asset') {
               return await sendAssetTransfer({
                 assetId: String(action.assetId || ''),
                 qty: String(action.qty || ''),
@@ -974,6 +1016,9 @@ const DappRequestConfirm: React.FC = () => {
               <Row label="Runtime Model" value={String(requestNetwork?.runtimeModelId || requestNetwork?.id || 'unknown')} mono />
               <Row label="Method" value={requestMethod} mono />
               <Row label="Type" value={requestTypeLabel} />
+              {requestIsRtmMarketAction && rtmMarketReferenceId ? (
+                <Row label={rtmMarketActionIsListingScoped ? 'Listing ID' : 'Order ID'} value={rtmMarketReferenceId} mono />
+              ) : null}
               {requestIsAuthSignature ? (
                 <Row
                   label="Signer"
@@ -991,20 +1036,20 @@ const DappRequestConfirm: React.FC = () => {
                     : `${requestAmount} ${(requestIsAssetSend || (requestIsRtmMarketAction && !!requestAssetId) || requestIsRtmIssuerAction) ? '' : (requestNetwork?.symbol || '')}`.trim()}
                 />
               ) : null}
-              {requestIsRtmMarketAction && rtmGrossAmount ? <Row label="Gross Order Amount" value={`${rtmGrossAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
-              {requestIsRtmMarketAction && rtmFeeBps > 0 ? <Row label="Fee Rate" value={formatBpsPercent(rtmFeeBps)} /> : null}
-              {requestIsRtmMarketAction && rtmFeeAmount ? <Row label="Platform Fee" value={`${rtmFeeAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
-              {requestIsRtmMarketAction && rtmFeeRecipient ? <Row label="Fee Recipient" value={rtmFeeRecipient} mono /> : null}
+              {requestIsRtmMarketAction && rtmMarketActionIsOrderScoped && rtmGrossAmount ? <Row label="Gross Order Amount" value={`${rtmGrossAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
+              {requestIsRtmMarketAction && rtmMarketActionIsOrderScoped && rtmFeeBps > 0 ? <Row label="Fee Rate" value={formatBpsPercent(rtmFeeBps)} /> : null}
+              {requestIsRtmMarketAction && rtmMarketActionIsOrderScoped && rtmFeeAmount ? <Row label="Platform Fee" value={`${rtmFeeAmount} ${requestNetwork?.symbol || ''}`.trim()} /> : null}
+              {requestIsRtmMarketAction && rtmMarketActionIsOrderScoped && rtmFeeRecipient ? <Row label="Fee Recipient" value={rtmFeeRecipient} mono /> : null}
               {requestIsRtmMarketAction ? (
                 <Row
-                  label="Order Verification"
+                  label={rtmMarketVerificationLabel}
                   value={
                     rtmMarketVerificationLoading
-                      ? 'Checking server order'
+                      ? (rtmMarketActionIsListingScoped ? 'Checking server listing snapshot' : 'Checking server order')
                       : rtmMarketVerificationError
                       ? `Failed: ${rtmMarketVerificationError}`
-                      : rtmMarketOrder
-                      ? 'Verified against server order'
+                      : (rtmMarketActionIsListingScoped ? rtmMarketListing : rtmMarketOrder)
+                      ? rtmMarketVerificationSuccess
                       : 'Pending'
                   }
                 />
