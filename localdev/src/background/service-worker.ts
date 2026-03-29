@@ -46,6 +46,7 @@ import {
 } from '../lib/walletStorage'
 import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 import { INITIAL_NETWORKS, type Network } from '../coins'
+import { getExtensionSurfaceOpenPolicy } from './extensionSurfacePolicy'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 ;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer ??= Buffer
@@ -1015,10 +1016,7 @@ async function openExtensionSurface(
 }
 
 async function openApprovalSurface(target?: ExtensionSurfaceTarget): Promise<void> {
-  await openExtensionSurface(buildApprovalRoutePath(), target, {
-    fallbackToTabOnSidePanelFailure: true,
-    preferPopupWindow: true
-  })
+  await openExtensionSurface(buildApprovalRoutePath(), target, getExtensionSurfaceOpenPolicy('approval'))
 }
 
 async function openRequestSurface(
@@ -1026,10 +1024,7 @@ async function openRequestSurface(
   method: DappRequestMethod,
   target?: ExtensionSurfaceTarget
 ): Promise<void> {
-  await openExtensionSurface(buildRequestRoutePath(requestId, method), target, {
-    fallbackToTabOnSidePanelFailure: true,
-    preferPopupWindow: true
-  })
+  await openExtensionSurface(buildRequestRoutePath(requestId, method), target, getExtensionSurfaceOpenPolicy('request'))
 }
 
 async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void> {
@@ -1056,9 +1051,7 @@ async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void>
     return '/wallet/assets'
   })()
 
-  await openExtensionSurface(routePath, target, {
-    fallbackToTabOnSidePanelFailure: true
-  })
+  await openExtensionSurface(routePath, target, getExtensionSurfaceOpenPolicy('wallet'))
 }
 
 async function openWalletSurfaceWithoutTabFallback(target?: ExtensionSurfaceTarget): Promise<void> {
@@ -1085,9 +1078,7 @@ async function openWalletSurfaceWithoutTabFallback(target?: ExtensionSurfaceTarg
     return '/wallet/assets'
   })()
 
-  await openExtensionSurface(routePath, target, {
-    fallbackToTabOnSidePanelFailure: false
-  })
+  await openExtensionSurface(routePath, target, getExtensionSurfaceOpenPolicy('wallet'))
 }
 
 function buildSurfaceTargetKey(target?: ExtensionSurfaceTarget): string {

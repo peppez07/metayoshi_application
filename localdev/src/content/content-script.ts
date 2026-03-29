@@ -136,7 +136,6 @@ const CS_INPAGE_CHANNEL = 'metayoshi:inpage'
 const CS_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const INJECTION_ALLOWLIST_KEY = 'dapp_injection_allowlist_v1'
 const INJECTION_ALLOW_PRIVATE_ORIGINS_KEY = 'dapp_injection_allow_private_origins_v1'
-const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app']
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
 const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
@@ -238,7 +237,6 @@ async function shouldInjectOnCurrentHost(): Promise<boolean> {
 
   const hostname = String(window.location.hostname || '').trim().toLowerCase()
   if (!hostname) return false
-  const defaults = DEFAULT_ALLOWED_HOSTS.map(normalizeHostPattern).filter(Boolean)
   const matchesAnyPattern = (patterns: string[]): boolean => {
     for (const pattern of patterns) {
       if (hostMatchesPattern(hostname, pattern)) return true
@@ -253,17 +251,17 @@ async function shouldInjectOnCurrentHost(): Promise<boolean> {
     const configured = Array.isArray(raw) 
       ? raw.map(normalizeHostPattern).filter(Boolean) 
       : []
-    const allowedHosts = configured.length > 0 ? configured : defaults
 
     if (isBlockedInternalHostname(hostname)) {
       if (!allowPrivateOrigins) return false
       return configured.length === 0 ? true : matchesAnyPattern(configured)
     }
 
-    return matchesAnyPattern(allowedHosts)
+    if (configured.length === 0) return true
+    return matchesAnyPattern(configured)
   } catch {
     if (isBlockedInternalHostname(hostname)) return false
-    return matchesAnyPattern(defaults)
+    return true
   }
 }
 
