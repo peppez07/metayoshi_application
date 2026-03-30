@@ -631,8 +631,9 @@ const DappRequestConfirm: React.FC = () => {
             const action = rtmMarketAction
             if (!action) throw new Error('Missing RTM market action payload')
             if (action.kind === 'fund_seller_asset' || action.kind === 'lock_listing_asset') {
+              const spendAssetId = String(action.walletAssetId || action.assetId || '').trim()
               return await sendAssetTransfer({
-                assetId: String(action.assetId || ''),
+                assetId: spendAssetId,
                 qty: String(action.qty || ''),
                 toAddress: String(action.toAddress || '')
               })

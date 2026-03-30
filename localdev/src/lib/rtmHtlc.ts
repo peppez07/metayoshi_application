@@ -46,6 +46,7 @@ type RtmMarketActionBase = {
   feeAmount?: string
   feeRecipientAddress?: string
   assetId?: string
+  walletAssetId?: string
   qty?: string
   fromAddress?: string
   redeemScriptHex?: string

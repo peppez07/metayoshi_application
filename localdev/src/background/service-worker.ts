@@ -1959,8 +1959,14 @@ async function requestDappActionApproval(
       if (pending.status === 'pending') {
         try {
           await openRequestSurface(pending.id, pending.method, surfaceTarget)
-        } catch {
-          // Preserve the original pending request and keep waiting for it.
+        } catch (err) {
+          void recordRuntimeError('background-sw', err, {
+            kind: 'open-request-surface-reuse',
+            requestId: pending.id,
+            origin: normalizedOrigin,
+            method: pending.method
+          })
+          throw err
         }
       }
       const decision = await waitForRequestDecision(
@@ -2016,6 +2022,8 @@ async function requestDappActionApproval(
       origin: normalizedOrigin,
       method
     })
+    await clearPendingRequestIfMatch(requestId)
+    throw err
   }
 
   const decision = await waitForRequestDecision(requestId, DAPP_APPROVAL_TIMEOUT_MS)
