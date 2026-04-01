@@ -265,9 +265,23 @@ interface WalletState {
   networkAssets?: Record<string, Record<string, number>>
   networkAssetLogos?: Record<string, Record<string, string>>
   networkAssetLabels?: Record<string, Record<string, string>>
+  networkAssetSpendability?: Record<string, Record<string, {
+    totalBalanceRaw?: number
+    spendableBalanceRaw?: number
+    blockedBalanceRaw?: number
+    spendable?: boolean
+    spendabilityReason?: string
+  }>>
   accountNetworkAssets?: Record<string, Record<string, number>>
   accountNetworkAssetLogos?: Record<string, Record<string, string>>
   accountNetworkAssetLabels?: Record<string, Record<string, string>>
+  accountNetworkAssetSpendability?: Record<string, Record<string, {
+    totalBalanceRaw?: number
+    spendableBalanceRaw?: number
+    blockedBalanceRaw?: number
+    spendable?: boolean
+    spendabilityReason?: string
+  }>>
 }
 
 type DappNetworkEntry = { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }
@@ -1445,12 +1459,20 @@ function readScopedAssetMap(
   assets: Record<string, number>
   labels: Record<string, string>
   logos: Record<string, string>
+  spendability: Record<string, {
+    totalBalanceRaw?: number
+    spendableBalanceRaw?: number
+    blockedBalanceRaw?: number
+    spendable?: boolean
+    spendabilityReason?: string
+  }>
 } {
   const scopeKey = buildAssetScopeKey(accountId, networkId)
   return {
     assets: state.accountNetworkAssets?.[scopeKey] || state.networkAssets?.[networkId] || {},
     labels: state.accountNetworkAssetLabels?.[scopeKey] || state.networkAssetLabels?.[networkId] || {},
-    logos: state.accountNetworkAssetLogos?.[scopeKey] || state.networkAssetLogos?.[networkId] || {}
+    logos: state.accountNetworkAssetLogos?.[scopeKey] || state.networkAssetLogos?.[networkId] || {},
+    spendability: state.accountNetworkAssetSpendability?.[scopeKey] || state.networkAssetSpendability?.[networkId] || {}
   }
 }
 
@@ -1461,12 +1483,25 @@ function buildWalletAssetRows(
 ): Array<Record<string, unknown>> {
   const scoped = readScopedAssetMap(state, accountId, networkId)
   return Object.entries(scoped.assets)
-    .map(([assetId, rawAmount]) => ({
-      assetId,
-      rawAmount: Number(rawAmount || 0),
-      label: String(scoped.labels?.[assetId] || assetId).trim() || assetId,
-      logo: String(scoped.logos?.[assetId] || '').trim() || undefined
-    }))
+    .map(([assetId, rawAmount]) => {
+      const totalBalanceRaw = Number((scoped.spendability?.[assetId]?.totalBalanceRaw ?? rawAmount) || 0)
+      const spendableBalanceRaw = Number((scoped.spendability?.[assetId]?.spendableBalanceRaw ?? rawAmount) || 0)
+      const blockedBalanceRaw = Number(scoped.spendability?.[assetId]?.blockedBalanceRaw || 0)
+      return {
+        balance: (Math.max(0, totalBalanceRaw) / 1e8).toFixed(8).replace(/\.?0+$/, '') || '0',
+        assetId,
+        rawAmount: totalBalanceRaw,
+        totalBalanceRaw,
+        spendableBalanceRaw,
+        blockedBalanceRaw,
+        spendableBalance: (Math.max(0, spendableBalanceRaw) / 1e8).toFixed(8).replace(/\.?0+$/, '') || '0',
+        blockedBalance: (Math.max(0, blockedBalanceRaw) / 1e8).toFixed(8).replace(/\.?0+$/, '') || '0',
+        spendable: scoped.spendability?.[assetId]?.spendable ?? true,
+        spendabilityReason: scoped.spendability?.[assetId]?.spendabilityReason,
+        label: String(scoped.labels?.[assetId] || assetId).trim() || assetId,
+        logo: String(scoped.logos?.[assetId] || '').trim() || undefined
+      }
+    })
     .sort((a, b) => Number(b.rawAmount || 0) - Number(a.rawAmount || 0))
 }
 

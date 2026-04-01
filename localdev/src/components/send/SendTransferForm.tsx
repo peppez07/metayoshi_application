@@ -41,6 +41,17 @@ function parseCoinAmount(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function describeRtmAssetSpendability(item: SendableItem): string {
+  const label = String(item.label || item.assetId || 'Asset').trim() || 'Asset'
+  if (item.spendabilityReason === 'pending_or_unconfirmed') {
+    return `${label} is visible, but only unconfirmed RTM asset UTXOs are available right now.`
+  }
+  if (item.spendabilityReason === 'balance_only_unspendable') {
+    return `${label} is indexed on this address, but no confirmed spendable RTM asset UTXOs are available yet.`
+  }
+  return `No spendable RTM asset UTXOs are available for ${label} on this address.`
+}
+
 type NftQuantityMode = 'not-nft' | 'erc721-fixed' | 'erc1155-integer' | 'nft-fixed'
 
 function resolveNftQuantityMode(item: SendableItem): NftQuantityMode {
@@ -112,7 +123,15 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const nativeInputDecimals = isNative
     ? (activeModelId === 'cosmos' ? 6 : (activeModelId === 'sui' ? 9 : 8))
     : 8
-  const available = Number(currentItem.rawAmount || 0) / 1e8
+  const totalAvailable = Number((currentItem.totalRawAmount ?? currentItem.rawAmount) || 0) / 1e8
+  const spendableAvailable = Number((currentItem.spendableRawAmount ?? currentItem.rawAmount) || 0) / 1e8
+  const blockedAvailable = Number(currentItem.blockedRawAmount || 0) / 1e8
+  const hasExplicitSpendability = currentItem.requestType === 'asset' && (
+    currentItem.spendableRawAmount !== undefined
+    || currentItem.totalRawAmount !== undefined
+    || currentItem.blockedRawAmount !== undefined
+  )
+  const available = hasExplicitSpendability ? spendableAvailable : totalAvailable
   const fallbackEstimatedNativeFee = useMemo(() => estimateNetworkFeeUi(activeNetwork), [activeNetwork])
   const modelPreferences = getNetworkModelPreferences(activeNetworkId)
   const previewNetwork = useMemo(() => ({
@@ -312,7 +331,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
   const validateAmount = (): string | null => {
     if (isFixedOneMode) {
       if (available < 1) {
-        setError('This NFT is not currently spendable on this address')
+        setError(hasExplicitSpendability ? describeRtmAssetSpendability(currentItem) : 'This NFT is not currently spendable on this address')
         return null
       }
       return '1'
@@ -336,7 +355,7 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       }
       const availableInt = BigInt(Math.max(0, Math.floor(available)))
       if (qty > availableInt) {
-        setError('Insufficient asset balance')
+        setError(hasExplicitSpendability && availableInt <= 0n ? describeRtmAssetSpendability(currentItem) : 'Insufficient asset balance')
         return null
       }
       return qty.toString()
@@ -348,7 +367,11 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
       return null
     }
     if (numeric > available) {
-      setError(isNative ? 'Insufficient balance' : 'Insufficient asset balance')
+      setError(
+        isNative
+          ? 'Insufficient balance'
+          : (hasExplicitSpendability && available <= 0 ? describeRtmAssetSpendability(currentItem) : 'Insufficient asset balance')
+      )
       return null
     }
     return formatUnits(numeric, nativeInputDecimals)
@@ -500,10 +523,19 @@ const SendTransferForm: React.FC<SendTransferFormProps> = ({ item, onBack, flowC
           </div>
           <p className="text-[10px] text-gray-500 font-bold uppercase">Available</p>
           <p className="text-lg font-bold">
-            {formatUnits(available, nativeInputDecimals)} {currentItem.kind === 'native' ? activeNetwork.symbol : currentItem.symbol}
+            {formatUnits(hasExplicitSpendability ? totalAvailable : available, nativeInputDecimals)} {currentItem.kind === 'native' ? activeNetwork.symbol : currentItem.symbol}
           </p>
           {displayAvailableFiat && (
             <p className="text-[11px] text-gray-400 mt-1">{displayAvailableFiat}</p>
+          )}
+          {hasExplicitSpendability && !isNative && (
+            <div className="mt-3 space-y-1 text-[11px] text-gray-400">
+              <p>Spendable: <span className="text-gray-200">{formatUnits(spendableAvailable, nativeInputDecimals)} {currentItem.symbol}</span></p>
+              <p>Blocked: <span className="text-gray-200">{formatUnits(blockedAvailable, nativeInputDecimals)} {currentItem.symbol}</span></p>
+              {blockedAvailable > 0 && (
+                <p className="text-amber-300">{describeRtmAssetSpendability(currentItem)}</p>
+              )}
+            </div>
           )}
         </div>
 

@@ -9,7 +9,9 @@ const UtxoAssetsModelPage: React.FC = () => {
     activeAccountId,
     activeNetworkId,
     networkAssets,
+    networkAssetSpendability,
     accountNetworkAssets,
+    accountNetworkAssetSpendability,
     accountNetworkAssetSnapshotStatus,
     fetchNetworkAssets,
     networks,
@@ -26,16 +28,20 @@ const UtxoAssetsModelPage: React.FC = () => {
     networkAssetLogos: {},
     networkAssetLabels: {},
     evmNftAssets: {},
+    networkAssetSpendability,
     accountNetworkAssets,
     accountNetworkAssetLogos: {},
     accountNetworkAssetLabels: {},
     accountNetworkEvmNftAssets: {},
+    accountNetworkAssetSpendability,
     accountNetworkAssetSnapshotStatus
   }, String(activeAccount?.id || ''), String(activeNetworkId || '')).assets, [
     activeAccount?.id,
     activeNetworkId,
     accountNetworkAssetSnapshotStatus,
+    accountNetworkAssetSpendability,
     accountNetworkAssets,
+    networkAssetSpendability,
     networkAssets
   ])
   const assetRows = useMemo(

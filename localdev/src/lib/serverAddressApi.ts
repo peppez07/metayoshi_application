@@ -80,7 +80,7 @@ export async function normalizeServerAddress(network: Network, address: string):
 export async function fetchServerAddressJson(
   network: Network,
   address: string,
-  route: 'balance' | 'assets' | 'history' | 'portfolio' | 'price',
+  route: 'balance' | 'assets' | 'assets/utxos' | 'history' | 'portfolio' | 'price',
   extraParams: Record<string, string> = {},
   options: { timeoutMs?: number; rpcConfig?: UtxoRpcConfig } = {}
 ): Promise<{

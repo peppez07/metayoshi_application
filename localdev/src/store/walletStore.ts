@@ -328,6 +328,20 @@ export interface FullBackupV2 extends Omit<FullBackupV1, 'version'> {
 
 export type SendableItemKind = 'native' | 'fungible' | 'nft'
 
+export type AssetSpendabilityReason =
+  | 'spendable'
+  | 'no_spendable_utxos'
+  | 'pending_or_unconfirmed'
+  | 'balance_only_unspendable'
+
+export interface AssetSpendabilityState {
+  totalBalanceRaw: number
+  spendableBalanceRaw: number
+  blockedBalanceRaw: number
+  spendable: boolean
+  spendabilityReason: AssetSpendabilityReason
+}
+
 export interface SendListPreferenceBucket {
   /** Explicit ordering for send entries in one account+network scope. */
   order: string[]
@@ -359,6 +373,14 @@ export interface SendableItem {
   amount: string
   /** Satoshi-like integer (1e8 scale) for sorting/comparisons. */
   rawAmount: number
+  totalAmount?: string
+  totalRawAmount?: number
+  spendableAmount?: string
+  spendableRawAmount?: number
+  blockedAmount?: string
+  blockedRawAmount?: number
+  spendable?: boolean
+  spendabilityReason?: AssetSpendabilityReason
   pinned: boolean
   hidden: boolean
 }
@@ -541,6 +563,8 @@ interface WalletState {
   networkAssetLabels: Record<string, Record<string, string>>
   /** EVM NFT metadata key lookup by network id and asset key. */
   evmNftAssets: Record<string, Record<string, EvmNftHolding>>
+  /** Per-network RTM asset spendability keyed by asset id. */
+  networkAssetSpendability: Record<string, Record<string, AssetSpendabilityState>>
   /** Account+network scoped asset balances keyed by `${accountId}::${networkId}`. */
   accountNetworkAssets: Record<string, Record<string, number>>
   /** Account+network scoped asset logos keyed by `${accountId}::${networkId}`. */
@@ -549,6 +573,8 @@ interface WalletState {
   accountNetworkAssetLabels: Record<string, Record<string, string>>
   /** Account+network scoped EVM NFT metadata keyed by `${accountId}::${networkId}`. */
   accountNetworkEvmNftAssets: Record<string, Record<string, EvmNftHolding>>
+  /** Account+network scoped RTM asset spendability keyed by `${accountId}::${networkId}`. */
+  accountNetworkAssetSpendability: Record<string, Record<string, AssetSpendabilityState>>
   /** Scope-local trust state for empty asset snapshots keyed by `${accountId}::${networkId}`. */
   accountNetworkAssetSnapshotStatus: Record<string, ScopedAssetSnapshotStatus>
   /** Account+network scoped portfolio totals in fiat. */
@@ -1426,6 +1452,7 @@ type ScopedAssetBuckets = {
   logos: Record<string, string>
   labels: Record<string, string>
   evmNfts: Record<string, EvmNftHolding>
+  spendability?: Record<string, AssetSpendabilityState>
 }
 
 type PortfolioAssetFiatBuckets = {
@@ -1474,6 +1501,60 @@ function resolveCosmosBridgeCoinId(network: Network): string {
     || (isCroCosmosModelId(modelId) ? 'cronos-pos' : 'cosmos')
   ).trim().toLowerCase()
   return resolved || 'cosmos'
+}
+
+function formatAssetRawBalance(rawAmount: number): string {
+  return formatUnits8(Math.max(0, Math.round(Number(rawAmount || 0))) / 1e8)
+}
+
+function resolveAssetSpendabilityReason(params: {
+  totalBalanceRaw: number
+  spendableBalanceRaw: number
+  pendingBalanceRaw?: number
+  observedUtxoBalanceRaw?: number
+}): AssetSpendabilityReason {
+  const totalBalanceRaw = Math.max(0, Math.round(Number(params.totalBalanceRaw || 0)))
+  const spendableBalanceRaw = Math.max(0, Math.round(Number(params.spendableBalanceRaw || 0)))
+  const pendingBalanceRaw = Math.max(0, Math.round(Number(params.pendingBalanceRaw || 0)))
+  const observedUtxoBalanceRaw = Math.max(0, Math.round(Number(params.observedUtxoBalanceRaw || 0)))
+  if (spendableBalanceRaw > 0) return 'spendable'
+  if (pendingBalanceRaw > 0 && observedUtxoBalanceRaw === pendingBalanceRaw) return 'pending_or_unconfirmed'
+  if (totalBalanceRaw > 0) return 'balance_only_unspendable'
+  return 'no_spendable_utxos'
+}
+
+function buildAssetSpendabilityState(params: {
+  totalBalanceRaw: number
+  spendableBalanceRaw: number
+  pendingBalanceRaw?: number
+  observedUtxoBalanceRaw?: number
+}): AssetSpendabilityState {
+  const totalBalanceRaw = Math.max(0, Math.round(Number(params.totalBalanceRaw || 0)))
+  const spendableBalanceRaw = Math.max(0, Math.round(Number(params.spendableBalanceRaw || 0)))
+  return {
+    totalBalanceRaw,
+    spendableBalanceRaw,
+    blockedBalanceRaw: Math.max(0, totalBalanceRaw - spendableBalanceRaw),
+    spendable: spendableBalanceRaw > 0,
+    spendabilityReason: resolveAssetSpendabilityReason(params)
+  }
+}
+
+function describeRtmAssetSpendabilityState(
+  spendability: AssetSpendabilityState | null | undefined,
+  assetLabel: string
+): string {
+  const label = String(assetLabel || 'asset').trim() || 'asset'
+  if (!spendability) {
+    return `No spendable RTM asset UTXOs are available for ${label}.`
+  }
+  if (spendability.spendabilityReason === 'pending_or_unconfirmed') {
+    return `${label} is visible in the wallet, but only unconfirmed RTM asset UTXOs are available right now. Wait for at least 1 confirmation.`
+  }
+  if (spendability.spendabilityReason === 'balance_only_unspendable') {
+    return `${label} is indexed on this address, but no confirmed spendable RTM asset UTXOs are available yet.`
+  }
+  return `No spendable RTM asset UTXOs are available for ${label}.`
 }
 
 function normalizeFiatValueMap(input: unknown): FiatValueMap {
@@ -1537,10 +1618,12 @@ export function getScopedAssetView(
     | 'networkAssetLogos'
     | 'networkAssetLabels'
     | 'evmNftAssets'
+    | 'networkAssetSpendability'
     | 'accountNetworkAssets'
     | 'accountNetworkAssetLogos'
     | 'accountNetworkAssetLabels'
     | 'accountNetworkEvmNftAssets'
+    | 'accountNetworkAssetSpendability'
     | 'accountNetworkAssetSnapshotStatus'
   >,
   accountId: string,
@@ -1550,19 +1633,22 @@ export function getScopedAssetView(
   logos: Record<string, string>
   labels: Record<string, string>
   evmNfts: Record<string, EvmNftHolding>
+  spendability: Record<string, AssetSpendabilityState>
 } {
   const scopeKey = buildAssetStateScopeKey(accountId, networkId)
   const scopedSnapshot = {
     assets: getScopedAssetBucket(state.accountNetworkAssets, accountId, networkId) || {},
     logos: getScopedAssetBucket(state.accountNetworkAssetLogos, accountId, networkId) || {},
     labels: getScopedAssetBucket(state.accountNetworkAssetLabels, accountId, networkId) || {},
-    evmNfts: getScopedAssetBucket(state.accountNetworkEvmNftAssets, accountId, networkId) || {}
+    evmNfts: getScopedAssetBucket(state.accountNetworkEvmNftAssets, accountId, networkId) || {},
+    spendability: getScopedAssetBucket(state.accountNetworkAssetSpendability, accountId, networkId) || {}
   }
   const networkSnapshot = {
     assets: state.networkAssets?.[networkId] || {},
     logos: state.networkAssetLogos?.[networkId] || {},
     labels: state.networkAssetLabels?.[networkId] || {},
-    evmNfts: state.evmNftAssets?.[networkId] || {}
+    evmNfts: state.evmNftAssets?.[networkId] || {},
+    spendability: state.networkAssetSpendability?.[networkId] || {}
   }
   const scopedPresent = hasScopedAssetSnapshot(state, accountId, networkId)
   const snapshotStatus = state.accountNetworkAssetSnapshotStatus?.[scopeKey] || null
@@ -1577,7 +1663,8 @@ export function getScopedAssetView(
       assets: networkSnapshot.assets,
       logos: networkSnapshot.logos,
       labels: networkSnapshot.labels,
-      evmNfts: networkSnapshot.evmNfts
+      evmNfts: networkSnapshot.evmNfts,
+      spendability: networkSnapshot.spendability
     }
   }
 
@@ -1585,14 +1672,15 @@ export function getScopedAssetView(
     assets: scopedSnapshot.assets || networkSnapshot.assets || {},
     logos: scopedSnapshot.logos || networkSnapshot.logos || {},
     labels: scopedSnapshot.labels || networkSnapshot.labels || {},
-    evmNfts: scopedSnapshot.evmNfts || networkSnapshot.evmNfts || {}
+    evmNfts: scopedSnapshot.evmNfts || networkSnapshot.evmNfts || {},
+    spendability: scopedSnapshot.spendability || networkSnapshot.spendability || {}
   }
 }
 
 function hasScopedAssetSnapshot(
   state: Pick<
     WalletState,
-    'accountNetworkAssets' | 'accountNetworkAssetLogos' | 'accountNetworkAssetLabels' | 'accountNetworkEvmNftAssets'
+    'accountNetworkAssets' | 'accountNetworkAssetLogos' | 'accountNetworkAssetLabels' | 'accountNetworkEvmNftAssets' | 'accountNetworkAssetSpendability'
   >,
   accountId: string,
   networkId: string
@@ -1603,6 +1691,7 @@ function hasScopedAssetSnapshot(
     || Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLogos || {}, scopeKey)
     || Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLabels || {}, scopeKey)
     || Object.prototype.hasOwnProperty.call(state.accountNetworkEvmNftAssets || {}, scopeKey)
+    || Object.prototype.hasOwnProperty.call(state.accountNetworkAssetSpendability || {}, scopeKey)
   )
 }
 
@@ -1610,14 +1699,15 @@ function buildScopedAssetProjection(
   state: WalletState,
   accountId: string,
   networkId: string
-): Pick<WalletState, 'networkAssets' | 'networkAssetLogos' | 'networkAssetLabels' | 'evmNftAssets'> {
+): Pick<WalletState, 'networkAssets' | 'networkAssetLogos' | 'networkAssetLabels' | 'evmNftAssets' | 'networkAssetSpendability'> {
   const scopeKey = buildAssetStateScopeKey(accountId, networkId)
   const hasScopedAssets = Object.prototype.hasOwnProperty.call(state.accountNetworkAssets, scopeKey)
   const hasScopedLogos = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLogos, scopeKey)
   const hasScopedLabels = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetLabels, scopeKey)
   const hasScopedNfts = Object.prototype.hasOwnProperty.call(state.accountNetworkEvmNftAssets, scopeKey)
+  const hasScopedSpendability = Object.prototype.hasOwnProperty.call(state.accountNetworkAssetSpendability, scopeKey)
   const useNetworkFallback = shouldPreferNetworkAssetSnapshot({
-    scopedPresent: hasScopedAssets || hasScopedLogos || hasScopedLabels || hasScopedNfts,
+    scopedPresent: hasScopedAssets || hasScopedLogos || hasScopedLabels || hasScopedNfts || hasScopedSpendability,
     scoped: {
       assets: state.accountNetworkAssets[scopeKey] || {},
       logos: state.accountNetworkAssetLogos[scopeKey] || {},
@@ -1664,6 +1754,14 @@ function buildScopedAssetProjection(
         : hasScopedNfts
           ? (state.accountNetworkEvmNftAssets[scopeKey] || {})
           : (state.evmNftAssets[networkId] || {})
+    },
+    networkAssetSpendability: {
+      ...state.networkAssetSpendability,
+      [networkId]: useNetworkFallback
+        ? (state.networkAssetSpendability[networkId] || {})
+        : hasScopedSpendability
+          ? (state.accountNetworkAssetSpendability[scopeKey] || {})
+          : (state.networkAssetSpendability[networkId] || {})
     }
   }
 }
@@ -1702,6 +1800,10 @@ function buildScopedAssetStateUpdate(
       ...state.accountNetworkEvmNftAssets,
       [scopeKey]: payload.evmNfts
     },
+    accountNetworkAssetSpendability: {
+      ...state.accountNetworkAssetSpendability,
+      [scopeKey]: payload.spendability || {}
+    },
     accountNetworkAssetSnapshotStatus: {
       ...state.accountNetworkAssetSnapshotStatus,
       [scopeKey]: snapshotStatus
@@ -1739,6 +1841,10 @@ function buildScopedAssetStateUpdate(
       evmNftAssets: {
         ...state.evmNftAssets,
         [networkId]: payload.evmNfts
+      },
+      networkAssetSpendability: {
+        ...state.networkAssetSpendability,
+        [networkId]: payload.spendability || {}
       }
     })
   }
@@ -3823,10 +3929,12 @@ export const useWalletStore = create<WalletState>()(
       networkAssetLogos: {},
       networkAssetLabels: {},
       evmNftAssets: {},
+      networkAssetSpendability: {},
       accountNetworkAssets: {},
       accountNetworkAssetLogos: {},
       accountNetworkAssetLabels: {},
       accountNetworkEvmNftAssets: {},
+      accountNetworkAssetSpendability: {},
       accountNetworkAssetSnapshotStatus: {},
       accountNetworkFiatTotals: {},
       accountNetworkFiatNative: {},
@@ -4195,10 +4303,12 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
+          networkAssetSpendability: {},
           accountNetworkAssets: {},
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkAssetSpendability: {},
           accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},
@@ -5825,10 +5935,15 @@ export const useWalletStore = create<WalletState>()(
         }
 
         try {
-          const assets = await listAssetBalancesByAddress(rpcConfig, address)
+          const assets = await listAssetBalancesByAddress(rpcConfig, address).catch(() => ({}))
+          const normalizedAssets: Record<string, number> = { ...(assets || {}) }
           const labels: Record<string, string> = {}
           const logos: Record<string, string> = {}
-          const metadataResponse = await fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null)
+          const spendability: Record<string, AssetSpendabilityState> = {}
+          const [metadataResponse, assetUtxoResponse] = await Promise.all([
+            fetchServerAddressJson(net, address, 'assets', {}, { rpcConfig }).catch(() => null),
+            fetchServerAddressJson(net, address, 'assets/utxos', {}, { rpcConfig }).catch(() => null)
+          ])
           const metadataAssets = metadataResponse?.ok && metadataResponse.json?.assets && typeof metadataResponse.json.assets === 'object'
             ? metadataResponse.json.assets as Record<string, unknown>
             : null
@@ -5849,18 +5964,84 @@ export const useWalletStore = create<WalletState>()(
               || row.currency
               || ''
             ).trim()
-            if (!tokenId || !(tokenId in (assets || {}))) continue
+            if (!tokenId || !(tokenId in normalizedAssets)) continue
             const label = String(row.symbol || row.name || tokenId).trim()
             if (label) labels[tokenId] = label
             const logoUri = extractAssetLogoUri(row)
             if (logoUri) logos[tokenId] = logoUri
           }
+          const utxoRows = Array.isArray(assetUtxoResponse?.json)
+            ? assetUtxoResponse?.json as Array<Record<string, unknown>>
+            : []
+          const observedUtxoRawByAsset: Record<string, number> = {}
+          const pendingRawByAsset: Record<string, number> = {}
+          const spendableRawByAsset: Record<string, number> = {}
+          for (const row of utxoRows) {
+            const tokenId = String(
+              row.assetId
+              || row.assetName
+              || row.name
+              || ''
+            ).trim()
+            if (!tokenId) continue
+            const amountText = String(
+              row.amountRaw
+              || row.balanceRaw
+              || row.amount
+              || row.balance
+              || ''
+            ).trim()
+            if (!amountText) continue
+            let amountRaw = 0
+            if (/^\d+$/.test(amountText)) {
+              amountRaw = Math.max(0, Math.round(Number(amountText)))
+            } else {
+              try {
+                amountRaw = Number(parseDecimalToAtomicUnits(amountText, 8, tokenId))
+              } catch {
+                continue
+              }
+            }
+            if (!Number.isFinite(amountRaw) || amountRaw <= 0) continue
+            const confirmations = Number(row.confirmations)
+            const confirmed = !Number.isFinite(confirmations) || confirmations >= 1
+            const isSpendable = row.spendable === true && confirmed
+            observedUtxoRawByAsset[tokenId] = Math.max(0, Math.round((observedUtxoRawByAsset[tokenId] || 0) + amountRaw))
+            if (!confirmed) {
+              pendingRawByAsset[tokenId] = Math.max(0, Math.round((pendingRawByAsset[tokenId] || 0) + amountRaw))
+            }
+            if (isSpendable) {
+              spendableRawByAsset[tokenId] = Math.max(0, Math.round((spendableRawByAsset[tokenId] || 0) + amountRaw))
+            }
+            if (!(tokenId in normalizedAssets)) {
+              normalizedAssets[tokenId] = amountRaw
+            }
+            if (!(tokenId in labels)) {
+              const fallbackLabel = String(row.assetName || row.assetId || tokenId).trim()
+              if (fallbackLabel) labels[tokenId] = fallbackLabel
+            }
+          }
+          const spendabilityAssetIds = new Set<string>([
+            ...Object.keys(normalizedAssets),
+            ...Object.keys(observedUtxoRawByAsset)
+          ])
+          for (const tokenId of spendabilityAssetIds) {
+            spendability[tokenId] = buildAssetSpendabilityState({
+              totalBalanceRaw: normalizedAssets[tokenId] || 0,
+              spendableBalanceRaw: spendableRawByAsset[tokenId] || 0,
+              pendingBalanceRaw: pendingRawByAsset[tokenId] || 0,
+              observedUtxoBalanceRaw: observedUtxoRawByAsset[tokenId] || 0
+            })
+          }
           applyAssetSnapshot({
-            assets: assets ?? {},
+            assets: normalizedAssets,
             logos,
             labels,
-            evmNfts: {}
-          }, metadataRows.length > 0 ? 'rpc:listassetbalancesbyaddress+server-metadata' : 'rpc:listassetbalancesbyaddress', {
+            evmNfts: {},
+            spendability
+          }, utxoRows.length > 0
+            ? (metadataRows.length > 0 ? 'rpc:listassetbalancesbyaddress+server-metadata+server-utxos' : 'rpc:listassetbalancesbyaddress+server-utxos')
+            : (metadataRows.length > 0 ? 'rpc:listassetbalancesbyaddress+server-metadata' : 'rpc:listassetbalancesbyaddress'), {
             emptyAuthoritative: true
           })
         } catch (err) {
@@ -6435,10 +6616,12 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos,
           networkAssetLabels,
           evmNftAssets,
+          networkAssetSpendability,
           accountNetworkAssets,
           accountNetworkAssetLogos,
           accountNetworkAssetLabels,
           accountNetworkEvmNftAssets,
+          accountNetworkAssetSpendability,
           accountNetworkAssetSnapshotStatus,
           sendListPreferences
         } = get()
@@ -6478,7 +6661,15 @@ export const useWalletStore = create<WalletState>()(
               label: (existing.label && existing.label !== existing.assetId) ? existing.label : row.label,
               logoUrl: existing.logoUrl || row.logoUrl,
               rawAmount: mergedRaw,
-              amount: formatUnits8(mergedRaw / 1e8)
+              amount: formatUnits8(mergedRaw / 1e8),
+              totalAmount: existing.totalAmount || row.totalAmount,
+              totalRawAmount: existing.totalRawAmount ?? row.totalRawAmount,
+              spendableAmount: existing.spendableAmount || row.spendableAmount,
+              spendableRawAmount: existing.spendableRawAmount ?? row.spendableRawAmount,
+              blockedAmount: existing.blockedAmount || row.blockedAmount,
+              blockedRawAmount: existing.blockedRawAmount ?? row.blockedRawAmount,
+              spendable: existing.spendable ?? row.spendable,
+              spendabilityReason: existing.spendabilityReason || row.spendabilityReason
             })
           }
 
@@ -6520,22 +6711,26 @@ export const useWalletStore = create<WalletState>()(
               networkAssetLogos,
               networkAssetLabels,
               evmNftAssets,
+              networkAssetSpendability,
               accountNetworkAssets,
               accountNetworkAssetLogos,
               accountNetworkAssetLabels,
               accountNetworkEvmNftAssets,
+              accountNetworkAssetSpendability,
               accountNetworkAssetSnapshotStatus
             }, account.id, requestedNetworkId)
           : {
               assets: getScopedAssetBucket(accountNetworkAssets, account.id, requestedNetworkId) || {},
               logos: getScopedAssetBucket(accountNetworkAssetLogos, account.id, requestedNetworkId) || {},
               labels: getScopedAssetBucket(accountNetworkAssetLabels, account.id, requestedNetworkId) || {},
-              evmNfts: getScopedAssetBucket(accountNetworkEvmNftAssets, account.id, requestedNetworkId) || {}
+              evmNfts: getScopedAssetBucket(accountNetworkEvmNftAssets, account.id, requestedNetworkId) || {},
+              spendability: getScopedAssetBucket(accountNetworkAssetSpendability, account.id, requestedNetworkId) || {}
             }
         const rawAssets = scopedAssetView.assets
         const rawLogos = scopedAssetView.logos
         const rawLabels = scopedAssetView.labels
         const nftLookup = scopedAssetView.evmNfts
+        const rawSpendability = scopedAssetView.spendability
 
         for (const [assetIdRaw, rawAmountValue] of Object.entries(rawAssets)) {
           const assetId = String(assetIdRaw || '').trim()
@@ -6559,6 +6754,10 @@ export const useWalletStore = create<WalletState>()(
           const symbol = kind === 'nft'
             ? 'NFT'
             : (String(rawLabels?.[assetId] || '').trim() || assetId)
+          const spendability = rawSpendability?.[assetId]
+          const totalRawAmount = spendability?.totalBalanceRaw ?? rawAmount
+          const spendableRawAmount = spendability?.spendableBalanceRaw ?? rawAmount
+          const blockedRawAmount = spendability?.blockedBalanceRaw ?? Math.max(0, totalRawAmount - spendableRawAmount)
 
           addOrMergeItem({
             id: normalizedId,
@@ -6570,8 +6769,16 @@ export const useWalletStore = create<WalletState>()(
             symbol,
             label,
             logoUrl: logoUri || getTokenLogoForAsset(label) || undefined,
-            amount: formatUnits8(rawAmount / 1e8),
-            rawAmount,
+            amount: formatUnits8(totalRawAmount / 1e8),
+            rawAmount: totalRawAmount,
+            totalAmount: formatAssetRawBalance(totalRawAmount),
+            totalRawAmount,
+            spendableAmount: formatAssetRawBalance(spendableRawAmount),
+            spendableRawAmount,
+            blockedAmount: formatAssetRawBalance(blockedRawAmount),
+            blockedRawAmount,
+            spendable: spendability?.spendable ?? undefined,
+            spendabilityReason: spendability?.spendabilityReason,
             pinned: false,
             hidden: false
           })
@@ -6817,7 +7024,21 @@ export const useWalletStore = create<WalletState>()(
         await waitForSendOperationSlot()
         const {
           networks, activeNetworkId, isLocked, sessionMnemonic,
-          accounts, activeAccountId, networkAssets, networkAssetLogos, networkAssetLabels, useLocalRpc: ulr2, localRpcOverrides: lro2
+          accounts,
+          activeAccountId,
+          networkAssets,
+          networkAssetLogos,
+          networkAssetLabels,
+          networkAssetSpendability,
+          evmNftAssets,
+          accountNetworkAssets,
+          accountNetworkAssetLogos,
+          accountNetworkAssetLabels,
+          accountNetworkEvmNftAssets,
+          accountNetworkAssetSpendability,
+          accountNetworkAssetSnapshotStatus,
+          useLocalRpc: ulr2,
+          localRpcOverrides: lro2
         } = get()
 
         const net = networks.find(n => n.id === activeNetworkId)
@@ -6839,6 +7060,40 @@ export const useWalletStore = create<WalletState>()(
         const senderAddress = acc.networkAddresses?.[activeNetworkId]
           || await get().ensureNetworkAddress(activeNetworkId)
         if (!senderAddress) throw new Error(`No address derived for ${net.name}`)
+        if (String(net.coinSymbol || '').trim().toUpperCase() === 'RTM') {
+          const normalizedAssetId = String(assetId || '').trim()
+          if (!normalizedAssetId) throw new Error('Asset id is required')
+          const scopedAssetView = getScopedAssetView({
+            networkAssets,
+            networkAssetLogos,
+            networkAssetLabels,
+            evmNftAssets,
+            networkAssetSpendability,
+            accountNetworkAssets,
+            accountNetworkAssetLogos,
+            accountNetworkAssetLabels,
+            accountNetworkEvmNftAssets,
+            accountNetworkAssetSpendability,
+            accountNetworkAssetSnapshotStatus
+          }, acc.id, activeNetworkId)
+          const assetLabel = String(
+            scopedAssetView.labels?.[normalizedAssetId]
+            || networkAssetLabels?.[activeNetworkId]?.[normalizedAssetId]
+            || normalizedAssetId
+          ).trim() || normalizedAssetId
+          const spendability = scopedAssetView.spendability?.[normalizedAssetId] || null
+          const spendableBalanceRaw = Math.max(0, Math.round(Number(spendability?.spendableBalanceRaw ?? scopedAssetView.assets?.[normalizedAssetId] ?? 0)))
+          const requestedQtyRaw = Number(parseDecimalToAtomicUnits(String(qty || '').trim(), 8, assetLabel))
+          if (!Number.isFinite(requestedQtyRaw) || requestedQtyRaw <= 0) {
+            throw new Error('Asset quantity must be greater than zero')
+          }
+          if (spendableBalanceRaw <= 0) {
+            throw new Error(describeRtmAssetSpendabilityState(spendability, assetLabel))
+          }
+          if (requestedQtyRaw > spendableBalanceRaw) {
+            throw new Error(`Insufficient spendable RTM asset balance for ${assetLabel}. Spendable ${formatAssetRawBalance(spendableBalanceRaw)}, requested ${formatAssetRawBalance(requestedQtyRaw)}.`)
+          }
+        }
 
         if (modelId === 'tron') {
           const recipient = String(toAddress || '').trim()
@@ -7653,6 +7908,8 @@ export const useWalletStore = create<WalletState>()(
           accountNetworkAssetLabels: {},
           evmNftAssets: {},
           accountNetworkEvmNftAssets: {},
+          networkAssetSpendability: {},
+          accountNetworkAssetSpendability: {},
           accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},
@@ -10028,10 +10285,12 @@ export const useWalletStore = create<WalletState>()(
           networkAssetLogos: {},
           networkAssetLabels: {},
           evmNftAssets: {},
+          networkAssetSpendability: {},
           accountNetworkAssets: {},
           accountNetworkAssetLogos: {},
           accountNetworkAssetLabels: {},
           accountNetworkEvmNftAssets: {},
+          accountNetworkAssetSpendability: {},
           accountNetworkAssetSnapshotStatus: {},
           accountNetworkFiatTotals: {},
           accountNetworkFiatNative: {},

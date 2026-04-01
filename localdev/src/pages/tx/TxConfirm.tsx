@@ -371,10 +371,12 @@ const TxLayout: React.FC<TxLayoutProps> = ({ title, error, isRejectMode }) => {
     networkAssetLogos: {},
     networkAssetLabels: {},
     evmNftAssets: {},
+    networkAssetSpendability: {},
     accountNetworkAssets: accountNetworkAssets || {},
     accountNetworkAssetLogos: {},
     accountNetworkAssetLabels: {},
     accountNetworkEvmNftAssets: {},
+    accountNetworkAssetSpendability: {},
     accountNetworkAssetSnapshotStatus: {}
   }, String(activeAccount?.id || ''), String(displayNetworkId || '')).assets?.[assetId] ?? 0)
   const nativeUsdPerCoin = useMemo(() => {
