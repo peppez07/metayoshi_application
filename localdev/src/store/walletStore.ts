@@ -6662,14 +6662,14 @@ export const useWalletStore = create<WalletState>()(
               logoUrl: existing.logoUrl || row.logoUrl,
               rawAmount: mergedRaw,
               amount: formatUnits8(mergedRaw / 1e8),
-              totalAmount: existing.totalAmount || row.totalAmount,
-              totalRawAmount: existing.totalRawAmount ?? row.totalRawAmount,
-              spendableAmount: existing.spendableAmount || row.spendableAmount,
-              spendableRawAmount: existing.spendableRawAmount ?? row.spendableRawAmount,
-              blockedAmount: existing.blockedAmount || row.blockedAmount,
-              blockedRawAmount: existing.blockedRawAmount ?? row.blockedRawAmount,
-              spendable: existing.spendable ?? row.spendable,
-              spendabilityReason: existing.spendabilityReason || row.spendabilityReason
+              totalAmount: row.totalAmount ?? existing.totalAmount,
+              totalRawAmount: row.totalRawAmount ?? existing.totalRawAmount,
+              spendableAmount: row.spendableAmount ?? existing.spendableAmount,
+              spendableRawAmount: row.spendableRawAmount ?? existing.spendableRawAmount,
+              blockedAmount: row.blockedAmount ?? existing.blockedAmount,
+              blockedRawAmount: row.blockedRawAmount ?? existing.blockedRawAmount,
+              spendable: row.spendable ?? existing.spendable,
+              spendabilityReason: row.spendabilityReason || existing.spendabilityReason
             })
           }
 
