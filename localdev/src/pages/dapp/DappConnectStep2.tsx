@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { IoArrowBack, IoCheckmarkCircle } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import {
   DAPP_PENDING_APPROVAL_STORAGE_KEY,
+  type DappPendingApproval,
   type DappScope
 } from '../../lib/dappPermissions'
 import { getAccountDisplayName } from '../../lib/accountName'
@@ -30,17 +31,6 @@ function resolveConnectApprovalTarget(
     }
   }
 
-  for (const network of networks) {
-    const address = String(getAccountAddressForNetwork(activeAccount, network.id, network.coinType) || '').trim()
-    if (address) {
-      return {
-        network,
-        networkId: network.id,
-        address
-      }
-    }
-  }
-
   return {
     network: preferredNetwork || networks[0] || null,
     networkId: preferredNetworkId,
@@ -61,12 +51,26 @@ const DappConnectStep2: React.FC = () => {
   const navigate = useNavigate()
   const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, networks } = useWalletStore()
   const { pendingApproval, loadingApproval } = usePendingDappApproval()
+  const [approvalSnapshot, setApprovalSnapshot] = useState<DappPendingApproval | null>(null)
+
+  useEffect(() => {
+    if (!pendingApproval || pendingApproval.status !== 'pending' || pendingApproval.expiresAt <= Date.now()) return
+    setApprovalSnapshot(pendingApproval)
+  }, [pendingApproval])
+
+  const displayedApproval = (
+    pendingApproval && pendingApproval.status === 'pending' && pendingApproval.expiresAt > Date.now()
+      ? pendingApproval
+      : approvalSnapshot && approvalSnapshot.status === 'pending' && approvalSnapshot.expiresAt > Date.now()
+        ? approvalSnapshot
+        : null
+  )
 
   const activeAccount = useMemo(
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
-  const approvalNetworkId = String(pendingApproval?.networkId || activeNetworkId || '').trim()
+  const approvalNetworkId = String(displayedApproval?.networkId || activeNetworkId || '').trim()
   const approvalTarget = useMemo(
     () => resolveConnectApprovalTarget(
       activeAccount,
@@ -85,18 +89,18 @@ const DappConnectStep2: React.FC = () => {
   const approvalAddress = approvalTarget.address
 
   const finishApproval = async (status: 'approved' | 'rejected'): Promise<void> => {
-    if (!pendingApproval || !canUseChromeStorage()) {
+    if (!displayedApproval || !canUseChromeStorage()) {
       navigate('/wallet/assets')
       return
     }
 
     if (status === 'approved') {
-      addAuthorizedSite(pendingApproval.origin)
+      addAuthorizedSite(displayedApproval.origin)
     }
 
     await chrome.storage.local.set({
       [DAPP_PENDING_APPROVAL_STORAGE_KEY]: {
-        ...pendingApproval,
+        ...displayedApproval,
         status,
         updatedAt: Date.now()
       }
@@ -105,7 +109,11 @@ const DappConnectStep2: React.FC = () => {
     navigate('/wallet/assets')
   }
 
-  if (loadingApproval || !pendingApproval) {
+  if (loadingApproval && !displayedApproval) {
+    return <DappApprovalStatus loading={loadingApproval} onBack={() => navigate('/wallet/assets')} />
+  }
+
+  if (!displayedApproval) {
     return <DappApprovalStatus loading={loadingApproval} onBack={() => navigate('/wallet/assets')} />
   }
 
@@ -128,7 +136,7 @@ const DappConnectStep2: React.FC = () => {
           </div>
           <div className="text-center">
             <h2 className="text-lg font-bold">Connect to {activeAccountName}</h2>
-            <p className="text-xs text-gray-400">{pendingApproval.origin}</p>
+            <p className="text-xs text-gray-400">{displayedApproval.origin}</p>
             <div className="mt-3 flex justify-center">
               <span className="rounded-full border border-dark-600 bg-dark-800 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-gray-200">
                 {activeAccountKindLabel}
@@ -141,7 +149,7 @@ const DappConnectStep2: React.FC = () => {
           <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/50">
             <p className="text-xs font-bold text-gray-400 uppercase mb-4">Permissions requested:</p>
             <ul className="space-y-3">
-              {pendingApproval.scopes.map((scope) => (
+              {displayedApproval.scopes.map((scope) => (
                 <PermissionItem key={scope} label={scopeLabel(scope)} />
               ))}
             </ul>
@@ -153,12 +161,6 @@ const DappConnectStep2: React.FC = () => {
               This site will connect to your active wallet account on {approvalNetwork?.name || 'the requested network'}.
               It will not receive a custom list of selected accounts from this approval.
             </p>
-            {approvalTarget.networkId && approvalTarget.networkId !== approvalNetworkId && (
-              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
-                MetaYoshi is using {approvalNetwork?.name || approvalTarget.networkId} because the current requested network
-                does not have an address for this account.
-              </p>
-            )}
             {isActiveMultisig && (
               <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
                 The selected account is multisig-aware metadata only. Dapps still receive a single public address.

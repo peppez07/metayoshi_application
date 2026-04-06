@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { IoArrowBackOutline, IoDocumentOutline, IoOpenOutline, IoRefreshOutline } from 'react-icons/io5'
 import { useWalletStore } from '../../store/walletStore'
 import { parseSolanaAssetType } from '../../lib/assetTypes'
-import { isMetayoshiHttpUrl } from '../../lib/serverOnly'
+import { isTrustedServerHttpUrl } from '../../lib/serverOnly'
 
 type PreviewKind = 'image' | 'pdf' | 'json' | 'text' | 'binary' | 'none'
 
@@ -17,7 +17,7 @@ function normalizePreviewValue(value: string): string {
 function buildSourceUrls(value: string): string[] {
   const v = String(value || '').trim()
   if (!v) return []
-  if (/^https?:\/\//i.test(v)) return isMetayoshiHttpUrl(v) ? [v] : []
+  if (/^https?:\/\//i.test(v)) return isTrustedServerHttpUrl(v) ? [v] : []
   if (/^data:/i.test(v)) return [v]
   if (/^ipfs:\/\//i.test(v) || /^ipfs\//i.test(v)) return []
   return [v]

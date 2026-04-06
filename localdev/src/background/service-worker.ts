@@ -1035,18 +1035,18 @@ async function openWalletSurface(target?: ExtensionSurfaceTarget): Promise<void>
   ])
   const routePath = (() => {
     if (
-      pendingRequest
-      && (pendingRequest.status === 'pending' || pendingRequest.status === 'approved')
-      && pendingRequest.expiresAt > now
-    ) {
-      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
-    }
-    if (
       pendingApproval
       && pendingApproval.status === 'pending'
       && pendingApproval.expiresAt > now
     ) {
       return buildApprovalRoutePath()
+    }
+    if (
+      pendingRequest
+      && pendingRequest.status === 'pending'
+      && pendingRequest.expiresAt > now
+    ) {
+      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
     }
     return '/wallet/assets'
   })()
@@ -1062,18 +1062,18 @@ async function openWalletSurfaceWithoutTabFallback(target?: ExtensionSurfaceTarg
   ])
   const routePath = (() => {
     if (
-      pendingRequest
-      && (pendingRequest.status === 'pending' || pendingRequest.status === 'approved')
-      && pendingRequest.expiresAt > now
-    ) {
-      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
-    }
-    if (
       pendingApproval
       && pendingApproval.status === 'pending'
       && pendingApproval.expiresAt > now
     ) {
       return buildApprovalRoutePath()
+    }
+    if (
+      pendingRequest
+      && pendingRequest.status === 'pending'
+      && pendingRequest.expiresAt > now
+    ) {
+      return buildRequestRoutePath(pendingRequest.id, pendingRequest.method)
     }
     return '/wallet/assets'
   })()
@@ -2200,17 +2200,9 @@ function buildDappRuntimeContext(state: WalletState, requestedNetworkId?: string
   const dappNetworks = resolveDappNetworks(state)
   const normalizedRequestedNetworkId = String(requestedNetworkId || '').trim()
   const explicitlyRequestedNetwork = dappNetworks.find((n) => n.id === normalizedRequestedNetworkId)
-  const preferredNetwork = explicitlyRequestedNetwork
+  const network = explicitlyRequestedNetwork
     || dappNetworks.find((n) => n.id === state.activeNetworkId)
     || dappNetworks[0]
-  const preferredNetworkId = preferredNetwork?.id || DEFAULT_NETWORK_ID
-  const preferredAddress = getActiveAddressFromState(state, preferredNetworkId)
-  // If the requested or active network has no address for the selected account,
-  // fall back to the first network that does. This keeps connect flows usable
-  // when a dapp hints one network but the current account only has another.
-  const network = preferredAddress
-    ? preferredNetwork
-    : findFirstNetworkWithActiveAddress(state, dappNetworks) || preferredNetwork
   const effectiveNetworkId = network?.id || DEFAULT_NETWORK_ID
   const address = getActiveAddressFromState(state, effectiveNetworkId)
   const connected = !(state.isLocked ?? true) && (state.isInitialized ?? false) && address !== null

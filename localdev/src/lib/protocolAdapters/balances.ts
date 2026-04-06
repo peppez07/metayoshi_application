@@ -3,7 +3,7 @@ import type { UtxoRpcConfig } from '../utxoRpc'
 import { callBridgeMethod } from '../utxoRpc'
 import { fetchServerAddressJson, normalizeServerAddress } from '../serverAddressApi'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../serverTimeouts'
-import { isMetayoshiHttpUrl } from '../serverOnly'
+import { isTrustedServerHttpUrl } from '../serverOnly'
 import { createStellarBridgeClient } from '../stellarBridgeClient'
 
 let ethersModulePromise: Promise<typeof import('ethers')> | null = null
@@ -70,7 +70,7 @@ function isBlockedDirectEvmRpcUrl(url: string): boolean {
 
 function isHostedBridgeRootRpcUrl(url: string): boolean {
   const raw = String(url || '').trim()
-  if (!raw || !isMetayoshiHttpUrl(raw)) return false
+  if (!raw || !isTrustedServerHttpUrl(raw)) return false
   try {
     const parsed = new URL(raw)
     const path = parsed.pathname.replace(/\/+$/, '') || '/'

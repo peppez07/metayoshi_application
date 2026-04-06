@@ -1,35 +1,38 @@
+<p align="center">
+  <img src="./public/MetayoshiLogo.png" alt="MetaYoshi Wallet logo" width="128" />
+</p>
+
 # MetaYoshi Wallet
 
-MetaYoshi Wallet is the public browser-extension wallet for the MetaYoshi project. It is built for non-custodial, multi-chain access: users keep control of their keys, approve their own actions, and work through one consistent wallet flow across configured networks.
+![Node 20+](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)
+![Vite 7](https://img.shields.io/badge/vite-7.x-646CFF?logo=vite&logoColor=white)
+![License MIT](https://img.shields.io/badge/license-MIT-16a34a)
 
-**Control beats trust.**
+MetaYoshi Wallet is a public browser-extension wallet for non-custodial, multi-chain access. Keys stay with the user, signing stays local, and the extension exposes one consistent wallet flow across configured networks.
 
-This repository is the source for MetaYoshi Wallet `0.2.1`.
+Control beats trust.
 
-## Why MetaYoshi
+## Release Status
 
-- Non-custodial by default. Private keys and seed phrases stay with the user.
-- One wallet flow across UTXO and account-based chains.
-- Real network integrations instead of a mock-only demo experience.
-- Open source code that the community can inspect, test, and improve.
+- Repository version: `0.2.1`
+- GitHub release-readiness audit completed on `2026-04-05`
+- `npm run lint`, `npm run test`, and `npm run build` pass locally
+- `npm audit --omit=dev` is clean after dependency refresh
+- Known architectural risks and open release blockers are tracked in [docs/github-release-audit-2026-04-05.md](./docs/github-release-audit-2026-04-05.md)
 
-MetaYoshi is aimed at practical daily usage: connect, review, approve, and manage assets through a familiar browser extension interface while keeping custody in your own hands.
+This repository is ready for public GitHub publication after standard documentation and hygiene cleanup. It is not yet a clean browser-store submission candidate while the high-severity architecture items in the release audit remain open.
 
-## Current focus
+## Highlights
 
-MetaYoshi `0.2.1` is focused on:
+- Non-custodial by default. Seed phrases and private keys stay with the user.
+- Browser extension packaging for Chrome, Brave, Chromium, and Firefox.
+- One wallet UI across UTXO, EVM, Cosmos-style, Solana, Sui, and Stellar-style flows.
+- Build-time network filtering through `.env.local` or `metayoshi.build.json`.
+- Public source with release audit, security policy, support guidance, and contribution standards.
 
-- browser-extension wallet UX
-- multi-chain runtime support
-- bridge-backed network access where required
-- packaging for Chrome, Brave, Chromium, and Firefox
-- safer public startup defaults for open-source distribution
+## Configured Network Coverage
 
-The public startup flow now prefers a bridge-free network when possible, so open-source builds no longer depend on the legacy RTM-first boot path.
-
-## Configured network coverage
-
-The project metadata for `0.2.1` currently includes these configured networks:
+The current project metadata includes:
 
 - Raptoreum
 - Bitcoin
@@ -50,9 +53,9 @@ The project metadata for `0.2.1` currently includes these configured networks:
 - BitcoinZ
 - zkSync Era
 
-Available networks in a given deployment can still depend on environment configuration and backend availability.
+Actual availability can still vary by environment configuration and backend availability.
 
-## Local setup
+## Quick Start
 
 Requirements:
 
@@ -71,145 +74,79 @@ Start local development:
 npm run dev
 ```
 
-Create a production build:
+Run the local validation set:
 
 ```bash
-npm run build
+npm run check:release
 ```
 
-To use local environment values, copy `.env.example` to `.env.local` and fill in your own settings.
+## Configuration
 
-Configuration guardrails:
+Copy `.env.example` to `.env.local` and fill in your own values. Do not commit `.env.local`, private credentials, or local build profiles.
 
-- keep all `VITE_*_API_BASE_URL` values on the same canonical backend origin unless you are intentionally testing a custom deployment
-- if any `VITE_*_API_BASE_URL` points at `localhost` or `127.0.0.1`, also set `VITE_ENABLE_LOCAL_BACKEND_HELP=true`
-- set both `VITE_BRIDGE_USER` and `VITE_BRIDGE_PASSWORD`, or leave both unset
-- if you set `VITE_DEFAULT_NETWORK`, it must still be enabled after `VITE_DISABLED_COINS`, `VITE_ENABLED_COINS`, and `metayoshi.build.json` filtering
+Important guardrails:
 
-To hide or deactivate specific blockchains before building, use either:
+- Keep all `VITE_*_API_BASE_URL` values on one canonical backend origin unless you are intentionally testing a split deployment.
+- If any `VITE_*_API_BASE_URL` points to `localhost` or `127.0.0.1`, also set `VITE_ENABLE_LOCAL_BACKEND_HELP=true`.
+- Set both `VITE_BRIDGE_USER` and `VITE_BRIDGE_PASSWORD`, or leave both unset.
+- If you set `VITE_DEFAULT_NETWORK`, it must remain enabled after `VITE_DISABLED_COINS`, `VITE_ENABLED_COINS`, and `metayoshi.build.json` filtering.
 
-- `.env.local` with `VITE_DISABLED_COINS`
-- `metayoshi.build.json` for a more explicit build profile
-
-Important:
-
-- this public repo does not include live server credentials
-- some backend-connected flows require your own server configuration
-- if `VITE_DEFAULT_NETWORK` is not set, the wallet prefers an enabled public-friendly startup network automatically
-
-## Available scripts
-
-- `npm run dev`
-- `npm run build`
-- `npm run lint`
-- `npm run preview`
-
-## Using the public repo
-
-This repository is intended for users, testers, and contributors who want to run the wallet locally, inspect how it works, or build their own test setup.
-
-What to expect:
-
-- the source code is public and reviewable
-- live production credentials are not bundled here
-- some wallet flows need your own backend or bridge configuration
-- available networks can vary based on your environment settings
-
-## Generic token support plan
-
-The long-term goal is a generic asset layer that makes token support feel consistent across different blockchain models instead of treating every network as a one-off integration.
-
-Direction of implementation:
-
-- EVM assets: keep improving ERC-20 token discovery, balance reads, transfer flows, and contract-based asset identification
-- Solana assets: continue SPL token and NFT handling with better metadata, mint recognition, and transfer clarity
-- Cardano assets: expand policy-token support through clearer asset identification and transfer tooling
-- Cosmos-style assets: improve denom-based asset presentation and chain-specific metadata handling
-- Shared asset UX: keep one consistent flow for logo resolution, balances, send confirmation, and transaction review
-- Safety first: token transfers should only be exposed where signing, validation, and fee handling are explicit and reviewable
-
-That means the wallet is moving toward broader generic token support, but actual availability still depends on the network, runtime support, and backend configuration in a given deployment.
-
-## Support the project
-
-MetaYoshi can be supported in three ways:
-
-- by using the wallet, testing it, and reporting reproducible issues
-- by contributing code, documentation, and UX improvements
-- by sending a direct donation to one of the project support addresses below
-
-Direct donation addresses:
-
-- Ethereum: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
-- Base: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
-- BNB: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
-- Raptoreum: `RFfwc9vv7W6hq3y6H2ZiYsb4PXZZ4Vi83m`
-- Cosmos: `cosmos1dutpffteuk2euly728lg7kkn5lpqn9m9c3d56h`
-- Dash: `Xt1U9CuRRHEwi5pjjNEVbVah3fbwcy2K4Xm`
-
-These are direct support addresses for the project. Availability of any donation prompt inside the wallet can still depend on network, runtime, and backend configuration.
-
-## Website and contact
-
-- Website: `https://metayoshi.app`
-- Support: `support@metayoshi.app`
-- Security: `security@metayoshi.app`
-
-For broader project direction, see the public website, FAQ, and whitepaper pages.
-
-## Extension permissions and page access
-
-The extension package currently requests broad `http://*/*` and `https://*/*` host access so it can support wallet provider and dapp connection behavior across supported websites.
-
-Important behavior detail:
-
-- the content script can load on broad web origins because that is how browser-extension provider support is packaged
-- the injected MetaYoshi inpage provider is still gated by the wallet allowlist and is not enabled on every page by default
-- public privacy and support pages should be kept aligned with this permission model before store submission
-
-## Configuration notes
-
-For local use, create a `.env.local` file from `.env.example` and provide your own values.
-
-### Hide networks before build
-
-If you want a wallet build that does not show specific blockchains in the app at all, you can exclude them before `npm run build`.
-
-Simple option in `.env.local`:
+Hide networks before build with `.env.local`:
 
 ```bash
 VITE_DISABLED_COINS=sol,sui,doge
 ```
 
-You can also whitelist only the networks you want:
+Or whitelist a smaller set:
 
 ```bash
 VITE_ENABLED_COINS=eth,base,arb,polygon
 ```
 
-For a dedicated build profile, create `metayoshi.build.json` in the `localdev` folder:
+For a dedicated build profile, create `metayoshi.build.json` from `metayoshi.build.example.json`.
 
-```json
-{
-  "coins": {
-    "disabled": ["sol", "sui", "doge"]
-  }
-}
-```
+## Scripts
 
-Notes:
+- `npm run dev` starts the Vite development server
+- `npm run lint` runs ESLint across the repository
+- `npm run test` runs the shipped unit and node-based tests
+- `npm run build` creates a production extension build
+- `npm run check:release` runs the main local release gate
+- `npm run release` builds and repacks release archives
 
-- hidden coins are removed from the built wallet network list, not just visually toggled off
-- `metayoshi.build.json` takes precedence over `VITE_ENABLED_COINS` and `VITE_DISABLED_COINS`
-- the build config also supports `"enabled": "tested"` or an explicit list such as `"enabled": ["eth", "base", "arb"]`
+## Extension Permissions
 
-The public repository does not include:
+The manifest requests broad optional host permissions for wallet-provider compatibility on supported websites. The current content-script path is deny-by-default for public origins and only injects the inpage provider when the site is explicitly authorized or explicitly allowlisted.
 
-- live server credentials
-- private bridge secrets
-- internal deployment configuration
+This distinction matters:
 
-If a backend-connected feature does not work in your setup, check your environment values first.
+- broad host access is still visible to reviewers and store policies
+- provider injection is not intended to be globally enabled by default
+- browser-store submission still needs the permission story, support text, and privacy text kept in sync with the actual code
+
+## Docs And Standards
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- [SUPPORT.md](./SUPPORT.md)
+- [SECURITY.md](./SECURITY.md)
+- [CHANGELOG.md](./CHANGELOG.md)
+- [NOTICE.md](./NOTICE.md)
+- [docs/release-checklist.md](./docs/release-checklist.md)
+- [docs/github-release-audit-2026-04-05.md](./docs/github-release-audit-2026-04-05.md)
+
+## Support
+
+- Website: `https://metayoshi.app`
+- Support: `support@metayoshi.app`
+- Security: `security@metayoshi.app`
+
+Project support addresses:
+
+- Ethereum / Base / BNB: `0x39904aB90441b7A2C6E5674E0Ce19Ac41607c576`
+- Raptoreum: `RFfwc9vv7W6hq3y6H2ZiYsb4PXZZ4Vi83m`
+- Cosmos: `cosmos1dutpffteuk2euly728lg7kkn5lpqn9m9c3d56h`
+- Dash: `Xt1U9CuRRHEwi5pjjNEVbVah3fbwcy2K4Xm`
 
 ## License
 

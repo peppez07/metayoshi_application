@@ -153,8 +153,8 @@ function hasConfiguredBridgeCredentials(config: UtxoRpcConfig): boolean {
 function buildHostedReadUnavailableError(config: UtxoRpcConfig, scope: string): Error {
   const label = String(config.networkId || config.coinSymbol || 'this network').trim() || 'this network'
   return new Error(
-    `Hosted MetaYoshi ${scope} endpoint is unavailable for ${label}. ` +
-    'The wallet is configured for hosted metayoshi.app reads only, so bridge-password fallback was skipped.'
+    `Configured wallet backend ${scope} endpoint is unavailable for ${label}. ` +
+    'Browser-side explorer fallback is disabled, so no direct public explorer request was attempted.'
   )
 }
 
@@ -185,10 +185,14 @@ function compactErrorText(value: string, maxLen = 260): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact
 }
 
+function isDirectExplorerFallbackEnabled(): boolean {
+  return String(import.meta.env.VITE_ENABLE_DIRECT_EXPLORER_FALLBACK || '').trim().toLowerCase() === 'true'
+}
+
 function resolveRtmExplorerBaseUrl(): string {
+  if (!isDirectExplorerFallbackEnabled()) return ''
   const configured = String(import.meta.env.VITE_RTM_EXPLORER || '').trim()
-  const base = configured || 'https://explorer.raptoreum.com'
-  return base.replace(/\/+$/, '')
+  return configured.replace(/\/+$/, '')
 }
 
 function canUseBridgeAddressAssetFallback(config: UtxoRpcConfig): boolean {
@@ -822,6 +826,7 @@ export async function fetchBridgeAddressAssetUtxos(
 
 async function fetchRtmExplorerAssetUtxos(address: string): Promise<RtmUnspentAsset[]> {
   const base = resolveRtmExplorerBaseUrl()
+  if (!base) return []
   const url = `${base}/sites/address/${encodeURIComponent(address)}`
   const res = await fetch(url, {
     method: 'GET',
@@ -1656,7 +1661,7 @@ export interface UtxoBalance {
   total: number        // in coins
 }
 
-const BTCZ_EXPLORER_FALLBACK_BASE = 'https://explorer.btcz.app'
+const BTCZ_EXPLORER_FALLBACK_BASE = ''
 const BTC_EXPLORER_MAINNET_BASE = ''
 const BTC_EXPLORER_TESTNET_BASE = ''
 const BTC_EXPLORER_TESTNET4_BASE = ''
@@ -1776,6 +1781,7 @@ function isDogecoinConfig(config: UtxoRpcConfig): boolean {
 }
 
 function buildBtczExplorerAddressUrls(address: string, suffix = ''): string[] {
+  if (!isDirectExplorerFallbackEnabled()) return []
   const encodedAddress = encodeURIComponent(address)
   const configuredBase = String(import.meta.env.VITE_BTCZ_EXPLORER || '').trim()
   const bases = dedupeStringList([configuredBase, BTCZ_EXPLORER_FALLBACK_BASE])
@@ -1815,6 +1821,7 @@ async function fetchBtczExplorerJson(config: UtxoRpcConfig, url: string): Promis
 }
 
 function buildBitcoinExplorerBases(config: UtxoRpcConfig): string[] {
+  if (!isDirectExplorerFallbackEnabled()) return []
   const customMain = String(import.meta.env.VITE_BTC_EXPLORER || '').trim()
   const customTest = String(import.meta.env.VITE_BTC_TESTNET_EXPLORER || '').trim()
   const isTestnet = isBitcoinTestnetConfig(config)

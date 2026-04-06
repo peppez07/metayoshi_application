@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: mailto:security@metayoshi.app
+    about: Report vulnerabilities privately instead of opening a public issue.
+  - name: Support
+    url: mailto:support@metayoshi.app
+    about: Ask setup or usage questions outside the issue tracker.

@@ -30,7 +30,7 @@ import { deriveCosmosAddress, isCosmosAddressForHrp } from '../lib/cosmosAddress
 import { signCosmosExecuteContractTxBase64, signCosmosTokenTransferTxBase64 } from '../lib/cosmosNonCustodial'
 import { normalizeConfiguredApiBaseUrl, resolveBalanceApiBaseUrl } from '../lib/apiBase'
 import { getMissingBridgeCredentialsMessage, normalizeBridgeCredentialValue } from '../lib/bridgeCredentials'
-import { isMetayoshiHttpUrl } from '../lib/serverOnly'
+import { isTrustedServerHttpUrl } from '../lib/serverOnly'
 import { DEFAULT_WALLET_SERVER_TIMEOUT_MS } from '../lib/serverTimeouts'
 import { encodeEvmContractLogoHint, extractEvmTokenAddressFromAssetId, extractEvmTokenAddressFromLogoUri } from '../lib/evmAssetId'
 import { buildTronAssetId, encodeTronContractLogoHint, extractTronContractFromAssetId, extractTronContractFromLogoUri, isLikelyTronContractAddress } from '../lib/tronAssetId'
@@ -4677,12 +4677,6 @@ export const useWalletStore = create<WalletState>()(
                 // Fall through to slower RPC/explorer scan.
               }
             }
-            console.groupCollapsed(`[EVM assets][${activeNetworkId}] bridge token rows for ${address}`)
-            console.log('bridgeCoin', bridgeCoin)
-            console.log('bridgeChain', bridgeChain)
-            console.log('bridgeTokenRows', bridgeTokenRows)
-            console.groupEnd()
-
             const activityTxids = activity
               .filter((entry) =>
                 String(entry?.networkId || '').trim() === activeNetworkId
@@ -4721,10 +4715,6 @@ export const useWalletStore = create<WalletState>()(
                 }
               }
             }
-            console.groupCollapsed(`[EVM assets][${activeNetworkId}] discovery payloads for ${address}`)
-            console.log('discoveredAddresses', discoveredAddresses)
-            console.log('assetsEndpointTokens', assetsEndpointTokens)
-            console.groupEnd()
             for (const discoveredAddress of discoveredAddresses) {
               if (trackedByAddress.has(discoveredAddress)) continue
               trackedByAddress.set(discoveredAddress, {
@@ -4782,11 +4772,6 @@ export const useWalletStore = create<WalletState>()(
               // Keep scan bounded when no dynamic discovery source produced candidates.
               mergedTokens = mergedTokens.slice(0, 80)
             }
-            console.groupCollapsed(`[EVM assets][${activeNetworkId}] merged token candidates for ${address}`)
-            console.log('trackedByAddress', [...trackedByAddress.values()])
-            console.log('mergedTokens', mergedTokens)
-            console.groupEnd()
-
             // Bridge-first: keep app->server transport consistent with wallet policy.
             const fungibleAssets: Record<string, number> = {}
             const fungibleAssetLogos: Record<string, string> = {}
@@ -4899,13 +4884,6 @@ export const useWalletStore = create<WalletState>()(
                   }
                 })
               : []
-            console.groupCollapsed(`[EVM assets][${activeNetworkId}] token read results for ${address}`)
-            console.log('tokenRows', tokenRows.filter(Boolean))
-            console.log('tokenReadSuccesses', tokenReadSuccesses)
-            console.log('tokenReadErrors', tokenReadErrors)
-            console.log('hasDirectEvmRpc', hasDirectEvmRpc)
-            console.groupEnd()
-
             for (const row of tokenRows) {
               if (!row) continue
               let assetKey = String(assetKeyByContract.get(row.token.address) || '').trim()
@@ -5118,14 +5096,6 @@ export const useWalletStore = create<WalletState>()(
             }
 
             const assets = { ...fungibleAssets, ...nftAssets }
-            console.groupCollapsed(`[EVM assets][${activeNetworkId}] final asset snapshot for ${address}`)
-            console.log('fungibleAssets', fungibleAssets)
-            console.log('fungibleAssetLabels', fungibleAssetLabels)
-            console.log('fungibleAssetLogos', fungibleAssetLogos)
-            console.log('nftAssets', nftAssets)
-            console.log('nftLookup', nftLookup)
-            console.log('finalAssets', assets)
-            console.groupEnd()
 
             // Do not wipe visible assets on transient provider failures.
             if (
@@ -6055,7 +6025,7 @@ export const useWalletStore = create<WalletState>()(
           const resolveSourceUrls = (uri: string): string[] => {
             const normalized = normalizeAssetUri(uri)
             if (!normalized) return []
-            if (/^https?:\/\//i.test(normalized)) return isMetayoshiHttpUrl(normalized) ? [normalized] : []
+            if (/^https?:\/\//i.test(normalized)) return isTrustedServerHttpUrl(normalized) ? [normalized] : []
             if (/^data:/i.test(normalized)) return [normalized]
             if (/^ipfs:\/\//i.test(normalized)) return []
             return [normalized]

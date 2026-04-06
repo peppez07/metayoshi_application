@@ -136,15 +136,18 @@ const CS_INPAGE_CHANNEL = 'metayoshi:inpage'
 const CS_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const INJECTION_ALLOWLIST_KEY = 'dapp_injection_allowlist_v1'
 const INJECTION_ALLOW_PRIVATE_ORIGINS_KEY = 'dapp_injection_allow_private_origins_v1'
+const WALLET_STORAGE_KEY = 'metayoshi-storage'
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
-const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
 const BLOCKED_INTERNAL_ORIGIN_MSG = 'Blocked internal application origin'
 const CONTENT_RUNTIME_KEY = '__metayoshi_content_runtime_v1'
 
 type ContentRuntimeState = {
   bootStarted: boolean
   messageListenerInstalled: boolean
+  walletSurfaceTriggerBridgeInstalled: boolean
+  storageListenerInstalled: boolean
+  providerEnabled: boolean
   bridgeConnecting: boolean
   bridgeReconnectTimer: number | null
   bridgePort: chrome.runtime.Port | null
@@ -160,6 +163,9 @@ const contentRuntime = (() => {
   const next: ContentRuntimeState = {
     bootStarted: false,
     messageListenerInstalled: false,
+    walletSurfaceTriggerBridgeInstalled: false,
+    storageListenerInstalled: false,
+    providerEnabled: false,
     bridgeConnecting: false,
     bridgeReconnectTimer: null,
     bridgePort: null
@@ -231,10 +237,43 @@ function isBlockedInternalHostname(hostname: string): boolean {
   return false
 }
 
+function unwrapPersistedStateRecord(rawValue: unknown): Record<string, unknown> | null {
+  if (!rawValue || typeof rawValue !== 'object') return null
+  const candidate = rawValue as Record<string, unknown>
+  const nestedState = candidate.state
+  if (nestedState && typeof nestedState === 'object' && !Array.isArray(nestedState)) {
+    return nestedState as Record<string, unknown>
+  }
+  return candidate
+}
+
+function normalizeHttpOrigin(value: unknown): string {
+  try {
+    const parsed = new URL(String(value || ''))
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return ''
+    return parsed.origin
+  } catch {
+    return ''
+  }
+}
+
+function parseAuthorizedOrigins(rawWalletStorage: unknown): string[] {
+  const state = unwrapPersistedStateRecord(rawWalletStorage)
+  const rawSites = Array.isArray(state?.authorizedSites) ? state.authorizedSites : []
+  const out = new Set<string>()
+  for (const entry of rawSites) {
+    const normalized = normalizeHttpOrigin(entry)
+    if (normalized) out.add(normalized)
+  }
+  return [...out]
+}
+
 async function shouldInjectOnCurrentHost(): Promise<boolean> {
   const protocol = String(window.location.protocol || '').trim().toLowerCase()
   if (protocol !== 'http:' && protocol !== 'https:') return false
 
+  const currentOrigin = normalizeHttpOrigin(window.location.href)
+  if (!currentOrigin) return false
   const hostname = String(window.location.hostname || '').trim().toLowerCase()
   if (!hostname) return false
   const matchesAnyPattern = (patterns: string[]): boolean => {
@@ -245,23 +284,30 @@ async function shouldInjectOnCurrentHost(): Promise<boolean> {
   }
 
   try {
-    const config = await chrome.storage.local.get([INJECTION_ALLOWLIST_KEY, INJECTION_ALLOW_PRIVATE_ORIGINS_KEY])
+    const config = await chrome.storage.local.get([
+      INJECTION_ALLOWLIST_KEY,
+      INJECTION_ALLOW_PRIVATE_ORIGINS_KEY,
+      WALLET_STORAGE_KEY
+    ])
     const raw = config?.[INJECTION_ALLOWLIST_KEY]
     const allowPrivateOrigins = config?.[INJECTION_ALLOW_PRIVATE_ORIGINS_KEY] === true
+    const authorizedOrigins = parseAuthorizedOrigins(config?.[WALLET_STORAGE_KEY])
     const configured = Array.isArray(raw) 
       ? raw.map(normalizeHostPattern).filter(Boolean) 
       : []
+    const isAuthorizedOrigin = authorizedOrigins.includes(currentOrigin)
 
     if (isBlockedInternalHostname(hostname)) {
+      if (isAuthorizedOrigin) return true
       if (!allowPrivateOrigins) return false
-      return configured.length === 0 ? true : matchesAnyPattern(configured)
+      return configured.length > 0 && matchesAnyPattern(configured)
     }
 
-    if (configured.length === 0) return true
+    if (isAuthorizedOrigin) return true
+    if (configured.length === 0) return false
     return matchesAnyPattern(configured)
   } catch {
-    if (isBlockedInternalHostname(hostname)) return false
-    return true
+    return false
   }
 }
 
@@ -287,6 +333,8 @@ function isWalletSurfaceTriggerElement(target: EventTarget | null): Element | nu
 }
 
 function installWalletSurfaceTriggerBridge(): void {
+  if (contentRuntime.walletSurfaceTriggerBridgeInstalled) return
+  contentRuntime.walletSurfaceTriggerBridgeInstalled = true
   window.addEventListener('click', (event) => {
     const trigger = isWalletSurfaceTriggerElement(event.target)
     if (!trigger) return
@@ -339,30 +387,10 @@ function isContextInvalidatedMessage(message: string): boolean {
   return CONTEXT_INVALIDATED_RE.test(String(message ?? ''))
 }
 
-function tryAutoReloadAfterContextInvalidation(): boolean {
-  try {
-    if (window.top !== window.self) return false
-    const alreadyReloaded = window.sessionStorage.getItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY) === '1'
-    if (alreadyReloaded) return false
-    window.sessionStorage.setItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY, '1')
-    window.setTimeout(() => {
-      try {
-        window.location.reload()
-      } catch {
-        // ignore reload errors
-      }
-    }, 40)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function markContextInvalidated(message: string): void {
   if (bridgeContextInvalidated) return
   bridgeContextInvalidated = true
   void recordRuntimeError('content-script', message, { kind: 'context-invalidated' })
-  tryAutoReloadAfterContextInvalidation()
   postToPage({
     type: 'bridge_error',
     error: {
@@ -370,6 +398,22 @@ function markContextInvalidated(message: string): void {
       message: CONTEXT_INVALIDATED_MSG,
       data: { detail: String(message ?? 'Extension context invalidated') }
     }
+  })
+}
+
+function installStorageChangeBridge(): void {
+  if (contentRuntime.storageListenerInstalled) return
+  contentRuntime.storageListenerInstalled = true
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return
+    if (
+      !changes[INJECTION_ALLOWLIST_KEY]
+      && !changes[INJECTION_ALLOW_PRIVATE_ORIGINS_KEY]
+      && !changes[WALLET_STORAGE_KEY]
+    ) {
+      return
+    }
+    void enableProviderForCurrentHost()
   })
 }
 
@@ -570,14 +614,10 @@ function initEventBridge(): void {
   })
 }
 
-async function boot(): Promise<void> {
+async function enableProviderForCurrentHost(): Promise<void> {
+  if (contentRuntime.providerEnabled) return
   const enabled = await shouldInjectOnCurrentHost()
   if (!enabled) return
-  try {
-    window.sessionStorage.removeItem(CONTEXT_INVALIDATED_AUTO_RELOAD_KEY)
-  } catch {
-    // ignore storage errors
-  }
 
   if (!contentRuntime.messageListenerInstalled) {
     window.addEventListener('message', (event) => {
@@ -591,9 +631,15 @@ async function boot(): Promise<void> {
     contentRuntime.messageListenerInstalled = true
   }
 
-  installWalletSurfaceTriggerBridge()
+  contentRuntime.providerEnabled = true
   injectInpage()
   initEventBridge()
+}
+
+async function boot(): Promise<void> {
+  installWalletSurfaceTriggerBridge()
+  installStorageChangeBridge()
+  await enableProviderForCurrentHost()
 }
 
 if (!contentRuntime.bootStarted) {

@@ -716,7 +716,7 @@ function buildSolanaWalletStandardWallet(): SolanaWalletStandardWallet {
   const wallet = {
     version: '1.0.0',
     name: 'MetaYoshi',
-    icon: 'https://web.metayoshi.app/favicon.ico',
+    icon: EIP6963_PROVIDER_ICON,
     chains: ['solana:mainnet'],
     features: {
       'standard:connect': {
@@ -756,19 +756,22 @@ function buildSolanaWalletStandardWallet(): SolanaWalletStandardWallet {
   return wallet
 }
 
+const EIP6963_PROVIDER_ICON = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 viewBox%3D%220 0 96 96%22%3E%3Cdefs%3E%3ClinearGradient id%3D%22g%22 x1%3D%220%25%22 y1%3D%220%25%22 x2%3D%22100%25%22 y2%3D%22100%25%22%3E%3Cstop offset%3D%220%25%22 stop-color%3D%22%23ffb36b%22/%3E%3Cstop offset%3D%22100%25%22 stop-color%3D%22%23ff6800%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width%3D%2296%22 height%3D%2296%22 rx%3D%2224%22 fill%3D%22%2313161f%22/%3E%3Ccircle cx%3D%2248%22 cy%3D%2248%22 r%3D%2231%22 fill%3D%22url(%23g)%22/%3E%3Cpath d%3D%22M30 31h12l6 11 6-11h12L57 47l10 18H55l-7-12-7 12H29l10-18-9-16z%22 fill%3D%22%23fff7ef%22/%3E%3C/svg%3E'
+
 const EIP6963_PROVIDER_INFO = {
   uuid: '2f0c6d35-b9e1-4e9d-9d2f-7f1d5f1f3a20',
   name: 'MetaYoshi',
-  icon: 'https://web.metayoshi.app/favicon.ico',
+  icon: EIP6963_PROVIDER_ICON,
   rdns: 'app.metayoshi.wallet'
 }
 
 function announceEip6963Provider(): void {
+  const detail = Object.freeze({
+    info: Object.freeze({ ...EIP6963_PROVIDER_INFO }),
+    provider: ethereumProvider
+  })
   window.dispatchEvent(new CustomEvent(EIP6963_ANNOUNCE_EVENT, {
-    detail: {
-      info: EIP6963_PROVIDER_INFO,
-      provider: ethereumProvider
-    }
+    detail
   }))
 }
 

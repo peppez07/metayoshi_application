@@ -233,17 +233,10 @@ function App() {
         markActive()
       }
     }
-    const lockOnPageHide = () => {
-      const state = useWalletStore.getState()
-      if (!state.isInitialized || state.isLocked) return
-      state.lock()
-    }
 
     window.addEventListener('pointerdown', markActive, true)
     window.addEventListener('keydown', markActive, true)
     window.addEventListener('focus', markActive)
-    window.addEventListener('pagehide', lockOnPageHide)
-    window.addEventListener('beforeunload', lockOnPageHide)
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange)
     }
@@ -252,8 +245,6 @@ function App() {
       window.removeEventListener('pointerdown', markActive, true)
       window.removeEventListener('keydown', markActive, true)
       window.removeEventListener('focus', markActive)
-      window.removeEventListener('pagehide', lockOnPageHide)
-      window.removeEventListener('beforeunload', lockOnPageHide)
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange)
       }

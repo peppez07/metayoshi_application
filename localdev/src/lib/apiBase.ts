@@ -1,4 +1,4 @@
-export const DEFAULT_PUBLIC_API_BASE_URL = 'https://api.metayoshi.app'
+export const DEFAULT_PUBLIC_API_BASE_URL = 'http://127.0.0.1:28080'
 const API_HOST_ALIASES = ['api', 'auth', 'balance', 'send', 'swap', 'www', 'web', 'tokens'] as const
 
 function isLocalApiBaseEnabled(): boolean {

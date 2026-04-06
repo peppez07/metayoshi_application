@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible defect in MetaYoshi Wallet
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Wallet version
+      description: Include the app or extension version you tested.
+      placeholder: "0.2.1"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Include browser name and version.
+      placeholder: "Chrome 135 / Firefox 138"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the shortest set of steps that reproduces the issue.
+      placeholder: |
+        1. Open ...
+        2. Connect ...
+        3. Approve ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact secrets, seed phrases, private keys, and passwords.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed secrets, private keys, seed phrases, and passwords from this report.
+          required: true
+        - label: I confirmed this is not a private security report.
+          required: true

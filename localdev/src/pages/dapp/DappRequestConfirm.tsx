@@ -35,6 +35,7 @@ import { buildNativeActivityAssetId } from '../../lib/activityIdentity'
 import { getDappRequestDisplayType, isAuthSignatureMessage, isNonBroadcastRequestMethod } from '../../lib/dappRequestDescriptors'
 import { getSendBlockedSyncReason, isSendBlockedBySync } from '../../lib/sendSyncPolicy'
 import { isCosmosLikeModelId, resolveRuntimeModelId } from '../../lib/runtimeModel'
+import { usePendingDappApproval } from './usePendingDappApproval'
 import {
   broadcastCosmosTx,
   signCosmosAmino,
@@ -71,6 +72,13 @@ function previewJson(value: unknown, maxLength = 240): string {
   } catch {
     return String(value ?? '')
   }
+}
+
+function buildPendingRequestRoute(request: DappPendingRequest): string {
+  if (request.method === 'wallet_sendAsset' || request.method === 'wallet_sendTransaction') {
+    return `/tx/confirm?dappRequest=1&id=${encodeURIComponent(request.id)}`
+  }
+  return `/dapp/request/confirm?id=${encodeURIComponent(request.id)}`
 }
 
 function formatBpsPercent(bps: number): string {
@@ -121,7 +129,9 @@ const DappRequestConfirm: React.FC = () => {
     syncPercent,
     lowSyncStreak
   } = useWalletStore()
+  const { pendingApproval, loadingApproval } = usePendingDappApproval()
   const [pendingRequest, setPendingRequest] = useState<DappPendingRequest | null>(null)
+  const [requestSnapshot, setRequestSnapshot] = useState<DappPendingRequest | null>(null)
   const [loadingRequest, setLoadingRequest] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -133,6 +143,19 @@ const DappRequestConfirm: React.FC = () => {
   const [rtmIssuerVerificationError, setRtmIssuerVerificationError] = useState('')
   const [rtmIssuerVerificationLoading, setRtmIssuerVerificationLoading] = useState(false)
 
+  useEffect(() => {
+    if (!pendingRequest || pendingRequest.expiresAt <= Date.now()) return
+    setRequestSnapshot(pendingRequest)
+  }, [pendingRequest])
+
+  const displayedRequest = (
+    pendingRequest && pendingRequest.expiresAt > Date.now()
+      ? pendingRequest
+      : requestSnapshot && requestSnapshot.expiresAt > Date.now()
+        ? requestSnapshot
+        : null
+  )
+
   const requestedId = useMemo(
     () => new URLSearchParams(location.search).get('id') || '',
     [location.search]
@@ -143,25 +166,25 @@ const DappRequestConfirm: React.FC = () => {
     [networks, activeNetworkId]
   )
   const requestNetwork = useMemo(
-    () => networks.find((n) => n.id === pendingRequest?.networkId) || activeNetwork,
-    [networks, pendingRequest, activeNetwork]
+    () => networks.find((n) => n.id === displayedRequest?.networkId) || activeNetwork,
+    [networks, displayedRequest, activeNetwork]
   )
   const requestModelId = resolveRuntimeModelId(requestNetwork)
-  const requestPayload = asRecord(pendingRequest?.request)
-  const requestMethod = String(pendingRequest?.method || '').trim()
-  const requestAccount = accounts.find((account) => account.id === pendingRequest?.accountId) || accounts[0]
+  const requestPayload = asRecord(displayedRequest?.request)
+  const requestMethod = String(displayedRequest?.method || '').trim()
+  const requestAccount = accounts.find((account) => account.id === displayedRequest?.accountId) || accounts[0]
   const requestAccountKindLabel = getAccountKindLabel(requestAccount)
   const requestAccountIsMultisig = isMultisigAccount(requestAccount)
-  const requestIsAssetSend = pendingRequest?.method === 'wallet_sendAsset'
+  const requestIsAssetSend = displayedRequest?.method === 'wallet_sendAsset'
   const requestIsRtmMarketAction = requestMethod === 'wallet_rtmMarketAction'
   const requestIsRtmIssuerAction = requestMethod === 'wallet_rtmIssuerAction'
   const requestIsRtmGetPublicKey = requestMethod === 'wallet_rtmGetPublicKey'
   const requestIsRtmSignMessage = requestMethod === 'wallet_rtmSignMessage'
-  const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(pendingRequest?.request)
-  const rtmMarketAction = (requestIsRtmMarketAction ? pendingRequest?.request : null) as RtmMarketAction | null
+  const requestIsEvmTx = !requestIsAssetSend && isDappEvmTransactionRequest(displayedRequest?.request)
+  const rtmMarketAction = (requestIsRtmMarketAction ? displayedRequest?.request : null) as RtmMarketAction | null
   const rtmMarketActionIsListingScoped = Boolean(requestIsRtmMarketAction && rtmMarketAction && isRtmListingMarketAction(rtmMarketAction))
   const rtmMarketActionIsOrderScoped = Boolean(requestIsRtmMarketAction && rtmMarketAction && isRtmOrderMarketAction(rtmMarketAction))
-  const rtmIssuerAction = (requestIsRtmIssuerAction ? pendingRequest?.request : null) as RtmIssuerAction | null
+  const rtmIssuerAction = (requestIsRtmIssuerAction ? displayedRequest?.request : null) as RtmIssuerAction | null
   const requestIsSignMessage = requestMethod === 'wallet_signMessage' || requestIsRtmSignMessage
   const requestIsSignTypedData = requestMethod === 'wallet_signTypedData'
   const requestIsSignTransaction = requestMethod === 'wallet_signTransaction'
@@ -172,7 +195,7 @@ const DappRequestConfirm: React.FC = () => {
   const requestIsCosmosSendTx = requestMethod === 'wallet_cosmosSendTx'
   const requestIsCosmosGetKey = requestMethod === 'wallet_cosmosGetKey'
   const requestIsAuthSignature = requestIsSignMessage && isAuthSignatureMessage(requestPayload?.message)
-  const normalizedRequestTypeLabel = getDappRequestDisplayType(pendingRequest)
+  const normalizedRequestTypeLabel = getDappRequestDisplayType(displayedRequest)
   const requestTypeLabel = requestAccountIsMultisig
     ? (
         requestIsSignMessage
@@ -214,10 +237,10 @@ const DappRequestConfirm: React.FC = () => {
     : requestIsRtmIssuerAction
     ? `RTM Issuer Action${rtmIssuerAction?.kind ? ` (${String(rtmIssuerAction.kind).replaceAll('_', ' ')})` : ''}`
     : requestIsEvmTx
-    ? (String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() ? 'Contract Call' : 'Contract Deployment')
+    ? (String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() ? 'Contract Call' : 'Contract Deployment')
     : normalizedRequestTypeLabel
   const requestTo = requestIsAssetSend
-    ? String((pendingRequest?.request as any)?.toAddress || '')
+    ? String((displayedRequest?.request as any)?.toAddress || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.toAddress || rtmMarketAction?.fromAddress || '')
     : requestIsRtmIssuerAction
@@ -239,10 +262,10 @@ const DappRequestConfirm: React.FC = () => {
     : requestIsCosmosSendTx
     ? String(requestPayload?.chainId || requestPayload?.mode || '').trim() || 'Broadcast'
     : requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() || 'Contract Creation'
-    : String((pendingRequest?.request as any)?.to || '')
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.to || '').trim() || 'Contract Creation'
+    : String((displayedRequest?.request as any)?.to || '')
   const requestAmount = requestIsAssetSend
-    ? String((pendingRequest?.request as any)?.qty || '')
+    ? String((displayedRequest?.request as any)?.qty || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.qty || rtmMarketAction?.amount || '')
     : requestIsRtmIssuerAction
@@ -267,11 +290,11 @@ const DappRequestConfirm: React.FC = () => {
     ? String(requestPayload?.mode || '')
     : requestIsEvmTx
     ? String(
-      (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.value
-      || (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.amount
+      (displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.value
+      || (displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.amount
       || '0'
     )
-    : String((pendingRequest?.request as any)?.amount || '')
+    : String((displayedRequest?.request as any)?.amount || '')
   const rtmMarketReferenceId = !requestIsRtmMarketAction || !rtmMarketAction
     ? ''
     : rtmMarketActionIsListingScoped
@@ -284,31 +307,31 @@ const DappRequestConfirm: React.FC = () => {
   const multisigUnsupportedReason = requestAccountIsMultisig
     ? 'Multisig accounts are wallet-managed only in this build. Dapp message signing, typed data, and direct transaction requests stay disabled.'
     : ''
-  const requestMemo = String((pendingRequest?.request as any)?.memo || '').trim()
+  const requestMemo = String((displayedRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
-    ? String((pendingRequest?.request as any)?.assetId || '')
+    ? String((displayedRequest?.request as any)?.assetId || '')
     : requestIsRtmMarketAction
     ? String(rtmMarketAction?.assetId || '')
     : requestIsRtmIssuerAction
     ? String(rtmIssuerAction?.subName ? `${rtmIssuerAction.rootName}|${rtmIssuerAction.subName}` : rtmIssuerAction?.rootName || '')
     : ''
   const requestData = requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.data || '').trim()
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.data || '').trim()
     : ''
   const requestGasLimit = requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasLimit || '').trim()
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasLimit || '').trim()
     : ''
   const requestGasPrice = requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasPrice || '').trim()
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.gasPrice || '').trim()
     : ''
   const requestMaxFeePerGas = requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxFeePerGas || '').trim()
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxFeePerGas || '').trim()
     : ''
   const requestMaxPriorityFeePerGas = requestIsEvmTx
-    ? String((pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxPriorityFeePerGas || '').trim()
+    ? String((displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.maxPriorityFeePerGas || '').trim()
     : ''
   const requestTxType = requestIsEvmTx
-    ? (pendingRequest?.request as DappSendEvmTransactionPayload | undefined)?.type
+    ? (displayedRequest?.request as DappSendEvmTransactionPayload | undefined)?.type
     : undefined
   const requestPreview = requestIsSignMessage
     ? previewJson(requestPayload?.message || '')
@@ -351,7 +374,12 @@ const DappRequestConfirm: React.FC = () => {
     const applyPendingValue = (rawValue: unknown): void => {
       const parsed = parseDappPendingRequest(rawValue)
       if (!mounted) return
-      if (!parsed || (requestedId && parsed.id !== requestedId)) {
+      if (!parsed) {
+        setPendingRequest(null)
+        setLoadingRequest(false)
+        return
+      }
+      if (requestedId && parsed.id !== requestedId) {
         setPendingRequest(null)
         setLoadingRequest(false)
         return
@@ -389,7 +417,7 @@ const DappRequestConfirm: React.FC = () => {
       mounted = false
       chrome.storage.onChanged.removeListener(onStorageChanged)
     }
-  }, [requestedId])
+  }, [navigate, requestedId])
 
   useEffect(() => {
     if (!pendingRequest) return
@@ -399,6 +427,12 @@ const DappRequestConfirm: React.FC = () => {
     if (!isWalletSendRoute) return
     navigate(`/tx/confirm?dappRequest=1&id=${encodeURIComponent(pendingRequest.id)}`, { replace: true })
   }, [navigate, pendingRequest, requestIsEvmTx])
+
+  useEffect(() => {
+    if (loadingRequest || loadingApproval) return
+    if (displayedRequest || !pendingApproval) return
+    navigate('/dapp/connect/1', { replace: true })
+  }, [displayedRequest, loadingApproval, loadingRequest, navigate, pendingApproval])
 
   useEffect(() => {
     if (!requestIsRtmMarketAction || !rtmMarketAction) {

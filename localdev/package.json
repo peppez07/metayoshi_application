@@ -2,10 +2,24 @@
   "name": "metayoshi-wallet",
   "private": true,
   "version": "0.2.1",
+  "description": "MetaYoshi Wallet browser extension for non-custodial multi-chain access.",
+  "keywords": [
+    "wallet",
+    "browser-extension",
+    "web3",
+    "multi-chain",
+    "crypto"
+  ],
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "node --import tsx --test src/background/extensionSurfacePolicy.test.ts src/store/assetScopeState.test.ts src/coins/serverRegistry/runtime.test.ts scripts/verify-rtm-multisig.test.ts",
+    "check:release": "npm run lint && npm run test && npm run build",
     "validate:env": "tsx scripts/validate-wallet-env.ts",
     "build:validated": "npm run validate:env && npm run build",
     "smoke:evm-token-send-prep": "tsx scripts/prepare-evm-token-sends.ts",
@@ -29,7 +43,7 @@
     "@scure/btc-signer": "^2.0.1",
     "@solana/web3.js": "^1.98.4",
     "@stellar/stellar-sdk": "^14.5.0",
-    "@walletconnect/ethereum-provider": "^2.23.7",
+    "@walletconnect/ethereum-provider": "^2.23.9",
     "bip39": "^3.1.0",
     "bs58": "^6.0.0",
     "buffer": "^6.0.3",
@@ -52,24 +66,28 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@eslint/js": "^9.0.0",
-    "@types/chrome": "^0.1.37",
+    "@eslint/js": "^9.39.4",
+    "@types/chrome": "^0.1.39",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@typescript-eslint/eslint-plugin": "8.56.1",
-    "@typescript-eslint/parser": "8.56.1",
+    "@typescript-eslint/eslint-plugin": "8.58.0",
+    "@typescript-eslint/parser": "8.58.0",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.27",
-    "eslint": "^9.0.0",
+    "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "7.0.1",
     "fake-indexeddb": "^6.2.5",
-    "postcss": "^8.5.6",
+    "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "tsx": "^4.21.0",
     "typescript": "5.9.3",
     "vite": "^7.3.1",
     "vite-plugin-top-level-await": "^1.6.0",
-    "vite-plugin-wasm": "^3.5.0"
+    "vite-plugin-wasm": "^3.6.0"
+  },
+  "overrides": {
+    "defu": "6.1.6",
+    "h3": "1.15.11"
   }
 }

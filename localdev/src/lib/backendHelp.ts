@@ -1,8 +1,8 @@
-import { normalizeConfiguredApiBaseUrl } from './apiBase'
+import { DEFAULT_PUBLIC_API_BASE_URL, normalizeConfiguredApiBaseUrl } from './apiBase'
 import { DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS } from './serverTimeouts'
 
 const HELP_TIMEOUT_MS = DEFAULT_WALLET_SERVER_DISCOVERY_TIMEOUT_MS
-const DEFAULT_PUBLIC_HELP_ORIGIN = 'https://api.metayoshi.app'
+const DEFAULT_PUBLIC_HELP_ORIGIN = DEFAULT_PUBLIC_API_BASE_URL
 
 type HelpCommands = Record<string, string[]>
 
@@ -144,11 +144,9 @@ function resolveHelpOriginCandidates(base?: unknown): string[] {
       if (apiHelpOrigin) candidates.push(apiHelpOrigin)
       candidates.push(configuredOrigin)
     }
-  } else {
-    candidates.push(DEFAULT_PUBLIC_HELP_ORIGIN)
   }
 
-  candidates.push(DEFAULT_PUBLIC_HELP_ORIGIN)
+  if (DEFAULT_PUBLIC_HELP_ORIGIN) candidates.push(DEFAULT_PUBLIC_HELP_ORIGIN)
   return unique(candidates.filter(Boolean))
 }
 

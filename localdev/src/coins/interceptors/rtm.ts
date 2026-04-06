@@ -4,7 +4,7 @@ import { resolvePublicApiBaseUrl } from '../../lib/apiBase'
 
 // RTM mainnet API profile and transport interceptor.
 const DEFAULT_WALLET = 'mainwallet'
-const DEFAULT_RTM_EXPLORER_URL = 'https://explorer.raptoreum.com'
+const DEFAULT_RTM_EXPLORER_URL = ''
 
 const apiBaseUrl = resolvePublicApiBaseUrl((import.meta as any)?.env?.VITE_API_BASE_URL)
 const wallet = String(import.meta.env.VITE_RTM_WALLET || DEFAULT_WALLET).trim() || DEFAULT_WALLET
