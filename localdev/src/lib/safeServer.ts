@@ -13,25 +13,21 @@ import type {
   SafeTransactionDetails,
   SafeWalletTx
 } from './safe'
+import {
+  assertSafeServiceConfigured,
+  isSupportedSafeMultisigChainId
+} from './safeConfig'
 
 const APP_API_KEY = String((import.meta as any)?.env?.VITE_APP_API_KEY || '').trim()
 const SAFE_EXEC_IFACE = new ethers.Interface([
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)'
 ])
 
-export const SAFE_MULTISIG_SUPPORTED_CHAIN_IDS = [1, 10, 100, 137, 8453, 42161, 43114] as const
-const SAFE_MULTISIG_SUPPORTED_CHAIN_ID_SET = new Set<number>(SAFE_MULTISIG_SUPPORTED_CHAIN_IDS)
-
 type JsonResponse = {
   ok: boolean
   status: number
   json: any
   text: string
-}
-
-export function isSupportedSafeMultisigChainId(value: unknown): boolean {
-  const parsed = typeof value === 'number' ? value : Number(String(value || '').trim())
-  return Number.isInteger(parsed) && parsed > 0 && SAFE_MULTISIG_SUPPORTED_CHAIN_ID_SET.has(parsed)
 }
 
 function readString(value: unknown): string {
@@ -185,6 +181,7 @@ export async function fetchSafeInfoFromServer(params: {
   if (!isSupportedSafeMultisigChainId(params.chainId)) {
     throw new Error('unsupported_safe_chain')
   }
+  assertSafeServiceConfigured(params.chainId)
   const safeAddress = normalizeSafeAddress(params.safeAddress)
   const payload = await fetchMultisigServerJson(
     params.rpcConfig,
@@ -206,6 +203,10 @@ export async function listSafePendingTransactionsFromServer(params: {
   safeAddress: string
   rpcConfig: UtxoRpcConfig
 }): Promise<SafePendingTransactionSummary[]> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const safeAddress = normalizeSafeAddress(params.safeAddress)
   const payload = await fetchMultisigServerJson(
     params.rpcConfig,
@@ -248,6 +249,10 @@ export async function prepareSafeTransactionFromServer(params: {
     masterCopy?: string | null
   }
 }> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const payload = await fetchMultisigServerJson(params.rpcConfig, '/v1/multisig/evm/safe/prepare', {
     method: 'POST',
     headers: {
@@ -292,6 +297,10 @@ export async function getSafeTransactionDetailsFromServer(params: {
     value: Record<string, unknown>
   }
 }> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const safeAddress = normalizeSafeAddress(params.safeAddress)
   const safeTxHash = readString(params.safeTxHash)
   const payload = await fetchMultisigServerJson(
@@ -318,6 +327,10 @@ export async function proposeSafeTransactionFromServer(params: {
   signer: SafeOwnerSigner
   origin?: string
 }): Promise<SafeProposalResult> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const prepared = await prepareSafeTransactionFromServer({
     chainId: params.chainId,
     safeAddress: params.safeAddress,
@@ -354,6 +367,10 @@ export async function confirmSafeTransactionFromServer(params: {
   rpcConfig: UtxoRpcConfig
   signer: SafeOwnerSigner
 }): Promise<SafeProposalResult> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const details = await getSafeTransactionDetailsFromServer({
     chainId: params.chainId,
     safeAddress: params.safeAddress,
@@ -388,6 +405,10 @@ export async function relaySafeExecutionFromServer(params: {
   signedTxHex: string
   rpcConfig: UtxoRpcConfig
 }): Promise<{ txid: string }> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const payload = await fetchMultisigServerJson(params.rpcConfig, '/v1/multisig/evm/safe/relay', {
     method: 'POST',
     headers: {
@@ -422,6 +443,10 @@ export async function executeSafeTransactionViaServer(params: {
     type?: 2
   }) => Promise<{ hash: string }>
 }): Promise<SafeExecutionResult> {
+  if (!isSupportedSafeMultisigChainId(params.chainId)) {
+    throw new Error('unsupported_safe_chain')
+  }
+  assertSafeServiceConfigured(params.chainId)
   const details = await getSafeTransactionDetailsFromServer({
     chainId: params.chainId,
     safeAddress: params.safeAddress,

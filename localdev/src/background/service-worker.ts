@@ -34,7 +34,12 @@ import {
   type DappRequestMethod,
   type DappScope
 } from '../lib/dappPermissions'
-import { getAccountAddressForNetwork, isMultisigAccount } from '../lib/multisig'
+import {
+  buildMultisigUnsupportedMethodMessage,
+  getAccountAddressForNetwork,
+  isMultisigAccount,
+  isMultisigDappMethodBlocked
+} from '../lib/multisig'
 import { callBridgeMethod, type UtxoRpcConfig } from '../lib/utxoRpc'
 import { deriveUtxoAddress } from '../lib/utxoAddress'
 import { setExtensionSurfaceRoute } from '../lib/extensionSurfaceRoute'
@@ -253,7 +258,7 @@ interface WalletState {
     family?: string
     derivationIndex?: number
     multisig?: unknown
-    addresses: { EVM?: string; UTXO?: string; XRP?: string; COSMOS?: string }
+    addresses: { EVM?: string; UTXO?: string; XRP?: string; COSMOS?: string; SOL?: string; SUI?: string; XLM?: string; TRON?: string; XMR?: string }
     networkAddresses?: Record<string, string>
     networkBalances?: Record<string, string>
     balance?: string
@@ -560,7 +565,7 @@ function findFirstNetworkWithActiveAddress(
 function throwUnsupportedMultisigMethod(method: string): never {
   throw {
     code: -32603,
-    message: `${method} is not supported for multisig accounts in this build`
+    message: buildMultisigUnsupportedMethodMessage(method)
   }
 }
 
@@ -2361,15 +2366,7 @@ async function handleRpcMethod(
     const activeAccount = getActiveAccountFromState(state)
     const multisigActive = isMultisigAccount(activeAccount)
     const advertisedMethods = multisigActive
-      ? methodMatrix.methods.filter((entry) => !(
-          SIGN_MESSAGE_METHODS.has(entry)
-          || ETHEREUM_SIGN_METHODS.has(entry)
-          || SIGN_TYPED_DATA_METHODS.has(entry)
-          || ETHEREUM_SIGN_TYPED_DATA_METHODS.has(entry)
-          || SIGN_TRANSACTION_METHODS.has(entry)
-          || SIGN_ALL_TRANSACTIONS_METHODS.has(entry)
-          || SIGN_AND_SEND_TRANSACTION_METHODS.has(entry)
-        ))
+      ? methodMatrix.methods.filter((entry) => !isMultisigDappMethodBlocked(entry))
       : methodMatrix.methods
     const features = {
       nativeSend: multisigActive ? false : Boolean(netCaps.features.nativeSend),
@@ -3033,10 +3030,7 @@ async function handleRpcMethod(
     const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
     if (isMultisigAccount(activeAccount)) {
-      throw {
-        code: -32603,
-        message: 'eth_sendTransaction is not available for multisig accounts in this build'
-      }
+      throwUnsupportedMultisigMethod(method)
     }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
@@ -3062,6 +3056,9 @@ async function handleRpcMethod(
     }
     const activeAccount = getActiveAccountFromState(state)
     if (!activeAccount) throw { code: -32603, message: 'No account available' }
+    if (isMultisigAccount(activeAccount)) {
+      throwUnsupportedMultisigMethod(method)
+    }
     if (origin) {
       const approved = await requestScopes(origin, ['read', 'send_coin'], { networkId: effectiveNetworkId, surfaceTarget })
       if (!approved) throw { code: 4001, message: 'User rejected the request' }

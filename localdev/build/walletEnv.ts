@@ -1,6 +1,7 @@
 import path from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
+import { getSafeChainConfigurations, getSafeServiceConfiguration } from '../src/lib/safeConfig'
 
 const API_HOST_ALIASES = ['api', 'auth', 'balance', 'send', 'swap', 'www', 'web', 'tokens'] as const
 
@@ -166,7 +167,9 @@ export function validateWalletEnvConfiguration(baseDir = walletRootDir): void {
     'VITE_BRIDGE_USER',
     'VITE_BRIDGE_PASSWORD',
     'VITE_APP_API_KEY',
-    'VITE_BRIDGE_TX_AUTH_KEY'
+    'VITE_BRIDGE_TX_AUTH_KEY',
+    'VITE_SAFE_SERVICE_BASE_URL',
+    ...getSafeChainConfigurations().map((config) => config.envKey)
   ] as const
   for (const key of relevantProcessKeys) {
     const value = String(process.env[key] ?? '').trim()
@@ -246,10 +249,33 @@ export function validateWalletEnvConfiguration(baseDir = walletRootDir): void {
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean)
   )
+  const enabledCoins = new Set(
+    String(env.VITE_ENABLED_COINS || '')
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  )
   const configuredDefaultNetwork = String(env.VITE_DEFAULT_NETWORK || '').trim().toLowerCase()
   if (configuredDefaultNetwork && disabledCoins.has(configuredDefaultNetwork)) {
     errors.push(
       `VITE_DEFAULT_NETWORK=${configuredDefaultNetwork} is also listed in VITE_DISABLED_COINS. Choose a startup network that remains enabled.`
+    )
+  }
+
+  const isSafeChainEnabled = (aliases: readonly string[]): boolean => {
+    const normalizedAliases = aliases.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+    if (normalizedAliases.length === 0) return false
+    if (enabledCoins.size > 0) return normalizedAliases.some((alias) => enabledCoins.has(alias))
+    return !normalizedAliases.some((alias) => disabledCoins.has(alias))
+  }
+
+  for (const safeChain of getSafeChainConfigurations()) {
+    if (!isSafeChainEnabled(safeChain.networkAliases)) continue
+    const service = getSafeServiceConfiguration(safeChain.chainId, env)
+    if (service.serviceUrl) continue
+    errors.push(
+      `Safe multisig is enabled for ${safeChain.label} (${safeChain.chainId}) but no Safe service endpoint is configured. ` +
+      `Set ${safeChain.envKey} or VITE_SAFE_SERVICE_BASE_URL, or disable one of: ${safeChain.networkAliases.join(', ')}.`
     )
   }
 

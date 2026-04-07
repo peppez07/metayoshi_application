@@ -95,9 +95,9 @@ import {
   isRtmMultisigAccount,
   isRtmMultisigMetadata,
   isWalletReadyMultisigNetwork,
+  isWalletReadySafeMultisigNetwork,
   isSafeMultisigAccount,
   isSafeMultisigMetadata,
-  isSupportedSafeMultisigNetwork,
   isMultisigAccount,
   isWatchOnlyAccount,
   normalizeAccountKind
@@ -111,12 +111,12 @@ import {
 import {
   executeSafeTransactionViaServer,
   fetchSafeInfoFromServer,
-  isSupportedSafeMultisigChainId,
   listSafePendingTransactionsFromServer,
   prepareSafeTransactionFromServer,
   proposeSafeTransactionFromServer,
   confirmSafeTransactionFromServer
 } from '../lib/safeServer'
+import { isSupportedSafeMultisigChainId } from '../lib/safeConfig'
 import {
   fetchChainBalanceAndSync,
   type ChainBalanceSyncResult,
@@ -1248,7 +1248,7 @@ function getAccountCapabilitiesForNetwork(account: Account | null, network: Netw
   const isWatchOnly = isWatchOnlyAccount(account) || (network?.derivation?.status === 'unsupported' && !isMultisig)
   return {
     canSend: !isWatchOnly,
-    canUseDappSend: !isWatchOnly && !isMultisig,
+    canUseDappSend: !isWatchOnly && (!isMultisig || Boolean(account?.multisig?.capabilities?.dappSend)),
     canSignMessages: isMultisig ? Boolean(account?.multisig?.capabilities?.canSignMessages) : !isWatchOnly,
     canSignTypedData: isMultisig ? Boolean(account?.multisig?.capabilities?.canSignTypedData) : !isWatchOnly,
     canUseBackendAuth: safeMultisig ? Boolean(safeMultisig.multisig.ownerSignerAccountId) : !isMultisig && !isWatchOnly,
@@ -1288,6 +1288,9 @@ async function dispatchSafeTransactionFlow(params: {
   >
 }): Promise<{ hash: string; safeTxHash?: string; status?: 'proposed' | 'confirmed' | 'executed' }> {
   if (params.network.id !== params.account.multisig.networkId) {
+    throw new Error('wrong_network_for_safe')
+  }
+  if (!isWalletReadySafeMultisigNetwork(params.network)) {
     throw new Error('wrong_network_for_safe')
   }
   const chainId = Number(params.network.chainId || 0)
@@ -3404,7 +3407,8 @@ function defaultMultisigCapabilities(): MultisigCapabilities {
     canPropose: true,
     canExecute: true,
     canSignMessages: false,
-    canSignTypedData: false
+    canSignTypedData: false,
+    dappSend: false
   }
 }
 
@@ -3413,7 +3417,8 @@ function defaultBtcMultisigCapabilities(localSignerCount: number, threshold: num
     canPropose: false,
     canExecute: localSignerCount >= threshold,
     canSignMessages: false,
-    canSignTypedData: false
+    canSignTypedData: false,
+    dappSend: false
   }
 }
 
@@ -3559,7 +3564,9 @@ function buildBaseAccount(candidate: Partial<Account>, index: number): Account {
       SOL: addresses.SOL ?? '',
       SUI: addresses.SUI ?? '',
       XRP: addresses.XRP ?? '',
-      XLM: addresses.XLM ?? ''
+      XLM: addresses.XLM ?? '',
+      TRON: addresses.TRON ?? '',
+      XMR: addresses.XMR ?? ''
     },
     networkAddresses,
     networkBalances,
@@ -4101,7 +4108,9 @@ export const useWalletStore = create<WalletState>()(
                 SOL: account.addresses?.SOL || '',
                 SUI: account.addresses?.SUI || '',
                 XRP: account.addresses?.XRP || '',
-                XLM: account.addresses?.XLM || ''
+                XLM: account.addresses?.XLM || '',
+                TRON: account.addresses?.TRON || '',
+                XMR: account.addresses?.XMR || ''
               },
               networkNames: { ...(account.networkNames ?? {}) },
               networkAddresses: { ...(account.networkAddresses ?? {}) },
@@ -7562,10 +7571,12 @@ export const useWalletStore = create<WalletState>()(
               UTXO: derived.addresses.UTXO || acc.addresses?.UTXO || '',
               BTC:  acc.addresses?.BTC || '',
               COSMOS: derived.addresses.COSMOS || acc.addresses?.COSMOS || '',
-              SOL:  acc.addresses?.SOL || '',
+              SOL:  derived.addresses.SOL || acc.addresses?.SOL || '',
               SUI:  derived.addresses.SUI || acc.addresses?.SUI || '',
               XRP:  derived.addresses.XRP || acc.addresses?.XRP || '',
-              XLM:  derived.addresses.XLM || acc.addresses?.XLM || ''
+              XLM:  derived.addresses.XLM || acc.addresses?.XLM || '',
+              TRON: derived.addresses.TRON || acc.addresses?.TRON || '',
+              XMR: derived.addresses.XMR || acc.addresses?.XMR || ''
             },
             networkAddresses: {
               ...(acc.networkAddresses ?? {}),
@@ -7814,12 +7825,15 @@ export const useWalletStore = create<WalletState>()(
           throw new Error(`Could not derive ${selectedNetwork.symbol} address for account ${normalizedName}`)
         }
 
-        const addresses: Record<CoinType, string> = { EVM: '', UTXO: '', BTC: '', COSMOS: '', SOL: '', SUI: '', XRP: '', XLM: '' }
+        const addresses: Record<CoinType, string> = createEmptyAccountAddresses()
         if (selectedNetwork.coinType === 'EVM') addresses.EVM = selectedAddress
         if (selectedNetwork.coinType === 'UTXO') addresses.UTXO = selectedAddress
         if (selectedNetwork.coinType === 'COSMOS') addresses.COSMOS = selectedAddress
+        if (selectedNetwork.coinType === 'SUI') addresses.SUI = selectedAddress
         if (selectedNetwork.coinType === 'XRP') addresses.XRP = selectedAddress
         if (selectedNetwork.coinType === 'XLM') addresses.XLM = selectedAddress
+        if (selectedNetwork.coinType === 'TRON') addresses.TRON = selectedAddress
+        if (selectedNetwork.coinType === 'XMR') addresses.XMR = selectedAddress
         if (selectedModelId === 'sol') addresses.SOL = selectedAddress
 
         const newAccount: Account = {
@@ -7859,7 +7873,7 @@ export const useWalletStore = create<WalletState>()(
         if (capability.family === 'safe') {
           const linkedOwnerId = 'ownerSignerAccountId' in params ? (String(params.ownerSignerAccountId || '').trim() || null) : null
           if (!linkedOwnerId) throw new Error('owner_signer_missing')
-          if (!isSupportedSafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
+          if (!isWalletReadySafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
           const chainId = Number(network.chainId || 0)
           if (!isSupportedSafeMultisigChainId(chainId)) throw new Error('unsupported_safe_chain')
           const ownerAccount = state.accounts.find((account) => account.id === linkedOwnerId) || null
@@ -8114,7 +8128,7 @@ export const useWalletStore = create<WalletState>()(
         const account = state.accounts.find((candidate) => candidate.id === accountId)
         if (!isSafeMultisigAccount(account)) throw new Error('unsupported_method_for_multisig')
         const network = state.networks.find((candidate) => candidate.id === account.multisig.networkId)
-        if (!network || !isSupportedSafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
+        if (!network || !isWalletReadySafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
         const rpcConfig = await createUtxoRpcConfig(network, {
           secureBridgeSigner: get().signBackendAuthMessage
         })
@@ -8151,7 +8165,7 @@ export const useWalletStore = create<WalletState>()(
         const account = state.accounts.find((candidate) => candidate.id === accountId)
         if (!isSafeMultisigAccount(account)) return []
         const network = state.networks.find((candidate) => candidate.id === account.multisig.networkId)
-        if (!network || !isSupportedSafeMultisigNetwork(network)) return []
+        if (!network || !isWalletReadySafeMultisigNetwork(network)) return []
         return await listSafePendingTransactionsFromServer({
           chainId: Number(network.chainId || 0),
           safeAddress: account.multisig.address,
@@ -8168,7 +8182,7 @@ export const useWalletStore = create<WalletState>()(
         const targetNetworkId = normalizeNetworkIdAlias(String(networkId || account.multisig.networkId || '').trim())
         if (!targetNetworkId || targetNetworkId !== account.multisig.networkId) throw new Error('wrong_network_for_safe')
         const network = resolveNetworkByIdOrActive(state, targetNetworkId)
-        if (!network || !isSupportedSafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
+        if (!network || !isWalletReadySafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
         const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
         const signerAddress = String(signerContext.signerAddress || '').trim()
         if (!signerAddress) throw new Error('owner_signer_missing')
@@ -8244,7 +8258,7 @@ export const useWalletStore = create<WalletState>()(
         const targetNetworkId = normalizeNetworkIdAlias(String(networkId || account.multisig.networkId || '').trim())
         if (!targetNetworkId || targetNetworkId !== account.multisig.networkId) throw new Error('wrong_network_for_safe')
         const network = resolveNetworkByIdOrActive(state, targetNetworkId)
-        if (!network || !isSupportedSafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
+        if (!network || !isWalletReadySafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
         const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
         const signerAddress = String(signerContext.signerAddress || '').trim()
         if (!signerAddress) throw new Error('owner_signer_missing')
@@ -8286,7 +8300,7 @@ export const useWalletStore = create<WalletState>()(
         const targetNetworkId = normalizeNetworkIdAlias(String(networkId || account.multisig.networkId || '').trim())
         if (!targetNetworkId || targetNetworkId !== account.multisig.networkId) throw new Error('wrong_network_for_safe')
         const network = resolveNetworkByIdOrActive(state, targetNetworkId)
-        if (!network || !isSupportedSafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
+        if (!network || !isWalletReadySafeMultisigNetwork(network)) throw new Error('wrong_network_for_safe')
         const signerContext = await get().resolveAccountSignerContext(account.id, network.id)
         const signerAddress = String(signerContext.signerAddress || '').trim()
         if (!signerAddress) throw new Error('owner_signer_missing')

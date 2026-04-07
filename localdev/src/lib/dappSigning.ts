@@ -1,4 +1,3 @@
-import { ethers } from 'ethers'
 import * as secp from '@noble/secp256k1'
 import { sha256 } from '@noble/hashes/sha256'
 import { hmac } from '@noble/hashes/hmac'
@@ -13,6 +12,11 @@ import { resolveEvmExternalSigner } from './evmExternalSigner'
 import { deriveSolanaAddress } from './solanaAddress'
 import { deriveCosmosAddress, resolveCosmosAddressConfig } from './cosmosAddress'
 import { deriveUtxoAddress } from './utxoAddress'
+import {
+  createEvmSignerAdapter,
+  normalizeEvmTransactionInput,
+  type EvmTransactionInput
+} from './evmSignerAdapter'
 import type { Network } from '../coins'
 import { sendBridgeEvmSignedRelay, sendBridgeSolanaSignedRelay, type UtxoRpcConfig } from './utxoRpc'
 
@@ -72,22 +76,6 @@ function normalizeMessageBytes(input: string, encoding: 'utf8' | 'hex' | 'base64
   if (encoding === 'hex') return normalizeHexData(input)
   if (encoding === 'base64') return fromBase64(input)
   return utf8(input)
-}
-
-function parseRpcQuantityToBigInt(value: unknown): bigint {
-  const raw = String(value ?? '').trim()
-  if (!raw) return 0n
-  if (/^0x[0-9a-f]+$/i.test(raw)) return BigInt(raw)
-  if (/^\d+$/.test(raw)) return BigInt(raw)
-  throw new Error(`Invalid RPC quantity: ${raw}`)
-}
-
-function evmDerivationPath(accountIndex: number): string {
-  return `m/44'/60'/${accountIndex}'/0/0`
-}
-
-function deriveEvmWallet(mnemonic: string, accountIndex: number) {
-  return ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, evmDerivationPath(accountIndex))
 }
 
 function resolveAccountIndex(accountIndex?: number): number {
@@ -237,13 +225,13 @@ export async function signEvmMessage(input: {
   message: string
   encoding?: 'utf8' | 'hex'
 }): Promise<string> {
-  const externalSigner = await resolveEvmExternalSigner()
   const messageBytes = normalizeMessageBytes(input.message, input.encoding || 'utf8')
-  if (externalSigner) {
-    return externalSigner.signMessage(ethers.getBytes(messageBytes))
-  }
-  const wallet = deriveEvmWallet(input.mnemonic, resolveAccountIndex(input.accountIndex))
-  return wallet.signMessage(messageBytes)
+  const adapter = createEvmSignerAdapter({
+    mnemonic: input.mnemonic,
+    accountIndex: input.accountIndex,
+    externalSigner: await resolveEvmExternalSigner()
+  })
+  return await adapter.signMessage(messageBytes)
 }
 
 export async function signRtmMessage(input: {
@@ -287,69 +275,43 @@ export async function signEvmTypedData(input: {
   typedData: unknown
 }): Promise<string> {
   const parsed = parseTypedDataPayload(input.typedData)
-  const externalSigner = await resolveEvmExternalSigner()
-  if (externalSigner && typeof (externalSigner as any).signTypedData === 'function') {
-    return (externalSigner as any).signTypedData(parsed.domain, parsed.types, parsed.message)
-  }
-  const wallet = deriveEvmWallet(input.mnemonic, resolveAccountIndex(input.accountIndex))
-  return wallet.signTypedData(parsed.domain, parsed.types, parsed.message)
+  const adapter = createEvmSignerAdapter({
+    mnemonic: input.mnemonic,
+    accountIndex: input.accountIndex,
+    externalSigner: await resolveEvmExternalSigner()
+  })
+  return await adapter.signTypedData(parsed.domain, parsed.types, parsed.message)
 }
 
 export async function signEvmTransaction(input: {
   mnemonic: string
   accountIndex?: number
-  tx: {
-    to?: string
-    value?: string
-    data?: string
-    gasLimit?: string
-    gasPrice?: string
-    maxFeePerGas?: string
-    maxPriorityFeePerGas?: string
-    nonce?: string
-    chainId?: string | number
-    type?: number
-  }
+  tx: EvmTransactionInput
 }): Promise<string> {
-  const wallet = deriveEvmWallet(input.mnemonic, resolveAccountIndex(input.accountIndex))
-  const tx = input.tx || {}
-  const request: any = {
-    data: String(tx.data || '').trim() || undefined,
-    to: String(tx.to || '').trim() || undefined,
-    value: tx.value !== undefined ? parseRpcQuantityToBigInt(tx.value) : undefined,
-    gasLimit: tx.gasLimit !== undefined ? parseRpcQuantityToBigInt(tx.gasLimit) : undefined,
-    gasPrice: tx.gasPrice !== undefined ? parseRpcQuantityToBigInt(tx.gasPrice) : undefined,
-    maxFeePerGas: tx.maxFeePerGas !== undefined ? parseRpcQuantityToBigInt(tx.maxFeePerGas) : undefined,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas !== undefined ? parseRpcQuantityToBigInt(tx.maxPriorityFeePerGas) : undefined,
-    nonce: tx.nonce !== undefined ? Number(parseRpcQuantityToBigInt(tx.nonce)) : undefined,
-    chainId: tx.chainId !== undefined ? Number(parseRpcQuantityToBigInt(tx.chainId)) : undefined,
-    type: tx.type === 2 ? 2 : undefined
-  }
-  return wallet.signTransaction(request)
+  const adapter = createEvmSignerAdapter({
+    mnemonic: input.mnemonic,
+    accountIndex: input.accountIndex,
+    externalSigner: await resolveEvmExternalSigner()
+  })
+  return await adapter.signTransaction(normalizeEvmTransactionInput(input.tx))
 }
 
 export async function signAndSendEvmTransaction(input: {
   mnemonic: string
   accountIndex?: number
   rpcConfig: UtxoRpcConfig
-  tx: {
-    to?: string
-    value?: string
-    data?: string
-    gasLimit?: string
-    gasPrice?: string
-    maxFeePerGas?: string
-    maxPriorityFeePerGas?: string
-    nonce?: string
-    chainId?: string | number
-    type?: number
-  }
+  tx: EvmTransactionInput
 }): Promise<{ hash: string }> {
-  const signedTx = await signEvmTransaction({
+  const normalizedTx = normalizeEvmTransactionInput(input.tx)
+  const adapter = createEvmSignerAdapter({
     mnemonic: input.mnemonic,
     accountIndex: input.accountIndex,
-    tx: input.tx
+    externalSigner: await resolveEvmExternalSigner()
   })
+  if (adapter.sendTransaction) {
+    return await adapter.sendTransaction(normalizedTx)
+  }
+  const signedTx = await adapter.signTransaction(normalizedTx)
   const relayed = await sendBridgeEvmSignedRelay(input.rpcConfig, {
     kind: 'coin',
     signedTxHex: signedTx

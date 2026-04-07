@@ -1,7 +1,7 @@
 import type { NetworkCapabilitiesInput } from '../lib/networkCapabilities'
 export type { NetworkCapabilitiesInput } from '../lib/networkCapabilities'
 
-export type CoinType = 'EVM' | 'UTXO' | 'BTC' | 'SOL' | 'XRP' | 'COSMOS' | 'SUI' | 'XLM'
+export type CoinType = 'EVM' | 'UTXO' | 'BTC' | 'SOL' | 'XRP' | 'COSMOS' | 'SUI' | 'XLM' | 'TRON' | 'XMR'
 
 export interface NetworkDerivationSupport {
   status: 'supported' | 'unsupported'

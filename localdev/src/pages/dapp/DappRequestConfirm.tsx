@@ -8,7 +8,13 @@ import {
   type DappPendingRequest,
   type DappSendEvmTransactionPayload
 } from '../../lib/dappPermissions'
-import { getAccountAddressForNetwork, getAccountKindLabel, isMultisigAccount } from '../../lib/multisig'
+import {
+  MULTISIG_WALLET_MANAGED_ONLY_REASON,
+  buildMultisigUnsupportedActionMessage,
+  getAccountAddressForNetwork,
+  getAccountKindLabel,
+  isMultisigAccount
+} from '../../lib/multisig'
 import { deriveUtxoAddress } from '../../lib/utxoAddress'
 import {
   createRtmMarketRpcConfig,
@@ -305,7 +311,7 @@ const DappRequestConfirm: React.FC = () => {
     ? 'Verified against server listing snapshot'
     : 'Verified against server order'
   const multisigUnsupportedReason = requestAccountIsMultisig
-    ? 'Multisig accounts are wallet-managed only in this build. Dapp message signing, typed data, and direct transaction requests stay disabled.'
+    ? MULTISIG_WALLET_MANAGED_ONLY_REASON
     : ''
   const requestMemo = String((displayedRequest?.request as any)?.memo || '').trim()
   const requestAssetId = requestIsAssetSend
@@ -541,12 +547,14 @@ const DappRequestConfirm: React.FC = () => {
       || requestIsSignAllTransactions
       || requestIsSignAndSendTransaction
       || requestIsRtmGetPublicKey
+      || requestIsCosmosGetKey
       || requestIsCosmosSignDirect
       || requestIsCosmosSignAmino
+      || requestIsCosmosSendTx
       || requestIsRtmMarketAction
       || requestIsRtmIssuerAction
     )) {
-      setSubmitError('This multisig account does not support dapp-driven signing or send requests in this build')
+      setSubmitError(buildMultisigUnsupportedActionMessage())
       return
     }
     if (requestIsRtmMarketAction) {

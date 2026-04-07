@@ -11,6 +11,7 @@ export interface EvmExternalSignTxInput {
   gasPrice?: bigint
   maxFeePerGas?: bigint
   maxPriorityFeePerGas?: bigint
+  nonce?: number
   type?: 2
 }
 
@@ -19,6 +20,7 @@ export interface EvmExternalSigner {
   getAddress: () => Promise<string>
   signMessage: (message: string | Uint8Array) => Promise<string>
   signTypedData: (domain: Record<string, any>, types: Record<string, any>, value: Record<string, any>) => Promise<string>
+  signTransaction?: (input: EvmExternalSignTxInput) => Promise<string>
   sendTransaction: (input: EvmExternalSignTxInput) => Promise<{ hash: string }>
 }
 
@@ -120,6 +122,21 @@ function createInjectedHardwareSigner(): EvmExternalSigner {
         expectedAddress
       )
     },
+    signTransaction: async (input) => {
+      await injected.request?.({ method: 'eth_requestAccounts' })
+      await maybeSwitchChain(injected, input.chainId)
+      return await withBrowserSigner(injected, async ({ signer }) => await signer.signTransaction({
+        to: input.to ? normalizeEvmAddress(input.to) : undefined,
+        value: input.valueWei ?? 0n,
+        data: String(input.data || '').trim() || undefined,
+        gasLimit: input.gasLimit ?? undefined,
+        gasPrice: input.gasPrice ?? undefined,
+        maxFeePerGas: input.maxFeePerGas ?? undefined,
+        maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+        nonce: input.nonce ?? undefined,
+        type: input.type ?? undefined
+      }), expectedAddress)
+    },
     sendTransaction: async (input) => {
       await injected.request?.({ method: 'eth_requestAccounts' })
       await maybeSwitchChain(injected, input.chainId)
@@ -132,6 +149,7 @@ function createInjectedHardwareSigner(): EvmExternalSigner {
           gasPrice: input.gasPrice ?? undefined,
           maxFeePerGas: input.maxFeePerGas ?? undefined,
           maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+          nonce: input.nonce ?? undefined,
           type: input.type ?? undefined
         })
         return { hash: String(tx?.hash || '').trim() }
@@ -179,6 +197,23 @@ function createWalletConnectSigner(): EvmExternalSigner {
         expectedAddress
       )
     },
+    signTransaction: async (input) => {
+      const wc = await getWalletConnectProvider()
+      await wc.connect?.()
+      await wc.request?.({ method: 'eth_requestAccounts', params: [] })
+      await maybeSwitchChain(wc, input.chainId)
+      return await withBrowserSigner(wc, async ({ signer }) => await signer.signTransaction({
+        to: input.to ? normalizeEvmAddress(input.to) : undefined,
+        value: input.valueWei ?? 0n,
+        data: String(input.data || '').trim() || undefined,
+        gasLimit: input.gasLimit ?? undefined,
+        gasPrice: input.gasPrice ?? undefined,
+        maxFeePerGas: input.maxFeePerGas ?? undefined,
+        maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+        nonce: input.nonce ?? undefined,
+        type: input.type ?? undefined
+      }), expectedAddress)
+    },
     sendTransaction: async (input) => {
       const wc = await getWalletConnectProvider()
       await wc.connect?.()
@@ -193,6 +228,7 @@ function createWalletConnectSigner(): EvmExternalSigner {
           gasPrice: input.gasPrice ?? undefined,
           maxFeePerGas: input.maxFeePerGas ?? undefined,
           maxPriorityFeePerGas: input.maxPriorityFeePerGas ?? undefined,
+          nonce: input.nonce ?? undefined,
           type: input.type ?? undefined
         })
         return { hash: String(tx?.hash || '').trim() }

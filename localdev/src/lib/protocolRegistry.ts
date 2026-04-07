@@ -211,11 +211,11 @@ export function resolveNetworkProtocolFamily(network: Network, options?: Resolve
   if (manifest?.protocolFamily) return manifest.protocolFamily
   if (isCosmosLikeModelId(modelId) || String(network.coinType || '').trim().toUpperCase() === 'COSMOS') return 'cosmos'
   if (modelId === 'ada' || runtimeProtocol === 'cardano-wallet-compat') return 'cardano'
-  if (modelId === 'xmr' || runtimeProtocol === 'monero-wallet-compat') return 'monero'
+  if (String(network.coinType || '').trim().toUpperCase() === 'XMR' || modelId === 'xmr' || runtimeProtocol === 'monero-wallet-compat') return 'monero'
   if (modelId === 'sol') return 'solana'
   if (modelId === 'sui') return 'sui'
   if (modelId === 'xlm') return 'stellar'
-  if (modelId === 'tron') return 'tron'
+  if (String(network.coinType || '').trim().toUpperCase() === 'TRON' || modelId === 'tron') return 'tron'
   if (String(network.coinType || '').trim().toUpperCase() === 'XRP' || runtimeProtocol === 'xrp-jsonrpc-compat') return 'xrp'
   if (String(network.coinType || '').trim().toUpperCase() === 'EVM') return 'evm'
   if (String(network.coinType || '').trim().toUpperCase() === 'UTXO') return 'utxo'

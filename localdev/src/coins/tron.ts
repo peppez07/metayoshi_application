@@ -19,7 +19,7 @@ export function createTronNetwork(ctx: CoinRuntimeContext): Network {
     displayChain: 'main',
     name: 'TRON',
     symbol: 'TRX',
-    coinType: 'BTC',
+    coinType: 'TRON',
     coinSymbol: 'TRX',
     rpcUrl: '',
     rpcWallet: '',

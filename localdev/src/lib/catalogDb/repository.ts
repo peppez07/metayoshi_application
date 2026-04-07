@@ -317,6 +317,8 @@ function resolveRuntimeFamilyId(network: Network): string {
   if (coinType === 'XRP') return 'xrp'
   if (coinType === 'COSMOS') return 'cosmos'
   if (coinType === 'SUI') return 'sui'
+  if (coinType === 'TRON') return 'tron'
+  if (coinType === 'XMR') return 'monero'
   return normalizeLower(network.runtimeModelId || network.id || network.coinType || 'generic') || 'generic'
 }
 

@@ -20,7 +20,7 @@ export function createXmrNetwork(ctx: CoinRuntimeContext): Network {
     displayChain: 'main',
     name: 'Monero',
     symbol: 'XMR',
-    coinType: 'BTC',
+    coinType: 'XMR',
     coinSymbol: 'XMR',
     rpcUrl: '',
     rpcWallet: '',

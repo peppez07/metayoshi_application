@@ -18,7 +18,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node --import tsx --test src/background/extensionSurfacePolicy.test.ts src/store/assetScopeState.test.ts src/coins/serverRegistry/runtime.test.ts scripts/verify-rtm-multisig.test.ts",
+    "test": "node --import tsx --test src/background/extensionSurfacePolicy.test.ts src/store/assetScopeState.test.ts src/coins/serverRegistry/runtime.test.ts src/lib/multisigSupport.test.ts src/lib/protocolRegistry.test.ts src/lib/dappSigning.evm.test.ts scripts/verify-rtm-multisig.test.ts",
     "check:release": "npm run lint && npm run test && npm run build",
     "validate:env": "tsx scripts/validate-wallet-env.ts",
     "build:validated": "npm run validate:env && npm run build",

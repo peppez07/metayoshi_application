@@ -1,4 +1,5 @@
 import { ethers } from 'ethers'
+import { resolveSafeServiceUrl } from './safeConfig'
 
 export interface SafeWalletTx {
   to: string
@@ -111,18 +112,7 @@ function normalizeSafeAddress(value: string): string {
 
 function buildSafeServiceUrl(chainId: number): string | null {
   if (!Number.isInteger(chainId) || chainId <= 0) return null
-  const custom = String((import.meta as any)?.env?.VITE_SAFE_SERVICE_BASE_URL || '').trim()
-  if (custom) return custom.replace(/\/+$/, '')
-  const chainSpecific = String((import.meta as any)?.env?.[`VITE_SAFE_SERVICE_BASE_URL_${chainId}`] || '').trim()
-  if (chainSpecific) return chainSpecific.replace(/\/+$/, '')
-  if (chainId === 1) return 'https://safe-transaction-mainnet.safe.global'
-  if (chainId === 10) return 'https://safe-transaction-optimism.safe.global'
-  if (chainId === 100) return 'https://safe-transaction-gnosis-chain.safe.global'
-  if (chainId === 137) return 'https://safe-transaction-polygon.safe.global'
-  if (chainId === 8453) return 'https://safe-transaction-base.safe.global'
-  if (chainId === 42161) return 'https://safe-transaction-arbitrum.safe.global'
-  if (chainId === 43114) return 'https://safe-transaction-avalanche.safe.global'
-  return null
+  return resolveSafeServiceUrl(chainId, (import.meta as any)?.env || {})
 }
 
 function encodeApiPath(baseUrl: string | null, path: string): string | null {
