@@ -140,6 +140,10 @@ export class RtmElectrum {
     return this.client.on('blockchain.scripthash.subscribe', (params) => handler(String(params[0]), params[1] as string | null))
   }
 
+  async blockHeader(height: number): Promise<string> {
+    return await this.client.request<string>('blockchain.block.header', [height])
+  }
+
   async getTransaction(txid: string): Promise<string> {
     return await this.client.request<string>('blockchain.transaction.get', [txid, false])
   }

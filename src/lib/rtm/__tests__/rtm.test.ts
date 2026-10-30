@@ -15,6 +15,7 @@ import { buildAssetTransferScript, parseAssetScript } from '../assetScript'
 import { buildAssetSend, buildNativeSend, type AssetUtxo, type CoinUtxo } from '../builder'
 import { ByteReader, bytesToHex, concatBytes, hash160, hexToBytes, reverseBytes, sha256d } from '../bytes'
 import { legacySighash, parseTx, readTx, serializeTx, type Transaction } from '../transaction'
+import { describeTx, headerTime } from '../history'
 
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const ASSET = '12'.repeat(32)
@@ -301,5 +302,50 @@ describe('builders', async () => {
       coins,
       feePerByte: 2n
     })).toThrow(/R\.\.\. addresses/)
+  })
+})
+
+describe('activity', async () => {
+  const me = addressToScript((await deriveAccountKey(MNEMONIC, 0)).address)
+  const other = addressToScript((await deriveAccountKey(MNEMONIC, 1)).address)
+  const tx = (inputs: Array<[string, number]>, outputs: Array<[bigint, Uint8Array]>): Transaction => ({
+    version: 2,
+    inputs: inputs.map(([txid, vout]) => ({ txid, vout, scriptSig: new Uint8Array(), sequence: 0xffffffff })),
+    outputs: outputs.map(([value, script]) => ({ value, script })),
+    locktime: 0
+  })
+  const funding = tx([['00'.repeat(32), 0xffffffff]], [
+    [10_00000000n, me],
+    [0n, buildAssetTransferScript(me, { assetId: ASSET, amount: 5_00000000n, uniqueId: null })]
+  ])
+  const fundingId = 'f0'.repeat(32)
+  const fetch = async (txid: string) => {
+    if (txid === fundingId) return funding
+    throw new Error('unknown tx')
+  }
+
+  test('counts received coins and assets', async () => {
+    const effect = await describeTx(funding, me, fetch)
+    expect(effect.rtmDelta).toBe(10_00000000n)
+    expect(effect.assetDeltas).toEqual({ [ASSET]: 5_00000000n })
+    expect(effect.spentFromUs).toBe(false)
+  })
+
+  test('nets spends against change', async () => {
+    const spend = tx([[fundingId, 0], [fundingId, 1]], [
+      [3_00000000n, other],
+      [6_99990000n, me],
+      [0n, buildAssetTransferScript(other, { assetId: ASSET, amount: 2_00000000n, uniqueId: null })],
+      [0n, buildAssetTransferScript(me, { assetId: ASSET, amount: 3_00000000n, uniqueId: null })]
+    ])
+    const effect = await describeTx(spend, me, fetch)
+    expect(effect.rtmDelta).toBe(-3_00010000n)
+    expect(effect.assetDeltas).toEqual({ [ASSET]: -2_00000000n })
+    expect(effect.spentFromUs).toBe(true)
+  })
+
+  test('reads block time from a header', () => {
+    const header = hexToBytes(block20000.block.slice(0, 160))
+    expect(headerTime(bytesToHex(header))).toBe(block20000.time * 1000)
   })
 })

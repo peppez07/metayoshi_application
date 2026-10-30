@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
-import { useWalletStore, type FullBackupV1 } from '../../store/walletStore'
+import { useWalletStore } from '../../store/walletStore'
 import { useNavigate } from 'react-router-dom'
 import { decryptVaultV1, type EncryptedVaultV1 } from '../../lib/vaultCrypto'
 import {
@@ -10,8 +10,6 @@ import {
   IoDocumentTextOutline,
   IoShieldCheckmarkOutline,
   IoPersonOutline,
-  IoSwapHorizontalOutline,
-  IoLayersOutline,
   IoTimeOutline,
   IoCloseCircleOutline,
   IoWarningOutline
@@ -19,10 +17,20 @@ import {
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-function isFullBackup(v: unknown): v is FullBackupV1 {
+/** v1 backups come from the multichain 0.1.x releases; v2 from the RTM-only wallet. */
+interface LoadedBackup {
+  type: 'metayoshi-full-backup'
+  version: 1 | 2
+  createdAt: number
+  vault: EncryptedVaultV1
+  accounts: Array<{ id: string; name: string }>
+  activeAccountId: string | null
+}
+
+function isFullBackup(v: unknown): v is LoadedBackup {
   if (!v || typeof v !== 'object') return false
   const obj = v as Record<string, unknown>
-  return obj.type === 'metayoshi-full-backup' && obj.version === 1 && Boolean(obj.vault)
+  return obj.type === 'metayoshi-full-backup' && (obj.version === 1 || obj.version === 2) && Boolean(obj.vault) && Array.isArray(obj.accounts)
 }
 
 function isVaultBackup(v: unknown): v is { vault: EncryptedVaultV1 } {
@@ -46,7 +54,7 @@ type Mode = 'full' | 'phrase' | 'vault'
 
 const RestoreSettings: React.FC = () => {
   const navigate  = useNavigate()
-  const { initialize, fullRestore } = useWalletStore()
+  const { initialize, restoreBackup } = useWalletStore()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [mode, setMode] = useState<Mode>('full')
@@ -58,7 +66,7 @@ const RestoreSettings: React.FC = () => {
 
   // full backup mode
   const [fullBackupJson,   setFullBackupJson]   = useState('')
-  const [parsedBackup,     setParsedBackup]     = useState<FullBackupV1 | null>(null)
+  const [parsedBackup,     setParsedBackup]     = useState<LoadedBackup | null>(null)
   const [backupParseError, setBackupParseError] = useState('')
 
   // phrase mode
@@ -99,7 +107,7 @@ const RestoreSettings: React.FC = () => {
     try {
       const parsed = JSON.parse(text)
       if (!isFullBackup(parsed)) {
-        setBackupParseError('File is not a MetaYoshi Full Backup (v1)')
+        setBackupParseError('File is not a MetaYoshi full backup')
         return
       }
       setParsedBackup(parsed)
@@ -159,7 +167,7 @@ const RestoreSettings: React.FC = () => {
 
     setBusy(true)
     try {
-      await fullRestore({ backup: parsedBackup, backupPassword, newPassword })
+      await restoreBackup({ backup: parsedBackup, backupPassword, newPassword })
       navigate('/connecting')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -289,7 +297,6 @@ const RestoreSettings: React.FC = () => {
                   <p className="text-xs font-bold text-green-400">Backup loaded</p>
                   <p className="text-[10px] text-gray-500">
                     {parsedBackup.accounts.length} account{parsedBackup.accounts.length !== 1 ? 's' : ''} ·{' '}
-                    {parsedBackup.activity.length} tx records ·{' '}
                     {new Date(parsedBackup.createdAt).toLocaleDateString()}
                   </p>
                 </div>
@@ -316,7 +323,7 @@ const RestoreSettings: React.FC = () => {
                 </label>
                 <textarea
                   className="input-field min-h-[80px] resize-none text-[10px] font-mono leading-relaxed py-2.5"
-                  placeholder='{"type":"metayoshi-full-backup","version":1,...}'
+                  placeholder='{"type":"metayoshi-full-backup","version":2,...}'
                   value={fullBackupJson}
                   onChange={e => parseFullBackupText(e.target.value)}
                 />
@@ -336,10 +343,6 @@ const RestoreSettings: React.FC = () => {
                     label="Vault" value="Encrypted mnemonic" />
                   <PreviewRow icon={<IoPersonOutline className="w-3.5 h-3.5 text-yellow-400" />}
                     label="Accounts" value={`${parsedBackup.accounts.length}`} />
-                  <PreviewRow icon={<IoSwapHorizontalOutline className="w-3.5 h-3.5 text-blue-400" />}
-                    label="Transactions" value={`${parsedBackup.activity.length}`} />
-                  <PreviewRow icon={<IoLayersOutline className="w-3.5 h-3.5 text-green-400" />}
-                    label="Asset balances" value={`${Object.values(parsedBackup.networkAssets ?? {}).reduce((s, n) => s + Object.keys(n).length, 0)} cached`} />
                   <PreviewRow icon={<IoTimeOutline className="w-3.5 h-3.5 text-gray-400" />}
                     label="Created" value={new Date(parsedBackup.createdAt).toLocaleString()} />
                 </div>

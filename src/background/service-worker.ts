@@ -1,5 +1,5 @@
-// Background Service Worker for MetaYoshi Wallet Extension
-// Handles DApp RPC requests and message passing
+// Background service worker: routes dApp requests to the popup, which holds
+// the keys and the ElectrumX connection. This worker never signs anything.
 
 import {
   clearRuntimeErrorLog,
@@ -25,14 +25,13 @@ import {
   type DappScope
 } from '../lib/dappPermissions'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
-import { resolveNetworkCapabilities } from '../lib/networkCapabilities'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
-const DEFAULT_NETWORK_ID = String(import.meta.env.VITE_DEFAULT_NETWORK || 'rtm').trim() || 'rtm'
 const APP_POPUP_WIDTH = 380
 const APP_POPUP_HEIGHT = 640
 const APP_POPUP_MAX_HEIGHT = 700
 const APP_ENTRY_PATH = 'app/src/ui/index.html'
+const RTM_DECIMALS = 8
 const managedPopupWindowIds = new Set<number>()
 let managedPopupWindowId: number | null = null
 let managedPopupOpenQueue: Promise<void> = Promise.resolve()
@@ -86,179 +85,39 @@ const SIGN_MESSAGE_METHODS = new Set(['wallet_signMessage', 'metayoshi_signMessa
 const SEND_TRANSACTION_METHODS = new Set(['wallet_sendTransaction', 'metayoshi_sendTransaction', 'rtm_sendTransaction'])
 const SEND_ASSET_METHODS = new Set(['wallet_sendAsset', 'metayoshi_sendAsset', 'rtm_sendAsset'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
-const SWITCH_NETWORK_METHODS = new Set(['wallet_switchNetwork', 'metayoshi_switchNetwork', 'rtm_switchNetwork'])
-const ETH_REQUEST_ACCOUNTS_METHODS = new Set(['eth_requestAccounts'])
-const ETH_ACCOUNTS_METHODS = new Set(['eth_accounts'])
-const ETH_CHAIN_ID_METHODS = new Set(['eth_chainId'])
-const NET_VERSION_METHODS = new Set(['net_version'])
-const ETH_SEND_TRANSACTION_METHODS = new Set(['eth_sendTransaction'])
-const SWITCH_ETHEREUM_CHAIN_METHODS = new Set(['wallet_switchEthereumChain'])
-const ADD_ETHEREUM_CHAIN_METHODS = new Set(['wallet_addEthereumChain'])
-const ETH_SIGN_UNSUPPORTED_METHODS = new Set([
-  'eth_sign',
-  'personal_sign',
-  'eth_signTypedData',
-  'eth_signTypedData_v1',
-  'eth_signTypedData_v3',
-  'eth_signTypedData_v4'
-])
 const DAPP_SDK_METHODS = [
-  'wallet_getProviderState',
-  'metayoshi_getProviderState',
-  'rtm_getProviderState',
-  'wallet_requestAccounts',
-  'metayoshi_requestAccounts',
-  'rtm_requestAccounts',
-  'wallet_accounts',
-  'metayoshi_accounts',
-  'rtm_accounts',
-  'wallet_connect',
-  'metayoshi_connect',
-  'rtm_connect',
-  'wallet_selectAccount',
-  'metayoshi_selectAccount',
-  'rtm_selectAccount',
-  'wallet_switchNetwork',
-  'metayoshi_switchNetwork',
-  'rtm_switchNetwork',
-  'wallet_getNetworks',
-  'metayoshi_getNetworks',
-  'rtm_getNetworks',
-  'wallet_getCapabilities',
-  'metayoshi_getCapabilities',
-  'rtm_getCapabilities',
-  'wallet_sendTransaction',
-  'metayoshi_sendTransaction',
-  'rtm_sendTransaction',
-  'wallet_sendAsset',
-  'metayoshi_sendAsset',
-  'rtm_sendAsset',
-  'eth_requestAccounts',
-  'eth_accounts',
-  'eth_chainId',
-  'net_version',
-  'eth_sendTransaction',
-  'wallet_switchEthereumChain',
-  'wallet_addEthereumChain'
-] as const
+  ...PROVIDER_STATE_METHODS,
+  ...REQUEST_ACCOUNTS_METHODS,
+  ...ACCOUNTS_METHODS,
+  ...CONNECT_METHODS,
+  ...SELECT_ACCOUNT_METHODS,
+  ...NETWORKS_METHODS,
+  ...CAPABILITIES_METHODS,
+  ...SEND_TRANSACTION_METHODS,
+  ...SEND_ASSET_METHODS
+]
+
+/** The single network this wallet serves. */
+const RTM_NETWORK = {
+  id: 'rtm',
+  name: 'Raptoreum',
+  symbol: 'RTM',
+  coinType: 'UTXO',
+  decimals: RTM_DECIMALS,
+  capabilities: { nativeSend: true, assetLayer: true, assetSend: true, activity: true }
+} as const
 
 // Event ports for broadcasting events to content scripts
 const eventPorts = new Set<chrome.runtime.Port>()
 
+/** The subset of the popup's persisted store that this worker reads. */
 interface WalletState {
   isInitialized?: boolean
   isLocked?: boolean
   hasVault?: boolean
-  accounts?: Array<{
-    id: string
-    addresses: { EVM?: string; UTXO?: string; XRP?: string }
-    networkAddresses?: Record<string, string>
-  }>
+  accounts?: Array<{ id: string; address?: string }>
   activeAccountId?: string | null
-  activeNetworkId?: string
   authorizedSites?: string[]
-  networks?: Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
-}
-
-type DappNetworkDescriptor = {
-  id: string
-  runtimeModelId: string | null
-  name: string
-  symbol: string
-  coinType: string
-  chainId: number | null
-  chainIdHex: string | null
-  capabilities: {
-    nativeSend: boolean
-    assetLayer: boolean
-    assetSend: boolean
-    activity: boolean
-  }
-}
-
-function buildDappNetworkDescriptor(
-  network: { id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any },
-  active: boolean
-): DappNetworkDescriptor & { active: boolean } {
-  const caps = resolveNetworkCapabilities(network || {})
-  return {
-    id: String(network?.id || '').trim(),
-    runtimeModelId: String(network?.runtimeModelId || '').trim() || null,
-    name: String(network?.name || '').trim(),
-    symbol: String(network?.symbol || '').trim(),
-    coinType: String(network?.coinType || '').trim(),
-    chainId: typeof network?.chainId === 'number' ? network.chainId : null,
-    chainIdHex: typeof network?.chainId === 'number' ? toHexChainId(network.chainId) : null,
-    active,
-    capabilities: {
-      nativeSend: Boolean(caps.features.nativeSend),
-      assetLayer: Boolean(caps.features.assetLayer),
-      assetSend: Boolean(caps.features.assetSend),
-      activity: Boolean(caps.features.activity)
-    }
-  }
-}
-
-function resolveDappNetworks(state: WalletState): Array<{ id: string; runtimeModelId?: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }> {
-  return (state.networks || []).filter((network) => {
-    const id = String(network?.id || '').trim()
-    return Boolean(id)
-  })
-}
-
-type ResolvedDappNetwork = ReturnType<typeof resolveDappNetworks>[number]
-
-function resolveCoinDecimals(network?: { coinType?: string; symbol?: string; id?: string }): number {
-  const symbol = String(network?.symbol || '').trim().toUpperCase()
-  const id = String(network?.id || '').trim().toLowerCase()
-  if (network?.coinType === 'EVM') return 18
-  if (network?.coinType === 'XRP') return 6
-  if (network?.coinType === 'SOL' || symbol === 'SOL' || id === 'sol' || id === 'solana' || id === 'srv--solana-testnet') return 9
-  if (symbol === 'XLM' || id === 'xlm' || id === 'stellar') return 7
-  if (symbol === 'TRX' || id === 'tron') return 6
-  if (symbol === 'ADA' || id === 'ada') return 6
-  if (symbol === 'XMR' || id === 'xmr') return 12
-  return 8
-}
-
-function decimalFromBaseUnits(value: bigint, decimals: number): string {
-  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0
-  if (safeDecimals === 0) return value.toString()
-  const scale = 10n ** BigInt(safeDecimals)
-  const whole = value / scale
-  const fraction = value % scale
-  if (fraction === 0n) return whole.toString()
-  const fractionText = fraction.toString().padStart(safeDecimals, '0').replace(/0+$/, '')
-  return `${whole.toString()}.${fractionText}`
-}
-
-function parseAnyChainIdToNumber(input: unknown): number | null {
-  if (typeof input === 'number' && Number.isFinite(input) && input > 0) return Math.trunc(input)
-  const raw = String(input ?? '').trim().toLowerCase()
-  if (!raw) return null
-  if (raw.startsWith('0x')) {
-    const parsed = Number.parseInt(raw, 16)
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-  }
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-}
-
-function toHexChainId(value: number | null | undefined): string {
-  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '0x0'
-  return `0x${Math.trunc(Number(value)).toString(16)}`
-}
-
-function findDappNetworkByChainId(
-  dappNetworks: ResolvedDappNetwork[],
-  inputChainId: unknown
-): ResolvedDappNetwork | null {
-  const target = parseAnyChainIdToNumber(inputChainId)
-  if (!target) return null
-  for (const net of dappNetworks) {
-    if (Number(net?.chainId || 0) === target) return net
-  }
-  return null
 }
 
 installGlobalErrorMonitor('background-sw')
@@ -270,9 +129,7 @@ function createDefaultWalletState(): WalletState {
     hasVault: false,
     accounts: [],
     activeAccountId: null,
-    activeNetworkId: DEFAULT_NETWORK_ID,
-    authorizedSites: [],
-    networks: []
+    authorizedSites: []
   }
 }
 
@@ -296,7 +153,6 @@ function normalizeAuthorizedSites(rawSites: unknown): string[] {
   )
 }
 
-// Get wallet state from storage
 async function getWalletState(): Promise<WalletState> {
   const raw = await getWalletStorageRecord()
   const parsed = unwrapPersistedState<WalletState>(raw)
@@ -324,31 +180,10 @@ async function updateWalletStateInStorage(
   return nextState
 }
 
-function getActiveAddressFromState(state: WalletState, networkId: string): string | null {
-  const normalizedNetworkId = String(networkId || '').trim()
-  const network = state.networks?.find((n) => n.id === normalizedNetworkId)
+function getActiveAddressFromState(state: WalletState): string | null {
   const account = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
-  if (!network || !account) return null
-
-  const networkAddress = String(account.networkAddresses?.[normalizedNetworkId] || '').trim()
-  if (networkAddress) return networkAddress
-
-  if (network.coinType === 'EVM') {
-    return account.addresses?.EVM || null
-  }
-  if (network.coinType === 'XRP') {
-    return account.addresses?.XRP || null
-  }
-  if (network.coinType === 'UTXO') {
-    return account.addresses?.UTXO || null
-  }
-  return null
-}
-
-// Get active account address based on network type
-async function getActiveAddress(networkId: string): Promise<string | null> {
-  const state = await getWalletState()
-  return getActiveAddressFromState(state, networkId)
+  const address = String(account?.address || '').trim()
+  return address || null
 }
 
 async function getDappPermissionMap(): Promise<Record<string, DappPermission>> {
@@ -810,46 +645,6 @@ function parseSendTransactionParams(params: unknown, maxDecimals = 8): SendTrans
   return { to, amount }
 }
 
-function parseEthSendTransactionParams(params: unknown, maxDecimals = 18): SendTransactionParams {
-  const candidate = Array.isArray(params) ? params[0] : params
-  if (!candidate || typeof candidate !== 'object') {
-    throw { code: -32602, message: 'eth_sendTransaction requires params [{ to, value }]' }
-  }
-
-  const payload = candidate as Record<string, unknown>
-  const to = String(payload.to ?? '').trim()
-  if (!to) throw { code: -32602, message: 'eth_sendTransaction requires `to`' }
-
-  const valueRaw = payload.value
-  if (valueRaw == null) throw { code: -32602, message: 'eth_sendTransaction requires `value` in wei' }
-
-  let wei: bigint
-  if (typeof valueRaw === 'string') {
-    const raw = valueRaw.trim().toLowerCase()
-    if (!raw) throw { code: -32602, message: 'eth_sendTransaction requires non-empty `value`' }
-    if (raw.startsWith('0x')) {
-      try {
-        wei = BigInt(raw)
-      } catch {
-        throw { code: -32602, message: 'eth_sendTransaction value must be valid hex wei' }
-      }
-    } else if (/^\d+$/.test(raw)) {
-      wei = BigInt(raw)
-    } else {
-      throw { code: -32602, message: 'eth_sendTransaction value must be wei integer (hex or decimal)' }
-    }
-  } else if (typeof valueRaw === 'number' && Number.isFinite(valueRaw)) {
-    if (valueRaw < 0) throw { code: -32602, message: 'eth_sendTransaction value must be >= 0' }
-    wei = BigInt(Math.trunc(valueRaw))
-  } else {
-    throw { code: -32602, message: 'eth_sendTransaction value must be wei integer (hex or decimal)' }
-  }
-
-  if (wei <= 0n) throw { code: -32602, message: 'eth_sendTransaction value must be > 0' }
-  const amount = decimalFromBaseUnits(wei, maxDecimals)
-  return { to, amount }
-}
-
 function parseSendAssetParams(params: unknown): SendAssetParams {
   const candidate = Array.isArray(params) ? params[0] : params
   if (!candidate || typeof candidate !== 'object') {
@@ -998,377 +793,119 @@ async function requestScope(origin: string, scope: DappScope): Promise<boolean> 
   return requestScopes(origin, [scope])
 }
 
-type DappRuntimeContext = {
-  state: WalletState
-  dappNetworks: Array<{ id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any }>
-  network: { id: string; coinType: string; name: string; symbol: string; chainId?: number; capabilities?: any } | undefined
-  effectiveNetworkId: string
-  address: string | null
-  connected: boolean
-  unlocked: boolean
-  providerState: {
-    connected: boolean
-    unlocked: boolean
-    coinId: string | null
-    coinName: string | null
-    coinSymbol: string | null
-    coinDecimals: number
-    chainId: string | null
-    chainIdHex: string | null
-    networkId: string | null
-    networkLabel: string | null
-    accounts: string[]
-    selectedAddress: string | null
-  }
-}
 
-function buildDappRuntimeContext(state: WalletState): DappRuntimeContext {
-  const dappNetworks = resolveDappNetworks(state)
-  const network = dappNetworks.find((n) => n.id === state.activeNetworkId) || dappNetworks[0]
-  const effectiveNetworkId = network?.id || DEFAULT_NETWORK_ID
-  const address = getActiveAddressFromState(state, effectiveNetworkId)
-  const connected = !(state.isLocked ?? true) && (state.isInitialized ?? false) && address !== null
+function buildProviderState(state: WalletState) {
   const unlocked = !(state.isLocked ?? true) && (state.isInitialized ?? false)
-
+  const address = unlocked ? getActiveAddressFromState(state) : null
   return {
-    state,
-    dappNetworks,
-    network,
-    effectiveNetworkId,
-    address,
-    connected,
+    connected: unlocked && address !== null,
     unlocked,
-    providerState: {
-      connected,
-      unlocked,
-      coinId: network?.id || null,
-      coinName: network?.name || null,
-      coinSymbol: network?.symbol || null,
-      coinDecimals: resolveCoinDecimals(network),
-      chainId: network?.chainId?.toString() || network?.id || null,
-      chainIdHex: Number(network?.chainId || 0) > 0 ? toHexChainId(Number(network?.chainId || 0)) : null,
-      networkId: network?.id || null,
-      networkLabel: network?.name || null,
-      accounts: address ? [address] : [],
-      selectedAddress: address
-    }
+    coinId: RTM_NETWORK.id,
+    coinName: RTM_NETWORK.name,
+    coinSymbol: RTM_NETWORK.symbol,
+    coinDecimals: RTM_DECIMALS,
+    chainId: RTM_NETWORK.id,
+    chainIdHex: null,
+    networkId: RTM_NETWORK.id,
+    networkLabel: RTM_NETWORK.name,
+    accounts: address ? [address] : [],
+    selectedAddress: address
   }
 }
 
-// Handle RPC methods
+/** Ensures an initialized, unlocked wallet with an address; opens the unlock popup otherwise. */
+async function requireUnlockedAddress(): Promise<{ state: WalletState; address: string; accountId: string }> {
+  const state = await getWalletState()
+  if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
+    throw { code: -32603, message: 'Wallet is not initialized' }
+  }
+  if (state.isLocked ?? true) {
+    try {
+      await openUnlockPopup()
+    } catch {
+      // Ignore popup launch failures and return the lock error to the dApp.
+    }
+    throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
+  }
+  const account = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
+  const address = getActiveAddressFromState(state)
+  if (!account || !address) throw { code: -32603, message: 'No account available' }
+  return { state, address, accountId: account.id }
+}
+
+async function requireScopes(origin: string | undefined, scopes: DappScope[]): Promise<void> {
+  if (!origin) return
+  if (!(await requestScopes(origin, scopes))) throw { code: 4001, message: 'User rejected the request' }
+  await touchLastConnected(origin)
+}
+
 async function handleRpcMethod(method: string, params: any, origin?: string): Promise<any> {
-  const runtime = buildDappRuntimeContext(await getWalletState())
-  const {
-    state,
-    dappNetworks,
-    network,
-    effectiveNetworkId,
-    address,
-    connected,
-    unlocked,
-    providerState
-  } = runtime
-  
-  // Provider state methods
-  if (PROVIDER_STATE_METHODS.has(method)) {
-    return providerState
+  const state = await getWalletState()
+
+  if (PROVIDER_STATE_METHODS.has(method)) return buildProviderState(state)
+
+  if (NETWORKS_METHODS.has(method)) return [{ ...RTM_NETWORK, active: true }]
+
+  if (CAPABILITIES_METHODS.has(method)) {
+    const providerState = buildProviderState(state)
+    return {
+      wallet: { isMetaYoshi: true, connected: providerState.connected, unlocked: providerState.unlocked },
+      network: { id: RTM_NETWORK.id, name: RTM_NETWORK.name, symbol: RTM_NETWORK.symbol, coinType: RTM_NETWORK.coinType },
+      features: { nativeSend: true, signMessage: false, assetLayer: true, assetSend: true },
+      scopes: { read: true, sign: false, send_coin: true, send_asset: true },
+      methods: DAPP_SDK_METHODS,
+      networks: [{ ...RTM_NETWORK, active: true }]
+    }
   }
 
   if (CONNECT_METHODS.has(method)) {
-    if (origin) {
-      const approved = await requestScope(origin, 'read')
-      if (!approved) {
-        throw { code: 4001, message: 'User rejected the request' }
-      }
-      await touchLastConnected(origin)
-    }
-
-    const refreshed = buildDappRuntimeContext(await getWalletState())
-    if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
-      throw { code: -32603, message: 'Wallet is not initialized' }
-    }
-    if (refreshed.state.isLocked ?? true) {
-      try {
-        await openUnlockPopup()
-      } catch {
-        // Ignore popup launch failures and return the lock error to dapp.
-      }
-      throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
-    }
-    if (!refreshed.address) {
-      throw { code: -32603, message: 'No account available' }
-    }
-    return refreshed.providerState
+    await requireScopes(origin, ['read'])
+    await requireUnlockedAddress()
+    return buildProviderState(await getWalletState())
   }
 
-  if (CAPABILITIES_METHODS.has(method)) {
-    const netCaps = resolveNetworkCapabilities(network || {})
-    const features = {
-      nativeSend: Boolean(netCaps.features.nativeSend),
-      signMessage: false,
-      assetLayer: Boolean(netCaps.features.assetLayer),
-      assetSend: Boolean(netCaps.features.assetSend)
-    }
-    return {
-      wallet: { isMetaYoshi: true, connected, unlocked },
-      network: {
-        id: network?.id || null,
-        runtimeModelId: String((network as any)?.runtimeModelId || '').trim() || null,
-        name: network?.name || null,
-        symbol: network?.symbol || null,
-        coinType: network?.coinType || null
-      },
-      features,
-      scopes: {
-        read: true,
-        sign: features.signMessage,
-        send_coin: features.nativeSend,
-        send_asset: features.assetSend
-      },
-      methods: [...DAPP_SDK_METHODS],
-      networks: dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
-    }
+  if (REQUEST_ACCOUNTS_METHODS.has(method)) {
+    await requireScopes(origin, ['read'])
+    const { address } = await requireUnlockedAddress()
+    return [address]
   }
 
-  if (NETWORKS_METHODS.has(method)) {
-    return dappNetworks.map((n) => buildDappNetworkDescriptor(n, n.id === state.activeNetworkId))
-  }
-  
-  // Request accounts / enable
-  if (REQUEST_ACCOUNTS_METHODS.has(method) || ETH_REQUEST_ACCOUNTS_METHODS.has(method)) {
-    if (origin) {
-      const approved = await requestScope(origin, 'read')
-      if (!approved) {
-        throw { code: 4001, message: 'User rejected the request' }
-      }
-      await touchLastConnected(origin)
-    }
-
-    const refreshed = buildDappRuntimeContext(await getWalletState())
-    if (!(refreshed.state.isInitialized ?? false) || !(refreshed.state.hasVault ?? false)) {
-      throw { code: -32603, message: 'Wallet is not initialized' }
-    }
-    if (refreshed.state.isLocked ?? true) {
-      try {
-        await openUnlockPopup()
-      } catch {
-        // Ignore popup launch failures and return the lock error to dapp.
-      }
-      throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
-    }
-    if (!refreshed.address) {
-      throw { code: -32603, message: 'No account available' }
-    }
-
-    return [refreshed.address]
-  }
-  
-  // Get accounts
-  if (ACCOUNTS_METHODS.has(method) || ETH_ACCOUNTS_METHODS.has(method)) {
-    if ((state.isLocked ?? true) || !(state.isInitialized ?? false)) {
-      return []
-    }
-
-    const currentAddress = getActiveAddressFromState(state, effectiveNetworkId)
-    return currentAddress ? [currentAddress] : []
-  }
-  
-  if (ETH_CHAIN_ID_METHODS.has(method)) {
-    return toHexChainId(Number(network?.chainId || 0))
+  if (ACCOUNTS_METHODS.has(method)) {
+    if ((state.isLocked ?? true) || !(state.isInitialized ?? false)) return []
+    if (origin && !(await hasScope(origin, 'read'))) return []
+    const address = getActiveAddressFromState(state)
+    return address ? [address] : []
   }
 
-  if (NET_VERSION_METHODS.has(method)) {
-    return String(parseAnyChainIdToNumber(network?.chainId) || 0)
-  }
-
-  if (SIGN_MESSAGE_METHODS.has(method) || ETH_SIGN_UNSUPPORTED_METHODS.has(method)) {
+  if (SIGN_MESSAGE_METHODS.has(method)) {
     throw { code: -32601, message: `Method not supported: ${method}` }
   }
 
-  if (SEND_TRANSACTION_METHODS.has(method) || ETH_SEND_TRANSACTION_METHODS.has(method)) {
-    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
-      throw { code: -32603, message: 'Wallet is not initialized' }
-    }
-    if (!network || !resolveNetworkCapabilities(network).features.nativeSend) {
-      throw { code: -32603, message: 'No supported send-capable network selected' }
-    }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
-    if (!activeAccount) {
-      throw { code: -32603, message: 'No account available' }
-    }
-
-    if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_coin'])
-      if (!approved) {
-        throw { code: 4001, message: 'User rejected the request' }
-      }
-      await touchLastConnected(origin)
-    }
-
-    const parsedSend = ETH_SEND_TRANSACTION_METHODS.has(method)
-      ? parseEthSendTransactionParams(params, resolveCoinDecimals(network))
-      : parseSendTransactionParams(params, resolveCoinDecimals(network))
-    const result = await requestDappActionApproval(
-      origin || 'unknown',
-      network.id,
-      activeAccount.id,
-      'wallet_sendTransaction',
-      parsedSend
-    )
-    return result
+  if (SEND_TRANSACTION_METHODS.has(method)) {
+    const parsed = parseSendTransactionParams(params, RTM_DECIMALS)
+    await requireScopes(origin, ['read', 'send_coin'])
+    const { accountId } = await requireUnlockedAddress()
+    return requestDappActionApproval(origin || 'unknown', RTM_NETWORK.id, accountId, 'wallet_sendTransaction', parsed)
   }
 
   if (SEND_ASSET_METHODS.has(method)) {
-    if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
-      throw { code: -32603, message: 'Wallet is not initialized' }
-    }
-    if (!network || !resolveNetworkCapabilities(network).features.assetSend) {
-      throw { code: -32603, message: 'No supported asset-send network selected' }
-    }
-    const activeAccount = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
-    if (!activeAccount) {
-      throw { code: -32603, message: 'No account available' }
-    }
-
-    if (origin) {
-      const approved = await requestScopes(origin, ['read', 'send_asset'])
-      if (!approved) {
-        throw { code: 4001, message: 'User rejected the request' }
-      }
-      await touchLastConnected(origin)
-    }
-
-    const parsedSendAsset = parseSendAssetParams(params)
-    const result = await requestDappActionApproval(
-      origin || 'unknown',
-      network.id,
-      activeAccount.id,
-      'wallet_sendAsset',
-      parsedSendAsset
-    )
-    return result
+    const parsed = parseSendAssetParams(params)
+    await requireScopes(origin, ['read', 'send_asset'])
+    const { accountId } = await requireUnlockedAddress()
+    return requestDappActionApproval(origin || 'unknown', RTM_NETWORK.id, accountId, 'wallet_sendAsset', parsed)
   }
-  
-  // Select account
+
   if (SELECT_ACCOUNT_METHODS.has(method)) {
+    await requireScopes(origin, ['read'])
     const { index } = params || {}
-    if (typeof index !== 'number') {
-      throw { code: -32602, message: 'Account index is required' }
-    }
-    
-    const currentState = await getWalletState()
-    const account = currentState.accounts?.[index]
-    if (!account) {
-      throw { code: -32602, message: 'Invalid account index' }
-    }
-    
-    // Update active account in storage
-    await updateWalletStateInStorage((current) => ({
-      ...current,
-      activeAccountId: account.id
-    }))
-    
-    const address = await getActiveAddress(currentState.activeNetworkId || DEFAULT_NETWORK_ID)
-    return {
-      selectedAddress: address,
-      accounts: address ? [address] : []
-    }
-  }
-  
-  // Switch network
-  if (SWITCH_NETWORK_METHODS.has(method)) {
-    const { networkId } = params || {}
-    if (!networkId) {
-      throw { code: -32602, message: 'Network ID is required' }
-    }
-    
-    const currentState = await getWalletState()
-    const normalizedNetworkId = String(networkId).trim()
-    const network = resolveDappNetworks(currentState).find((n) => n.id === normalizedNetworkId)
-    if (!network) {
-      throw { code: -32602, message: `Unsupported network for MetaYoshi DApp SDK: ${networkId}` }
-    }
-    
-    // Update active network in storage
-    await updateWalletStateInStorage((current) => ({
-      ...current,
-      activeNetworkId: normalizedNetworkId
-    }))
-    
-    // Broadcast network change event
-    broadcastEvent('networkChanged', {
-      networkId: normalizedNetworkId,
-      networkLabel: network.name,
-      coinId: network.id,
-      coinName: network.name,
-      coinSymbol: network.symbol,
-      coinDecimals: resolveCoinDecimals(network),
-      chainId: String(network.chainId ?? ''),
-      chainIdHex: toHexChainId(network.chainId)
-    })
-    
-    return { networkId: normalizedNetworkId, networkLabel: network.name }
+    if (typeof index !== 'number') throw { code: -32602, message: 'Account index is required' }
+    const account = state.accounts?.[index]
+    if (!account) throw { code: -32602, message: 'Invalid account index' }
+    const next = await updateWalletStateInStorage((current) => ({ ...current, activeAccountId: account.id }))
+    const address = getActiveAddressFromState(next)
+    return { selectedAddress: address, accounts: address ? [address] : [] }
   }
 
-  if (SWITCH_ETHEREUM_CHAIN_METHODS.has(method)) {
-    const candidate = Array.isArray(params) ? params[0] : params
-    const targetChainId = (candidate && typeof candidate === 'object')
-      ? (candidate as any).chainId
-      : undefined
-    const targetNetwork = findDappNetworkByChainId(dappNetworks, targetChainId)
-    if (!targetNetwork) {
-      throw { code: 4902, message: `Unrecognized chainId: ${String(targetChainId ?? '')}` }
-    }
-
-    await updateWalletStateInStorage((current) => ({
-      ...current,
-      activeNetworkId: targetNetwork.id
-    }))
-
-    broadcastEvent('networkChanged', {
-      networkId: targetNetwork.id,
-      networkLabel: targetNetwork.name,
-      coinId: targetNetwork.id,
-      coinName: targetNetwork.name,
-      coinSymbol: targetNetwork.symbol,
-      coinDecimals: resolveCoinDecimals(targetNetwork),
-      chainId: String(targetNetwork.chainId ?? ''),
-      chainIdHex: toHexChainId(targetNetwork.chainId)
-    })
-
-    return null
-  }
-
-  if (ADD_ETHEREUM_CHAIN_METHODS.has(method)) {
-    const candidate = Array.isArray(params) ? params[0] : params
-    const targetChainId = (candidate && typeof candidate === 'object')
-      ? (candidate as any).chainId
-      : undefined
-    const targetNetwork = findDappNetworkByChainId(dappNetworks, targetChainId)
-    if (!targetNetwork) {
-      throw { code: 4902, message: `Unsupported chain for this wallet: ${String(targetChainId ?? '')}` }
-    }
-
-    await updateWalletStateInStorage((current) => ({
-      ...current,
-      activeNetworkId: targetNetwork.id
-    }))
-
-    broadcastEvent('networkChanged', {
-      networkId: targetNetwork.id,
-      networkLabel: targetNetwork.name,
-      coinId: targetNetwork.id,
-      coinName: targetNetwork.name,
-      coinSymbol: targetNetwork.symbol,
-      coinDecimals: resolveCoinDecimals(targetNetwork),
-      chainId: String(targetNetwork.chainId ?? ''),
-      chainIdHex: toHexChainId(targetNetwork.chainId)
-    })
-
-    return null
-  }
-  
-  // Unsupported method
   throw { code: -32601, message: `Method not found: ${method}` }
 }
 
@@ -1378,142 +915,74 @@ function broadcastEvent(event: string, payload: any): void {
   for (const port of eventPorts) {
     try {
       port.postMessage(message)
-    } catch (err) {
-      // Port closed, remove it
+    } catch {
       eventPorts.delete(port)
     }
   }
 }
 
-// Handle messages from content scripts
 chrome.runtime.onMessage.addListener((message: DappRequest | MonitorRequest, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) => {
   if (message?.type === 'METAYOSHI_MONITOR_GET_ERRORS') {
     void getRuntimeErrorLog()
       .then((errors) => sendResponse({ ok: true, errors }))
-      .catch((err) => {
-        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      })
+      .catch((err) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }))
     return true
   }
 
   if (message?.type === 'METAYOSHI_MONITOR_CLEAR_ERRORS') {
     void clearRuntimeErrorLog()
       .then(() => sendResponse({ ok: true }))
-      .catch((err) => {
-        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      })
+      .catch((err) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }))
     return true
   }
 
   if (message.type === 'DAPP_INTERNAL_RPC') {
     const { request, origin } = message
     const originUrl = origin || sender?.origin || sender?.url || 'unknown'
-    
+
     handleRpcMethod(request.method, request.params, originUrl)
       .then((result) => {
-        const response: JsonRpcResponse = {
-          jsonrpc: '2.0',
-          id: request.id ?? null,
-          result
-        }
+        const response: JsonRpcResponse = { jsonrpc: '2.0', id: request.id ?? null, result }
         sendResponse({ ok: true, jsonRpc: response })
       })
       .catch((err) => {
-        void recordRuntimeError('background-sw', err, {
-          kind: 'dapp-rpc',
-          method: request.method,
-          origin: originUrl
-        })
+        void recordRuntimeError('background-sw', err, { kind: 'dapp-rpc', method: request.method, origin: originUrl })
         const response: JsonRpcResponse = {
           jsonrpc: '2.0',
           id: request.id ?? null,
-          error: {
-            code: err.code || -32603,
-            message: err.message || 'Internal error',
-            data: err.data
-          }
+          error: { code: err.code || -32603, message: err.message || 'Internal error', data: err.data }
         }
         sendResponse({ ok: true, jsonRpc: response })
       })
-    
+
     return true // Keep channel open for async response
   }
-  
+
   return false
 })
 
-// Handle event port connections
-chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
-  if (port.name === BG_EVENT_PORT_NAME) {
-    eventPorts.add(port)
-    
-    port.onDisconnect.addListener(() => {
-      eventPorts.delete(port)
-    })
-    
-    // Send ready event
-    port.postMessage({
-      type: 'ready',
-      events: ['accountsChanged', 'networkChanged', 'lockChanged']
-    })
-    
-    // Listen for storage changes to broadcast events
-    chrome.storage.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
-      if (areaName === 'local' && changes[WALLET_STORAGE_KEY]) {
-        const newValue = changes[WALLET_STORAGE_KEY].newValue
-        const oldValue = changes[WALLET_STORAGE_KEY].oldValue
-        const newState = unwrapPersistedState<WalletState>(newValue)
-        const oldState = unwrapPersistedState<WalletState>(oldValue)
-        
-        if (newState && oldState) {
-          const dappNetworks = resolveDappNetworks(newState)
-          const activeDappNetwork = dappNetworks.find((n) => n.id === newState.activeNetworkId) || dappNetworks[0]
-          const activeDappNetworkId = activeDappNetwork?.id || DEFAULT_NETWORK_ID
-          
-          // Accounts changed
-          if (newState.activeAccountId !== oldState.activeAccountId || 
-              JSON.stringify(newState.accounts) !== JSON.stringify(oldState.accounts)) {
-            const address = getActiveAddressFromState(newState, activeDappNetworkId)
-            broadcastEvent('accountsChanged', {
-              accounts: address ? [address] : [],
-              address
-            })
-          }
-          
-          // Network changed
-          if (newState.activeNetworkId !== oldState.activeNetworkId) {
-            const network = resolveDappNetworks(newState).find((n) => n.id === newState.activeNetworkId)
-            if (network && String(network.id || '').trim()) {
-              broadcastEvent('networkChanged', {
-                networkId: network.id,
-                networkLabel: network.name,
-                coinId: network.id,
-                coinName: network.name,
-                coinSymbol: network.symbol,
-                coinDecimals: resolveCoinDecimals(network),
-                chainId: String(network.chainId ?? ''),
-                chainIdHex: toHexChainId(network.chainId)
-              })
-            }
-          }
-          
-          // Lock state changed
-          if (newState.isLocked !== oldState.isLocked) {
-            broadcastEvent('lockChanged', {
-              unlocked: !(newState.isLocked ?? true)
-            })
-            
-            if (newState.isLocked) {
-              broadcastEvent('accountsChanged', {
-                accounts: [],
-                address: null
-              })
-            }
-          }
-        }
-      }
-    })
+// Broadcast wallet changes once, regardless of how many pages are connected.
+chrome.storage.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+  if (areaName !== 'local' || !changes[WALLET_STORAGE_KEY] || eventPorts.size === 0) return
+  const newState = unwrapPersistedState<WalletState>(changes[WALLET_STORAGE_KEY].newValue)
+  const oldState = unwrapPersistedState<WalletState>(changes[WALLET_STORAGE_KEY].oldValue)
+  if (!newState || !oldState) return
+
+  const newAddress = buildProviderState(newState).selectedAddress
+  const oldAddress = buildProviderState(oldState).selectedAddress
+  if (newAddress !== oldAddress) {
+    broadcastEvent('accountsChanged', { accounts: newAddress ? [newAddress] : [], address: newAddress })
   }
+  if (newState.isLocked !== oldState.isLocked) {
+    broadcastEvent('lockChanged', { unlocked: !(newState.isLocked ?? true) })
+  }
+})
+
+chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
+  if (port.name !== BG_EVENT_PORT_NAME) return
+  eventPorts.add(port)
+  port.onDisconnect.addListener(() => eventPorts.delete(port))
+  port.postMessage({ type: 'ready', events: ['accountsChanged', 'lockChanged'] })
 })
 
 chrome.windows.onBoundsChanged.addListener((win) => {
@@ -1545,7 +1014,3 @@ void enforceSingleManagedPopupWindow()
 setInterval(() => {
   void enforceSingleManagedPopupWindow()
 }, 1500)
-
-// Initialize
-console.log('MetaYoshi Wallet Background Service Worker initialized')
-

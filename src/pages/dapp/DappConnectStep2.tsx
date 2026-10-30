@@ -10,22 +10,21 @@ import {
   type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
-import { getAccountDisplayName } from '../../lib/accountName'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
 }
 
 function scopeLabel(scope: DappScope): string {
-  if (scope === 'read') return 'Read accounts, network/chain context, and capability state'
+  if (scope === 'read') return 'See your selected RTM address'
   if (scope === 'sign') return 'Request message signatures (currently disabled in SDK)'
-  if (scope === 'send_coin') return 'Request native transfers (wallet_sendTransaction / eth_sendTransaction)'
-  return 'Request token/NFT or network-native asset transfers'
+  if (scope === 'send_coin') return 'Request RTM transfers (wallet_sendTransaction)'
+  return 'Request asset transfers (wallet_sendAsset)'
 }
 
 const DappConnectStep2: React.FC = () => {
   const navigate = useNavigate()
-  const { addAuthorizedSite, accounts, activeAccountId, activeNetworkId, isLocked } = useWalletStore()
+  const { addAuthorizedSite, accounts, activeAccountId, isLocked } = useWalletStore()
   const [pendingApproval, setPendingApproval] = useState<DappPendingApproval | null>(null)
   const [loadingApproval, setLoadingApproval] = useState(true)
 
@@ -33,10 +32,7 @@ const DappConnectStep2: React.FC = () => {
     () => accounts.find((account) => account.id === activeAccountId) || accounts[0],
     [accounts, activeAccountId]
   )
-  const activeAccountName = useMemo(
-    () => getAccountDisplayName(activeAccount, activeNetworkId, 'Account'),
-    [activeAccount, activeNetworkId]
-  )
+  const activeAccountName = activeAccount?.name ?? 'Account'
 
   useEffect(() => {
     if (!canUseChromeStorage()) {

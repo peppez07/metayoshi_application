@@ -1,5 +1,5 @@
-﻿// Inpage Provider Script - Injected into web pages
-// Provides window.metayoshi API for DApps
+// Inpage Provider Script - Injected into web pages
+// Provides the window.metayoshi / window.rtm API for Raptoreum dApps
 
 const IP_CONTENT_CHANNEL = 'metayoshi:content'
 const IP_INPAGE_CHANNEL = 'metayoshi:inpage'
@@ -10,10 +10,9 @@ const PROVIDER_ENABLE_METHOD = 'wallet_requestAccounts'
 const REQUEST_ACCOUNTS_METHODS = new Set([
   'wallet_requestAccounts',
   'metayoshi_requestAccounts',
-  'rtm_requestAccounts',
-  'eth_requestAccounts'
+  'rtm_requestAccounts'
 ])
-const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts', 'eth_accounts'])
+const ACCOUNTS_METHODS = new Set(['wallet_accounts', 'metayoshi_accounts', 'rtm_accounts'])
 const CONNECT_METHODS = new Set(['wallet_connect', 'metayoshi_connect', 'rtm_connect'])
 const SELECT_ACCOUNT_METHODS = new Set(['wallet_selectAccount', 'metayoshi_selectAccount', 'rtm_selectAccount'])
 const PROVIDER_STATE_METHODS = new Set(['wallet_getProviderState', 'metayoshi_getProviderState', 'rtm_getProviderState'])
@@ -324,8 +323,6 @@ function initState(): void {
 const provider = {
   isMetaYoshi: true,
   isRtm: true,
-  isMultiChain: true,
-  isMetaMask: false,
 
   get coinId() {
     return state.coinId
@@ -406,14 +403,8 @@ const provider = {
   off: removeListener,
   once,
 
-  switchNetwork: (networkId: string) => {
-    return request({ method: 'wallet_switchNetwork', params: { networkId } })
-  },
-
   _metayoshi: {
-    hardwareWallet: String((import.meta as any)?.env?.VITE_EVM_SIGNER_MODE || '').trim().toLowerCase() === 'hardware',
     version: import.meta.env.VITE_APP_VERSION ?? '0.1.0-beta',
-    multiChain: true,
     eip1193: true
   }
 }
@@ -428,14 +419,6 @@ if (!(window as any).metayoshi) {
 
 if (!(window as any).rtm) {
   Object.defineProperty(window, 'rtm', {
-    value: provider,
-    writable: false,
-    configurable: false
-  })
-}
-
-if (!(window as any).ethereum) {
-  Object.defineProperty(window, 'ethereum', {
     value: provider,
     writable: false,
     configurable: false

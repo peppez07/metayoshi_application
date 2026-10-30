@@ -14,25 +14,34 @@ const PasswordSettings: React.FC = () => {
   const navigate = useNavigate()
   const { changePassword } = useWalletStore()
 
-  const handleUpdate = (e: React.FormEvent) => {
+  const [busy, setBusy] = useState(false)
+
+  const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setSuccess('')
 
+    if (newPass.length < 8) {
+      setError('Password must be at least 8 characters')
+      return
+    }
     if (newPass !== confirmPass) {
       setError('Passwords do not match')
       return
     }
 
-    const ok = changePassword(currentPass, newPass)
-    if (ok) {
+    setBusy(true)
+    try {
+      await changePassword(currentPass, newPass)
       setSuccess('Password updated successfully')
       setCurrentPass('')
       setNewPass('')
       setConfirmPass('')
       setTimeout(() => navigate('/settings'), 1500)
-    } else {
-      setError('Invalid current password')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -74,9 +83,10 @@ const PasswordSettings: React.FC = () => {
         {success && <p className="text-xs text-green-500 text-center font-bold">{success}</p>}
 
         <div className="flex justify-center mt-8">
-          <Button 
+          <Button
             type="submit"
             className="w-full btn-primary"
+            isLoading={busy}
           >
             Confirm
           </Button>

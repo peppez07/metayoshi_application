@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { PasswordGate } from '../../components/PasswordGate'
 import { Button } from '../../components/Button'
-import { useWalletStore, type FullBackupV1 } from '../../store/walletStore'
+import { useWalletStore } from '../../store/walletStore'
 import {
   IoCopyOutline,
   IoCheckmarkCircle,
@@ -9,8 +9,7 @@ import {
   IoLayersOutline,
   IoShieldCheckmarkOutline,
   IoTimeOutline,
-  IoPersonOutline,
-  IoSwapHorizontalOutline
+  IoPersonOutline
 } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 
@@ -37,15 +36,10 @@ const BackupSettings: React.FC = () => {
     sessionMnemonic,
     accounts,
     activeAccountId,
-    activeNetworkId,
-    activity,
     authorizedSites,
     autolockMinutes,
-    donationPercent,
-    backupConfirmed,
-    networkAssets,
-    nextAccountIndex,
-    createdAt
+    servers,
+    exportBackup
   } = useWalletStore()
 
   const [tab, setTab] = useState<'phrase' | 'full'>('full')
@@ -90,22 +84,7 @@ const BackupSettings: React.FC = () => {
       return
     }
 
-    const backup: FullBackupV1 = {
-      type:             'metayoshi-full-backup',
-      version:          1,
-      createdAt:        createdAt ?? Date.now(),
-      vault,
-      accounts,
-      nextAccountIndex: nextAccountIndex ?? accounts.length,
-      activeAccountId,
-      activeNetworkId,
-      activity,
-      authorizedSites,
-      autolockMinutes,
-      donationPercent,
-      backupConfirmed,
-      networkAssets
-    }
+    const backup = exportBackup()
 
     downloadJSON(backup, `metayoshi-fullbackup-${Date.now()}.json`)
     setFullDownloaded(true)
@@ -183,14 +162,9 @@ const BackupSettings: React.FC = () => {
                   value={`${accounts.length} account${accounts.length !== 1 ? 's' : ''}`}
                 />
                 <BackupRow
-                  icon={<IoSwapHorizontalOutline className="w-4 h-4 text-blue-400" />}
-                  label="Transaction History"
-                  value={`${activity.length} record${activity.length !== 1 ? 's' : ''}`}
-                />
-                <BackupRow
                   icon={<IoLayersOutline className="w-4 h-4 text-green-400" />}
-                  label="Asset Balances"
-                  value={`${Object.values(networkAssets).reduce((s, n) => s + Object.keys(n).length, 0)} cached`}
+                  label="ElectrumX servers"
+                  value={`${servers.length} server${servers.length !== 1 ? 's' : ''}`}
                 />
                 <BackupRow
                   icon={<IoTimeOutline className="w-4 h-4 text-gray-400" />}
@@ -210,13 +184,12 @@ const BackupSettings: React.FC = () => {
                 </div>
                 {accounts.map(acc => {
                   const isActive = acc.id === activeAccountId
-                  const addrCount = Object.keys(acc.networkAddresses ?? {}).length
                   return (
                     <div key={acc.id} className="flex items-center gap-3 px-4 py-3 border-b border-dark-600/30 last:border-0">
                       <div className={`w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-yellow-400 shrink-0 ${isActive ? 'ring-2 ring-primary' : ''}`} />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-gray-200">{acc.name}</p>
-                        <p className="text-[10px] text-gray-500">{addrCount} network address{addrCount !== 1 ? 'es' : ''}</p>
+                        <p className="text-[10px] text-gray-500 font-mono truncate">{acc.address}</p>
                       </div>
                       {isActive && (
                         <span className="text-[9px] font-bold text-primary uppercase px-1.5 py-0.5 rounded bg-primary/10">Active</span>

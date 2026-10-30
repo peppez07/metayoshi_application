@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MetaYoshi",
+  "description": "Non-custodial Raptoreum (RTM) wallet for coins and assets, powered by ElectrumX.",
   "version": "0.1.0",
   "version_name": "0.1.0-beta",
   "action": {
@@ -24,10 +25,8 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
-  "permissions": ["storage"],
-  "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+  "permissions": [
+    "storage"
   ],
   "content_scripts": [
     {
@@ -35,13 +34,17 @@
         "https://*/*",
         "http://*/*"
       ],
-      "js": ["assets/content.js"],
+      "js": [
+        "assets/content.js"
+      ],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/inpage.js"],
+      "resources": [
+        "assets/inpage.js"
+      ],
       "matches": [
         "https://*/*",
         "http://*/*"

@@ -1,70 +1,39 @@
-# Chrome Web Store Review Checklist
+# Store Review Checklist
 
-Last updated: 2026-02-20
-
-This checklist reflects the current MetaYoshi extension packaging profile.
+This checklist reflects the current MetaYoshi (Raptoreum-only) packaging profile.
 
 ## Permissions (least privilege)
 
 - `permissions`: `storage`
-- No `alarms`
-- No `notifications`
-- No `externally_connectable`
-
-## Host scope
-
-Declared in `public/manifest.json`:
-- `https://metayoshi.app/*`
-- `https://*.metayoshi.app/*`
-- `https://gateway.pinata.cloud/*`
-- `https://ipfs.io/*`
-- `https://cloudflare-ipfs.com/*`
-- `http://localhost/*`
-- `http://127.0.0.1/*`
-- `https://localhost/*`
-- `https://127.0.0.1/*`
-- `http://host.docker.internal/*`
+- No `host_permissions`: the wallet's only network traffic is the WebSocket
+  connection to the configured ElectrumX servers, which needs no host permission.
+- No `alarms`, `notifications` or `externally_connectable`
 
 ## Content script scope
 
-Content script + web-accessible resources are limited to:
-- `metayoshi.app` / `*.metayoshi.app`
-- localhost variants (`localhost` and `127.0.0.1`)
-
-Runtime host allowlist key:
-- `dapp_injection_allowlist_v1`
+The content script is declared for all `http(s)` pages but only injects the provider
+on allowlisted hosts. The allowlist is stored under `dapp_injection_allowlist_v1`
+and defaults to `metayoshi.app` and `*.metayoshi.app`.
 
 ## Security statements for submission
 
-Use these points in your store submission notes:
-- The extension does not require privileged Chrome APIs beyond `storage`.
-- DApp connect/send requests require explicit user approval and scoped origin permissions.
-- DApp permissions are persisted by normalized origin under `metayoshi-dapp-permissions-v1`.
-- Wallet session mnemonic is kept in memory and not persisted to storage.
-- For public builds, bridge master secrets are kept server-side; secure write flow uses short-lived server-issued tokens.
-- Legacy `X-Bridge-Tx-Key` support is retained only for compatibility/private deployments.
+- Non-custodial: the recovery phrase is encrypted locally (PBKDF2-SHA256, 310k
+  iterations, AES-GCM) and only decrypted into memory; it is never persisted in plain text.
+- Transactions are built and signed in the extension. ElectrumX servers receive
+  only public addresses (as script hashes) and signed transactions.
+- Every server must report the Raptoreum mainnet genesis hash before it is used.
+- dApp connect and send requests require explicit approval and per-origin scopes,
+  stored under `metayoshi-dapp-permissions-v1`.
+- The extension makes no other network requests. Explorer and IPFS links open
+  only when the user clicks them.
 
 ## Packaging artifacts
 
 - Chromium package source: `dist-chromium/`
 - Firefox package source: `dist-firefox/`
-- Chromium CWS upload ZIP: `Metayoshi-chromium.zip`
-- Firefox AMO upload ZIP: `Metayoshi-firefox.zip`
-
-Regenerate packages:
 
 ```bash
-npm run build:browsers
-```
-
-Create Firefox upload ZIP (manifest at root, no Finder metadata):
-
-```bash
-npm run zip:firefox
-```
-
-Create Chromium upload ZIP (manifest at root, no Finder metadata):
-
-```bash
-npm run zip:chromium
+npm run build:browsers   # both packages
+npm run zip:chromium     # Chromium upload ZIP
+npm run zip:firefox      # Firefox upload ZIP
 ```

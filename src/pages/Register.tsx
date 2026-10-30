@@ -4,7 +4,7 @@ import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { useWalletStore } from '../store/walletStore'
 import { PageTransition } from '../components/PageTransition'
-import * as bip39 from 'bip39'
+import { generateMnemonic, isValidMnemonic } from '../lib/rtm/address'
 
 const Register: React.FC = () => {
   const navigate = useNavigate()
@@ -60,7 +60,7 @@ const Register: React.FC = () => {
     setChallengeInput('')
     // Generate a new mnemonic once on first open in create mode.
     if (!mnemonic.trim()) {
-      setMnemonic(bip39.generateMnemonic())
+      setMnemonic(generateMnemonic())
     }
   }, [mode])
 
@@ -86,7 +86,7 @@ const Register: React.FC = () => {
       setError('Passwords do not match')
       return
     }
-    if (!bip39.validateMnemonic(normalizedMnemonic)) {
+    if (!isValidMnemonic(normalizedMnemonic)) {
       setError('Invalid mnemonic phrase')
       return
     }
@@ -223,7 +223,7 @@ const Register: React.FC = () => {
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() => setMnemonic(bip39.generateMnemonic())}
+                      onClick={() => setMnemonic(generateMnemonic())}
                     >
                       Regenerate
                     </Button>
@@ -321,7 +321,7 @@ const Register: React.FC = () => {
         </div>
 
         <footer className="text-gray-500 text-xs font-medium mt-auto">
-          Need help? <button className="text-primary hover:underline">Contact MetaYoshi</button>
+          Raptoreum (RTM) wallet
         </footer>
       </div>
     </PageTransition>
