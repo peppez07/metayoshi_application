@@ -21,12 +21,13 @@ export function useWalletFrame() {
 }
 
 const ConnectionChip: React.FC = () => {
-  const { connection, tipHeight, refreshing, connect, activeServer } = useWalletStore()
+  const { connection, connectionError, tipHeight, refreshing, connect, activeServer } = useWalletStore()
+  const syncing = connectionError.includes('synchronizing')
   const label = connection === 'connected'
     ? `#${tipHeight.toLocaleString('en-US')}`
-    : connection === 'connecting' ? 'Connecting' : 'Offline'
+    : syncing ? 'Server syncing' : connection === 'connecting' ? 'Connecting' : 'Offline'
   const dot = connection === 'connected' ? (refreshing ? 'status-dot-yellow' : 'status-dot-green')
-    : connection === 'connecting' ? 'status-dot-yellow' : 'status-dot-red'
+    : connection === 'connecting' || syncing ? 'status-dot-yellow' : 'status-dot-red'
   return (
     <button
       type="button"
@@ -104,7 +105,7 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
         <div className="px-4 pb-2">
           <Notice
             tone="warning"
-            title="Offline: showing last known data"
+            title={connectionError.includes('synchronizing') ? 'Server synchronizing: showing last known data' : 'Offline: showing last known data'}
             action={<IconButton label="Retry" onClick={() => void connect()} className="w-7 h-7 -my-1"><IoRefresh className="w-4 h-4" /></IconButton>}
           >
             {(connectionError.split('\n')[0] || 'The ElectrumX server cannot be reached').replace(/\.?$/, '.')} Sending is disabled until the wallet reconnects.

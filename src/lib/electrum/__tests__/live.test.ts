@@ -1,10 +1,9 @@
 /**
  * Live check against a real ElectrumX for Raptoreum server. Skipped unless
  * RTM_LIVE_SERVER is set, e.g.
- *   RTM_LIVE_SERVER=wss://144.202.18.233:50004 NODE_EXTRA_CA_CERTS=server.crt npm run test:live
- * NODE_EXTRA_CA_CERTS is only needed for a self-signed certificate.
+ *   RTM_LIVE_SERVER=https://144.202.18.233/api/v1/electrum npm run test:live
  */
-import { afterAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { ElectrumClient } from '../client'
 import { RtmElectrum } from '../rtmElectrum'
 import { parseTx } from '../../rtm/transaction'
@@ -15,7 +14,8 @@ const SERVER = process.env.RTM_LIVE_SERVER ?? ''
 const ADDRESS = process.env.RTM_LIVE_ADDRESS ?? 'RVLFQj4RiMCDDrWGZXRd2ui1NKGQ9ieooz'
 
 describe.skipIf(!SERVER)(`live ElectrumX ${SERVER}`, () => {
-  const api = new RtmElectrum(new ElectrumClient(SERVER))
+  let api: RtmElectrum
+  beforeAll(() => { api = new RtmElectrum(new ElectrumClient(SERVER)) })
   afterAll(() => api.client.close())
 
   test('is Raptoreum mainnet with a ready asset index', async () => {

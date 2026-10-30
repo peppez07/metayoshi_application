@@ -17,7 +17,9 @@ const Connecting: React.FC = () => {
       if (cancelled) return
       const { connection, connectionError } = useWalletStore.getState()
       if (connection !== 'connected') {
-        setWarning(`Could not reach an ElectrumX server.\n${connectionError}\nYou can retry or change servers in Settings.`)
+        setWarning(connectionError.includes('synchronizing')
+          ? connectionError
+          : `Could not reach an ElectrumX server.\n${connectionError}\nYou can retry or change servers in Settings.`)
         await new Promise((resolve) => setTimeout(resolve, 3500))
         if (cancelled) return
       }

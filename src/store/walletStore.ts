@@ -7,7 +7,7 @@ import { formatUnits, parseUnits } from '../lib/rtm/amount'
 import { buildAssetSend, buildNativeSend, type BuiltTransaction } from '../lib/rtm/builder'
 import { describeTx, headerTime } from '../lib/rtm/history'
 import { parseTx, type Transaction } from '../lib/rtm/transaction'
-import { closeClient, DEFAULT_ELECTRUM_SERVERS, getClient, isValidServerUrl, RtmElectrum, type AssetMetadata } from '../lib/electrum/rtmElectrum'
+import { BUILTIN_ELECTRUM_SERVER, LEGACY_ELECTRUM_SERVER, closeClient, DEFAULT_ELECTRUM_SERVERS, getClient, isValidServerUrl, RtmElectrum, type AssetMetadata } from '../lib/electrum/rtmElectrum'
 
 export const RTM_DECIMALS = 8
 export const RTM_SYMBOL = 'RTM'
@@ -201,9 +201,13 @@ function newAccountId(): string {
 }
 
 function normalizeServers(list: unknown): string[] {
-  const values = Array.isArray(list) ? list.map((s) => String(s || '').trim()).filter(isValidServerUrl) : []
+  const values = Array.isArray(list) ? list.map((s) => migrateServer(String(s || '').trim())).filter(isValidServerUrl) : []
   const unique = Array.from(new Set(values))
   return unique.length > 0 ? unique : [...DEFAULT_ELECTRUM_SERVERS]
+}
+
+function migrateServer(url: string): string {
+  return url === LEGACY_ELECTRUM_SERVER ? BUILTIN_ELECTRUM_SERVER : url
 }
 
 function toAssetInfo(m: AssetMetadata): AssetInfo {
@@ -535,7 +539,7 @@ export const useWalletStore = create<WalletState>()(
 
         addServer: (url) => {
           const value = url.trim()
-          if (!isValidServerUrl(value)) throw new Error('Server URL must start with wss:// or ws://')
+          if (!isValidServerUrl(value)) throw new Error('Use an HTTPS or WebSocket URL without credentials or fragments')
           set((state) => ({ servers: state.servers.includes(value) ? state.servers : [...state.servers, value] }))
         },
 
@@ -860,7 +864,7 @@ export const useWalletStore = create<WalletState>()(
           autolockMinutes: Number(old.autolockMinutes) || 5,
           lastActiveTimestamp: Date.now(),
           servers: normalizeServers(old.servers),
-          activeServer: '',
+          activeServer: migrateServer(String(old.activeServer ?? '')),
           assetInfo: old.assetInfo && typeof old.assetInfo === 'object' ? old.assetInfo : {},
           sent: []
         } as Partial<WalletState>
@@ -868,7 +872,8 @@ export const useWalletStore = create<WalletState>()(
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
         const servers = normalizeServers(persisted.servers)
-        const activeServer = servers.includes(String(persisted.activeServer)) ? String(persisted.activeServer) : servers[0]
+        const selected = migrateServer(String(persisted.activeServer ?? ''))
+        const activeServer = servers.includes(selected) ? selected : servers[0]
         const accounts = migrateAccounts(persisted.accounts)
         return {
           ...currentState,

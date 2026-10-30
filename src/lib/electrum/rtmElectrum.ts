@@ -1,22 +1,17 @@
 import { ElectrumClient, ElectrumError } from './client'
+export { isValidServerUrl } from './client'
 import { addressToScriptHash } from '../rtm/address'
 import { toAtoms } from '../rtm/amount'
 import { hexToBytes } from '../rtm/bytes'
 import type { AssetUtxo, CoinUtxo } from '../rtm/builder'
 
-/** Initial test server; replaced by node-collected servers later. */
-export const DEFAULT_ELECTRUM_SERVERS: string[] = String(
-  import.meta.env.VITE_RTM_ELECTRUM_SERVERS || 'wss://144.202.18.233:50004'
-).split(',').map((s) => s.trim()).filter(Boolean)
+export const BUILTIN_ELECTRUM_SERVER = 'https://144.202.18.233/api/v1/electrum'
+export const LEGACY_ELECTRUM_SERVER = 'wss://144.202.18.233:50004'
 
-export function isValidServerUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return (parsed.protocol === 'wss:' || parsed.protocol === 'ws:') && !!parsed.hostname
-  } catch {
-    return false
-  }
-}
+/** Build-time custom defaults remain supported. */
+export const DEFAULT_ELECTRUM_SERVERS: string[] = String(
+  import.meta.env.VITE_RTM_ELECTRUM_SERVERS || BUILTIN_ELECTRUM_SERVER
+).split(',').map((s) => s.trim()).filter(Boolean)
 
 export interface ServerFeatures {
   serverVersion: string
