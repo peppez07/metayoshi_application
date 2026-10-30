@@ -1,6 +1,7 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IoChevronForward, IoDiamondOutline } from 'react-icons/io5'
+import { IoChevronForward, IoCubeOutline, IoHourglassOutline, IoSearchOutline } from 'react-icons/io5'
+import { AssetAvatar, Badge, EmptyState } from './ui'
 import { activeAccountOf, assetLabel, formatAsset, useWalletStore } from '../store/walletStore'
 
 interface AssetListProps {
@@ -21,45 +22,49 @@ export const AssetList: React.FC<AssetListProps> = ({ query = '' }) => {
     .sort((a, b) => assetLabel(a.assetId, a.info).localeCompare(assetLabel(b.assetId, b.info)))
 
   if (connection === 'connected' && !assetsReady) {
-    return <p className="text-xs text-yellow-300 text-center py-8 px-6">The server's asset index is still synchronizing. Assets will appear when it is ready.</p>
+    return (
+      <EmptyState icon={<IoHourglassOutline className="w-6 h-6" />} title="Asset index synchronizing">
+        The server is still indexing assets. They appear here automatically when it is ready.
+      </EmptyState>
+    )
   }
   if (rows.length === 0) {
-    return <p className="text-xs text-gray-500 text-center py-8">{needle ? `No assets match "${query}"` : 'No assets on this account yet'}</p>
+    return needle
+      ? <EmptyState icon={<IoSearchOutline className="w-6 h-6" />} title="No matches">No asset matches “{query}”.</EmptyState>
+      : (
+        <EmptyState icon={<IoCubeOutline className="w-6 h-6" />} title="No assets yet">
+          Raptoreum assets sent to this account's address show up here.
+        </EmptyState>
+      )
   }
 
   return (
-    <div className="space-y-1.5">
+    <ul className="space-y-1">
       {rows.map((row) => {
         const pending = BigInt(row.unconfirmed)
+        const name = assetLabel(row.assetId, row.info)
         return (
-          <button
-            key={row.assetId}
-            onClick={() => navigate(`/assets/preview?id=${row.assetId}`)}
-            className="w-full flex items-center justify-between p-3 rounded-xl border border-dark-600 bg-dark-700/40 hover:bg-dark-700 transition-colors text-left"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
-                <IoDiamondOutline className="w-4 h-4 text-primary" />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-sm font-bold truncate">{assetLabel(row.assetId, row.info)}</span>
-                <span className="text-[10px] text-gray-500 font-mono truncate">
-                  {row.info?.isUnique ? 'Unique · ' : ''}{row.assetId.slice(0, 10)}…
+          <li key={row.assetId}>
+            <button type="button" onClick={() => navigate(`/assets/preview?id=${row.assetId}`)} className="list-row">
+              <AssetAvatar id={row.assetId} name={name} unique={row.info?.isUnique} />
+              <span className="flex flex-col min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-semibold truncate">
+                  <span className="truncate">{name}</span>
+                  {row.info?.isUnique && <Badge tone="primary">NFT</Badge>}
                 </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="flex flex-col items-end">
-                <span className="text-sm font-bold">{formatAsset(row.confirmed, row.info)}</span>
+                <span className="text-[11px] text-gray-500 font-mono truncate">{row.assetId.slice(0, 8)}…{row.assetId.slice(-4)}</span>
+              </span>
+              <span className="flex flex-col items-end shrink-0">
+                <span className="text-sm font-semibold tabular-nums">{formatAsset(row.confirmed, row.info)}</span>
                 {pending !== 0n && (
-                  <span className="text-[10px] text-yellow-300">{pending > 0n ? '+' : ''}{formatAsset(pending, row.info)} pending</span>
+                  <span className="text-[11px] text-warning tabular-nums">{pending > 0n ? '+' : ''}{formatAsset(pending, row.info)} pending</span>
                 )}
-              </div>
-              <IoChevronForward className="w-4 h-4 text-gray-500" />
-            </div>
-          </button>
+              </span>
+              <IoChevronForward className="w-4 h-4 text-gray-600 shrink-0" />
+            </button>
+          </li>
         )
       })}
-    </div>
+    </ul>
   )
 }

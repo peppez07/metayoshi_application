@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { IoArrowBack, IoArrowUpOutline, IoOpenOutline } from 'react-icons/io5'
+import { IoArrowUpOutline, IoOpenOutline } from 'react-icons/io5'
 import { Button } from '../../components/Button'
+import { AssetAvatar, Badge, DetailRow, Notice, PageHeader, Skeleton } from '../../components/ui'
 import { isValidAssetId } from '../../lib/rtm/assetScript'
 import { activeAccountOf, assetLabel, formatAsset, useWalletStore, type AssetInfo } from '../../store/walletStore'
 
@@ -21,71 +22,72 @@ const AssetPreviewPage: React.FC = () => {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (!isValidAssetId(assetId) || info || connection !== 'connected') return
+    if (!isValidAssetId(assetId)) {
+      setError('This is not a valid asset ID.')
+      return
+    }
+    if (info || connection !== 'connected') return
     void loadAssetInfo(assetId).then((result) => {
       if (result) setInfo(result)
-      else setError('Asset metadata not found')
+      else setError('Asset metadata was not found on the server.')
     })
   }, [assetId, info, connection, loadAssetInfo])
 
-  const rows: Array<[string, string, boolean?]> = info
-    ? [
-        ['Asset ID', assetId, true],
-        ['Type', info.isUnique ? 'Unique (NFT)' : 'Fungible'],
-        ['Decimals', String(info.decimalPoint)],
-        ['Circulating supply', formatAsset(info.supply, info)],
-        ['Mints', info.maxMintCount ? `${info.mintCount} / ${info.maxMintCount}` : String(info.mintCount)],
-        ['Updatable', info.updatable ? 'Yes' : 'No'],
-        ['Created at block', info.creationHeight ? String(info.creationHeight) : '—'],
-        ['Reference', info.referenceHash || '—', true]
-      ]
-    : [['Asset ID', assetId, true]]
+  const name = assetLabel(assetId, info ?? undefined)
+  const canSend = !!holding && BigInt(holding.confirmed) > 0n && connection === 'connected'
 
   return (
-    <div className="flex flex-col h-full bg-dark-800">
-      <header className="p-4 flex items-center gap-3 border-b border-dark-600">
-        <button onClick={() => navigate(-1)} className="p-1 rounded-lg hover:bg-dark-700">
-          <IoArrowBack className="w-5 h-5" />
-        </button>
-        <span className="text-sm font-bold truncate">{assetLabel(assetId, info ?? undefined)}</span>
-      </header>
-
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-        <div className="text-center space-y-1">
-          <p className="text-3xl font-bold">{formatAsset(holding?.confirmed ?? '0', info ?? undefined)}</p>
-          <p className="text-xs text-gray-400">balance on {account?.name}</p>
+    <div className="flex flex-col h-full">
+      <PageHeader title={name} />
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+        <div className="card px-5 py-6 flex flex-col items-center text-center gap-3">
+          <AssetAvatar id={assetId || '0'} name={name} size={56} unique={info?.isUnique} />
+          <div>
+            <p className="text-[30px] font-bold leading-tight tabular-nums">{formatAsset(holding?.confirmed ?? '0', info ?? undefined)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{name} · {account?.name}</p>
+          </div>
+          <div className="flex gap-1.5">
+            {info ? (
+              <>
+                <Badge tone={info.isUnique ? 'primary' : 'neutral'}>{info.isUnique ? 'Unique' : 'Fungible'}</Badge>
+                {info.isRoot ? <Badge>Root</Badge> : <Badge>Sub-asset</Badge>}
+                {info.updatable && <Badge>Updatable</Badge>}
+              </>
+            ) : !error && <Skeleton className="h-5 w-32" />}
+          </div>
           {holding && BigInt(holding.unconfirmed) !== 0n && (
-            <p className="text-[11px] text-yellow-300">{formatAsset(holding.unconfirmed, info ?? undefined)} pending</p>
+            <p className="text-xs text-warning">{formatAsset(holding.unconfirmed, info ?? undefined)} pending confirmation</p>
           )}
         </div>
 
-        <div className="p-4 rounded-xl border border-dark-600 bg-dark-700/40 space-y-3">
-          {rows.map(([label, value, mono]) => (
-            <div key={label} className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-gray-500 uppercase tracking-widest">{label}</span>
-              <span className={mono ? 'text-[11px] font-mono break-all text-gray-200' : 'text-sm text-gray-200'}>{value}</span>
-            </div>
-          ))}
-          {info && isIpfsCid(info.referenceHash) && (
-            <a
-              href={`https://ipfs.io/ipfs/${info.referenceHash}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-            >
-              Open reference on IPFS <IoOpenOutline className="w-3 h-3" />
-            </a>
+        {error && <Notice tone="error">{error}</Notice>}
+
+        <div className="card px-4 py-1 divide-y divide-white/[0.05]">
+          <DetailRow label="Asset ID" value={assetId} mono copy={assetId} />
+          {info ? (
+            <>
+              <DetailRow label="Decimals" value={String(info.decimalPoint)} />
+              <DetailRow label="Circulating supply" value={formatAsset(info.supply, info)} />
+              <DetailRow label="Mints" value={info.maxMintCount ? `${info.mintCount} of ${info.maxMintCount}` : String(info.mintCount)} />
+              <DetailRow label="Created at block" value={info.creationHeight ? info.creationHeight.toLocaleString('en-US') : 'Unknown'} />
+              {info.referenceHash && (
+                <DetailRow
+                  label="Reference"
+                  mono
+                  value={isIpfsCid(info.referenceHash)
+                    ? <a href={`https://ipfs.io/ipfs/${info.referenceHash}`} target="_blank" rel="noreferrer" className="text-primary-300 hover:underline inline-flex items-center gap-1">{info.referenceHash} <IoOpenOutline className="w-3 h-3 shrink-0" /></a>
+                    : info.referenceHash}
+                />
+              )}
+            </>
+          ) : !error && (
+            <div className="py-3 space-y-2"><Skeleton className="h-4" /><Skeleton className="h-4 w-2/3" /></div>
           )}
-          {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
       </div>
 
-      <footer className="p-4 border-t border-dark-600">
-        <Button
-          className="w-full"
-          disabled={!holding || BigInt(holding.confirmed) <= 0n || connection !== 'connected'}
-          onClick={() => navigate(`/assets/send?id=${assetId}`)}
-        >
+      <footer className="p-4 pt-2">
+        <Button className="w-full" size="lg" disabled={!canSend} onClick={() => navigate(`/assets/send?id=${assetId}`)}>
           <IoArrowUpOutline className="w-4 h-4" /> Send
         </Button>
       </footer>

@@ -9,24 +9,30 @@ function cn(...inputs: ClassValue[]) {
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string
+  /** Element shown inside the field on the right (unit, button). */
+  trailing?: React.ReactNode
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, ...props }, ref) => {
+  ({ className, label, error, trailing, id, ...props }, ref) => {
+    const generated = React.useId()
+    const inputId = id ?? generated
     return (
-      <div className="w-full space-y-1.5">
-        {label && <label className="text-xs font-semibold text-gray-400 ml-1">{label}</label>}
-        <input
-          ref={ref}
-          className={cn(
-            'input-field',
-            error && 'border-red-500 focus:border-red-500',
-            className
-          )}
-          {...props}
-        />
-        {error && <p className="text-[10px] text-red-500 ml-1">{error}</p>}
+      <div className="w-full">
+        {label && <label htmlFor={inputId} className="field-label">{label}</label>}
+        <div className="relative">
+          <input
+            ref={ref}
+            id={inputId}
+            aria-invalid={error ? true : undefined}
+            className={cn('input-field', trailing && 'pr-16', error && 'border-danger/70 focus:border-danger', className)}
+            {...props}
+          />
+          {trailing && <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">{trailing}</div>}
+        </div>
+        {error && <p className="text-[11px] text-danger mt-1.5 ml-1">{error}</p>}
       </div>
     )
   }
 )
+Input.displayName = 'Input'

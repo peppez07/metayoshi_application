@@ -96,51 +96,38 @@ const Unlock: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col items-center justify-between h-full p-8 text-center bg-dark-800">
-      <div className="flex flex-col items-center mt-12 gap-6">
-        <p className="text-2xl font-black uppercase tracking-[0.22em] text-primary">METAYOSHI</p>
-        <div className="w-32 h-32 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_28px_rgba(245,132,31,0.28)]">
-          <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.15] translate-y-[2px]" />
+    <div className="flex flex-col h-full px-6 pb-6 text-center">
+      <div className="flex-1 flex flex-col items-center justify-center gap-5">
+        <div className="w-28 h-28 rounded-full overflow-hidden border-2 border-primary/80 bg-gradient-to-b from-primary/35 to-primary/10 shadow-glow">
+          <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain scale-[1.15] translate-y-[2px]" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-2xl font-black uppercase tracking-tight">Welcome Back!</h1>
-          <p className="text-gray-400 text-sm font-medium">Please enter your password</p>
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-sm text-gray-400">Unlock your Raptoreum wallet</p>
         </div>
-      </div>
-
-      <form onSubmit={handleUnlock} className="w-full space-y-6">
-        <Input 
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          error={error}
-          className="bg-dark-700/50 border-dark-600 focus:border-primary text-center h-12"
-        />
-        
-        <div className="space-y-4">
-          <Button 
-            type="submit"
-            className="w-full"
-            isLoading={isLoading}
-          >
+        <form onSubmit={handleUnlock} className="w-full space-y-3 pt-2">
+          <Input
+            type="password"
+            aria-label="Password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            error={error}
+            autoComplete="current-password"
+            autoFocus
+            className="text-center"
+          />
+          <Button type="submit" size="lg" className="w-full" isLoading={isLoading} disabled={!password}>
             Unlock
           </Button>
-          <button
-            type="button"
-            className="text-primary font-bold text-sm hover:underline"
-            onClick={() => navigate('/settings/restore')}
-          >
-            Forgot password?
-          </button>
-        </div>
-      </form>
-
-      <footer className="flex flex-col items-center gap-1.5 text-gray-500 text-xs font-medium mt-auto">
-        <span className="px-2.5 py-0.5 rounded-full bg-dark-700/60 border border-dark-600/60 text-[10px] font-bold tracking-widest text-gray-600 uppercase">
-          v{APP_VERSION}
-        </span>
-      </footer>
+        </form>
+        <button type="button" className="text-xs text-gray-400 hover:text-primary-300" onClick={() => navigate('/settings/restore')}>
+          Forgot password? <span className="font-semibold text-primary-300">Restore wallet</span>
+        </button>
+      </div>
+      <span className="mx-auto px-2.5 py-0.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-[10px] font-semibold tracking-wider text-gray-500">
+        v{APP_VERSION}
+      </span>
     </div>
   )
 }

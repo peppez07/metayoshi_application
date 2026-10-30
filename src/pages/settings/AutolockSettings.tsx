@@ -1,63 +1,33 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button } from '../../components/Button'
+import React from 'react'
+import clsx from 'clsx'
+import { IoCheckmark } from 'react-icons/io5'
 import { useWalletStore } from '../../store/walletStore'
+
+const OPTIONS: Array<[number, string]> = [[1, '1 minute'], [5, '5 minutes'], [10, '10 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [0, 'Never']]
 
 const AutolockSettings: React.FC = () => {
   const { autolockMinutes, setAutolock } = useWalletStore()
-  const [value, setValue] = useState(autolockMinutes)
-  const navigate = useNavigate()
-
-  const handleUpdate = () => {
-    setAutolock(value)
-    navigate('/settings')
-  }
-
   return (
-    <div className="flex flex-col h-full bg-dark-800">
-      <header className="p-4 bg-dark-900 border-b border-dark-600 text-center">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-200 leading-tight">Wallet Account Settings - Change Autolock Settings</h2>
-      </header>
-
-      <div className="flex-1 p-8 space-y-12">
-        <div className="text-center space-y-2">
-           <h3 className="text-4xl font-black text-primary">{value}</h3>
-           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">minutes</p>
-        </div>
-
-        <div className="space-y-6">
-          <input 
-            type="range"
-            min="0"
-            max="10"
-            step="1"
-            value={value}
-            onChange={(e) => setValue(parseInt(e.target.value))}
-            className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-primary"
-          />
-          <div className="flex justify-between px-1">
-             {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(v => (
-               <div key={v} className="flex flex-col items-center gap-1">
-                 <div className="w-[1px] h-2 bg-dark-600" />
-                 <span className="text-[8px] font-bold text-gray-500">{v}</span>
-               </div>
-             ))}
-          </div>
-        </div>
-
-        <p className="text-[10px] text-gray-500 text-center leading-relaxed font-medium">
-          The wallet will automatically lock after being idle for {value} minutes. To re-access your wallet, you will need to enter your password.
-        </p>
+    <div className="px-4 py-4 space-y-4">
+      <p className="text-xs text-gray-400 leading-relaxed px-1">
+        Lock the wallet after this much inactivity. Unlocking needs your password; the recovery phrase is cleared from memory when locked.
+      </p>
+      <div className="card p-1.5" role="radiogroup" aria-label="Auto-lock delay">
+        {OPTIONS.map(([minutes, label]) => {
+          const selected = autolockMinutes === minutes
+          return (
+            <button key={minutes} type="button" role="radio" aria-checked={selected} className="list-row" onClick={() => setAutolock(minutes)}>
+              <span className={clsx('flex-1 text-sm', selected ? 'font-semibold text-white' : 'text-gray-300')}>{label}</span>
+              <span className={clsx('w-5 h-5 rounded-full border flex items-center justify-center', selected ? 'bg-primary border-primary' : 'border-white/20')}>
+                {selected && <IoCheckmark className="w-3.5 h-3.5 text-white" />}
+              </span>
+            </button>
+          )
+        })}
       </div>
-
-      <footer className="p-6">
-        <Button 
-          className="w-full btn-primary"
-          onClick={handleUpdate}
-        >
-          Confirm
-        </Button>
-      </footer>
+      {autolockMinutes === 0 && (
+        <p className="text-[11px] text-warning px-1">Without auto-lock, anyone with access to this browser can use the wallet while it is open.</p>
+      )}
     </div>
   )
 }

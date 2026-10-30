@@ -4,6 +4,7 @@ import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { useWalletStore } from '../store/walletStore'
 import { PageTransition } from '../components/PageTransition'
+import { Notice } from '../components/ui'
 import { generateMnemonic, isValidMnemonic } from '../lib/rtm/address'
 
 const Register: React.FC = () => {
@@ -134,195 +135,133 @@ const Register: React.FC = () => {
     await createVault()
   }
 
+  const words = normalizedMnemonic ? normalizedMnemonic.split(' ') : []
+  const checks: Array<[boolean, (v: boolean) => void, React.ReactNode]> = [
+    [ack, setAck, 'I saved my recovery phrase somewhere safe and offline'],
+    [betaAck, setBetaAck, 'I understand MetaYoshi is in beta and may contain bugs'],
+    [termsAck, setTermsAck, <>I accept the MetaYoshi <button type="button" onClick={openTermsInInternalTab} className="text-primary-300 hover:underline">Terms of Service</button></>]
+  ]
+
   return (
     <PageTransition>
-      <div className="flex flex-col items-center justify-between h-full p-8 text-center bg-dark-800 overflow-y-auto hide-scrollbar">
-        <div className="flex flex-col items-center mt-12 gap-6">
-          <div className="w-32 h-32 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary bg-gradient-to-b from-primary/35 to-primary/10 shadow-[0_0_28px_rgba(245,132,31,0.28)]">
-            <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain object-center scale-[1.15] translate-y-[2px]" />
+      <div className="flex flex-col h-full overflow-y-auto hide-scrollbar px-5 pb-6">
+        <div className="flex flex-col items-center pt-8 pb-5 gap-3 text-center">
+          <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-primary/80 bg-gradient-to-b from-primary/35 to-primary/10 shadow-glow">
+            <img src="/MetayoshiLogo.png" alt="MetaYoshi" className="w-full h-full object-contain scale-[1.15] translate-y-[2px]" />
           </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-black uppercase tracking-tight">MetaYoshi</h1>
-            <p className="text-gray-400 text-sm font-medium">Your keys, your coins</p>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">MetaYoshi</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Non-custodial Raptoreum wallet · your keys, your coins</p>
           </div>
         </div>
 
-        <div className="w-full space-y-6">
-          <div className="grid grid-cols-2 gap-2 bg-dark-700/40 p-1 rounded-xl border border-dark-600">
+        <div className="flex gap-1 p-1 rounded-2xl bg-dark-750 border border-white/[0.05] mb-4" role="group" aria-label="Wallet setup mode">
+          {(['create', 'import'] as const).map((value) => (
             <button
-              className={mode === 'create' ? 'py-2 rounded-lg bg-primary text-white font-bold text-xs' : 'py-2 rounded-lg text-gray-300 font-bold text-xs'}
-              onClick={() => setMode('create')}
+              key={value}
               type="button"
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
+              className={mode === value ? 'tab-item tab-active' : 'tab-item tab-inactive'}
             >
-              Create
+              {value === 'create' ? 'Create' : 'Import'}
             </button>
-            <button
-              className={mode === 'import' ? 'py-2 rounded-lg bg-primary text-white font-bold text-xs' : 'py-2 rounded-lg text-gray-300 font-bold text-xs'}
-              onClick={() => setMode('import')}
-              type="button"
-            >
-              Import
-            </button>
+          ))}
+        </div>
+
+        {mode === 'create' && createStep === 'verify' ? (
+          <div className="space-y-4">
+            <div className="card px-4 py-4 space-y-1">
+              <p className="text-sm font-semibold">Confirm your recovery phrase</p>
+              <p className="text-xs text-gray-400 leading-relaxed">Type word #{challengeIndex !== null ? challengeIndex + 1 : '?'} from the phrase you just saved.</p>
+            </div>
+            <Input
+              type="text"
+              aria-label="Requested word"
+              placeholder={challengeIndex !== null ? `Word #${challengeIndex + 1}` : 'Requested word'}
+              value={challengeInput}
+              onChange={(e) => setChallengeInput(e.target.value)}
+              className="text-center"
+              autoComplete="off"
+              autoFocus
+            />
+            {error && <Notice tone="error">{error}</Notice>}
+            <div className="flex gap-2">
+              <Button variant="secondary" size="lg" className="flex-1" disabled={busy}
+                onClick={() => { setError(''); setCreateStep('form'); setChallengeIndex(null); setChallengeInput('') }}>
+                Back
+              </Button>
+              <Button size="lg" className="flex-1" onClick={handleVerifyAndCreate} isLoading={busy}>Verify & create</Button>
+            </div>
           </div>
-
-          {mode === 'create' && createStep === 'verify' ? (
-            <>
-              <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-4 space-y-2">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Seed Phrase Check</p>
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  Prove you memorized your phrase before the vault is created.
-                </p>
-              </div>
-
-              <Input
-                type="text"
-                placeholder={challengeIndex !== null ? `Enter word #${challengeIndex + 1}` : 'Enter requested word'}
-                value={challengeInput}
-                onChange={(e) => setChallengeInput(e.target.value)}
-                className="bg-dark-700/50 border-dark-600 text-center h-12"
-                autoComplete="off"
-                autoFocus
-              />
-
-              {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => {
-                    setError('')
-                    setCreateStep('form')
-                    setChallengeIndex(null)
-                    setChallengeInput('')
-                  }}
-                  disabled={busy}
-                >
-                  Restart
-                </Button>
-                <Button className="flex-1 btn-primary" onClick={handleVerifyAndCreate} isLoading={busy}>
-                  Verify & Create
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-2 text-left">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-                  Secret Recovery Phrase
-                </label>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <span className="field-label">Secret recovery phrase</span>
+              {mode === 'create' ? (
+                <div className="card px-3 py-3">
+                  <ol className="grid grid-cols-3 gap-1.5">
+                    {words.map((word, i) => (
+                      <li key={`${i}-${word}`} className="flex items-center gap-1.5 rounded-xl bg-white/[0.04] px-2 py-1.5 font-mono text-xs">
+                        <span className="text-[10px] text-gray-500 w-4 text-right">{i + 1}</span>
+                        <span className="truncate">{word}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="flex gap-2 mt-3">
+                    <Button variant="secondary" size="sm" className="flex-1" onClick={() => setMnemonic(generateMnemonic())}>Regenerate</Button>
+                    <Button variant="secondary" size="sm" className="flex-1" onClick={() => void navigator.clipboard.writeText(normalizedMnemonic)}>Copy</Button>
+                  </div>
+                  <p className="text-[11px] text-warning mt-3 leading-relaxed">Write these words down in order. Anyone with them controls your funds; MetaYoshi cannot recover them.</p>
+                </div>
+              ) : (
                 <textarea
-                  className="input-field min-h-[110px] resize-none text-xs leading-relaxed py-3 font-mono"
+                  aria-label="Secret recovery phrase"
+                  className="input-field min-h-[104px] resize-none font-mono text-xs leading-relaxed"
                   value={mnemonic}
                   onChange={(e) => setMnemonic(e.target.value)}
-                  placeholder={mode === 'create' ? 'Generated recovery phrase' : 'Enter 12/24 words separated by spaces'}
-                  readOnly={mode === 'create'}
+                  placeholder="Enter your 12 or 24 words separated by spaces"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
-                {mode === 'create' && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setMnemonic(generateMnemonic())}
-                    >
-                      Regenerate
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => navigator.clipboard.writeText(normalizedMnemonic)}
-                    >
-                      Copy
-                    </Button>
-                  </div>
-                )}
-              </div>
+              )}
+            </div>
 
-              <div className="space-y-3">
-                <Input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="bg-dark-700/50 border-dark-600 text-center h-12"
-                />
-                <Input
-                  type="password"
-                  placeholder="Confirm Password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="bg-dark-700/50 border-dark-600 text-center h-12"
-                />
-              </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="password" aria-label="Password" placeholder="Password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input type="password" aria-label="Confirm password" placeholder="Confirm Password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+            </div>
+            <p className="text-[11px] text-gray-500 -mt-2 ml-1">At least 8 characters. Encrypts the phrase on this device.</p>
 
-              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={ack}
-                  onChange={(e) => setAck(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-xs font-bold text-gray-300">
-                  I saved my recovery phrase securely
-                </span>
-              </label>
+            <div className="card p-1.5">
+              {checks.map(([checked, set, label], i) => (
+                <label key={i} className="list-row cursor-pointer items-start">
+                  <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} className="mt-0.5 w-4 h-4 accent-primary shrink-0" />
+                  <span className="text-xs text-gray-300 leading-relaxed">{label}</span>
+                </label>
+              ))}
+            </div>
 
-              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={betaAck}
-                  onChange={(e) => setBetaAck(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-xs font-bold text-gray-300">
-                  I understand MetaYoshi is still in beta and may contain bugs
-                </span>
-              </label>
+            <details className="card-flat px-4 py-3 group">
+              <summary className="text-xs text-gray-400 cursor-pointer select-none list-none flex justify-between">
+                Terms summary <span className="text-gray-600 group-open:rotate-90 transition-transform">›</span>
+              </summary>
+              <ul className="mt-2 text-[11px] text-gray-400 leading-relaxed list-disc pl-4 space-y-1">
+                <li>MetaYoshi is non-custodial. Only you control your keys and recovery phrase.</li>
+                <li>Lost or exposed recovery data can permanently result in loss of funds.</li>
+                <li>Transactions you sign are your responsibility and cannot be reversed.</li>
+                <li>MetaYoshi is provided as-is and gives no legal, tax or investment advice.</li>
+                <li>You are responsible for compliance in your jurisdiction.</li>
+              </ul>
+            </details>
 
-              <div className="text-left bg-dark-700/30 border border-dark-600 rounded-xl p-3 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Terms of Service</p>
-                  <button
-                    type="button"
-                    onClick={openTermsInInternalTab}
-                    className="text-[10px] font-bold text-primary hover:underline uppercase tracking-widest"
-                  >
-                    Show Terms
-                  </button>
-                </div>
-                <ul className="text-[11px] text-gray-300 leading-relaxed list-disc pl-4 space-y-1">
-                  <li>MetaYoshi is non-custodial. Only you control your keys and recovery phrase.</li>
-                  <li>Lost or exposed recovery data can permanently result in loss of funds.</li>
-                  <li>All transactions and signatures are your responsibility and can be irreversible.</li>
-                  <li>MetaYoshi is provided as-is and does not provide legal, tax, or investment advice.</li>
-                  <li>You are responsible for legal and regulatory compliance in your jurisdiction.</li>
-                </ul>
-              </div>
+            {error && <Notice tone="error">{error}</Notice>}
 
-              <label className="flex items-center gap-3 text-left cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={termsAck}
-                  onChange={(e) => setTermsAck(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-xs font-bold text-gray-300">
-                  I accept MetaYoshi Terms of Service
-                </span>
-              </label>
-
-              {error && <p className="text-xs text-red-500 font-bold text-center">{error}</p>}
-
-              <Button className="w-full btn-primary" onClick={handleSubmit} isLoading={busy}>
-                {mode === 'create' ? 'Create Vault' : 'Import Vault'}
-              </Button>
-            </>
-          )}
-        </div>
-
-        <footer className="text-gray-500 text-xs font-medium mt-auto">
-          Raptoreum (RTM) wallet
-        </footer>
+            <Button size="lg" className="w-full" onClick={handleSubmit} isLoading={busy}>
+              {mode === 'create' ? 'Create wallet' : 'Import wallet'}
+            </Button>
+          </div>
+        )}
       </div>
     </PageTransition>
   )

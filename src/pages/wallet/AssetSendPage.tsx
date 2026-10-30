@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { IoArrowBack } from 'react-icons/io5'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
+import { AssetAvatar, Notice, PageHeader } from '../../components/ui'
 import { decodeAddress } from '../../lib/rtm/address'
 import { activeAccountOf, assetLabel, formatAsset, parseAssetQuantity, useWalletStore } from '../../store/walletStore'
 
@@ -45,45 +45,47 @@ const AssetSendPage: React.FC = () => {
     navigate('/tx/confirm', { state: { kind: 'asset', assetId, to: to.trim(), amount: amount.trim() } })
   }
 
+  const setMax = () => {
+    if (!holding || !info) return
+    setAmount(formatAsset(holding.confirmed, info))
+  }
+
   return (
-    <div className="flex flex-col h-full bg-dark-800">
-      <header className="p-4 flex items-center gap-3 border-b border-dark-600">
-        <button onClick={() => navigate(-1)} className="p-1 rounded-lg hover:bg-dark-700">
-          <IoArrowBack className="w-5 h-5" />
-        </button>
-        <span className="text-sm font-bold truncate">Send {assetLabel(assetId, info)}</span>
-      </header>
-
-      <form onSubmit={submit} className="flex-1 flex flex-col p-6 gap-4">
-        <div className="p-3 rounded-xl border border-dark-600 bg-dark-700/30 flex items-center justify-between">
-          <span className="text-xs font-bold">{account?.name}</span>
-          <span className="text-[10px] font-bold text-gray-300">{formatAsset(holding?.confirmed ?? '0', info)} available</span>
+    <div className="flex flex-col h-full">
+      <PageHeader title={`Send ${assetLabel(assetId, info)}`} />
+      <form onSubmit={submit} className="flex-1 flex flex-col px-4 py-4 gap-4" noValidate>
+        <div className="card-flat flex items-center gap-3 px-4 py-3">
+          <AssetAvatar id={assetId || '0'} name={assetLabel(assetId, info)} size={32} unique={info?.isUnique} />
+          <span className="flex flex-col min-w-0 flex-1">
+            <span className="text-sm font-semibold truncate">{assetLabel(assetId, info)}</span>
+            <span className="text-[11px] text-gray-500">{account?.name}</span>
+          </span>
+          <span className="text-xs font-semibold tabular-nums">{formatAsset(holding?.confirmed ?? '0', info)} available</span>
         </div>
 
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Recipient Address</label>
-          <Input placeholder="R…" value={to} onChange={(e) => setTo(e.target.value)} className="bg-dark-700/50 border-dark-600 font-mono text-xs" autoFocus />
-        </div>
+        <Input label="Recipient address" placeholder="R…" value={to} onChange={(e) => setTo(e.target.value)} className="font-mono text-xs" autoComplete="off" spellCheck={false} autoFocus />
 
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">
-            {info?.isUnique ? 'Number of tokens' : 'Quantity'}
-          </label>
-          <Input inputMode="decimal" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-dark-700/50 border-dark-600" />
-          <p className="text-[10px] text-gray-500 ml-1">
+        <div>
+          <Input
+            label={info?.isUnique ? 'Number of tokens' : 'Quantity'}
+            inputMode="decimal"
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            trailing={holding && info ? (
+              <button type="button" onClick={setMax} className="text-[11px] font-bold px-2 py-1 rounded-lg bg-primary/15 text-primary-300 hover:bg-primary/25">MAX</button>
+            ) : undefined}
+          />
+          <p className="text-[11px] text-gray-500 mt-1.5 ml-1">
             {info?.isUnique
-              ? 'Unique tokens are sent lowest ID first.'
+              ? 'Unique tokens are sent lowest ID first. The network fee is paid in RTM.'
               : `Up to ${info?.decimalPoint ?? 0} decimal places. The network fee is paid in RTM.`}
           </p>
         </div>
 
-        {error && (
-          <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-lg">
-            <p className="text-xs font-bold text-red-300 text-center">{error}</p>
-          </div>
-        )}
+        {error && <Notice tone="error">{error}</Notice>}
 
-        <Button type="submit" className="w-full mt-auto" disabled={!to.trim() || !amount.trim()}>
+        <Button type="submit" size="lg" className="w-full mt-auto" disabled={!to.trim() || !amount.trim()}>
           Review
         </Button>
       </form>

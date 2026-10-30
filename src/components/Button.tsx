@@ -7,43 +7,37 @@ function cn(...inputs: ClassValue[]) {
 }
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
   size?: 'sm' | 'md' | 'lg'
   isLoading?: boolean
 }
 
+const VARIANTS = {
+  primary: 'btn-primary',
+  secondary: 'btn-secondary',
+  outline: 'btn-outline',
+  ghost: 'btn text-gray-300 hover:bg-white/[0.06] hover:text-white',
+  danger: 'btn-danger'
+}
+
+const SIZES = {
+  sm: 'h-9 px-3.5 text-xs rounded-xl',
+  md: 'h-11 px-5 text-sm',
+  lg: 'h-12 px-6 text-[15px]'
+}
+
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'primary', size = 'md', isLoading, ...props }, ref) => {
-    const variants = {
-      primary: 'btn-primary',
-      secondary: 'btn-secondary',
-      outline: 'btn-outline',
-      ghost: 'hover:bg-dark-700 text-gray-400 hover:text-white',
-    }
-
-    const sizes = {
-      sm: 'py-1.5 px-3 text-xs',
-      md: 'py-2.5 px-6 text-sm',
-      lg: 'py-3.5 px-8 text-base',
-    }
-
-    return (
-      <button
-        ref={ref}
-        className={cn(
-          'font-bold rounded-full transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95',
-          variants[variant],
-          sizes[size],
-          className
-        )}
-        {...props}
-        disabled={isLoading || props.disabled}
-      >
-        {isLoading ? (
-          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin-smooth" />
-        ) : null}
-        {props.children}
-      </button>
-    )
-  }
+  ({ className, variant = 'primary', size = 'md', isLoading, children, ...props }, ref) => (
+    <button
+      ref={ref}
+      className={cn(VARIANTS[variant], SIZES[size], className)}
+      {...props}
+      disabled={isLoading || props.disabled}
+      aria-busy={isLoading || undefined}
+    >
+      {isLoading && <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin-smooth" />}
+      {children}
+    </button>
+  )
 )
+Button.displayName = 'Button'

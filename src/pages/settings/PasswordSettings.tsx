@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
+import { Notice } from '../../components/ui'
 import { useWalletStore } from '../../store/walletStore'
 
 const PasswordSettings: React.FC = () => {
@@ -46,53 +47,19 @@ const PasswordSettings: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <header className="p-4 bg-dark-900 border-b border-dark-600 text-center">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-200 leading-tight">Wallet Account Settings - Change wallet password</h2>
-      </header>
-
-      <form onSubmit={handleUpdate} className="flex-1 p-6 space-y-6">
-        <div className="space-y-4">
-          <Input 
-            type="password"
-            label="Type current password"
-            placeholder="********"
-            value={currentPass}
-            onChange={(e) => setCurrentPass(e.target.value)}
-            className="bg-dark-700/50 border-dark-600"
-          />
-          <Input 
-            type="password"
-            label="Type new password"
-            placeholder="********"
-            value={newPass}
-            onChange={(e) => setNewPass(e.target.value)}
-            className="bg-dark-700/50 border-dark-600"
-          />
-          <Input 
-            type="password"
-            label="Type again new password"
-            placeholder="********"
-            value={confirmPass}
-            onChange={(e) => setConfirmPass(e.target.value)}
-            className="bg-dark-700/50 border-dark-600"
-          />
-        </div>
-
-        {error && <p className="text-xs text-red-500 text-center font-bold">{error}</p>}
-        {success && <p className="text-xs text-green-500 text-center font-bold">{success}</p>}
-
-        <div className="flex justify-center mt-8">
-          <Button
-            type="submit"
-            className="w-full btn-primary"
-            isLoading={busy}
-          >
-            Confirm
-          </Button>
-        </div>
-      </form>
-    </div>
+    <form onSubmit={handleUpdate} className="px-4 py-4 space-y-4" noValidate>
+      <p className="text-xs text-gray-400 leading-relaxed px-1">
+        The password encrypts your recovery phrase on this device. Changing it re-encrypts the vault; your addresses stay the same.
+      </p>
+      <Input type="password" label="Current password" autoComplete="current-password" value={currentPass} onChange={(e) => setCurrentPass(e.target.value)} />
+      <Input type="password" label="New password" autoComplete="new-password" placeholder="At least 8 characters" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
+      <Input type="password" label="Confirm new password" autoComplete="new-password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} />
+      {error && <Notice tone="error">{error}</Notice>}
+      {success && <Notice tone="success">{success}</Notice>}
+      <Button type="submit" size="lg" className="w-full" isLoading={busy} disabled={!currentPass || !newPass || !confirmPass}>
+        Update password
+      </Button>
+    </form>
   )
 }
 
