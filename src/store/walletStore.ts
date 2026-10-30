@@ -8,6 +8,7 @@ import { buildAssetSend, buildNativeSend, type BuiltTransaction } from '../lib/r
 import { describeTx, headerTime } from '../lib/rtm/history'
 import { parseTx, type Transaction } from '../lib/rtm/transaction'
 import { BUILTIN_ELECTRUM_SERVER, LEGACY_ELECTRUM_SERVER, closeClient, DEFAULT_ELECTRUM_SERVERS, getClient, isValidServerUrl, RtmElectrum, type AssetMetadata } from '../lib/electrum/rtmElectrum'
+import { connectionCandidates, crossCheck, fetchPeers, mergePeers, type ChainCheck, type DiscoveredServer } from '../lib/electrum/discovery'
 
 export const RTM_DECIMALS = 8
 export const RTM_SYMBOL = 'RTM'
@@ -112,6 +113,10 @@ interface WalletState {
   lastActiveTimestamp: number
   servers: string[]
   activeServer: string
+  /** Servers learned from other servers' smartnode discovery; connection candidates only. */
+  discoveredServers: DiscoveredServer[]
+  peerDiscovery: boolean
+  lastDiscoveryAt: number
   assetInfo: Record<string, AssetInfo>
   sent: SentRecord[]
 
@@ -119,6 +124,7 @@ interface WalletState {
   sessionMnemonic: string | null
   connection: ConnectionStatus
   connectionError: string
+  chainCheck: ChainCheck
   serverVersion: string
   assetsReady: boolean
   tipHeight: number
@@ -150,6 +156,8 @@ interface WalletState {
   addServer: (url: string) => void
   removeServer: (url: string) => void
   setActiveServer: (url: string) => Promise<void>
+  setPeerDiscovery: (enabled: boolean) => void
+  discoverServers: (force?: boolean) => Promise<void>
 
   connect: () => Promise<void>
   refresh: () => Promise<void>
@@ -308,12 +316,23 @@ function requireApi(): RtmElectrum {
   return api
 }
 
+const DISCOVERY_INTERVAL_MS = 30 * 60_000
+
+/** Signing is refused while the connected server disagrees with every other reachable server. */
+function requireTrustedApi(chainCheck: ChainCheck): RtmElectrum {
+  if (chainCheck === 'mismatch') {
+    throw new Error('This server reports a different chain than other servers. Switch servers in Settings before sending.')
+  }
+  return requireApi()
+}
+
 // ── store ────────────────────────────────────────────────────────────────────
 
 const SESSION_DEFAULTS = {
   sessionMnemonic: null,
   connection: 'disconnected' as ConnectionStatus,
   connectionError: '',
+  chainCheck: 'idle' as ChainCheck,
   serverVersion: '',
   assetsReady: false,
   tipHeight: 0,
@@ -344,6 +363,22 @@ export const useWalletStore = create<WalletState>()(
           reconnectTimer = null
           if (!get().isLocked && get().connection === 'error') void get().connect()
         }, delay)
+      }
+
+      // Finds more servers, then confirms the connected server's chain with another one.
+      const verifyChain = async (server: RtmElectrum, tip: number): Promise<void> => {
+        if (!get().peerDiscovery) return
+        await get().discoverServers().catch(() => undefined)
+        if (api !== server) return
+        const { activeServer, servers, discoveredServers } = get()
+        const others = connectionCandidates('', servers, discoveredServers).filter((url) => url !== activeServer)
+        if (others.length === 0) {
+          set({ chainCheck: 'unverified' })
+          return
+        }
+        set({ chainCheck: 'checking' })
+        const result = await crossCheck(server, tip, others).catch(() => 'unverified' as const)
+        if (api === server) set({ chainCheck: result })
       }
 
       const signingKey = async (accountId: string) => {
@@ -378,6 +413,9 @@ export const useWalletStore = create<WalletState>()(
         lastActiveTimestamp: Date.now(),
         servers: [...DEFAULT_ELECTRUM_SERVERS],
         activeServer: DEFAULT_ELECTRUM_SERVERS[0],
+        discoveredServers: [],
+        peerDiscovery: true,
+        lastDiscoveryAt: 0,
         assetInfo: {},
         sent: [],
         ...SESSION_DEFAULTS,
@@ -550,18 +588,36 @@ export const useWalletStore = create<WalletState>()(
         }),
 
         setActiveServer: async (url) => {
-          if (!get().servers.includes(url)) get().addServer(url)
+          const discovered = get().discoveredServers.some((p) => p.url === url)
+          if (!get().servers.includes(url) && !discovered) get().addServer(url)
           set({ activeServer: url })
           teardownSession()
           await get().connect()
         },
 
+        setPeerDiscovery: (enabled) => {
+          set({ peerDiscovery: enabled, ...(enabled ? {} : { chainCheck: 'idle' as ChainCheck }) })
+          if (enabled) void get().discoverServers(true)
+        },
+
+        discoverServers: async (force = false) => {
+          const { peerDiscovery, lastDiscoveryAt, activeServer, servers, connection } = get()
+          if (!peerDiscovery || connection !== 'connected') return
+          const now = Date.now()
+          if (!force && now - lastDiscoveryAt < DISCOVERY_INTERVAL_MS) return
+          set({ lastDiscoveryAt: now })
+          // Ask the connected server first; other configured gateways add independent views.
+          const sources = Array.from(new Set([activeServer, ...servers])).slice(0, 3)
+          const lists = await Promise.all(sources.map((url) => fetchPeers(url)))
+          set((state) => ({ discoveredServers: mergePeers(state.discoveredServers, lists.flat(), Date.now()) }))
+        },
+
         connect: async () => {
           if (api && get().connection === 'connected') return
           if (get().connection === 'connecting') return
-          set({ connection: 'connecting', connectionError: '' })
-          const { activeServer, servers } = get()
-          const candidates = [activeServer, ...servers.filter((s) => s !== activeServer)]
+          set({ connection: 'connecting', connectionError: '', chainCheck: 'idle' })
+          const { activeServer, servers, discoveredServers, peerDiscovery } = get()
+          const candidates = connectionCandidates(activeServer, servers, peerDiscovery ? discoveredServers : [])
           const errors: string[] = []
           for (const url of candidates) {
             teardownSession()
@@ -597,6 +653,7 @@ export const useWalletStore = create<WalletState>()(
               })
               await subscribeActive()
               await get().refresh()
+              void verifyChain(candidate, tip)
               return
             } catch (error) {
               errors.push(`${url}: ${errorMessage(error)}`)
@@ -684,7 +741,7 @@ export const useWalletStore = create<WalletState>()(
         },
 
         prepareRtmSend: async ({ to, amount, sendMax }) => {
-          const server = requireApi()
+          const server = requireTrustedApi(get().chainCheck)
           const account = activeAccountOf(get())
           if (!account) throw new Error('No account')
           const recipient = to.trim()
@@ -715,7 +772,7 @@ export const useWalletStore = create<WalletState>()(
         },
 
         prepareAssetSend: async ({ assetId, to, amount }) => {
-          const server = requireApi()
+          const server = requireTrustedApi(get().chainCheck)
           if (!get().assetsReady) throw new Error('The server asset index is still synchronizing')
           const account = activeAccountOf(get())
           if (!account) throw new Error('No account')
@@ -757,7 +814,7 @@ export const useWalletStore = create<WalletState>()(
         },
 
         broadcast: async (prepared) => {
-          const txid = await requireApi().broadcast(prepared.hex)
+          const txid = await requireTrustedApi(get().chainCheck).broadcast(prepared.hex)
           if (txid !== prepared.txid) throw new Error(`Server returned unexpected txid ${txid}`)
           set((state) => ({
             sent: [
@@ -845,6 +902,9 @@ export const useWalletStore = create<WalletState>()(
         lastActiveTimestamp: state.lastActiveTimestamp,
         servers: state.servers,
         activeServer: state.activeServer,
+        discoveredServers: state.discoveredServers,
+        peerDiscovery: state.peerDiscovery,
+        lastDiscoveryAt: state.lastDiscoveryAt,
         assetInfo: state.assetInfo,
         sent: state.sent
       }),
@@ -872,8 +932,9 @@ export const useWalletStore = create<WalletState>()(
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WalletState>
         const servers = normalizeServers(persisted.servers)
+        const discoveredServers = mergePeers([], Array.isArray(persisted.discoveredServers) ? persisted.discoveredServers : [], Date.now())
         const selected = migrateServer(String(persisted.activeServer ?? ''))
-        const activeServer = servers.includes(selected) ? selected : servers[0]
+        const activeServer = servers.includes(selected) || discoveredServers.some((p) => p.url === selected) ? selected : servers[0]
         const accounts = migrateAccounts(persisted.accounts)
         return {
           ...currentState,
@@ -881,6 +942,9 @@ export const useWalletStore = create<WalletState>()(
           accounts,
           servers,
           activeServer,
+          discoveredServers,
+          peerDiscovery: persisted.peerDiscovery !== false,
+          lastDiscoveryAt: Number(persisted.lastDiscoveryAt) || 0,
           activeAccountId: accounts.some((a) => a.id === persisted.activeAccountId) ? persisted.activeAccountId! : (accounts[0]?.id ?? null)
         }
       }

@@ -64,6 +64,21 @@ VITE_RTM_ELECTRUM_SERVERS="https://node1.example/api/v1/electrum,wss://node2.exa
 
 The wallet tries the active server first, then the others in order.
 
+### Server discovery
+
+The wallet needs no single server. Each HTTPS gateway publishes
+`/api/v1/servers`: gateways it found and verified among the registered Raptoreum
+smartnodes, using its own Core node. After connecting, the wallet merges these
+lists (refreshed every 30 minutes, kept up to 7 days) and tries those servers
+after your own, so it keeps working if the built-in server is down.
+
+Discovered servers are only candidates. Each must pass the genesis check, and
+the wallet compares a recent block header with another server. If every
+reachable server disagrees, the wallet shows a warning and refuses to sign or
+broadcast until you choose another server. Keys, signing and the recovery phrase
+stay in the browser; servers only see script hashes and signed transactions.
+Turn discovery off in **Settings → ElectrumX servers**.
+
 ## Develop
 
 ```bash

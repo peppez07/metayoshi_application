@@ -43,7 +43,7 @@ const ConnectionChip: React.FC = () => {
 
 export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader = false }) => {
   const state = useWalletStore()
-  const { connection, connectionError, accounts, activeAccountId, setActiveAccount, renameAccount, addAccount, lock, connect } = state
+  const { connection, connectionError, chainCheck, accounts, activeAccountId, setActiveAccount, renameAccount, addAccount, lock, connect } = state
   const navigate = useNavigate()
   const [sheet, setSheet] = React.useState<'accounts' | 'receive' | null>(null)
   const [qrDataUrl, setQrDataUrl] = React.useState('')
@@ -109,6 +109,18 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             action={<IconButton label="Retry" onClick={() => void connect()} className="w-7 h-7 -my-1"><IoRefresh className="w-4 h-4" /></IconButton>}
           >
             {(connectionError.split('\n')[0] || 'The ElectrumX server cannot be reached').replace(/\.?$/, '.')} Sending is disabled until the wallet reconnects.
+          </Notice>
+        </div>
+      )}
+
+      {!hideHeader && connection === 'connected' && chainCheck === 'mismatch' && (
+        <div className="px-4 pb-2">
+          <Notice
+            tone="error"
+            title="Server chain does not match other servers"
+            action={<IconButton label="Server settings" onClick={() => navigate('/settings/servers')} className="w-7 h-7 -my-1"><IoSettingsOutline className="w-4 h-4" /></IconButton>}
+          >
+            Balances from this server may be wrong and sending is disabled. Choose another server.
           </Notice>
         </div>
       )}
