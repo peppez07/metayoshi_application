@@ -62,7 +62,6 @@ shows the exact network fee, and broadcasts through its ElectrumX server only af
   coinSymbol: 'RTM'
   coinDecimals: 8
   chainId: 'rtm'
-  chainIdHex: null
   networkId: 'rtm'
   networkLabel: 'Raptoreum'
   accounts: string[]

@@ -154,7 +154,7 @@ const DappConnectStep2: React.FC = () => {
           </div>
 
           <p className="text-[10px] text-gray-500 leading-tight">
-            Only connect with trusted sites. MetaYoshi exposes EIP-1193-compatible account and chain methods, plus wallet-specific methods for multichain capabilities.
+            Only connect with trusted sites. MetaYoshi only works with Raptoreum (RTM) mainnet coins and assets.
           </p>
         </div>
       </div>

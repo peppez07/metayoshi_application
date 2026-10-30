@@ -805,7 +805,6 @@ function buildProviderState(state: WalletState) {
     coinSymbol: RTM_NETWORK.symbol,
     coinDecimals: RTM_DECIMALS,
     chainId: RTM_NETWORK.id,
-    chainIdHex: null,
     networkId: RTM_NETWORK.id,
     networkLabel: RTM_NETWORK.name,
     accounts: address ? [address] : [],

@@ -34,12 +34,10 @@ type ProviderState = {
 
 type ProviderNetwork = {
   id: string
-  runtimeModelId: string | null
   name: string
   symbol: string
   coinType: string
-  chainId: number | null
-  chainIdHex?: string | null
+  decimals: number
   active: boolean
   capabilities: {
     nativeSend: boolean
@@ -57,7 +55,6 @@ type ProviderCapabilities = {
   }
   network: {
     id: string | null
-    runtimeModelId: string | null
     name: string | null
     symbol: string | null
     coinType: string | null
@@ -158,7 +155,7 @@ function applyProviderState(next: any): void {
   state.coinName = next.coinName ?? state.coinName
   state.coinSymbol = next.coinSymbol ?? state.coinSymbol
   state.coinDecimals = next.coinDecimals ?? state.coinDecimals
-  state.chainId = next.chainIdHex ?? next.networkId ?? next.chainId ?? state.chainId
+  state.chainId = next.networkId ?? next.chainId ?? state.chainId
   state.networkLabel = next.networkLabel ?? state.networkLabel
   updateAccounts(normalizeAccountAddresses(next.accounts))
   if (next.selectedAddress) {
@@ -283,7 +280,7 @@ window.addEventListener('message', (event) => {
     }
 
     if (eventName === 'networkChanged') {
-      state.chainId = payload.chainIdHex ?? payload.chainId ?? payload.networkId ?? state.chainId
+      state.chainId = payload.networkId ?? payload.chainId ?? state.chainId
       state.networkLabel = payload.networkLabel ?? state.networkLabel
       if (payload.coinId !== undefined) state.coinId = payload.coinId ?? state.coinId
       if (payload.coinName !== undefined) state.coinName = payload.coinName ?? state.coinName
