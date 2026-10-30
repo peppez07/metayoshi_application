@@ -3,3 +3,12 @@ node_modules
 .env.local
 .env.*.local
 metayoshi.build.json
+
+# build output
+dist/
+dist-chromium/
+dist-firefox/
+*.zip
+
+# extension signing keys
+*.pem

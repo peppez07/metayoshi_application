@@ -1,8 +1,0 @@
-{
-  "remainingBtczFallback": [
-    "rebus.ts",
-    "rizon.ts",
-    "sifchain.ts"
-  ],
-  "missingLogoFiles": []
-}
