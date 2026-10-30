@@ -12,10 +12,10 @@
     "zip:chromium": "npm run build:chromium && node scripts/zip-chromium.mjs",
     "zip:firefox": "npm run build:firefox && node scripts/zip-firefox.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@walletconnect/ethereum-provider": "^2.21.5",
     "@emurgo/cardano-serialization-lib-asmjs": "^15.0.3",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "1.3.2",
@@ -24,6 +24,7 @@
     "@scure/bip39": "^2.0.1",
     "@solana/web3.js": "^1.98.4",
     "@stellar/stellar-sdk": "^12.3.0",
+    "@walletconnect/ethereum-provider": "^2.21.5",
     "bip39": "^3.1.0",
     "bs58": "^6.0.0",
     "buffer": "^6.0.3",
@@ -60,6 +61,7 @@
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "5.2.2",
-    "vite": "^5.1.0"
+    "vite": "^5.1.0",
+    "vitest": "^2.1.9"
   }
 }
