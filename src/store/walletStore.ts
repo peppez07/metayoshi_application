@@ -268,11 +268,12 @@ let reconnectAttempts = 0
 const txCache = new Map<string, Transaction>()
 const headerTimeCache = new Map<number, number>()
 
-async function fetchTx(txid: string): Promise<Transaction> {
+/** `height` comes from the address history; it lets servers without Core txindex answer. */
+async function fetchTx(txid: string, height: number): Promise<Transaction> {
   const cached = txCache.get(txid)
   if (cached) return cached
   if (!api) throw new Error('Not connected')
-  const tx = parseTx(await api.getTransaction(txid))
+  const tx = parseTx(await api.getTransactionAt(txid, height))
   if (txCache.size > MAX_ACTIVITY_PREV_TX) txCache.delete(txCache.keys().next().value as string)
   txCache.set(txid, tx)
   return tx
@@ -627,6 +628,12 @@ export const useWalletStore = create<WalletState>()(
               .slice(-HISTORY_LIMIT)
               .reverse()
             const previous = new Map((get().activity[account.id] ?? []).map((item) => [item.txid, item]))
+            // An input can only spend our output if its funding tx is in our history.
+            const heights = new Map(history.map((h) => [h.txid, h.height]))
+            const fetchOwnPrev = async (txid: string) => {
+              const height = heights.get(txid)
+              return height === undefined ? null : fetchTx(txid, height)
+            }
             const items: ActivityItem[] = []
             for (const entry of recent) {
               const known = previous.get(entry.txid)
@@ -635,7 +642,7 @@ export const useWalletStore = create<WalletState>()(
                 continue
               }
               try {
-                const effect = await describeTx(await fetchTx(entry.txid), ownScript, fetchTx)
+                const effect = await describeTx(await fetchTx(entry.txid, entry.height), ownScript, fetchOwnPrev)
                 items.push({
                   txid: entry.txid,
                   height: entry.height,

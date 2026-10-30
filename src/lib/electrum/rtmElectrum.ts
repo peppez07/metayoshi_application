@@ -52,6 +52,8 @@ export interface AssetMetadata {
   creationHeight: number | null
 }
 
+const METHOD_NOT_FOUND = -32601
+
 /** Floor used when the server reports no fee information. */
 export const MIN_FEE_PER_BYTE = 2n
 
@@ -146,6 +148,25 @@ export class RtmElectrum {
 
   async getTransaction(txid: string): Promise<string> {
     return await this.client.request<string>('blockchain.transaction.get', [txid, false])
+  }
+
+  private inBlockSupported = true
+
+  /**
+   * Confirmed transactions via the RTM extension, which works on servers whose
+   * Core has no txindex; mempool transactions (height <= 0) and servers
+   * without the extension use blockchain.transaction.get.
+   */
+  async getTransactionAt(txid: string, height: number): Promise<string> {
+    if (height > 0 && this.inBlockSupported) {
+      try {
+        return await this.client.request<string>('blockchain.transaction.get_in_block', [txid, height])
+      } catch (error) {
+        if (!(error instanceof ElectrumError) || error.code !== METHOD_NOT_FOUND) throw error
+        this.inBlockSupported = false
+      }
+    }
+    return await this.getTransaction(txid)
   }
 
   async broadcast(hex: string): Promise<string> {

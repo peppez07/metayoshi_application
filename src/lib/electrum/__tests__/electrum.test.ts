@@ -12,7 +12,7 @@ function listening(server: WebSocketServer): Promise<void> {
 }
 
 /** Minimal ElectrumX stand-in speaking JSON-RPC over WebSocket frames. */
-function startMockServer(genesis = RTM_GENESIS_HASH) {
+function startMockServer(genesis = RTM_GENESIS_HASH, inBlock = true) {
   const server = new WebSocketServer({ port: 0 })
   const calls: string[] = []
   let retriesLeft = 2
@@ -26,6 +26,8 @@ function startMockServer(genesis = RTM_GENESIS_HASH) {
       return { confirmed: 1234567890, unconfirmed: -5 }
     },
     'blockchain.scripthash.listunspent': () => [{ tx_hash: 'aa'.repeat(32), tx_pos: 1, value: 500000000, height: 90 }],
+    'blockchain.transaction.get': ([txid]) => `plain:${txid}`,
+    ...(inBlock ? { 'blockchain.transaction.get_in_block': ([txid, height]: any[]) => `block${height}:${txid}` } : {}),
     'blockchain.relayfee': () => 0.00001,
     'blockchain.estimatefee': () => 0.00005,
     'blockchain.scripthash.assets.listunspent': ([, assetId, cursor]) => {
@@ -101,6 +103,11 @@ describe('ElectrumX client', () => {
     expect(await seen).toBe('newstatus')
   })
 
+  test('reads confirmed transactions from their block and mempool ones directly', async () => {
+    expect(await api.getTransactionAt('ee'.repeat(32), 77)).toBe(`block77:${'ee'.repeat(32)}`)
+    expect(await api.getTransactionAt('ee'.repeat(32), 0)).toBe(`plain:${'ee'.repeat(32)}`)
+  })
+
   test('surfaces server errors', async () => {
     await expect(api.client.request('no.such.method')).rejects.toBeInstanceOf(ElectrumError)
   })
@@ -112,6 +119,19 @@ describe('network verification', () => {
     await listening(mock.server)
     const api = new RtmElectrum(new ElectrumClient(mock.url()))
     await expect(api.verifyNetwork()).rejects.toThrow(/genesis hash mismatch/)
+    api.client.close()
+    mock.server.close()
+  })
+})
+
+describe('servers without the get_in_block extension', () => {
+  test('fall back to blockchain.transaction.get', async () => {
+    const mock = startMockServer(RTM_GENESIS_HASH, false)
+    await listening(mock.server)
+    const api = new RtmElectrum(new ElectrumClient(mock.url()))
+    expect(await api.getTransactionAt('ee'.repeat(32), 77)).toBe(`plain:${'ee'.repeat(32)}`)
+    expect(await api.getTransactionAt('ff'.repeat(32), 78)).toBe(`plain:${'ff'.repeat(32)}`)
+    expect(mock.calls.filter((m) => m === 'blockchain.transaction.get_in_block')).toHaveLength(1)
     api.client.close()
     mock.server.close()
   })

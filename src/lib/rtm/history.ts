@@ -15,12 +15,13 @@ const NULL_TXID = '0'.repeat(64)
 
 /**
  * Computes what a transaction did to one P2PKH script. Inputs are resolved by
- * fetching the transactions they spend.
+ * fetching the transactions they spend; `fetchTx` may return null for a
+ * transaction outside the address history, whose outputs cannot be ours.
  */
 export async function describeTx(
   tx: Transaction,
   ownScript: Uint8Array,
-  fetchTx: (txid: string) => Promise<Transaction>
+  fetchTx: (txid: string) => Promise<Transaction | null>
 ): Promise<TxEffect> {
   let rtmDelta = 0n
   const assetDeltas: Record<string, bigint> = {}
@@ -49,6 +50,7 @@ export async function describeTx(
   for (const input of tx.inputs) {
     if (input.txid === NULL_TXID) continue
     const prev = await fetchTx(input.txid)
+    if (!prev) continue
     const spent = prev.outputs[input.vout]
     if (spent && apply(spent.script, spent.value, -1n)) spentFromUs = true
   }

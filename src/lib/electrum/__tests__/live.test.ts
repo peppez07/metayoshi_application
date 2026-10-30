@@ -31,9 +31,13 @@ describe.skipIf(!SERVER)(`live ElectrumX ${SERVER}`, () => {
     const utxoTotal = utxos.filter((u) => u.height > 0).reduce((n, u) => n + u.value, 0n)
     expect(utxoTotal).toBeLessThanOrEqual(balance.confirmed + (balance.unconfirmed > 0n ? balance.unconfirmed : 0n))
     if (history.length > 0) {
+      const heights = new Map(history.map((h) => [h.txid, h.height]))
+      const fetchTx = async (txid: string) => {
+        const height = heights.get(txid)
+        return height === undefined ? null : parseTx(await api.getTransactionAt(txid, height))
+      }
       const latest = history[history.length - 1]
-      const fetchTx = async (txid: string) => parseTx(await api.getTransaction(txid))
-      const effect = await describeTx(await fetchTx(latest.txid), addressToScript(ADDRESS), fetchTx)
+      const effect = await describeTx((await fetchTx(latest.txid))!, addressToScript(ADDRESS), fetchTx)
       console.log('latest tx', latest.txid, effect)
     }
   }, 60_000)
