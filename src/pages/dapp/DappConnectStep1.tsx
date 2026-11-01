@@ -10,6 +10,7 @@ import {
   type DappScope
 } from '../../lib/dappPermissions'
 import { useWalletStore } from '../../store/walletStore'
+import { isSidePanel } from '../../lib/surface'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -77,7 +78,7 @@ const DappConnectStep1: React.FC = () => {
       })
     }
     navigate('/wallet/assets')
-    window.close()
+    if (!isSidePanel()) window.close()
   }
 
   if (loadingApproval) {

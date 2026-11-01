@@ -10,6 +10,8 @@ It holds RTM and Raptoreum assets (fungible and unique) and talks directly to an
   The server only sees script hashes and the signed transaction.
 - Addresses: BIP44 `m/44'/175'/{account}'/0/0`, P2PKH (`R…`). These match the
   addresses created by earlier MetaYoshi releases.
+- BitcoinZ (BTCZ) is a second network, picked from the coin chip in the header.
+  See [BitcoinZ](#bitcoinz-btcz).
 
 ## How it works
 
@@ -109,6 +111,57 @@ RTM_LIVE_SERVER=https://144.202.18.233/api/v1/electrum npm run test:live
 
 `RTM_LIVE_ADDRESS` selects the address to query.
 
+## BitcoinZ (BTCZ)
+
+Each account also has a BitcoinZ address from the same recovery phrase:
+BIP44 `m/44'/177'/{account}'/0/0` (SLIP-44 coin type 177), transparent P2PKH
+`t1…` addresses (version bytes `1CB8`, P2SH `1CBD`). BitcoinZ has no assets,
+so the Assets tab is hidden on this network. Shielded `z…` addresses are not
+supported.
+
+- Transactions are transparent Sapling v4 transactions (version group
+  `0x892F2085`), signed with the ZIP-243 digest under the Canopy branch ID
+  `0xe9ff75a6` and expiring 20 blocks after the current tip
+  (`src/lib/btcz/transaction.ts`, checked against the official ZIP-243 test
+  vectors). The fee is the fee rate from the server, at least 0.0001 BTCZ.
+- Servers must report the BitcoinZ genesis hash
+  `f499ee3d…534d75c1`. The defaults are the public servers from the official
+  BitcoinZ Electrum wallet on their secure WebSocket port:
+  `wss://electrum1.btcz.rocks:50004`, `electrum2`, `electrum6`. A browser can
+  only use them if they present a browser-trusted certificate; otherwise add
+  your own BitcoinZ ElectrumX server (`COIN=BitcoinZ`, WSS or behind an HTTPS
+  gateway) in **Settings → ElectrumX servers** while BitcoinZ is selected, or
+  at build time:
+
+```bash
+VITE_BTCZ_ELECTRUM_SERVERS="wss://btcz.example:50004" VITE_BTCZ_EXPLORER="https://explorer.example" npm run build
+```
+
+Smartnode server discovery only exists for Raptoreum. For BitcoinZ the wallet
+compares a recent block header with your other configured BitcoinZ servers.
+dApps keep using Raptoreum only: a dApp transaction request switches the wallet
+back to Raptoreum before it is built.
+
+## More coins
+
+`src/lib/coins/catalog.ts` lists 111 more coins (from ElectrumX `coins.py`
+and SLIP-0044). A coin becomes available in **Add coin** once its transaction
+family is implemented and tested; today that is the 66 coins that sign like
+Bitcoin's legacy P2PKH transactions (BTC, LTC, DOGE, DASH, DGB, RVN, VTC, …).
+See [docs/MULTICOIN_PLAN.md](docs/MULTICOIN_PLAN.md) for the families, the
+phases and the per-coin research.
+
+- Addresses: `m/44'/<SLIP-44 coin type>'/<account>'/0/0`, P2PKH. SegWit coins
+  can also pay native SegWit (`bc1…`, `ltc1…`) addresses.
+- Transactions: version 1, legacy `SIGHASH_ALL` over P2PKH inputs. Fees come
+  from the server's fee estimate and relay fee; the dust limit follows the
+  relay fee (Dogecoin: at least 0.01 DOGE).
+- Servers: most public ElectrumX servers only speak TCP/SSL, which a browser
+  cannot use. These coins start without a server: add a `wss://` server or
+  an HTTPS gateway in **Settings → ElectrumX servers**, or set
+  `VITE_ELECTRUM_SERVERS_<SYMBOL>` (for example `VITE_ELECTRUM_SERVERS_LTC`)
+  at build time.
+
 ## dApps
 
 See [docs/SDK.md](docs/SDK.md). The provider is `window.metayoshi`
@@ -117,6 +170,9 @@ See [docs/SDK.md](docs/SDK.md). The provider is `window.metayoshi`
 ## Status
 
 Beta. Coin and asset sends still need live mainnet testing; use small amounts.
+
+- BitcoinZ sends are tested against the ZIP-243 test vectors and a mock
+  ElectrumX server, not yet on BitcoinZ mainnet.
 
 - Unique-asset sends that split a token range follow the server's range model
   but have not yet been confirmed on mainnet.

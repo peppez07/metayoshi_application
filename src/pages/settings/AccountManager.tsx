@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Input } from '../../components/Input'
-import { activeAccountOf, useWalletStore } from '../../store/walletStore'
+import { accountAddress, activeAccountOf, useWalletStore } from '../../store/walletStore'
 import { IoAdd, IoTrashOutline, IoCheckmarkCircle } from 'react-icons/io5'
 import { useToast } from '../../components/Toast'
 import { IconButton, Notice } from '../../components/ui'
@@ -67,7 +67,7 @@ const AccountManager: React.FC = () => {
         <div className="card px-4 py-4 space-y-4">
           <h3 className="text-sm font-semibold">New account</h3>
           <Input label="Account name" placeholder={`Account ${accounts.length + 1}`} value={accountName} onChange={(e) => setAccountName(e.target.value)} autoFocus />
-          <p className="text-[11px] text-gray-500">The next address is derived from your recovery phrase (m/44'/175'/n'/0/0), so it can always be restored.</p>
+          <p className="text-[11px] text-gray-500">The next addresses are derived from your recovery phrase (RTM m/44'/175'/n'/0/0, BTCZ m/44'/177'/n'/0/0), so they can always be restored.</p>
           {error && <Notice tone="error">{error}</Notice>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={() => { setShowAdd(false); setError('') }} disabled={isCreating}>Cancel</Button>
@@ -100,7 +100,10 @@ const AccountManager: React.FC = () => {
                     {active && <IoCheckmarkCircle className="text-primary w-4 h-4 shrink-0" />}
                   </span>
                   <span className="text-[11px] text-gray-500 font-mono truncate">
-                    {account.address ? `${account.address.slice(0, 10)}…${account.address.slice(-8)}` : 'Unlock to derive'}
+                    {(() => {
+                      const address = accountAddress(account, state.network)
+                      return address ? `${address.slice(0, 10)}…${address.slice(-8)}` : 'Unlock to derive'
+                    })()}
                   </span>
                 </span>
               </button>

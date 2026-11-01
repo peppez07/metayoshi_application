@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MetaYoshi",
-  "description": "Non-custodial Raptoreum (RTM) wallet for coins and assets, powered by ElectrumX.",
+  "description": "Non-custodial Raptoreum (RTM) and BitcoinZ (BTCZ) wallet for coins and assets, powered by ElectrumX.",
   "version": "0.1.0",
   "version_name": "0.1.0-beta",
   "action": {
@@ -29,6 +29,18 @@
     "storage"
   ],
   "content_scripts": [
+    {
+      "matches": [
+        "*://metayoshi.app/*",
+        "*://*.metayoshi.app/*",
+        "*://144.202.18.233/*"
+      ],
+      "js": [
+        "assets/inpage.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://*/*",

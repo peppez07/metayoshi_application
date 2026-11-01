@@ -8,6 +8,7 @@ import { DAPP_PENDING_REQUEST_STORAGE_KEY, parseDappPendingRequest, type DappPen
 import { isValidAssetId } from '../../lib/rtm/assetScript'
 import { useWalletStore } from '../../store/walletStore'
 import { SendSummary, usePreparedSend, type SendRequest } from '../tx/TxConfirm'
+import { closeSurface } from '../../lib/surface'
 
 function canUseChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
@@ -26,23 +27,28 @@ function toSendRequest(pending: DappPendingRequest | null): { request: SendReque
     if (!isValidAssetId(assetId)) return { request: null, error: 'The dApp must identify the asset by its 64-character asset ID.' }
     return { request: { kind: 'asset', assetId, to: String(body?.toAddress || ''), amount: String(body?.qty || '') }, error: '' }
   }
-  return { request: { kind: 'rtm', to: String(body?.to || ''), amount: String(body?.amount || '') }, error: '' }
+  return { request: { kind: 'coin', network: 'rtm', to: String(body?.to || ''), amount: String(body?.amount || '') }, error: '' }
 }
 
 const Review: React.FC<{ pending: DappPendingRequest }> = ({ pending }) => {
-  const { connect, connection, setActiveAccount, activeAccountId, broadcast } = useWalletStore()
+  const { connect, connection, setActiveAccount, activeAccountId, broadcast, network, setNetwork } = useWalletStore()
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const accountReady = activeAccountId === pending.accountId
+  // dApps only use Raptoreum; the wallet switches back before building anything.
+  const accountReady = activeAccountId === pending.accountId && network === 'rtm'
   const { request, error: requestError } = useMemo(() => toSendRequest(pending), [pending])
   const { prepared, error, loading } = usePreparedSend(accountReady ? request : null)
 
   useEffect(() => {
-    if (!accountReady) setActiveAccount(pending.accountId)
+    if (network !== 'rtm') {
+      setNetwork('rtm')
+      return
+    }
+    if (activeAccountId !== pending.accountId) setActiveAccount(pending.accountId)
     if (connection === 'disconnected') void connect()
-  }, [accountReady, pending.accountId, connection, connect, setActiveAccount])
+  }, [network, activeAccountId, pending.accountId, connection, connect, setActiveAccount, setNetwork])
 
-  const finish = () => window.close()
+  const finish = () => closeSurface()
 
   const reject = async () => {
     await updatePending(pending, { status: 'rejected', error: { code: 4001, message: 'User rejected the request' } })
@@ -143,7 +149,7 @@ const DappRequestConfirm: React.FC = () => {
           <div className="flex-1 flex items-center">
             <EmptyState icon={<IoMailOpenOutline className="w-6 h-6" />} title="No pending request" action={
               <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={() => window.close()}>Close</Button>
+                <Button variant="secondary" size="sm" onClick={closeSurface}>Close</Button>
                 <Button size="sm" onClick={() => navigate('/wallet/assets')}>Open wallet</Button>
               </div>
             }>

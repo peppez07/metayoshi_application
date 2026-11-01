@@ -11,7 +11,8 @@ const BROADCAST = 'blockchain.transaction.broadcast'
 const SUBSCRIPTIONS = new Set(['blockchain.headers.subscribe', 'blockchain.scripthash.subscribe', 'blockchain.scripthash.assets.subscribe'])
 
 export class ElectrumError extends Error {
-  constructor(message: string, readonly code?: number) {
+  /** True when the server answered with an error, as opposed to a transport failure. */
+  constructor(message: string, readonly code?: number, readonly fromServer = false) {
     super(message)
     this.name = 'ElectrumError'
   }
@@ -29,7 +30,48 @@ function protocolError(error: { code?: unknown; message?: unknown }): ElectrumEr
   const code = typeof error.code === 'number' ? error.code : undefined
   return new ElectrumError(code === ELECTRUM_RETRY_CODE
     ? 'The server is synchronizing or temporarily busy. The wallet will reconnect automatically; please wait.'
-    : String(error.message ?? 'Electrum request failed'), code)
+    : String(error.message ?? 'Electrum request failed'), code, true)
+}
+
+/**
+ * JSON.parse, except that integers too large for a double (amounts above
+ * about 90 million coins in base units, which Dogecoin addresses reach) are
+ * kept exactly, as strings; toAtoms reads both forms. Only number tokens
+ * outside string literals are touched.
+ */
+export function parseJson(text: string): any {
+  let out = ''
+  let start = 0
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (char === '"') {
+      for (i += 1; i < text.length && text[i] !== '"'; i += 1) if (text[i] === '\\') i += 1
+      continue
+    }
+    if (char !== '-' && (char < '0' || char > '9')) continue
+    let end = i + 1
+    while (end < text.length && /[0-9.eE+-]/.test(text[end])) end += 1
+    const token = text.slice(i, end)
+    if (/^-?\d{16,}$/.test(token) && !Number.isSafeInteger(Number(token))) {
+      out += `${text.slice(start, i)}"${token}"`
+      start = end
+    }
+    i = end - 1
+  }
+  return JSON.parse(start === 0 ? text : out + text.slice(start))
+}
+
+/**
+ * The node's reason from an ElectrumX broadcast error, without the raw
+ * transaction ElectrumX appends ("...rejected by network rules.\n\n<reason>\n[<hex>]").
+ */
+function rejectionReason(message: string): string {
+  const text = message
+    .replace(/\[?[0-9a-f]{100,}\]?/gi, '')
+    .replace(/^the transaction was rejected by network rules\.?/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return (text || 'no reason given').slice(0, 300)
 }
 
 type NotificationHandler = (params: unknown[]) => void
@@ -138,6 +180,8 @@ export class ElectrumClient {
       socket.onerror = () => {
         clearTimeout(timer)
         reject(new ElectrumError('Connection to Electrum server failed'))
+        // Some WebSocket implementations (Node's) fire error again from close() while connecting.
+        socket.onerror = null
         socket.close()
       }
       socket.onclose = () => {
@@ -171,7 +215,7 @@ export class ElectrumClient {
   private handleMessage(text: string): void {
     let messages: any[]
     try {
-      const parsed = JSON.parse(text)
+      const parsed = parseJson(text)
       messages = Array.isArray(parsed) ? parsed : [parsed]
     } catch { return }
     for (const message of messages) {
@@ -211,7 +255,7 @@ export class ElectrumClient {
         throw protocolError({ code: ELECTRUM_RETRY_CODE })
       }
       if (!response.ok) throw new ElectrumError(`Electrum HTTP request failed (${response.status})`)
-      const message = await response.json()
+      const message = parseJson(await response.text())
       this.assertCurrent(generation)
       if (!message || message.jsonrpc !== '2.0' || message.id !== id ||
         (message.error ? typeof message.error !== 'object' : !Object.prototype.hasOwnProperty.call(message, 'result'))) {
@@ -260,6 +304,10 @@ export class ElectrumClient {
       } catch (error) {
         if (method === BROADCAST) {
           const code = error instanceof ElectrumError ? error.code : undefined
+          // The server answered: its node refused the transaction, so nothing was sent and the reason is useful.
+          if (error instanceof ElectrumError && error.fromServer && code !== ELECTRUM_RETRY_CODE) {
+            throw new ElectrumError(`The network rejected this transaction: ${rejectionReason(error.message)}`, code, true)
+          }
           throw new ElectrumError(code === ELECTRUM_RETRY_CODE
             ? 'The server is synchronizing or temporarily busy. Transaction submission was not confirmed; check its status before sending again.'
             : 'Transaction submission was not confirmed. Check its status before sending again.', code)

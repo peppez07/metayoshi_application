@@ -4,7 +4,7 @@ import {
   IoChevronForward, IoPeopleOutline, IoKeyOutline, IoTimerOutline, IoServerOutline, IoCloudUploadOutline,
   IoCloudDownloadOutline, IoEyeOutline, IoDownloadOutline, IoGlobeOutline, IoLockClosedOutline
 } from 'react-icons/io5'
-import { useWalletStore } from '../../store/walletStore'
+import { networkParams, serverStateOf, useWalletStore } from '../../store/walletStore'
 
 const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? ''
 
@@ -18,7 +18,10 @@ interface Item {
 
 const MainSettings: React.FC = () => {
   const navigate = useNavigate()
-  const { accounts, autolockMinutes, servers, authorizedSites, connection, lock } = useWalletStore()
+  const state = useWalletStore()
+  const { accounts, autolockMinutes, authorizedSites, connection, lock } = state
+  const network = networkParams(state)
+  const { servers } = serverStateOf(state, network.id)
 
   const sections: Array<{ title: string; items: Item[] }> = [
     {
@@ -32,7 +35,7 @@ const MainSettings: React.FC = () => {
     {
       title: 'Network',
       items: [
-        { label: 'ElectrumX servers', path: '/settings/servers', icon: <IoServerOutline />, detail: connection === 'connected' ? 'Connected' : `${servers.length} configured` },
+        { label: `${network.symbol} ElectrumX servers`, path: '/settings/servers', icon: <IoServerOutline />, detail: connection === 'connected' ? 'Connected' : `${servers.length} configured` },
         { label: 'Connected sites', path: '/settings/authorized-sites', icon: <IoGlobeOutline />, detail: String(authorizedSites.length) }
       ]
     },
@@ -70,7 +73,7 @@ const MainSettings: React.FC = () => {
       <button type="button" onClick={() => { lock(); navigate('/unlock', { replace: true }) }} className="btn-secondary w-full h-11 text-sm">
         <IoLockClosedOutline className="w-4 h-4" /> Lock wallet
       </button>
-      <p className="text-center text-[11px] text-gray-600 pb-2">MetaYoshi {APP_VERSION} · Raptoreum (RTM)</p>
+      <p className="text-center text-[11px] text-gray-600 pb-2">MetaYoshi {APP_VERSION} · Raptoreum (RTM) · BitcoinZ (BTCZ)</p>
     </div>
   )
 }

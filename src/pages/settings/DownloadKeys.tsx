@@ -21,10 +21,10 @@ const DownloadKeys: React.FC = () => {
   const mnemonic = sessionMnemonic ?? ''
 
   const exportData = () => ({
-    coin: 'RTM',
+    coin: key?.symbol ?? 'RTM',
     mnemonic,
     account: key ? { name: key.accountName, address: key.address, path: key.path, privateKeyWif: key.wif, publicKey: key.publicKey } : null,
-    accounts: accounts.map((a) => ({ name: a.name, address: a.address, derivationIndex: a.derivationIndex })),
+    accounts: accounts.map((a) => ({ name: a.name, address: a.address, addresses: a.addresses, derivationIndex: a.derivationIndex })),
     timestamp: new Date().toISOString(),
     warning: 'NEVER share these keys with anyone. Keep this file secure.'
   })
@@ -34,7 +34,7 @@ const DownloadKeys: React.FC = () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `metayoshi-rtm-keys-${Date.now()}.json`
+    a.download = `metayoshi-${(key?.symbol ?? 'RTM').toLowerCase()}-keys-${Date.now()}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -59,7 +59,7 @@ const DownloadKeys: React.FC = () => {
 
         <div className="space-y-4">
           <Field label={`Mnemonic phrase · ${mnemonic.split(' ').filter(Boolean).length} words`} value={mnemonic} />
-          <Field label={`Private key (WIF · ${key?.accountName ?? 'Account'})`} value={key?.wif ?? ''} />
+          <Field label={`${key?.symbol ?? ''} private key (WIF · ${key?.accountName ?? 'Account'})`.trim()} value={key?.wif ?? ''} />
           <Field label="Public key" value={key?.publicKey ?? ''} />
           <Field label={`Address · ${key?.path ?? ''}`} value={key?.address ?? ''} />
         </div>

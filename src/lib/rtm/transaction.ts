@@ -124,7 +124,7 @@ function derInteger(value: Uint8Array): Uint8Array {
   return concatBytes(Uint8Array.of(0x02, body.length), body)
 }
 
-function compactToDer(signature: Uint8Array): Uint8Array {
+export function compactToDer(signature: Uint8Array): Uint8Array {
   const r = derInteger(signature.slice(0, 32))
   const s = derInteger(signature.slice(32, 64))
   return concatBytes(Uint8Array.of(0x30, r.length + s.length), r, s)
@@ -141,7 +141,8 @@ export function p2pkhKeyHash(script: Uint8Array): Uint8Array | null {
 export function signTransaction(
   outputs: TxOutput[],
   spends: SpendInput[],
-  privateKey: Uint8Array
+  privateKey: Uint8Array,
+  version: number = TX_VERSION
 ): { hex: string; txid: string; size: number } {
   if (spends.length === 0) throw new Error('Transaction has no inputs')
   const pubkey = secp.getPublicKey(privateKey, true)
@@ -153,7 +154,7 @@ export function signTransaction(
     }
   }
   const tx: Transaction = {
-    version: TX_VERSION,
+    version,
     inputs: spends.map((spend) => ({ txid: spend.txid, vout: spend.vout, scriptSig: new Uint8Array(), sequence: SEQUENCE_FINAL })),
     outputs,
     locktime: 0

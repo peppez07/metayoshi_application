@@ -1,6 +1,7 @@
 import { addressToScript, COIN, decodeAddress } from './address'
 import { buildAssetTransferScript } from './assetScript'
 import { estimateTxBytes, signTransaction, type SpendInput, type TxOutput } from './transaction'
+import { RTM_NETWORK, type NetworkParams } from '../networks'
 
 /** Change below this is added to the fee instead of creating an output. */
 export const DUST_SATS = 1000n
@@ -41,16 +42,38 @@ interface Selection {
   change: bigint
 }
 
+/** How one coin sizes, prices and signs a transaction of P2PKH inputs. */
+export interface SendChain {
+  network: NetworkParams
+  estimateBytes: (inputCount: number, outputScripts: Uint8Array[]) => number
+  sign: (outputs: TxOutput[], spends: SpendInput[], privateKey: Uint8Array) => { hex: string; txid: string; size: number }
+  /** Fee floor per transaction, whatever the fee rate. */
+  minFee: bigint
+  maxFee: bigint
+  /** Change below this goes to the fee; recipients must receive more. */
+  dust: bigint
+}
+
+export const RTM_SEND_CHAIN: SendChain = {
+  network: RTM_NETWORK,
+  estimateBytes: estimateTxBytes,
+  sign: signTransaction,
+  minFee: 0n,
+  maxFee: MAX_FEE_SATS,
+  dust: DUST_SATS
+}
+
 function confirmedCoins(utxos: CoinUtxo[]): CoinUtxo[] {
   return utxos.filter((u) => u.height > 0 && u.value > 0n).sort((a, b) => (b.value > a.value ? 1 : b.value < a.value ? -1 : 0))
 }
 
-function feeFor(inputCount: number, scripts: Uint8Array[], feePerByte: bigint): bigint {
-  return BigInt(estimateTxBytes(inputCount, scripts)) * feePerByte
+function feeFor(inputCount: number, scripts: Uint8Array[], feePerByte: bigint, chain: SendChain): bigint {
+  const fee = BigInt(chain.estimateBytes(inputCount, scripts)) * feePerByte
+  return fee > chain.minFee ? fee : chain.minFee
 }
 
 /**
- * Adds RTM inputs until `target` plus fee is covered. `fixedSpends` are inputs
+ * Adds coin inputs until `target` plus fee is covered. `fixedSpends` are inputs
  * that must be included (asset inputs, which carry zero RTM).
  */
 function selectCoins(params: {
@@ -60,32 +83,34 @@ function selectCoins(params: {
   outputScripts: Uint8Array[]
   target: bigint
   feePerByte: bigint
+  chain: SendChain
 }): Selection {
-  const { senderScript, fixedSpends, outputScripts, target, feePerByte } = params
+  const { senderScript, fixedSpends, outputScripts, target, feePerByte, chain } = params
   const spends = [...fixedSpends]
   let total = fixedSpends.reduce((n, s) => n + s.value, 0n)
   const withChange = [...outputScripts, senderScript]
   for (const coin of confirmedCoins(params.coins)) {
-    const noChangeFee = feeFor(spends.length, outputScripts, feePerByte)
+    const noChangeFee = feeFor(spends.length, outputScripts, feePerByte, chain)
     if (spends.length > fixedSpends.length || target === 0n) {
-      const changeFee = feeFor(spends.length, withChange, feePerByte)
-      if (total >= target + changeFee + DUST_SATS) return { spends, fee: changeFee, change: total - target - changeFee }
+      const changeFee = feeFor(spends.length, withChange, feePerByte, chain)
+      if (total >= target + changeFee + chain.dust) return { spends, fee: changeFee, change: total - target - changeFee }
       if (total >= target + noChangeFee) return { spends, fee: total - target, change: 0n }
     }
     if (spends.length >= MAX_INPUTS) break
     spends.push({ txid: coin.txid, vout: coin.vout, prevScript: senderScript, value: coin.value })
     total += coin.value
   }
-  const changeFee = feeFor(spends.length, withChange, feePerByte)
-  if (spends.length > 0 && total >= target + changeFee + DUST_SATS) {
+  const changeFee = feeFor(spends.length, withChange, feePerByte, chain)
+  if (spends.length > 0 && total >= target + changeFee + chain.dust) {
     return { spends, fee: changeFee, change: total - target - changeFee }
   }
-  const noChangeFee = feeFor(spends.length, outputScripts, feePerByte)
+  const noChangeFee = feeFor(spends.length, outputScripts, feePerByte, chain)
   if (spends.length > 0 && total >= target + noChangeFee) return { spends, fee: total - target, change: 0n }
   const available = confirmedCoins(params.coins).reduce((n, c) => n + c.value, 0n)
+  const symbol = chain.network.symbol
   throw new Error(
-    `Insufficient confirmed RTM: need ${formatSats(target + noChangeFee)} RTM including fee, ` +
-    `have ${formatSats(available)} RTM`
+    `Insufficient confirmed ${symbol}: need ${formatSats(target + noChangeFee)} ${symbol} including fee, ` +
+    `have ${formatSats(available)} ${symbol}`
   )
 }
 
@@ -95,13 +120,13 @@ function formatSats(value: bigint): string {
   return fraction ? `${whole}.${fraction}` : whole.toString()
 }
 
-function checkFee(fee: bigint): void {
-  if (fee > MAX_FEE_SATS) throw new Error(`Estimated fee too high: ${formatSats(fee)} RTM`)
+function checkFee(fee: bigint, chain: SendChain): void {
+  if (fee > chain.maxFee) throw new Error(`Estimated fee too high: ${formatSats(fee)} ${chain.network.symbol}`)
 }
 
-function finish(outputs: TxOutput[], selection: Selection, sent: bigint, privateKey: Uint8Array): BuiltTransaction {
-  checkFee(selection.fee)
-  const signed = signTransaction(outputs, selection.spends, privateKey)
+function finish(outputs: TxOutput[], selection: Selection, sent: bigint, privateKey: Uint8Array, chain: SendChain): BuiltTransaction {
+  checkFee(selection.fee, chain)
+  const signed = chain.sign(outputs, selection.spends, privateKey)
   return { ...signed, fee: selection.fee, sent, change: selection.change }
 }
 
@@ -113,38 +138,43 @@ export function buildNativeSend(params: {
   feePerByte: bigint
   /** Send everything minus the fee to the single recipient. */
   sendMax?: boolean
+  /** Coin rules; Raptoreum by default. */
+  chain?: SendChain
 }): BuiltTransaction {
-  const senderScript = addressToScript(params.senderAddress)
+  const chain = params.chain ?? RTM_SEND_CHAIN
+  const network = chain.network
+  const senderScript = addressToScript(params.senderAddress, network)
   if (params.outputs.length === 0) throw new Error('No recipients')
   const recipients = params.outputs.map((o) => {
-    if (!decodeAddress(o.address)) throw new Error(`Invalid RTM address: ${o.address}`)
-    return { value: o.value, script: addressToScript(o.address) }
+    if (!decodeAddress(o.address, network)) throw new Error(`Invalid ${network.symbol} address: ${o.address}`)
+    return { value: o.value, script: addressToScript(o.address, network) }
   })
 
   if (params.sendMax) {
     if (recipients.length !== 1) throw new Error('Send max requires exactly one recipient')
     const coins = confirmedCoins(params.coins).slice(0, MAX_INPUTS)
     const total = coins.reduce((n, c) => n + c.value, 0n)
-    const fee = feeFor(coins.length, [recipients[0].script], params.feePerByte)
-    if (coins.length === 0 || total <= fee + DUST_SATS) throw new Error('Balance is too small to cover the network fee')
+    const fee = feeFor(coins.length, [recipients[0].script], params.feePerByte, chain)
+    if (coins.length === 0 || total <= fee + chain.dust) throw new Error('Balance is too small to cover the network fee')
     const value = total - fee
     const spends = coins.map((c) => ({ txid: c.txid, vout: c.vout, prevScript: senderScript, value: c.value }))
-    return finish([{ value, script: recipients[0].script }], { spends, fee, change: 0n }, value, params.privateKey)
+    return finish([{ value, script: recipients[0].script }], { spends, fee, change: 0n }, value, params.privateKey, chain)
   }
 
   const target = recipients.reduce((n, o) => n + o.value, 0n)
-  for (const r of recipients) if (r.value <= DUST_SATS) throw new Error('Amount is below the dust threshold')
+  for (const r of recipients) if (r.value <= chain.dust) throw new Error('Amount is below the dust threshold')
   const selection = selectCoins({
     coins: params.coins,
     senderScript,
     fixedSpends: [],
     outputScripts: recipients.map((r) => r.script),
     target,
-    feePerByte: params.feePerByte
+    feePerByte: params.feePerByte,
+    chain
   })
   const outputs: TxOutput[] = [...recipients]
   if (selection.change > 0n) outputs.push({ value: selection.change, script: senderScript })
-  return finish(outputs, selection, target, params.privateKey)
+  return finish(outputs, selection, target, params.privateKey, chain)
 }
 
 interface AssetPlan {
@@ -226,9 +256,10 @@ export function buildAssetSend(params: {
     fixedSpends: plan.spends,
     outputScripts: plan.outputs.map((o) => o.script),
     target: 0n,
-    feePerByte: params.feePerByte
+    feePerByte: params.feePerByte,
+    chain: RTM_SEND_CHAIN
   })
   const outputs = [...plan.outputs]
   if (selection.change > 0n) outputs.push({ value: selection.change, script: senderScript })
-  return finish(outputs, selection, params.amount, params.privateKey)
+  return finish(outputs, selection, params.amount, params.privateKey, RTM_SEND_CHAIN)
 }

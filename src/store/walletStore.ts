@@ -6,13 +6,21 @@ import { addressToScript, addressToScriptHash, clearSeedCache, deriveAccountKey,
 import { formatUnits, parseUnits } from '../lib/rtm/amount'
 import { buildAssetSend, buildNativeSend, type BuiltTransaction } from '../lib/rtm/builder'
 import { describeTx, headerTime } from '../lib/rtm/history'
-import { parseTx, type Transaction } from '../lib/rtm/transaction'
-import { BUILTIN_ELECTRUM_SERVER, LEGACY_ELECTRUM_SERVER, closeClient, DEFAULT_ELECTRUM_SERVERS, getClient, isValidServerUrl, RtmElectrum, type AssetMetadata } from '../lib/electrum/rtmElectrum'
+import { type Transaction } from '../lib/rtm/transaction'
+import { needsTipHeight, parseNetworkTx, sendChainFor } from '../lib/coins/families'
+import { BUILTIN_ELECTRUM_SERVER, LEGACY_ELECTRUM_SERVER, closeClient, DEFAULT_ELECTRUM_SERVERS, defaultServers, getClient, isValidServerUrl, RtmElectrum, type AssetMetadata } from '../lib/electrum/rtmElectrum'
 import { connectionCandidates, crossCheck, fetchPeers, mergePeers, type ChainCheck, type DiscoveredServer } from '../lib/electrum/discovery'
+import { DEFAULT_ENABLED_NETWORKS, explorerUrl, isNetworkId, NETWORKS, type NetworkId, type NetworkParams } from '../lib/networks'
 
 export const RTM_DECIMALS = 8
 export const RTM_SYMBOL = 'RTM'
 export const EXPLORER_URL = String(import.meta.env.VITE_RTM_EXPLORER || 'https://explorer.raptoreum.com').replace(/\/+$/, '')
+
+/** Explorer page for a transaction; null for coins without a known explorer. */
+export function explorerTxUrl(network: NetworkId, txid: string): string | null {
+  const params = NETWORKS[network]
+  return params ? explorerUrl(params, txid) : null
+}
 const HISTORY_LIMIT = 30
 const MAX_ACTIVITY_PREV_TX = 400
 
@@ -20,7 +28,15 @@ export interface Account {
   id: string
   name: string
   derivationIndex: number
+  /** Raptoreum address; dApps only ever see this one. */
   address: string
+  /** Addresses on the other enabled networks, by network ID (m/44'/coinType'/index'/0/0). */
+  addresses: Record<NetworkId, string>
+}
+
+export interface ServerConfig {
+  servers: string[]
+  activeServer: string
 }
 
 /** Atomic amounts are kept as decimal strings so the state stays JSON-safe. */
@@ -60,6 +76,8 @@ export interface ActivityItem {
 /** Locally broadcast transactions, shown until the server reports them. */
 export interface SentRecord {
   txid: string
+  /** Absent on records from RTM-only releases. */
+  network?: NetworkId
   accountId: string
   to: string
   amount: string
@@ -70,7 +88,10 @@ export interface SentRecord {
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export interface PreparedSend {
-  kind: 'rtm' | 'asset'
+  kind: 'coin' | 'asset'
+  network: NetworkId
+  /** Native coin symbol; the fee is always paid in it. */
+  symbol: string
   accountId: string
   from: string
   to: string
@@ -95,6 +116,10 @@ export interface FullBackupV2 {
   autolockMinutes: number
   backupConfirmed: boolean
   servers: string[]
+  /** Added with multi-coin support; older backups restore the defaults. */
+  enabledNetworks?: NetworkId[]
+  offeredNetworks?: NetworkId[]
+  coinServers?: Record<NetworkId, string[]>
 }
 
 interface WalletState {
@@ -111,8 +136,17 @@ interface WalletState {
   authorizedSites: string[]
   autolockMinutes: number
   lastActiveTimestamp: number
+  /** The coin the wallet shows and connects for. */
+  network: NetworkId
+  /** Networks shown in the network picker, in the order they were added. */
+  enabledNetworks: NetworkId[]
+  /** Default networks this wallet has already been given (see normalizeEnabled). */
+  offeredNetworks: NetworkId[]
+  /** Raptoreum servers. */
   servers: string[]
   activeServer: string
+  /** Servers of every other network. */
+  coinServers: Record<NetworkId, ServerConfig>
   /** Servers learned from other servers' smartnode discovery; connection candidates only. */
   discoveredServers: DiscoveredServer[]
   peerDiscovery: boolean
@@ -149,6 +183,9 @@ interface WalletState {
   removeAccount: (id: string) => void
   renameAccount: (id: string, name: string) => void
   setActiveAccount: (id: string) => void
+  setNetwork: (network: NetworkId) => void
+  enableNetwork: (network: NetworkId) => Promise<void>
+  disableNetwork: (network: NetworkId) => void
 
   addAuthorizedSite: (origin: string) => void
   removeAuthorizedSite: (origin: string) => void
@@ -162,7 +199,8 @@ interface WalletState {
   connect: () => Promise<void>
   refresh: () => Promise<void>
   loadAssetInfo: (assetId: string) => Promise<AssetInfo | null>
-  prepareRtmSend: (params: { to: string; amount: string; sendMax?: boolean }) => Promise<PreparedSend>
+  /** Native coin send on the selected network; `network` asserts which coin the caller expects. */
+  prepareCoinSend: (params: { network: NetworkId; to: string; amount: string; sendMax?: boolean }) => Promise<PreparedSend>
   prepareAssetSend: (params: { assetId: string; to: string; amount: string }) => Promise<PreparedSend>
   broadcast: (prepared: PreparedSend) => Promise<string>
 
@@ -178,6 +216,70 @@ export function activeAccountOf(state: Pick<WalletState, 'accounts' | 'activeAcc
 
 export function formatRtm(atoms: string | bigint): string {
   return formatUnits(BigInt(atoms || 0), RTM_DECIMALS)
+}
+
+/** Both coins use 8 decimals. */
+export function formatCoin(atoms: string | bigint, network: NetworkId): string {
+  return formatUnits(BigInt(atoms || 0), NETWORKS[network].decimals)
+}
+
+export function networkParams(state: Pick<WalletState, 'network'>): NetworkParams {
+  return NETWORKS[state.network] ?? NETWORKS.rtm
+}
+
+export function accountAddress(account: Pick<Account, 'address' | 'addresses'> | undefined, network: NetworkId): string {
+  if (!account) return ''
+  return network === 'rtm' ? account.address : account.addresses?.[network] ?? ''
+}
+
+/** Balances and activity are kept per network and account. */
+export function walletKey(network: NetworkId, accountId: string): string {
+  return network === 'rtm' ? accountId : `${network}:${accountId}`
+}
+
+type ServerFields = Pick<WalletState, 'servers' | 'activeServer' | 'coinServers'>
+
+export function serverStateOf(state: ServerFields, network: NetworkId): ServerConfig {
+  if (network === 'rtm') return { servers: state.servers, activeServer: state.activeServer }
+  const config = state.coinServers?.[network]
+  if (config) return config
+  const servers = defaultServers(network)
+  return { servers, activeServer: servers[0] ?? '' }
+}
+
+function serverPatch(network: NetworkId, servers: string[], activeServer: string, state?: ServerFields): Partial<ServerFields> {
+  if (network === 'rtm') return { servers, activeServer }
+  return { coinServers: { ...(state?.coinServers ?? {}), [network]: { servers, activeServer } } }
+}
+
+function normalizeCoinServers(raw: unknown, legacyBtcz?: { servers?: unknown; activeServer?: unknown }): Record<NetworkId, ServerConfig> {
+  const out: Record<NetworkId, ServerConfig> = {}
+  const source: Record<string, any> = raw && typeof raw === 'object' ? { ...(raw as Record<string, any>) } : {}
+  // State saved by the BitcoinZ-only release.
+  if (legacyBtcz?.servers && !source.btcz) source.btcz = { servers: legacyBtcz.servers, activeServer: legacyBtcz.activeServer }
+  for (const [id, value] of Object.entries(source)) {
+    if (!isNetworkId(id) || id === 'rtm') continue
+    const list = Array.isArray(value) ? value : value?.servers
+    const servers = normalizeServers(list, id)
+    const selected = String(Array.isArray(value) ? '' : value?.activeServer ?? '')
+    out[id] = { servers, activeServer: servers.includes(selected) ? selected : servers[0] ?? '' }
+  }
+  return out
+}
+
+/** The default networks of releases that did not record which defaults a wallet was given. */
+const FIRST_DEFAULT_NETWORKS: NetworkId[] = ['rtm', 'btcz']
+
+/**
+ * Saved networks plus any default the wallet has not been given yet, so a coin
+ * added to the defaults appears once in existing wallets and stays removed if
+ * the user removes it.
+ */
+function normalizeEnabled(raw: unknown, offered?: unknown): NetworkId[] {
+  const list = Array.isArray(raw) ? raw.filter(isNetworkId) : DEFAULT_ENABLED_NETWORKS
+  const given = Array.isArray(offered) ? offered.map(String) : FIRST_DEFAULT_NETWORKS
+  const added = DEFAULT_ENABLED_NETWORKS.filter((id) => !given.includes(id))
+  return Array.from(new Set(['rtm', ...list, ...added]))
 }
 
 export function formatAsset(atoms: string | bigint, info?: Pick<AssetInfo, 'decimalPoint'>): string {
@@ -208,10 +310,12 @@ function newAccountId(): string {
   return `acc-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
-function normalizeServers(list: unknown): string[] {
-  const values = Array.isArray(list) ? list.map((s) => migrateServer(String(s || '').trim())).filter(isValidServerUrl) : []
+function normalizeServers(list: unknown, network: NetworkId = 'rtm'): string[] {
+  const migrate = network === 'rtm' ? migrateServer : (url: string) => url
+  const values = Array.isArray(list) ? list.map((s) => migrate(String(s || '').trim())).filter(isValidServerUrl) : []
   const unique = Array.from(new Set(values))
-  return unique.length > 0 ? unique : [...DEFAULT_ELECTRUM_SERVERS]
+  // An emptied list stays empty for coins without default servers.
+  return unique.length > 0 || (Array.isArray(list) && network !== 'rtm') ? unique : defaultServers(network)
 }
 
 function migrateServer(url: string): string {
@@ -231,18 +335,46 @@ function migrateAccounts(raw: unknown): Account[] {
     const derivationIndex = Number.isInteger(item.derivationIndex) && item.derivationIndex >= 0 ? item.derivationIndex : index
     const legacyName = item.networkNames?.rtm
     const address = String(item.address ?? item.networkAddresses?.rtm ?? '').trim()
+    const saved: Record<string, unknown> = item.addresses && typeof item.addresses === 'object' ? { ...item.addresses } : {}
+    if (item.btczAddress && !saved.btcz) saved.btcz = item.btczAddress
+    const addresses: Record<NetworkId, string> = {}
+    for (const [id, value] of Object.entries(saved)) {
+      const text = String(value ?? '').trim()
+      if (isNetworkId(id) && id !== 'rtm' && isValidAddress(text, NETWORKS[id])) addresses[id] = text
+    }
     accounts.push({
       id: String(item.id || `acc-${derivationIndex + 1}`),
       name: String(legacyName || item.name || `Account ${derivationIndex + 1}`).trim(),
       derivationIndex,
-      address: isValidAddress(address) ? address : ''
+      address: isValidAddress(address) ? address : '',
+      addresses
     })
   })
   return accounts
 }
 
-async function deriveAccounts(mnemonic: string, accounts: Account[]): Promise<Account[]> {
-  return Promise.all(accounts.map(async (a) => ({ ...a, address: (await deriveAccountKey(mnemonic, a.derivationIndex)).address })))
+/** The RTM address plus one address per enabled network. */
+async function deriveAddresses(mnemonic: string, derivationIndex: number, networks: NetworkId[]): Promise<Pick<Account, 'address' | 'addresses'>> {
+  const rtm = await deriveAccountKey(mnemonic, derivationIndex)
+  const addresses: Record<NetworkId, string> = {}
+  for (const id of networks) {
+    if (id === 'rtm' || !isNetworkId(id)) continue
+    addresses[id] = (await deriveAccountKey(mnemonic, derivationIndex, NETWORKS[id])).address
+  }
+  return { address: rtm.address, addresses }
+}
+
+async function deriveAccounts(mnemonic: string, accounts: Account[], networks: NetworkId[]): Promise<Account[]> {
+  return Promise.all(accounts.map(async (a) => ({ ...a, ...(await deriveAddresses(mnemonic, a.derivationIndex, networks)) })))
+}
+
+function newAccount(id: string, name: string, derivationIndex: number): Account {
+  return { id, name, derivationIndex, address: '', addresses: {} }
+}
+
+/** Real block times only; a misread header yields no time instead of a wrong one. */
+function plausibleTime(ms: number): number | null {
+  return ms > Date.UTC(2009, 0, 1) && ms < Date.now() + 2 * 3600_000 ? ms : null
 }
 
 // ── storage (chrome.storage.local, shared with the background worker) ────────
@@ -277,26 +409,31 @@ let unsubscribers: Array<() => void> = []
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
+/** Incremented by every connect(); a connect loop that is no longer current stops. */
+let connectRun = 0
 const txCache = new Map<string, Transaction>()
-const headerTimeCache = new Map<number, number>()
+const headerTimeCache = new Map<string, number>()
 
 /** `height` comes from the address history; it lets servers without Core txindex answer. */
-async function fetchTx(txid: string, height: number): Promise<Transaction> {
-  const cached = txCache.get(txid)
+async function fetchTx(server: RtmElectrum, txid: string, height: number): Promise<Transaction> {
+  const key = `${server.network.id}:${txid}`
+  const cached = txCache.get(key)
   if (cached) return cached
-  if (!api) throw new Error('Not connected')
-  const tx = parseTx(await api.getTransactionAt(txid, height))
+  const hex = await server.getTransactionAt(txid, height)
+  const tx = parseNetworkTx(server.network, hex)
   if (txCache.size > MAX_ACTIVITY_PREV_TX) txCache.delete(txCache.keys().next().value as string)
-  txCache.set(txid, tx)
+  txCache.set(key, tx)
   return tx
 }
 
-async function blockTime(height: number): Promise<number | null> {
-  if (height <= 0 || !api) return null
-  const cached = headerTimeCache.get(height)
+async function blockTime(server: RtmElectrum, height: number): Promise<number | null> {
+  if (height <= 0) return null
+  const key = `${server.network.id}:${height}`
+  const cached = headerTimeCache.get(key)
   if (cached) return cached
-  const time = headerTime(await api.blockHeader(height))
-  headerTimeCache.set(height, time)
+  const time = plausibleTime(headerTime(await server.blockHeader(height), server.network.headerTimeOffset))
+  if (time === null) return null
+  headerTimeCache.set(key, time)
   return time
 }
 
@@ -367,11 +504,15 @@ export const useWalletStore = create<WalletState>()(
 
       // Finds more servers, then confirms the connected server's chain with another one.
       const verifyChain = async (server: RtmElectrum, tip: number): Promise<void> => {
-        if (!get().peerDiscovery) return
-        await get().discoverServers().catch(() => undefined)
+        const network = server.network
+        if (network.peerDiscovery) {
+          if (!get().peerDiscovery) return
+          await get().discoverServers().catch(() => undefined)
+        }
         if (api !== server) return
-        const { activeServer, servers, discoveredServers } = get()
-        const others = connectionCandidates('', servers, discoveredServers).filter((url) => url !== activeServer)
+        const { activeServer, servers } = serverStateOf(get(), network.id)
+        const discovered = network.peerDiscovery ? get().discoveredServers : []
+        const others = connectionCandidates('', servers, discovered).filter((url) => url !== activeServer)
         if (others.length === 0) {
           set({ chainCheck: 'unverified' })
           return
@@ -381,21 +522,23 @@ export const useWalletStore = create<WalletState>()(
         if (api === server) set({ chainCheck: result })
       }
 
-      const signingKey = async (accountId: string) => {
+      const signingKey = async (accountId: string, network: NetworkParams = NETWORKS.rtm) => {
         const { sessionMnemonic, accounts, isLocked } = get()
         if (isLocked || !sessionMnemonic) throw new Error('Wallet is locked')
         const account = accounts.find((a) => a.id === accountId)
         if (!account) throw new Error('Account not found')
-        const key = await deriveAccountKey(sessionMnemonic, account.derivationIndex)
-        if (account.address && key.address !== account.address) throw new Error('Derived key does not match the account address')
+        const key = await deriveAccountKey(sessionMnemonic, account.derivationIndex, network)
+        const expected = accountAddress(account, network.id)
+        if (expected && key.address !== expected) throw new Error('Derived key does not match the account address')
         return { account, key }
       }
 
       const subscribeActive = async (): Promise<void> => {
-        const account = activeAccountOf(get())
-        if (!api || !account?.address) return
-        await api.subscribeAddress(account.address).catch(() => null)
-        if (get().assetsReady) await api.subscribeAssets(account.address).catch(() => null)
+        const server = api
+        const address = accountAddress(activeAccountOf(get()), get().network)
+        if (!server || !address) return
+        await server.subscribeAddress(address).catch(() => null)
+        if (get().assetsReady && server.network.hasAssets) await server.subscribeAssets(address).catch(() => null)
       }
 
       return {
@@ -411,8 +554,12 @@ export const useWalletStore = create<WalletState>()(
         authorizedSites: [],
         autolockMinutes: 5,
         lastActiveTimestamp: Date.now(),
+        network: 'rtm',
+        enabledNetworks: [...DEFAULT_ENABLED_NETWORKS],
+        offeredNetworks: [...DEFAULT_ENABLED_NETWORKS],
         servers: [...DEFAULT_ELECTRUM_SERVERS],
         activeServer: DEFAULT_ELECTRUM_SERVERS[0],
+        coinServers: {},
         discoveredServers: [],
         peerDiscovery: true,
         lastDiscoveryAt: 0,
@@ -424,7 +571,7 @@ export const useWalletStore = create<WalletState>()(
           const phrase = mnemonic.trim().toLowerCase().split(/\s+/).join(' ')
           if (!isValidMnemonic(phrase)) throw new Error('Invalid recovery phrase')
           const vault = await encryptVaultV1({ password, mnemonic: phrase })
-          const first = await deriveAccountKey(phrase, 0)
+          const first = await deriveAddresses(phrase, 0, get().enabledNetworks)
           set({
             isInitialized: true,
             hasVault: true,
@@ -433,7 +580,7 @@ export const useWalletStore = create<WalletState>()(
             backupConfirmed: false,
             createdAt: Date.now(),
             sessionMnemonic: phrase,
-            accounts: [{ id: 'acc-1', name: 'Account 1', derivationIndex: 0, address: first.address }],
+            accounts: [{ ...newAccount('acc-1', 'Account 1', 0), ...first }],
             nextAccountIndex: 1,
             activeAccountId: 'acc-1',
             lastActiveTimestamp: Date.now(),
@@ -458,8 +605,8 @@ export const useWalletStore = create<WalletState>()(
           }
           const existing = get().accounts.length > 0
             ? get().accounts
-            : [{ id: 'acc-1', name: 'Account 1', derivationIndex: 0, address: '' }]
-          const accounts = await deriveAccounts(mnemonic, existing)
+            : [newAccount('acc-1', 'Account 1', 0)]
+          const accounts = await deriveAccounts(mnemonic, existing, get().enabledNetworks)
           const highest = accounts.reduce((max, a) => Math.max(max, a.derivationIndex), -1)
           set((state) => ({
             isLocked: false,
@@ -506,6 +653,7 @@ export const useWalletStore = create<WalletState>()(
             nextAccountIndex: 1,
             activeAccountId: null,
             authorizedSites: [],
+            network: 'rtm',
             assetInfo: {},
             sent: [],
             ...SESSION_DEFAULTS
@@ -540,12 +688,9 @@ export const useWalletStore = create<WalletState>()(
           const { sessionMnemonic, isLocked, nextAccountIndex, accounts } = get()
           if (isLocked || !sessionMnemonic) throw new Error('Unlock the wallet to add an account')
           const derivationIndex = Math.max(nextAccountIndex, accounts.reduce((m, a) => Math.max(m, a.derivationIndex + 1), 0))
-          const key = await deriveAccountKey(sessionMnemonic, derivationIndex)
           const account: Account = {
-            id: newAccountId(),
-            name: String(name || '').trim() || `Account ${derivationIndex + 1}`,
-            derivationIndex,
-            address: key.address
+            ...newAccount(newAccountId(), String(name || '').trim() || `Account ${derivationIndex + 1}`, derivationIndex),
+            ...(await deriveAddresses(sessionMnemonic, derivationIndex, get().enabledNetworks))
           }
           set((state) => ({ accounts: [...state.accounts, account], nextAccountIndex: derivationIndex + 1 }))
           return account
@@ -567,6 +712,31 @@ export const useWalletStore = create<WalletState>()(
           void subscribeActive().then(() => get().refresh())
         },
 
+        setNetwork: (network) => {
+          if (!isNetworkId(network) || network === get().network || !get().enabledNetworks.includes(network)) return
+          teardownSession()
+          set({ network, connection: 'disconnected', connectionError: '', chainCheck: 'idle', serverVersion: '', assetsReady: false, tipHeight: 0 })
+          if (!get().isLocked) void get().connect()
+        },
+
+        enableNetwork: async (network) => {
+          if (!isNetworkId(network) || get().enabledNetworks.includes(network)) return
+          const { sessionMnemonic, isLocked } = get()
+          if (isLocked || !sessionMnemonic) throw new Error('Unlock the wallet to add a network')
+          const params = NETWORKS[network]
+          const accounts = await Promise.all(get().accounts.map(async (a) => ({
+            ...a,
+            addresses: { ...a.addresses, [network]: (await deriveAccountKey(sessionMnemonic, a.derivationIndex, params)).address }
+          })))
+          set((state) => ({ accounts, enabledNetworks: [...state.enabledNetworks, network] }))
+        },
+
+        disableNetwork: (network) => {
+          if (network === 'rtm') return
+          if (get().network === network) get().setNetwork('rtm')
+          set((state) => ({ enabledNetworks: state.enabledNetworks.filter((id) => id !== network) }))
+        },
+
         addAuthorizedSite: (origin) => set((state) => ({
           authorizedSites: state.authorizedSites.includes(origin) ? state.authorizedSites : [...state.authorizedSites, origin]
         })),
@@ -578,20 +748,26 @@ export const useWalletStore = create<WalletState>()(
         addServer: (url) => {
           const value = url.trim()
           if (!isValidServerUrl(value)) throw new Error('Use an HTTPS or WebSocket URL without credentials or fragments')
-          set((state) => ({ servers: state.servers.includes(value) ? state.servers : [...state.servers, value] }))
+          set((state) => {
+            const { servers, activeServer } = serverStateOf(state, state.network)
+            return serverPatch(state.network, servers.includes(value) ? servers : [...servers, value], activeServer || value, state)
+          })
         },
 
         removeServer: (url) => set((state) => {
-          const servers = state.servers.filter((s) => s !== url)
-          const next = servers.length > 0 ? servers : [...DEFAULT_ELECTRUM_SERVERS]
-          return { servers: next, activeServer: next.includes(state.activeServer) ? state.activeServer : next[0] }
+          const current = serverStateOf(state, state.network)
+          const servers = current.servers.filter((s) => s !== url)
+          const next = servers.length > 0 || state.network !== 'rtm' ? servers : defaultServers(state.network)
+          return serverPatch(state.network, next, next.includes(current.activeServer) ? current.activeServer : next[0] ?? '', state)
         }),
 
         setActiveServer: async (url) => {
-          const discovered = get().discoveredServers.some((p) => p.url === url)
-          if (!get().servers.includes(url) && !discovered) get().addServer(url)
-          set({ activeServer: url })
+          const { network } = get()
+          const discovered = NETWORKS[network].peerDiscovery && get().discoveredServers.some((p) => p.url === url)
+          if (!serverStateOf(get(), network).servers.includes(url) && !discovered) get().addServer(url)
+          set((state) => serverPatch(network, serverStateOf(state, network).servers, url, state))
           teardownSession()
+          set({ connection: 'disconnected' })
           await get().connect()
         },
 
@@ -601,8 +777,8 @@ export const useWalletStore = create<WalletState>()(
         },
 
         discoverServers: async (force = false) => {
-          const { peerDiscovery, lastDiscoveryAt, activeServer, servers, connection } = get()
-          if (!peerDiscovery || connection !== 'connected') return
+          const { peerDiscovery, lastDiscoveryAt, activeServer, servers, connection, network } = get()
+          if (!peerDiscovery || connection !== 'connected' || !NETWORKS[network].peerDiscovery) return
           const now = Date.now()
           if (!force && now - lastDiscoveryAt < DISCOVERY_INTERVAL_MS) return
           set({ lastDiscoveryAt: now })
@@ -615,18 +791,25 @@ export const useWalletStore = create<WalletState>()(
         connect: async () => {
           if (api && get().connection === 'connected') return
           if (get().connection === 'connecting') return
+          const run = ++connectRun
+          const current = () => run === connectRun
+          const network = networkParams(get())
           set({ connection: 'connecting', connectionError: '', chainCheck: 'idle' })
-          const { activeServer, servers, discoveredServers, peerDiscovery } = get()
-          const candidates = connectionCandidates(activeServer, servers, peerDiscovery ? discoveredServers : [])
+          const { activeServer, servers } = serverStateOf(get(), network.id)
+          const discovered = get().peerDiscovery && network.peerDiscovery ? get().discoveredServers : []
+          const candidates = connectionCandidates(activeServer, servers, discovered)
           const errors: string[] = []
           for (const url of candidates) {
+            if (!current()) return
             teardownSession()
             const client = getClient(url)
-            const candidate = new RtmElectrum(client)
+            const candidate = new RtmElectrum(client, network)
             try {
               const features = await candidate.verifyNetwork()
+              if (!current()) return
               api = candidate
               const tip = await candidate.tipHeight()
+              if (!current()) return
               unsubscribers.push(
                 candidate.onHeader((height) => {
                   set({ tipHeight: height })
@@ -643,57 +826,65 @@ export const useWalletStore = create<WalletState>()(
                 })
               )
               reconnectAttempts = 0
-              set({
+              set((state) => ({
+                ...serverPatch(network.id, serverStateOf(state, network.id).servers, url, state),
                 connection: 'connected',
                 connectionError: '',
-                activeServer: url,
                 serverVersion: features.serverVersion,
                 assetsReady: features.assetsReady,
                 tipHeight: tip
-              })
+              }))
               await subscribeActive()
               await get().refresh()
               void verifyChain(candidate, tip)
               return
             } catch (error) {
+              if (!current()) return
               errors.push(`${url}: ${errorMessage(error)}`)
             }
           }
+          if (!current()) return
           teardownSession()
-          set({ connection: 'error', connectionError: errors.join('\n') || 'No ElectrumX server configured' })
+          set({ connection: 'error', connectionError: errors.join('\n') || `No ${network.name} ElectrumX server configured. Add one in Settings → ElectrumX servers.` })
           scheduleReconnect()
         },
 
         refresh: async () => {
           const account = activeAccountOf(get())
-          if (!api || !account?.address || get().refreshing) return
+          const server = api
+          if (!server || !account || get().refreshing) return
+          const network = server.network
+          const address = accountAddress(account, network.id)
+          if (!address) return
+          const key = walletKey(network.id, account.id)
           set({ refreshing: true })
           try {
-            const server = requireApi()
-            const [balance, history] = await Promise.all([server.balance(account.address), server.history(account.address)])
-            const holdings = get().assetsReady ? await server.assetBalances(account.address) : []
+            const [balance, history] = await Promise.all([server.balance(address), server.history(address)])
+            const holdings = get().assetsReady && network.hasAssets ? await server.assetBalances(address) : []
             set((state) => ({
-              balances: { ...state.balances, [account.id]: { confirmed: balance.confirmed.toString(), unconfirmed: balance.unconfirmed.toString() } },
-              assets: {
-                ...state.assets,
-                [account.id]: holdings
-                  .filter((h) => h.confirmed + h.unconfirmed > 0n)
-                  .map((h) => ({ assetId: h.assetId, confirmed: h.confirmed.toString(), unconfirmed: h.unconfirmed.toString() }))
-              }
+              balances: { ...state.balances, [key]: { confirmed: balance.confirmed.toString(), unconfirmed: balance.unconfirmed.toString() } },
+              ...(network.hasAssets ? {
+                assets: {
+                  ...state.assets,
+                  [account.id]: holdings
+                    .filter((h) => h.confirmed + h.unconfirmed > 0n)
+                    .map((h) => ({ assetId: h.assetId, confirmed: h.confirmed.toString(), unconfirmed: h.unconfirmed.toString() }))
+                }
+              } : {})
             }))
             for (const h of holdings) if (!get().assetInfo[h.assetId]) void get().loadAssetInfo(h.assetId)
 
-            const ownScript = addressToScript(account.address)
+            const ownScript = addressToScript(address, network)
             const recent = [...history]
               .sort((a, b) => (a.height <= 0 ? Number.MAX_SAFE_INTEGER : a.height) - (b.height <= 0 ? Number.MAX_SAFE_INTEGER : b.height))
               .slice(-HISTORY_LIMIT)
               .reverse()
-            const previous = new Map((get().activity[account.id] ?? []).map((item) => [item.txid, item]))
+            const previous = new Map((get().activity[key] ?? []).map((item) => [item.txid, item]))
             // An input can only spend our output if its funding tx is in our history.
             const heights = new Map(history.map((h) => [h.txid, h.height]))
             const fetchOwnPrev = async (txid: string) => {
               const height = heights.get(txid)
-              return height === undefined ? null : fetchTx(txid, height)
+              return height === undefined ? null : fetchTx(server, txid, height)
             }
             const items: ActivityItem[] = []
             for (const entry of recent) {
@@ -703,11 +894,11 @@ export const useWalletStore = create<WalletState>()(
                 continue
               }
               try {
-                const effect = await describeTx(await fetchTx(entry.txid, entry.height), ownScript, fetchOwnPrev)
+                const effect = await describeTx(await fetchTx(server, entry.txid, entry.height), ownScript, fetchOwnPrev)
                 items.push({
                   txid: entry.txid,
                   height: entry.height,
-                  timestamp: await blockTime(entry.height).catch(() => null),
+                  timestamp: await blockTime(server, entry.height).catch(() => null),
                   rtmDelta: effect.rtmDelta.toString(),
                   assetDeltas: Object.fromEntries(Object.entries(effect.assetDeltas).map(([k, v]) => [k, v.toString()])),
                   spentFromUs: effect.spentFromUs
@@ -718,21 +909,23 @@ export const useWalletStore = create<WalletState>()(
             }
             const seen = new Set(history.map((h) => h.txid))
             set((state) => ({
-              activity: { ...state.activity, [account.id]: items },
-              sent: state.sent.filter((s) => !seen.has(s.txid) && Date.now() - s.timestamp < 3 * 3600_000),
+              activity: { ...state.activity, [key]: items },
+              sent: state.sent.filter((s) => !(seen.has(s.txid) && (s.network ?? 'rtm') === network.id) && Date.now() - s.timestamp < 3 * 3600_000),
               lastRefreshAt: Date.now()
             }))
           } catch (error) {
-            set({ connectionError: errorMessage(error) })
+            if (api === server) set({ connectionError: errorMessage(error) })
           } finally {
             set({ refreshing: false })
+            // The network or server changed while this refresh ran; load the new one.
+            if (api && api !== server) scheduleRefresh()
           }
         },
 
         loadAssetInfo: async (assetId) => {
           const cached = get().assetInfo[assetId]
           if (cached) return cached
-          if (!api) return null
+          if (!api || !api.network.hasAssets) return null
           const metadata = await api.assetMetadata(assetId).catch(() => null)
           if (!metadata) return null
           const info = toAssetInfo(metadata)
@@ -740,31 +933,42 @@ export const useWalletStore = create<WalletState>()(
           return info
         },
 
-        prepareRtmSend: async ({ to, amount, sendMax }) => {
+        prepareCoinSend: async ({ network: expected, to, amount, sendMax }) => {
+          const network = networkParams(get())
+          if (expected !== network.id) throw new Error(`Switch MetaYoshi to ${NETWORKS[expected]?.name ?? expected} to send this transaction`)
           const server = requireTrustedApi(get().chainCheck)
+          if (server.network.id !== network.id) throw new Error('Not connected to this network yet')
           const account = activeAccountOf(get())
           if (!account) throw new Error('No account')
           const recipient = to.trim()
-          if (!isValidAddress(recipient)) throw new Error('Enter a valid Raptoreum address')
-          const value = sendMax ? 0n : parseUnits(amount, RTM_DECIMALS)
+          if (!isValidAddress(recipient, network)) throw new Error(`Enter a valid ${network.name} address`)
+          const value = sendMax ? 0n : parseUnits(amount, network.decimals)
           if (!sendMax && value <= 0n) throw new Error('Amount must be greater than zero')
-          const { key } = await signingKey(account.id)
-          const [coins, feePerByte] = await Promise.all([server.listUnspent(account.address), server.feePerByte()])
+          const { key } = await signingKey(account.id, network)
+          const from = key.address
+          const [coins, rates, tip] = await Promise.all([
+            server.listUnspent(from),
+            server.feeRates(),
+            needsTipHeight(network) ? server.tipHeight() : Promise.resolve(0)
+          ])
           const built: BuiltTransaction = buildNativeSend({
-            senderAddress: account.address,
+            senderAddress: from,
             privateKey: key.privateKey,
             coins,
             outputs: [{ address: recipient, value }],
-            feePerByte,
-            sendMax
+            feePerByte: rates.feePerByte,
+            sendMax,
+            chain: sendChainFor(network, { tipHeight: tip, relayFeePerByte: rates.relayFeePerByte })
           })
           return {
-            kind: 'rtm',
+            kind: 'coin',
+            network: network.id,
+            symbol: network.symbol,
             accountId: account.id,
-            from: account.address,
+            from,
             to: recipient,
-            amount: formatRtm(built.sent),
-            fee: formatRtm(built.fee),
+            amount: formatCoin(built.sent, network.id),
+            fee: formatCoin(built.fee, network.id),
             hex: built.hex,
             txid: built.txid,
             size: built.size
@@ -772,7 +976,9 @@ export const useWalletStore = create<WalletState>()(
         },
 
         prepareAssetSend: async ({ assetId, to, amount }) => {
+          if (!networkParams(get()).hasAssets) throw new Error('Switch MetaYoshi to Raptoreum to send assets')
           const server = requireTrustedApi(get().chainCheck)
+          if (!server.network.hasAssets) throw new Error('Not connected to Raptoreum yet')
           if (!get().assetsReady) throw new Error('The server asset index is still synchronizing')
           const account = activeAccountOf(get())
           if (!account) throw new Error('No account')
@@ -800,6 +1006,8 @@ export const useWalletStore = create<WalletState>()(
           })
           return {
             kind: 'asset',
+            network: 'rtm',
+            symbol: RTM_SYMBOL,
             accountId: account.id,
             from: account.address,
             to: recipient,
@@ -814,11 +1022,15 @@ export const useWalletStore = create<WalletState>()(
         },
 
         broadcast: async (prepared) => {
-          const txid = await requireTrustedApi(get().chainCheck).broadcast(prepared.hex)
+          const server = requireTrustedApi(get().chainCheck)
+          if (prepared.network !== get().network || server.network.id !== prepared.network) {
+            throw new Error(`This transaction is for ${NETWORKS[prepared.network]?.name ?? prepared.network}; switch back to that network to send it`)
+          }
+          const txid = await server.broadcast(prepared.hex)
           if (txid !== prepared.txid) throw new Error(`Server returned unexpected txid ${txid}`)
           set((state) => ({
             sent: [
-              { txid, accountId: prepared.accountId, to: prepared.to, amount: prepared.amount, assetId: prepared.assetId, timestamp: Date.now() },
+              { txid, network: prepared.network, accountId: prepared.accountId, to: prepared.to, amount: prepared.amount, assetId: prepared.assetId, timestamp: Date.now() },
               ...state.sent
             ]
           }))
@@ -840,7 +1052,10 @@ export const useWalletStore = create<WalletState>()(
             authorizedSites: state.authorizedSites,
             autolockMinutes: state.autolockMinutes,
             backupConfirmed: state.backupConfirmed,
-            servers: state.servers
+            servers: state.servers,
+            enabledNetworks: state.enabledNetworks,
+            offeredNetworks: state.offeredNetworks,
+            coinServers: Object.fromEntries(Object.entries(state.coinServers).map(([id, config]) => [id, config.servers]))
           }
         },
 
@@ -856,7 +1071,8 @@ export const useWalletStore = create<WalletState>()(
           const mnemonic = plain.mnemonic.trim()
           const vault = await encryptVaultV1({ password: newPassword, mnemonic })
           const migrated = migrateAccounts(data.accounts)
-          const accounts = await deriveAccounts(mnemonic, migrated.length > 0 ? migrated : [{ id: 'acc-1', name: 'Account 1', derivationIndex: 0, address: '' }])
+          const enabledNetworks = normalizeEnabled(data.enabledNetworks, data.offeredNetworks)
+          const accounts = await deriveAccounts(mnemonic, migrated.length > 0 ? migrated : [newAccount('acc-1', 'Account 1', 0)], enabledNetworks)
           const highest = accounts.reduce((max, a) => Math.max(max, a.derivationIndex), -1)
           teardownSession()
           set({
@@ -873,6 +1089,10 @@ export const useWalletStore = create<WalletState>()(
             authorizedSites: Array.isArray(data.authorizedSites) ? data.authorizedSites.map(String) : [],
             autolockMinutes: Number(data.autolockMinutes) || 5,
             servers: normalizeServers(data.servers),
+            enabledNetworks,
+            offeredNetworks: [...DEFAULT_ENABLED_NETWORKS],
+            coinServers: normalizeCoinServers(data.coinServers, { servers: data.btczServers }),
+            network: 'rtm',
             lastActiveTimestamp: Date.now(),
             sent: [],
             balances: {},
@@ -900,8 +1120,12 @@ export const useWalletStore = create<WalletState>()(
         authorizedSites: state.authorizedSites,
         autolockMinutes: state.autolockMinutes,
         lastActiveTimestamp: state.lastActiveTimestamp,
+        network: state.network,
         servers: state.servers,
         activeServer: state.activeServer,
+        enabledNetworks: state.enabledNetworks,
+        offeredNetworks: state.offeredNetworks,
+        coinServers: state.coinServers,
         discoveredServers: state.discoveredServers,
         peerDiscovery: state.peerDiscovery,
         lastDiscoveryAt: state.lastDiscoveryAt,
@@ -936,12 +1160,19 @@ export const useWalletStore = create<WalletState>()(
         const selected = migrateServer(String(persisted.activeServer ?? ''))
         const activeServer = servers.includes(selected) || discoveredServers.some((p) => p.url === selected) ? selected : servers[0]
         const accounts = migrateAccounts(persisted.accounts)
+        const legacy = persisted as Partial<WalletState> & { btczServers?: unknown; btczActiveServer?: unknown }
+        const enabledNetworks = normalizeEnabled(persisted.enabledNetworks, persisted.offeredNetworks)
+        const network = isNetworkId(persisted.network) && enabledNetworks.includes(persisted.network) ? persisted.network : 'rtm'
         return {
           ...currentState,
           ...persisted,
           accounts,
+          network,
+          enabledNetworks,
+          offeredNetworks: [...DEFAULT_ENABLED_NETWORKS],
           servers,
           activeServer,
+          coinServers: normalizeCoinServers(persisted.coinServers, { servers: legacy.btczServers, activeServer: legacy.btczActiveServer }),
           discoveredServers,
           peerDiscovery: persisted.peerDiscovery !== false,
           lastDiscoveryAt: Number(persisted.lastDiscoveryAt) || 0,
@@ -951,5 +1182,64 @@ export const useWalletStore = create<WalletState>()(
     }
   )
 )
+
+// ── unlocked session shared by the wallet's pages ───────────────────────────
+// The side panel, popup windows and request screens are separate pages. The
+// unlocked recovery phrase lives in chrome.storage.session: memory only,
+// cleared when the browser closes or the wallet locks, and readable only by
+// the extension's own pages (not content scripts). Unlocking or locking in one
+// page applies to all of them.
+
+const SESSION_STORAGE_KEY = 'metayoshi-session-v1'
+
+function sessionArea(): chrome.storage.StorageArea | null {
+  return typeof chrome !== 'undefined' && chrome.storage?.session ? chrome.storage.session : null
+}
+
+function sharedMnemonic(value: unknown): string | null {
+  const mnemonic = (value as { mnemonic?: unknown } | undefined)?.mnemonic
+  return typeof mnemonic === 'string' && mnemonic ? mnemonic : null
+}
+
+/** Adopts the session another page unlocked; locks when there is none (e.g. after a browser restart). */
+async function restoreSharedSession(area: chrome.storage.StorageArea): Promise<void> {
+  let mnemonic: string | null = null
+  try {
+    mnemonic = sharedMnemonic((await area.get(SESSION_STORAGE_KEY))[SESSION_STORAGE_KEY])
+  } catch {
+    // Unreadable session: treat as locked.
+  }
+  const state = useWalletStore.getState()
+  if (!state.isInitialized || state.sessionMnemonic) return
+  if (mnemonic) useWalletStore.setState({ isLocked: false, sessionMnemonic: mnemonic, lastActiveTimestamp: Date.now() })
+  else if (!state.isLocked) state.lock()
+}
+
+function shareSessionAcrossPages(): void {
+  const area = sessionArea()
+  if (!area) return
+  useWalletStore.subscribe((state, previous) => {
+    if (state.sessionMnemonic === previous.sessionMnemonic) return
+    const write = state.sessionMnemonic
+      ? area.set({ [SESSION_STORAGE_KEY]: { mnemonic: state.sessionMnemonic } })
+      : area.remove(SESSION_STORAGE_KEY)
+    void write.catch(() => undefined)
+  })
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'session' || !changes[SESSION_STORAGE_KEY]) return
+    const mnemonic = sharedMnemonic(changes[SESSION_STORAGE_KEY].newValue)
+    const state = useWalletStore.getState()
+    if (mnemonic && mnemonic !== state.sessionMnemonic && state.isInitialized) {
+      useWalletStore.setState({ isLocked: false, sessionMnemonic: mnemonic, lastActiveTimestamp: Date.now() })
+      if (state.connection === 'disconnected') void useWalletStore.getState().connect()
+    } else if (!mnemonic && state.sessionMnemonic) {
+      state.lock()
+    }
+  })
+  if (useWalletStore.persist.hasHydrated()) void restoreSharedSession(area)
+  else useWalletStore.persist.onFinishHydration(() => void restoreSharedSession(area))
+}
+
+shareSessionAcrossPages()
 
 export { addressToScriptHash }

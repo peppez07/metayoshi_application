@@ -25,6 +25,7 @@ import {
   type DappScope
 } from '../lib/dappPermissions'
 import { isPersistedStateEnvelope, unwrapPersistedState, WALLET_STORAGE_KEY } from '../lib/walletStorage'
+import { SIDE_PANEL_PORT_PREFIX } from '../lib/surface'
 
 const BG_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const APP_POPUP_WIDTH = 380
@@ -336,6 +337,14 @@ async function openUnlockPopup(): Promise<void> {
 }
 
 async function openManagedPopup(url: string): Promise<void> {
+  // Like Uniswap's wallet: requests show in the side panel instead of a new window.
+  if (await routeToSidePanel(url) || await openInSidePanel(url)) return
+  // Panel closed and the browser will not open it without a click: hold the screen,
+  // badge the toolbar icon, and show it as soon as the user opens the panel.
+  if (hasSidePanel()) {
+    holdForSidePanel(url)
+    return
+  }
   const nextTask = managedPopupOpenQueue
     .catch(() => {
       // Keep queue alive after prior failure.
@@ -813,6 +822,16 @@ function buildProviderState(state: WalletState) {
 }
 
 /** Ensures an initialized, unlocked wallet with an address; opens the unlock popup otherwise. */
+async function requireUnlockedAddressAfterUnlock(): Promise<{ state: WalletState; address: string; accountId: string }> {
+  const deadline = Date.now() + DAPP_APPROVAL_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const state = await getWalletState()
+    if (!(state.isLocked ?? true)) return requireUnlockedAddress()
+  }
+  throw { code: 4901, message: 'Wallet is locked' }
+}
+
 async function requireUnlockedAddress(): Promise<{ state: WalletState; address: string; accountId: string }> {
   const state = await getWalletState()
   if (!(state.isInitialized ?? false) || !(state.hasVault ?? false)) {
@@ -822,9 +841,10 @@ async function requireUnlockedAddress(): Promise<{ state: WalletState; address: 
     try {
       await openUnlockPopup()
     } catch {
-      // Ignore popup launch failures and return the lock error to the dApp.
+      throw { code: 4901, message: 'Wallet is locked' }
     }
-    throw { code: 4901, message: 'Wallet is locked. Unlock popup opened.' }
+    // Wait for the user to unlock, then carry on with the same request.
+    return requireUnlockedAddressAfterUnlock()
   }
   const account = state.accounts?.find((a) => a.id === state.activeAccountId) || state.accounts?.[0]
   const address = getActiveAddressFromState(state)
@@ -864,6 +884,8 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
   }
 
   if (REQUEST_ACCOUNTS_METHODS.has(method)) {
+    // Unlock first so the connect screens never show over a locked wallet.
+    await requireUnlockedAddress()
     await requireScopes(origin, ['read'])
     const { address } = await requireUnlockedAddress()
     return [address]
@@ -880,16 +902,17 @@ async function handleRpcMethod(method: string, params: any, origin?: string): Pr
     throw { code: -32601, message: `Method not supported: ${method}` }
   }
 
+  // A payment request needs no prior "connect": the confirmation screen shows the
+  // site, recipient and amount, nothing is sent without approval, and no address
+  // is revealed to the site. One flow: unlock if needed, then confirm.
   if (SEND_TRANSACTION_METHODS.has(method)) {
     const parsed = parseSendTransactionParams(params, RTM_DECIMALS)
-    await requireScopes(origin, ['read', 'send_coin'])
     const { accountId } = await requireUnlockedAddress()
     return requestDappActionApproval(origin || 'unknown', RTM_NETWORK.id, accountId, 'wallet_sendTransaction', parsed)
   }
 
   if (SEND_ASSET_METHODS.has(method)) {
     const parsed = parseSendAssetParams(params)
-    await requireScopes(origin, ['read', 'send_asset'])
     const { accountId } = await requireUnlockedAddress()
     return requestDappActionApproval(origin || 'unknown', RTM_NETWORK.id, accountId, 'wallet_sendAsset', parsed)
   }
@@ -984,6 +1007,87 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
   port.postMessage({ type: 'ready', events: ['accountsChanged', 'lockChanged'] })
 })
 
+// Open side panels (Chrome/Edge side panel, Firefox sidebar), by browser window.
+const sidePanelPorts = new Map<number, chrome.runtime.Port>()
+
+chrome.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
+  if (!port.name.startsWith(SIDE_PANEL_PORT_PREFIX)) return
+  const windowId = Number(port.name.slice(SIDE_PANEL_PORT_PREFIX.length))
+  const key = Number.isFinite(windowId) ? windowId : -1
+  sidePanelPorts.set(key, port)
+  port.onDisconnect.addListener(() => {
+    if (sidePanelPorts.get(key) === port) sidePanelPorts.delete(key)
+  })
+  if (heldPanelRoute) {
+    port.postMessage({ type: 'route', route: heldPanelRoute })
+    clearHeldPanelRoute()
+  }
+})
+
+/** The browser shows extension pages beside the page (Chrome/Edge side panel or Firefox sidebar). */
+function hasSidePanel(): boolean {
+  return Boolean(chrome.sidePanel?.open) || Boolean((globalThis as { browser?: { sidebarAction?: unknown } }).browser?.sidebarAction)
+}
+
+// A wallet screen waiting for the side panel to be opened.
+let heldPanelRoute: string | null = null
+let heldPanelTimer: ReturnType<typeof setTimeout> | undefined
+
+function holdForSidePanel(url: string): void {
+  const hash = url.indexOf('#')
+  heldPanelRoute = hash >= 0 ? url.slice(hash + 1) : '/'
+  void chrome.action?.setBadgeBackgroundColor?.({ color: '#ed7834' })
+  void chrome.action?.setBadgeText?.({ text: '1' })
+  clearTimeout(heldPanelTimer)
+  heldPanelTimer = setTimeout(clearHeldPanelRoute, DAPP_APPROVAL_TIMEOUT_MS)
+}
+
+function clearHeldPanelRoute(): void {
+  heldPanelRoute = null
+  clearTimeout(heldPanelTimer)
+  void chrome.action?.setBadgeText?.({ text: '' })
+}
+
+/**
+ * Opens the side panel in the focused window and shows `url` there. Chrome only
+ * allows this in response to a user action; false (popup fallback) otherwise.
+ */
+async function openInSidePanel(url: string): Promise<boolean> {
+  if (!chrome.sidePanel?.open) return false
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] })
+    if (typeof win.id !== 'number') return false
+    await chrome.sidePanel.open({ windowId: win.id })
+  } catch {
+    return false
+  }
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await routeToSidePanel(url)) return true
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  return false
+}
+
+/** Shows a wallet route in an open side panel (the focused window's first); false when none is open. */
+async function routeToSidePanel(url: string): Promise<boolean> {
+  if (sidePanelPorts.size === 0) return false
+  let focused = -1
+  try {
+    focused = (await chrome.windows.getLastFocused()).id ?? -1
+  } catch {
+    // No focused window; use any open panel.
+  }
+  const port = sidePanelPorts.get(focused) ?? sidePanelPorts.values().next().value
+  if (!port) return false
+  const hash = url.indexOf('#')
+  try {
+    port.postMessage({ type: 'route', route: hash >= 0 ? url.slice(hash + 1) : '/' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 chrome.windows.onBoundsChanged.addListener((win) => {
   if (typeof win.id !== 'number') return
   if (!managedPopupWindowIds.has(win.id)) return
@@ -998,8 +1102,21 @@ chrome.windows.onRemoved.addListener((windowId) => {
   managedPopupWindowIds.delete(windowId)
 })
 
+// Chrome/Edge: the toolbar button and its shortcut (Alt+Shift+M) open the wallet in the side panel.
+// Firefox has no chrome.sidePanel; its button toggles the sidebar below (shortcut via _execute_sidebar_action).
+chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true })?.catch((err: unknown) => {
+  void recordRuntimeError('background-sw', err, { kind: 'side-panel-behavior' })
+})
+
+const firefoxSidebar = (globalThis as { browser?: { sidebarAction?: { toggle?: () => Promise<void> } } }).browser?.sidebarAction
+
 if (chrome.action?.onClicked) {
   chrome.action.onClicked.addListener(() => {
+    // Must run synchronously inside the click for Firefox to allow it.
+    if (firefoxSidebar?.toggle) {
+      void firefoxSidebar.toggle().catch(() => openWalletHomePopup())
+      return
+    }
     void enforceSingleManagedPopupWindow()
     void openWalletHomePopup().catch((err) => {
       void recordRuntimeError('background-sw', err, { kind: 'open-wallet-popup' })

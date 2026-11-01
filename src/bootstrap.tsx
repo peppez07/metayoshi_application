@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import './styles/index.css'
 import { installGlobalErrorMonitor, recordRuntimeError } from './lib/runtimeErrorMonitor'
+import { initSidePanelBridge } from './lib/surface'
 
 import { ToastProvider } from './components/Toast'
 
@@ -55,6 +56,7 @@ class ErrorBoundary extends React.Component<
 }
 
 installGlobalErrorMonitor('popup-ui')
+initSidePanelBridge()
 
 console.log('MetaYoshi Wallet: Initializing...')
 console.log('Document ready state:', document.readyState)

@@ -2,10 +2,12 @@ import React from 'react'
 import clsx from 'clsx'
 import { IoArrowDown, IoArrowUp, IoOpenOutline, IoReceiptOutline, IoTimeOutline } from 'react-icons/io5'
 import { Badge, EmptyState } from '../../components/ui'
-import { activeAccountOf, assetLabel, EXPLORER_URL, formatAsset, formatRtm, RTM_SYMBOL, useWalletStore } from '../../store/walletStore'
+import { activeAccountOf, assetLabel, explorerTxUrl, formatAsset, formatCoin, networkParams, useWalletStore, walletKey } from '../../store/walletStore'
+import type { NetworkId } from '../../lib/networks'
 
 interface Row {
   txid: string
+  network: NetworkId
   outgoing: boolean
   pending: boolean
   title: string
@@ -28,20 +30,23 @@ function dayLabel(time: number | null, pending: boolean): string {
 const Activity: React.FC = () => {
   const state = useWalletStore()
   const { activity, sent, assetInfo, tipHeight } = state
+  const network = networkParams(state)
+  const symbol = network.symbol
   const account = activeAccountOf(state)
-  const items = account ? activity[account.id] ?? [] : []
+  const items = account ? activity[walletKey(network.id, account.id)] ?? [] : []
   const known = new Set(items.map((i) => i.txid))
 
   const rows: Row[] = [
-    ...sent.filter((s) => s.accountId === account?.id && !known.has(s.txid)).map((s) => ({
+    ...sent.filter((s) => s.accountId === account?.id && (s.network ?? 'rtm') === network.id && !known.has(s.txid)).map((s) => ({
       txid: s.txid,
+      network: network.id,
       outgoing: true,
       pending: true,
-      title: `Sent ${s.assetId ? assetLabel(s.assetId, assetInfo[s.assetId]) : RTM_SYMBOL}`,
+      title: `Sent ${s.assetId ? assetLabel(s.assetId, assetInfo[s.assetId]) : symbol}`,
       time: s.timestamp,
       height: 0,
       confirmations: 0,
-      amounts: [`-${s.amount} ${s.assetId ? assetLabel(s.assetId, assetInfo[s.assetId]) : RTM_SYMBOL}`]
+      amounts: [`-${s.amount} ${s.assetId ? assetLabel(s.assetId, assetInfo[s.assetId]) : symbol}`]
     })),
     ...items.map((item) => {
       const assetEntries = Object.entries(item.assetDeltas)
@@ -49,6 +54,7 @@ const Activity: React.FC = () => {
       const outgoing = assetEntries.length > 0 ? assetEntries.some(([, d]) => BigInt(d) < 0n) : rtm < 0n
       return {
         txid: item.txid,
+        network: network.id,
         outgoing,
         pending: item.height <= 0,
         title: assetEntries.length > 0 ? (outgoing ? 'Sent asset' : 'Received asset') : outgoing ? 'Sent' : 'Received',
@@ -57,7 +63,7 @@ const Activity: React.FC = () => {
         confirmations: item.height > 0 && tipHeight >= item.height ? tipHeight - item.height + 1 : 0,
         amounts: [
           ...assetEntries.map(([id, d]) => `${BigInt(d) > 0n ? '+' : ''}${formatAsset(d, assetInfo[id])} ${assetLabel(id, assetInfo[id])}`),
-          ...(rtm !== 0n ? [`${rtm > 0n ? '+' : ''}${formatRtm(rtm)} ${RTM_SYMBOL}`] : [])
+          ...(rtm !== 0n ? [`${rtm > 0n ? '+' : ''}${formatCoin(rtm, network.id)} ${symbol}`] : [])
         ]
       }
     })
@@ -66,7 +72,9 @@ const Activity: React.FC = () => {
   if (rows.length === 0) {
     return (
       <EmptyState icon={<IoReceiptOutline className="w-6 h-6" />} title="No transactions yet">
-        Your RTM and asset transfers appear here once they reach the network.
+        {network.hasAssets
+          ? 'Your RTM and asset transfers appear here once they reach the network.'
+          : `Your ${symbol} transfers appear here once they reach the network.`}
       </EmptyState>
     )
   }
@@ -93,9 +101,12 @@ const Activity: React.FC = () => {
   )
 }
 
-const ActivityRow: React.FC<{ row: Row }> = ({ row }) => (
+const ActivityRow: React.FC<{ row: Row }> = ({ row }) => {
+  const url = explorerTxUrl(row.network, row.txid)
+  const Container = url ? 'a' : 'div'
+  return (
   <li>
-    <a href={`${EXPLORER_URL}/tx/${row.txid}`} target="_blank" rel="noreferrer" className="list-row group">
+    <Container {...(url ? { href: url, target: '_blank', rel: 'noreferrer' } : { title: row.txid })} className="list-row group">
       <span className={clsx('w-10 h-10 rounded-full flex items-center justify-center shrink-0',
         row.pending ? 'bg-warning/10 text-warning' : row.outgoing ? 'bg-white/[0.06] text-gray-300' : 'bg-success/10 text-success')}>
         {row.pending ? <IoTimeOutline className="w-[18px] h-[18px]" /> : row.outgoing ? <IoArrowUp className="w-[18px] h-[18px]" /> : <IoArrowDown className="w-[18px] h-[18px]" />}
@@ -103,7 +114,7 @@ const ActivityRow: React.FC<{ row: Row }> = ({ row }) => (
       <span className="flex flex-col min-w-0 flex-1">
         <span className="flex items-center gap-1.5 text-sm font-semibold">
           {row.title}
-          <IoOpenOutline className="w-3 h-3 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+          {url && <IoOpenOutline className="w-3 h-3 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />}
         </span>
         <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
           {row.pending
@@ -122,8 +133,9 @@ const ActivityRow: React.FC<{ row: Row }> = ({ row }) => (
           </span>
         ))}
       </span>
-    </a>
+    </Container>
   </li>
-)
+  )
+}
 
 export default Activity

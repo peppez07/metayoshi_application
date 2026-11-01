@@ -64,7 +64,7 @@ const ShowSecrets: React.FC = () => {
         </SecretBlock>
 
         <SecretBlock
-          title={`Private key (WIF · ${key?.accountName ?? 'Account'})`}
+          title={`${key?.symbol ?? ''} private key (WIF · ${key?.accountName ?? 'Account'})`.trim()}
           value={key?.wif ?? ''}
           shown={showPrivKey}
           onToggle={() => setShowPrivKey(!showPrivKey)}

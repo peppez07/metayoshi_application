@@ -5,7 +5,7 @@ import { Input } from '../../components/Input'
 import { Badge, IconButton, Notice } from '../../components/ui'
 import { isValidServerUrl } from '../../lib/electrum/rtmElectrum'
 import type { ChainCheck } from '../../lib/electrum/discovery'
-import { useWalletStore } from '../../store/walletStore'
+import { networkParams, serverStateOf, useWalletStore } from '../../store/walletStore'
 
 const CHAIN_CHECK_TEXT: Record<ChainCheck, string> = {
   idle: '',
@@ -16,10 +16,13 @@ const CHAIN_CHECK_TEXT: Record<ChainCheck, string> = {
 }
 
 const ServerSettings: React.FC = () => {
+  const state = useWalletStore()
   const {
-    servers, activeServer, connection, connectionError, serverVersion, assetsReady, tipHeight, addServer, removeServer, setActiveServer,
+    connection, connectionError, serverVersion, assetsReady, tipHeight, addServer, removeServer, setActiveServer,
     discoveredServers, peerDiscovery, setPeerDiscovery, chainCheck
-  } = useWalletStore()
+  } = state
+  const network = networkParams(state)
+  const { servers, activeServer } = serverStateOf(state, network.id)
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
@@ -37,7 +40,9 @@ const ServerSettings: React.FC = () => {
     setError('')
     const value = url.trim()
     if (!isValidServerUrl(value)) {
-      setError('Use HTTPS, for example https://host/api/v1/electrum, or a WebSocket URL; no credentials or fragments')
+      setError(network.peerDiscovery
+        ? 'Use HTTPS, for example https://host/api/v1/electrum, or a WebSocket URL; no credentials or fragments'
+        : 'Use a secure WebSocket URL, for example wss://host:50004, or an HTTPS gateway; no credentials or fragments')
       return
     }
     addServer(value)
@@ -51,7 +56,7 @@ const ServerSettings: React.FC = () => {
     <div className="px-4 py-4 space-y-4">
       <div className="card px-4 py-4 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400">Current connection</span>
+          <span className="text-xs text-gray-400">{network.name} connection</span>
           <span className={`flex items-center gap-1.5 text-xs font-semibold ${statusTone}`}>
             <span className={`status-dot ${connection === 'connected' ? 'status-dot-green' : connection === 'connecting' || syncing ? 'status-dot-yellow' : 'status-dot-red'}`} />
             {connection === 'connected' ? `Block ${tipHeight.toLocaleString('en-US')}` : syncing ? 'Server synchronizing' : connection === 'connecting' ? 'Connecting…' : 'Not connected'}
@@ -59,7 +64,7 @@ const ServerSettings: React.FC = () => {
         </div>
         <p className="font-mono text-xs break-all text-gray-200">{activeServer}</p>
         {connection === 'connected' && (
-          <p className="text-[11px] text-gray-500">{serverVersion} · asset index {assetsReady ? 'ready' : 'synchronizing'}</p>
+          <p className="text-[11px] text-gray-500">{serverVersion}{network.hasAssets ? ` · asset index ${assetsReady ? 'ready' : 'synchronizing'}` : ''}</p>
         )}
         {connection === 'connected' && CHAIN_CHECK_TEXT[chainCheck] && (
           <p className={`text-[11px] ${chainCheck === 'agreed' ? 'text-success' : chainCheck === 'mismatch' ? 'text-danger' : 'text-gray-500'}`}>
@@ -74,8 +79,13 @@ const ServerSettings: React.FC = () => {
       </div>
 
       <section>
-        <h2 className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">Servers</h2>
-        <div className="card p-1.5">
+        <h2 className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">{network.symbol} servers</h2>
+        {servers.length === 0 && (
+          <Notice tone="warning" className="mb-2" title={`No ${network.name} server yet`}>
+            Add a browser-reachable ElectrumX endpoint for {network.symbol} below: a secure WebSocket URL (wss://) or an HTTPS gateway, with a browser-trusted certificate.
+          </Notice>
+        )}
+        <div className={servers.length === 0 ? 'hidden' : 'card p-1.5'}>
           {servers.map((server) => {
             const active = server === activeServer
             return (
@@ -98,7 +108,7 @@ const ServerSettings: React.FC = () => {
         </div>
       </section>
 
-      <section>
+      {network.peerDiscovery && <section>
         <div className="flex items-center justify-between px-1 pb-2">
           <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Discovered servers</h2>
           <label className="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
@@ -135,11 +145,11 @@ const ServerSettings: React.FC = () => {
             })}
           </div>
         )}
-      </section>
+      </section>}
 
       <div className="flex gap-2 items-start">
         <div className="flex-1">
-          <Input aria-label="Server URL" placeholder="https://host/api/v1/electrum" value={url} onChange={(e) => setUrl(e.target.value)} error={error} className="font-mono text-xs" />
+          <Input aria-label="Server URL" placeholder={network.peerDiscovery ? 'https://host/api/v1/electrum' : 'wss://host:50004'} value={url} onChange={(e) => setUrl(e.target.value)} error={error} className="font-mono text-xs" />
         </div>
         <Button variant="secondary" onClick={add} disabled={!url.trim()}>Add</Button>
       </div>
@@ -147,8 +157,26 @@ const ServerSettings: React.FC = () => {
       <div className="space-y-2 text-[11px] leading-relaxed text-gray-500 px-1">
         <p>
           The wallet reads public chain data from ElectrumX and broadcasts transactions it has already signed.
-          Keys never leave this browser, and every server must prove it is a Raptoreum mainnet server.
+          Keys never leave this browser, and every server must prove it is a {network.name} mainnet server.
         </p>
+        {network.id === 'btcz' && (
+          <p>
+            The BitcoinZ servers listed by default are the public electrum1, electrum2 and electrum6.btcz.rocks servers on their WebSocket port.
+            A browser only connects if the server presents a browser-trusted certificate; you can add your own BitcoinZ ElectrumX server here.
+          </p>
+        )}
+        {network.id !== 'btcz' && network.knownServers.length > 0 && (
+          <details>
+            <summary className="cursor-pointer select-none">Public {network.symbol} servers known to ElectrumX (TCP/SSL)</summary>
+            <p className="mt-1">
+              Browsers cannot connect to these directly. Put an HTTPS gateway or WebSocket proxy in front of one, then add that URL above.
+              The list may be out of date.
+            </p>
+            <ul className="mt-1 font-mono break-all">
+              {network.knownServers.map((server) => <li key={server}>{server}</li>)}
+            </ul>
+          </details>
+        )}
         <p>
           Use <span className="font-mono">https://</span> with a browser-trusted certificate. HTTPS checks for chain and asset changes every 15 seconds.
           Secure WebSocket (<span className="font-mono">wss://</span>) is also supported.

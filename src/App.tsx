@@ -35,13 +35,10 @@ const Unlocked = ({ element }: { element: ReactElement }) => {
 }
 
 function App() {
-  const { isLocked, isInitialized, hasVault, checkAutolock, sessionMnemonic, lock, updateLastActive } = useWalletStore()
+  const { isLocked, isInitialized, hasVault, checkAutolock, updateLastActive } = useWalletStore()
 
-  // sessionMnemonic is never persisted, so a reopened popup must unlock again.
-  useEffect(() => {
-    if (isInitialized && !isLocked && !sessionMnemonic) lock()
-  }, [])
-
+  // A page without the unlocked session adopts it from chrome.storage.session or
+  // locks (walletStore's shareSessionAcrossPages), so all wallet pages agree.
   useEffect(() => {
     const interval = setInterval(checkAutolock, 30_000)
     const onActivity = () => updateLastActive()

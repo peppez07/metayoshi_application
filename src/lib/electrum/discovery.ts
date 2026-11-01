@@ -110,7 +110,7 @@ export async function crossCheck(
   primaryTip: number,
   others: string[],
   limit = 2,
-  open: (url: string) => RtmElectrum = (url) => new RtmElectrum(new ElectrumClient(url))
+  open: (url: string) => RtmElectrum = (url) => new RtmElectrum(new ElectrumClient(url), primary.network)
 ): Promise<'agreed' | 'mismatch' | 'unverified'> {
   let disagreements = 0
   let compared = 0

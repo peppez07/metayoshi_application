@@ -5,4 +5,6 @@ interface ImportMetaEnv {
   /** Comma-separated Electrum HTTPS gateway or WebSocket URLs; HTTP/WS for testing only. */
   readonly VITE_RTM_ELECTRUM_SERVERS?: string
   readonly VITE_RTM_EXPLORER?: string
+  readonly VITE_BTCZ_ELECTRUM_SERVERS?: string
+  readonly VITE_BTCZ_EXPLORER?: string
 }

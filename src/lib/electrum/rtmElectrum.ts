@@ -2,16 +2,42 @@ import { ElectrumClient, ElectrumError } from './client'
 export { isValidServerUrl } from './client'
 import { addressToScriptHash } from '../rtm/address'
 import { toAtoms } from '../rtm/amount'
-import { hexToBytes } from '../rtm/bytes'
+import { bytesToHex, hexToBytes, reverseBytes, sha256d } from '../rtm/bytes'
 import type { AssetUtxo, CoinUtxo } from '../rtm/builder'
+import { BTCZ_NETWORK, NETWORKS, RTM_NETWORK, type NetworkId, type NetworkParams } from '../networks'
 
 export const BUILTIN_ELECTRUM_SERVER = 'https://144.202.18.233/api/v1/electrum'
 export const LEGACY_ELECTRUM_SERVER = 'wss://144.202.18.233:50004'
 
+function serverList(value: string): string[] {
+  return value.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
 /** Build-time custom defaults remain supported. */
-export const DEFAULT_ELECTRUM_SERVERS: string[] = String(
-  import.meta.env.VITE_RTM_ELECTRUM_SERVERS || BUILTIN_ELECTRUM_SERVER
-).split(',').map((s) => s.trim()).filter(Boolean)
+export const DEFAULT_ELECTRUM_SERVERS: string[] = serverList(String(import.meta.env.VITE_RTM_ELECTRUM_SERVERS || BUILTIN_ELECTRUM_SERVER))
+
+/**
+ * Public BitcoinZ ElectrumX servers (electrum-btcz servers.json) on their
+ * secure WebSocket port (btcz-electrum/electrumx-docker: 50004 = wss). A
+ * browser only connects when the certificate is browser-trusted.
+ */
+export const BTCZ_PUBLIC_SERVERS = [
+  'wss://electrum1.btcz.rocks:50004',
+  'wss://electrum2.btcz.rocks:50004',
+  'wss://electrum6.btcz.rocks:50004'
+]
+
+export const DEFAULT_BTCZ_ELECTRUM_SERVERS: string[] = serverList(String(import.meta.env.VITE_BTCZ_ELECTRUM_SERVERS || BTCZ_PUBLIC_SERVERS.join(',')))
+
+/** Build-time defaults for any other coin: VITE_ELECTRUM_SERVERS_<SYMBOL>, comma-separated. */
+const OTHER_DEFAULTS: Record<string, string | undefined> = import.meta.env as unknown as Record<string, string | undefined>
+
+export function defaultServers(network: NetworkId): string[] {
+  if (network === 'rtm') return [...DEFAULT_ELECTRUM_SERVERS]
+  if (network === 'btcz') return [...DEFAULT_BTCZ_ELECTRUM_SERVERS]
+  const configured = OTHER_DEFAULTS[`VITE_ELECTRUM_SERVERS_${network.toUpperCase()}`]
+  return configured ? serverList(String(configured)) : [...(NETWORKS[network]?.defaultServers ?? [])]
+}
 
 export interface ServerFeatures {
   serverVersion: string
@@ -52,7 +78,8 @@ const METHOD_NOT_FOUND = -32601
 /** Floor used when the server reports no fee information. */
 export const MIN_FEE_PER_BYTE = 2n
 
-export const RTM_GENESIS_HASH = 'b79e5df07278b9567ada8fc655ffbfa9d3f586dc38da3dd93053686f41caeea0'
+export const RTM_GENESIS_HASH = RTM_NETWORK.genesisHash
+export const BTCZ_GENESIS_HASH = BTCZ_NETWORK.genesisHash
 
 interface Page<T> {
   items: T[]
@@ -73,8 +100,18 @@ export function closeClient(): void {
   activeClient = null
 }
 
+/** Electrum API for one coin; Raptoreum by default, which adds the asset extensions. */
 export class RtmElectrum {
-  constructor(readonly client: ElectrumClient) {}
+  /** blockchain.transaction.get_in_block is an RTM ElectrumX extension. */
+  private inBlockSupported: boolean
+
+  constructor(readonly client: ElectrumClient, readonly network: NetworkParams = RTM_NETWORK) {
+    this.inBlockSupported = network.hasAssets
+  }
+
+  private scriptHash(address: string): string {
+    return addressToScriptHash(address, this.network)
+  }
 
   async features(): Promise<ServerFeatures> {
     const result = await this.client.request<any>('server.features')
@@ -87,13 +124,22 @@ export class RtmElectrum {
     }
   }
 
-  /** Verifies the server is a Raptoreum mainnet server before any wallet data is trusted. */
+  /** Verifies the server serves this coin's mainnet before any wallet data is trusted. */
   async verifyNetwork(): Promise<ServerFeatures> {
     const features = await this.features()
-    if (features.genesisHash !== RTM_GENESIS_HASH) {
-      throw new ElectrumError('Server is not a Raptoreum mainnet ElectrumX server (genesis hash mismatch)')
+    if (features.genesisHash !== this.network.genesisHash) {
+      throw new ElectrumError(`Server is not a ${this.network.name} mainnet ElectrumX server (genesis hash mismatch)`)
     }
-    return features
+    const checkpoint = this.network.checkpoint
+    if (checkpoint) {
+      // Forks share the genesis block; the block after the split tells them apart.
+      const header = await this.blockHeader(checkpoint.height).catch(() => '')
+      const hash = /^[0-9a-f]{160}$/i.test(header) ? bytesToHex(reverseBytes(sha256d(hexToBytes(header)))) : ''
+      if (hash !== checkpoint.hash) {
+        throw new ElectrumError(`Server is not on the ${this.network.name} chain (block ${checkpoint.height} does not match; it may serve a fork of ${this.network.name})`)
+      }
+    }
+    return this.network.hasAssets ? features : { ...features, assetsReady: false, assetIndexedHeight: null }
   }
 
   async tipHeight(): Promise<number> {
@@ -110,12 +156,12 @@ export class RtmElectrum {
 
   async balance(address: string): Promise<{ confirmed: bigint; unconfirmed: bigint }> {
     const result = await this.client.request<{ confirmed: number; unconfirmed: number }>(
-      'blockchain.scripthash.get_balance', [addressToScriptHash(address)])
+      'blockchain.scripthash.get_balance', [this.scriptHash(address)])
     return { confirmed: toAtoms(result.confirmed), unconfirmed: toAtoms(result.unconfirmed) }
   }
 
   async listUnspent(address: string): Promise<CoinUtxo[]> {
-    const rows = await this.client.request<any[]>('blockchain.scripthash.listunspent', [addressToScriptHash(address)])
+    const rows = await this.client.request<any[]>('blockchain.scripthash.listunspent', [this.scriptHash(address)])
     return (rows ?? []).map((row) => ({
       txid: String(row.tx_hash),
       vout: Number(row.tx_pos),
@@ -125,12 +171,12 @@ export class RtmElectrum {
   }
 
   async history(address: string): Promise<HistoryItem[]> {
-    const rows = await this.client.request<any[]>('blockchain.scripthash.get_history', [addressToScriptHash(address)])
+    const rows = await this.client.request<any[]>('blockchain.scripthash.get_history', [this.scriptHash(address)])
     return (rows ?? []).map((row) => ({ txid: String(row.tx_hash), height: Number(row.height), fee: row.fee }))
   }
 
   async subscribeAddress(address: string): Promise<string | null> {
-    return await this.client.request<string | null>('blockchain.scripthash.subscribe', [addressToScriptHash(address)])
+    return await this.client.request<string | null>('blockchain.scripthash.subscribe', [this.scriptHash(address)])
   }
 
   onAddressChange(handler: (scriptHash: string, status: string | null) => void): () => void {
@@ -144,8 +190,6 @@ export class RtmElectrum {
   async getTransaction(txid: string): Promise<string> {
     return await this.client.request<string>('blockchain.transaction.get', [txid, false])
   }
-
-  private inBlockSupported = true
 
   /**
    * Confirmed transactions via the RTM extension, which works on servers whose
@@ -170,23 +214,34 @@ export class RtmElectrum {
 
   /** Fee rate in satoshis per byte: the higher of relay fee and the 6-block estimate. */
   async feePerByte(): Promise<bigint> {
-    const toSatPerByte = (coinPerKb: unknown): bigint => {
+    return (await this.feeRates()).feePerByte
+  }
+
+  /**
+   * The rate to pay (relay fee, 6-block estimate and a floor, whichever is
+   * highest) and the relay fee itself, which sets the dust limit. Servers
+   * report coins per kilobyte; base units follow the coin's decimals.
+   */
+  async feeRates(): Promise<{ feePerByte: bigint; relayFeePerByte: bigint }> {
+    const unitsPerCoin = 10 ** this.network.decimals
+    const toPerByte = (coinPerKb: unknown): bigint => {
       const value = Number(coinPerKb)
       if (!Number.isFinite(value) || value <= 0) return 0n
-      return BigInt(Math.ceil((value * 1e8) / 1000))
+      return BigInt(Math.ceil((value * unitsPerCoin) / 1000))
     }
     const [relay, estimate] = await Promise.all([
       this.client.request<number>('blockchain.relayfee').catch(() => 0),
       this.client.request<number>('blockchain.estimatefee', [6]).catch(() => -1)
     ])
-    const rate = [toSatPerByte(relay), toSatPerByte(estimate), MIN_FEE_PER_BYTE].reduce((a, b) => (a > b ? a : b))
-    return rate
+    const relayFeePerByte = toPerByte(relay)
+    const feePerByte = [relayFeePerByte, toPerByte(estimate), MIN_FEE_PER_BYTE, this.network.minFeePerByte].reduce((a, b) => (a > b ? a : b))
+    return { feePerByte, relayFeePerByte }
   }
 
   // ── Assets ──────────────────────────────────────────────────────────────
 
   async assetBalances(address: string): Promise<AssetBalance[]> {
-    const result = await this.client.request<any>('blockchain.scripthash.assets.get_balance', [addressToScriptHash(address)])
+    const result = await this.client.request<any>('blockchain.scripthash.assets.get_balance', [this.scriptHash(address)])
     return Object.entries(result?.assets ?? {}).map(([assetId, b]: [string, any]) => ({
       assetId,
       confirmed: toAtoms(b.confirmed),
@@ -207,7 +262,7 @@ export class RtmElectrum {
   }
 
   async assetUnspent(address: string, assetId: string): Promise<AssetUtxo[]> {
-    const scripthash = addressToScriptHash(address)
+    const scripthash = this.scriptHash(address)
     const rows = await this.allPages<any>(async (cursor) => {
       const result = await this.client.request<any>('blockchain.scripthash.assets.listunspent', [scripthash, assetId, cursor, 1000])
       return { items: result?.items ?? [], cursor: result?.cursor ?? null }
@@ -225,7 +280,7 @@ export class RtmElectrum {
   }
 
   async assetHistory(address: string, assetId: string): Promise<Array<{ txid: string; height: number }>> {
-    const scripthash = addressToScriptHash(address)
+    const scripthash = this.scriptHash(address)
     const rows = await this.allPages<any>(async (cursor) => {
       const result = await this.client.request<any>('blockchain.scripthash.assets.get_history', [scripthash, assetId, cursor, 1000])
       return { items: result?.items ?? [], cursor: result?.cursor ?? null }
@@ -254,7 +309,7 @@ export class RtmElectrum {
   }
 
   async subscribeAssets(address: string): Promise<string | null> {
-    return await this.client.request<string | null>('blockchain.scripthash.assets.subscribe', [addressToScriptHash(address)])
+    return await this.client.request<string | null>('blockchain.scripthash.assets.subscribe', [this.scriptHash(address)])
   }
 
   onAssetChange(handler: (scriptHash: string) => void): () => void {

@@ -2,11 +2,13 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import clsx from 'clsx'
-import { IoChevronDown, IoCopyOutline, IoCheckmark, IoQrCodeOutline, IoCreateOutline, IoAdd, IoLockClosedOutline, IoSettingsOutline, IoRefresh } from 'react-icons/io5'
+import { IoChevronDown, IoCopyOutline, IoCheckmark, IoQrCodeOutline, IoCreateOutline, IoAdd, IoLockClosedOutline, IoSettingsOutline, IoRefresh, IoCloseCircleOutline, IoSearch } from 'react-icons/io5'
 import { Button } from './Button'
 import { IconButton, Notice, Sheet, shortAddress, useCopy } from './ui'
 import { SESSION_GRADIENT } from '../lib/sessionColor'
-import { activeAccountOf, useWalletStore } from '../store/walletStore'
+import { ALL_NETWORKS, NETWORKS } from '../lib/networks'
+import { NetworkIcon } from './NetworkIcon'
+import { accountAddress, activeAccountOf, networkParams, serverStateOf, useWalletStore } from '../store/walletStore'
 
 interface WalletFrameProps {
   children: React.ReactNode
@@ -21,7 +23,9 @@ export function useWalletFrame() {
 }
 
 const ConnectionChip: React.FC = () => {
-  const { connection, connectionError, tipHeight, refreshing, connect, activeServer } = useWalletStore()
+  const state = useWalletStore()
+  const { connection, connectionError, tipHeight, refreshing, connect } = state
+  const { activeServer } = serverStateOf(state, state.network)
   const syncing = connectionError.includes('synchronizing')
   const label = connection === 'connected'
     ? `#${tipHeight.toLocaleString('en-US')}`
@@ -43,14 +47,18 @@ const ConnectionChip: React.FC = () => {
 
 export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader = false }) => {
   const state = useWalletStore()
-  const { connection, connectionError, chainCheck, accounts, activeAccountId, setActiveAccount, renameAccount, addAccount, lock, connect } = state
+  const { connection, connectionError, chainCheck, accounts, activeAccountId, setActiveAccount, renameAccount, addAccount, lock, connect, setNetwork,
+    enabledNetworks, enableNetwork, disableNetwork } = state
+  const network = networkParams(state)
   const navigate = useNavigate()
-  const [sheet, setSheet] = React.useState<'accounts' | 'receive' | null>(null)
+  const [sheet, setSheet] = React.useState<'accounts' | 'receive' | 'network' | 'addNetwork' | null>(null)
+  const [search, setSearch] = React.useState('')
+  const [addError, setAddError] = React.useState('')
   const [qrDataUrl, setQrDataUrl] = React.useState('')
   const [copied, copy] = useCopy()
 
   const activeAccount = activeAccountOf(state)
-  const address = activeAccount?.address ?? ''
+  const address = accountAddress(activeAccount, network.id)
   const closeSheet = React.useCallback(() => setSheet(null), [])
   const frameContext = React.useMemo(() => ({ openReceive: () => setSheet('receive') }), [])
 
@@ -86,10 +94,20 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                 {activeAccount?.name ?? 'Account 1'}
                 <IoChevronDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
               </span>
-              <span className="text-[10px] text-gray-500 font-mono">{shortAddress(address, 5, 5)}</span>
+              <span className="text-[10px] text-gray-500 font-mono whitespace-nowrap">{shortAddress(address, 5, 5)}</span>
             </span>
           </button>
           <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setSheet('network')}
+              title={`Network: ${network.name}`}
+              aria-label={`Network: ${network.name}. Change network`}
+              className="flex items-center gap-0.5 h-8 pl-1 pr-1 rounded-full bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.07]"
+            >
+              <NetworkIcon network={network} size={24} />
+              <IoChevronDown className="w-3 h-3 text-gray-500" />
+            </button>
             <ConnectionChip />
             <IconButton label="Receive" onClick={() => setSheet('receive')} disabled={!address}>
               <IoQrCodeOutline className="w-[18px] h-[18px]" />
@@ -149,12 +167,12 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
                   <span className="w-9 h-9 rounded-full shrink-0" style={{ background: SESSION_GRADIENT }} />
                   <span className="flex flex-col min-w-0">
                     <span className="text-sm font-semibold truncate">{acc.name}</span>
-                    <span className="text-[11px] text-gray-500 font-mono">{shortAddress(acc.address, 8, 6) || '—'}</span>
+                    <span className="text-[11px] text-gray-500 font-mono">{shortAddress(accountAddress(acc, network.id), 8, 6) || '—'}</span>
                   </span>
                   {active && <IoCheckmark className="w-4 h-4 text-primary ml-auto shrink-0" />}
                 </button>
                 <IconButton label="Rename" onClick={() => editAccountName(acc.id)}><IoCreateOutline className="w-4 h-4" /></IconButton>
-                <IconButton label="Copy address" onClick={() => void copy(acc.address, acc.id)} className="mr-1.5">
+                <IconButton label="Copy address" onClick={() => void copy(accountAddress(acc, network.id), acc.id)} className="mr-1.5">
                   {copied === acc.id ? <IoCheckmark className="w-4 h-4 text-success" /> : <IoCopyOutline className="w-4 h-4" />}
                 </IconButton>
               </div>
@@ -163,7 +181,114 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
         </div>
       </Sheet>
 
-      <Sheet open={sheet === 'receive'} onClose={closeSheet} title="Receive RTM & assets" footer={
+      <Sheet open={sheet === 'network'} onClose={closeSheet} title="Network" footer={
+        <Button variant="secondary" className="w-full" onClick={() => { setSearch(''); setAddError(''); setSheet('addNetwork') }}>
+          <IoAdd className="w-4 h-4" /> Add coin
+        </Button>
+      }>
+        <div className="space-y-1.5">
+          {enabledNetworks.filter((id) => NETWORKS[id]).map((id) => {
+            const item = NETWORKS[id]
+            const active = id === network.id
+            return (
+              <div
+                key={id}
+                className={clsx('flex items-center rounded-2xl border transition-colors',
+                  active ? 'border-primary/50 bg-primary/[0.07]' : 'border-white/[0.06] bg-dark-750 hover:bg-dark-700')}
+              >
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => { setNetwork(id); closeSheet() }}
+                  className="flex-1 min-w-0 flex items-center gap-3 px-3 py-3 text-left"
+                >
+                  <NetworkIcon network={item} size={36} />
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-sm font-semibold truncate">{item.name}</span>
+                    <span className="text-[11px] text-gray-500">{item.symbol}{item.hasAssets ? ' · coins and assets' : ''}</span>
+                  </span>
+                  {active && <IoCheckmark className="w-4 h-4 text-primary ml-auto shrink-0" />}
+                </button>
+                {id !== 'rtm' && (
+                  <IconButton label={`Remove ${item.name}`} onClick={() => disableNetwork(id)} className="mr-1.5 hover:text-danger">
+                    <IoCloseCircleOutline className="w-4 h-4" />
+                  </IconButton>
+                )}
+              </div>
+            )
+          })}
+          <p className="text-[11px] text-gray-500 leading-relaxed px-1 pt-2">
+            Every account has an address on each network, derived from the same recovery phrase. Removing a coin only hides it. Connected sites only use Raptoreum.
+          </p>
+        </div>
+      </Sheet>
+
+      <Sheet open={sheet === 'addNetwork'} onClose={closeSheet} title="Add coin">
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 h-11 px-3 rounded-2xl bg-dark-750 border border-white/[0.06]">
+            <IoSearch className="w-4 h-4 text-gray-500" />
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search coins"
+              aria-label="Search coins"
+              className="flex-1 bg-transparent text-sm outline-none"
+            />
+          </label>
+          {addError && <Notice tone="error">{addError}</Notice>}
+          {(() => {
+            const query = search.trim().toLowerCase()
+            const matches = ALL_NETWORKS.filter((n) => !enabledNetworks.includes(n.id) &&
+              (!query || n.name.toLowerCase().includes(query) || n.symbol.toLowerCase().includes(query)))
+            const available = matches.filter((n) => n.supported)
+            const later = matches.filter((n) => !n.supported)
+            return (
+              <>
+                <div className="space-y-1">
+                  {available.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-white/[0.06] bg-dark-750 hover:bg-dark-700 text-left"
+                      onClick={() => {
+                        setAddError('')
+                        void enableNetwork(item.id)
+                          .then(() => { setNetwork(item.id); closeSheet() })
+                          .catch((err) => setAddError(err instanceof Error ? err.message : String(err)))
+                      }}
+                    >
+                      <NetworkIcon network={item} size={32} />
+                      <span className="flex flex-col min-w-0">
+                        <span className="text-sm font-semibold truncate">{item.name}</span>
+                        <span className="text-[11px] text-gray-500">{item.symbol}</span>
+                      </span>
+                      <IoAdd className="w-4 h-4 text-primary ml-auto shrink-0" />
+                    </button>
+                  ))}
+                  {available.length === 0 && <p className="text-[11px] text-gray-500 px-1">No more coins match.</p>}
+                </div>
+                {later.length > 0 && (
+                  <details className="card-flat px-3 py-2">
+                    <summary className="text-[11px] text-gray-400 cursor-pointer select-none">Not available yet ({later.length})</summary>
+                    <ul className="mt-2 space-y-1.5">
+                      {later.map((item) => (
+                        <li key={item.id} className="flex items-center gap-2 opacity-60">
+                          <NetworkIcon network={item} size={20} />
+                          <span className="text-xs">{item.name} <span className="text-gray-500">{item.symbol}</span></span>
+                          <span className="ml-auto text-[10px] text-gray-500 text-right">{item.pendingReason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      </Sheet>
+
+      <Sheet open={sheet === 'receive'} onClose={closeSheet} title={network.hasAssets ? `Receive ${network.symbol} & assets` : `Receive ${network.symbol}`} footer={
         <Button className="w-full" onClick={() => void copy(address, 'qr')} disabled={!address}>
           {copied === 'qr' ? <><IoCheckmark className="w-4 h-4" /> Copied</> : <><IoCopyOutline className="w-4 h-4" /> Copy Address</>}
         </Button>
@@ -179,7 +304,9 @@ export const WalletFrame: React.FC<WalletFrameProps> = ({ children, hideHeader =
             <p className="font-mono text-xs break-all text-gray-200 leading-relaxed select-all">{address || 'No address available'}</p>
           </div>
           <p className="text-[11px] text-gray-500 text-center leading-relaxed">
-            Send only Raptoreum (RTM) and Raptoreum assets to this address.
+            {network.hasAssets
+              ? 'Send only Raptoreum (RTM) and Raptoreum assets to this address.'
+              : `Send only ${network.name} (${network.symbol}) to this transparent address.`}
           </p>
         </div>
       </Sheet>

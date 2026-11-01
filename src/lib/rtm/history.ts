@@ -3,7 +3,7 @@ import { equalBytes } from './bytes'
 import type { Transaction } from './transaction'
 
 export interface TxEffect {
-  /** Net RTM change for the address, in satoshis. */
+  /** Net native coin change for the address, in satoshis. */
   rtmDelta: bigint
   /** Net change per asset ID, in atomic units. */
   assetDeltas: Record<string, bigint>
@@ -61,9 +61,9 @@ export async function describeTx(
   return { rtmDelta, assetDeltas, spentFromUs }
 }
 
-/** Block timestamp from an 80-byte header (hex). */
-export function headerTime(headerHex: string): number {
-  const bytes = headerHex.slice(136, 144)
+/** Block timestamp from a header (hex); nTime is at byte 68 of Bitcoin-style headers. */
+export function headerTime(headerHex: string, timeOffset = 68): number {
+  const bytes = headerHex.slice(timeOffset * 2, timeOffset * 2 + 8)
   if (bytes.length !== 8) return 0
   const le = bytes.match(/../g)!.reverse().join('')
   return Number.parseInt(le, 16) * 1000

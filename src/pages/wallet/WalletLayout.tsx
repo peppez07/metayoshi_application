@@ -7,14 +7,15 @@ import { PageTransition } from '../../components/PageTransition'
 import { Input } from '../../components/Input'
 import { Button } from '../../components/Button'
 import { Notice, Sheet } from '../../components/ui'
-import rtmLogo from '../../assets/raptoreum.png'
 import { isValidAddress } from '../../lib/rtm/address'
-import { activeAccountOf, formatRtm, RTM_SYMBOL, useWalletStore } from '../../store/walletStore'
+import { NetworkIcon } from '../../components/NetworkIcon'
+import { activeAccountOf, formatCoin, networkParams, useWalletStore, walletKey } from '../../store/walletStore'
 
-const TABS = [
+const ASSET_TABS = [
   { id: 'assets', label: 'Assets' },
   { id: 'activity', label: 'Activity' }
 ]
+const COIN_TABS = [{ id: 'activity', label: 'Activity' }]
 
 function groupedAmount(value: string): { whole: string; fraction: string } {
   const [whole, fraction = ''] = value.split('.')
@@ -27,8 +28,10 @@ const WalletLayout: React.FC = () => {
   const location = useLocation()
   const state = useWalletStore()
   const { balances, connection, connect, lastRefreshAt } = state
+  const network = networkParams(state)
+  const symbol = network.symbol
   const account = activeAccountOf(state)
-  const balance = account ? balances[account.id] : undefined
+  const balance = account ? balances[walletKey(network.id, account.id)] : undefined
 
   const [showSend, setShowSend] = useState(false)
   const [toAddress, setToAddress] = useState('')
@@ -47,25 +50,25 @@ const WalletLayout: React.FC = () => {
     if (connection === 'disconnected') void connect()
   }, [connection, connect])
 
-  const confirmed = formatRtm(balance?.confirmed ?? '0')
+  const confirmed = formatCoin(balance?.confirmed ?? '0', network.id)
   const { whole, fraction } = groupedAmount(confirmed)
   const pending = BigInt(balance?.unconfirmed ?? '0')
-  const activeTab = location.pathname.includes('/activity') ? 'activity' : 'assets'
+  const activeTab = location.pathname.includes('/activity') || !network.hasAssets ? 'activity' : 'assets'
   const loading = !balance && connection !== 'error'
   const canSend = connection === 'connected'
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault()
     setSendError('')
-    if (!isValidAddress(toAddress)) {
-      setSendError('Enter a valid Raptoreum address (starts with R).')
+    if (!isValidAddress(toAddress, network)) {
+      setSendError(`Enter a valid ${network.name} address (starts with ${network.addressPrefix}).`)
       return
     }
     if (!sendMax && !/^\d+(\.\d{1,8})?$/.test(amount.trim())) {
       setSendError('Enter an amount with at most 8 decimals.')
       return
     }
-    const request = { kind: 'rtm', to: toAddress.trim(), amount: amount.trim(), sendMax }
+    const request = { kind: 'coin', network: network.id, to: toAddress.trim(), amount: amount.trim(), sendMax }
     closeSend()
     navigate('/tx/confirm', { state: request })
   }
@@ -76,34 +79,34 @@ const WalletLayout: React.FC = () => {
         <div className="card relative overflow-hidden px-5 pt-5 pb-4">
           <div className="absolute -right-10 -top-12 w-40 h-40 rounded-full bg-primary/20 blur-3xl pointer-events-none" />
           <div className="flex items-center gap-2 text-xs text-gray-400">
-            <img src={rtmLogo} alt="" className="w-5 h-5 rounded-full bg-white p-[2px]" />
-            Raptoreum balance
+            <NetworkIcon network={network} size={20} />
+            {network.name} balance
           </div>
           {loading ? (
             <div className="mt-3 h-10 w-40 loading-shimmer rounded-xl" />
           ) : (
-            <p className="mt-2 flex items-baseline gap-1.5 tracking-tight" aria-label={`${confirmed} ${RTM_SYMBOL}`}>
+            <p className="mt-2 flex items-baseline gap-1.5 tracking-tight" aria-label={`${confirmed} ${symbol}`}>
               <span className="text-[34px] font-bold leading-none">{whole}</span>
               {fraction && <span className="text-xl font-semibold text-gray-400 leading-none">.{fraction}</span>}
-              <span className="text-sm font-semibold text-gray-400 ml-1">{RTM_SYMBOL}</span>
+              <span className="text-sm font-semibold text-gray-400 ml-1">{symbol}</span>
             </p>
           )}
           <div className="mt-2 min-h-[18px] text-[11px]">
             {pending !== 0n
-              ? <span className="text-warning">{pending > 0n ? '+' : ''}{formatRtm(pending)} {RTM_SYMBOL} pending confirmation</span>
+              ? <span className="text-warning">{pending > 0n ? '+' : ''}{formatCoin(pending, network.id)} {symbol} pending confirmation</span>
               : connection === 'error' && lastRefreshAt
                 ? <span className="text-gray-500">Last updated {new Date(lastRefreshAt).toLocaleTimeString()}</span>
                 : null}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className={`mt-3 grid gap-2 ${network.hasAssets ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <ReceiveAction />
             <QuickAction icon={<IoArrowUpOutline />} label="Send" onClick={() => setShowSend(true)} disabled={!canSend} primary />
-            <QuickAction icon={<IoLayersOutline />} label="Assets" onClick={() => navigate('/assets')} />
+            {network.hasAssets && <QuickAction icon={<IoLayersOutline />} label="Assets" onClick={() => navigate('/assets')} />}
           </div>
         </div>
       </section>
 
-      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => navigate(`/wallet/${id}`)} />
+      <Tabs tabs={network.hasAssets ? ASSET_TABS : COIN_TABS} activeTab={activeTab} onChange={(id) => navigate(`/wallet/${id}`)} />
 
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         <PageTransition>
@@ -111,15 +114,15 @@ const WalletLayout: React.FC = () => {
         </PageTransition>
       </div>
 
-      <Sheet open={showSend} onClose={closeSend} title={`Send ${RTM_SYMBOL}`}>
+      <Sheet open={showSend} onClose={closeSend} title={`Send ${symbol}`}>
         <form onSubmit={handleSend} className="space-y-4" noValidate>
           <div className="card-flat flex items-center justify-between px-4 py-3">
             <span className="text-xs text-gray-400">{account?.name}</span>
-            <span className="text-xs font-semibold">{confirmed} {RTM_SYMBOL} available</span>
+            <span className="text-xs font-semibold">{confirmed} {symbol} available</span>
           </div>
           <Input
             label="Recipient address"
-            placeholder="R…"
+            placeholder={`${network.addressPrefix}…`}
             value={toAddress}
             onChange={(e) => setToAddress(e.target.value)}
             className="font-mono text-xs"
@@ -145,7 +148,7 @@ const WalletLayout: React.FC = () => {
               }
             />
             <p className="text-[11px] text-gray-500 mt-1.5 ml-1">
-              {sendMax ? 'Sends all confirmed RTM; the network fee is deducted from the amount.' : 'The network fee is shown on the next screen.'}
+              {sendMax ? `Sends all confirmed ${symbol}; the network fee is deducted from the amount.` : 'The network fee is shown on the next screen.'}
             </p>
           </div>
           {sendError && <Notice tone="error">{sendError}</Notice>}

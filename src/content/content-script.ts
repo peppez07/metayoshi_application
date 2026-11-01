@@ -84,7 +84,10 @@ const CS_CONTENT_CHANNEL = 'metayoshi:content'
 const CS_INPAGE_CHANNEL = 'metayoshi:inpage'
 const CS_EVENT_PORT_NAME = 'metayoshi-inpage-events'
 const INJECTION_ALLOWLIST_KEY = 'dapp_injection_allowlist_v1'
-const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app']
+// Sites where the provider is exposed by default; the RTM explorer on the wallet's
+// gateway VPS hosts the "Buy Yoshi a gift" button. The manifest's MAIN-world
+// content script must match the same hosts (checked by dappHosts.test.ts).
+const DEFAULT_ALLOWED_HOSTS = ['metayoshi.app', '*.metayoshi.app', '144.202.18.233']
 const CONTEXT_INVALIDATED_RE = /extension context invalidated|context invalidated/i
 const CONTEXT_INVALIDATED_MSG = 'MetaYoshi extension was updated or reloaded. Refresh this tab and reconnect.'
 const CONTEXT_INVALIDATED_AUTO_RELOAD_KEY = 'metayoshi:auto-reloaded-after-context-invalidation'
@@ -324,7 +327,10 @@ async function boot(): Promise<void> {
     }
   })
 
-  injectInpage()
+  // On the default hosts the manifest's MAIN-world content script already loaded the
+  // provider (a <script> tag can be blocked by the page's CSP); elsewhere inject it.
+  const hostname = String(window.location.hostname || '').trim().toLowerCase()
+  if (!DEFAULT_ALLOWED_HOSTS.some((pattern) => hostMatchesPattern(hostname, pattern))) injectInpage()
   initEventBridge()
 }
 

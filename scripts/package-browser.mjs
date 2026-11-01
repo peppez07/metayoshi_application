@@ -26,12 +26,34 @@ rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 cpSync(srcDist, outDir, { recursive: true })
 
+// The provider runs as a classic script in the page's own world; wrap it so its
+// top-level names cannot collide with the page's globals.
+const inpagePath = path.join(outDir, 'assets', 'inpage.js')
+const inpage = readFileSync(inpagePath, 'utf-8')
+if (/^\s*(import|export)\s/m.test(inpage)) {
+  console.error('assets/inpage.js must be a self-contained script (no import/export).')
+  process.exit(1)
+}
+if (!inpage.startsWith('(()=>{')) writeFileSync(inpagePath, `(()=>{${inpage}\n})();\n`, 'utf-8')
+
 const baseManifestPath = path.join(root, 'public', 'manifest.json')
 const manifest = JSON.parse(readFileSync(baseManifestPath, 'utf-8'))
+
+// The wallet opens beside the page, like Uniswap's extension: the right-hand side
+// panel in Chrome/Edge, the sidebar in Firefox. Alt+Shift+M opens it; users can
+// change the key at chrome://extensions/shortcuts or about:addons.
+const SIDE_PANEL_PATH = 'app/src/ui/index.html?view=sidepanel'
+const SHORTCUT = { default: 'Alt+Shift+M', mac: 'Alt+Shift+M' }
 
 if (target === 'chromium') {
   // Firefox-only metadata should never appear in Chromium packages.
   delete manifest.browser_specific_settings
+  manifest.permissions = Array.from(new Set([...(manifest.permissions || []), 'sidePanel']))
+  manifest.side_panel = { default_path: SIDE_PANEL_PATH }
+  manifest.commands = {
+    ...(manifest.commands || {}),
+    _execute_action: { suggested_key: SHORTCUT, description: 'Open MetaYoshi' }
+  }
 }
 
 if (target === 'firefox') {
@@ -55,6 +77,17 @@ if (target === 'firefox') {
 
   // Chromium-only key; keep Firefox manifest clean.
   delete manifest.externally_connectable
+
+  manifest.sidebar_action = {
+    default_panel: SIDE_PANEL_PATH,
+    default_title: 'MetaYoshi',
+    default_icon: manifest.action?.default_icon ?? manifest.icons,
+    open_at_install: false
+  }
+  manifest.commands = {
+    ...(manifest.commands || {}),
+    _execute_sidebar_action: { suggested_key: SHORTCUT, description: 'Open MetaYoshi' }
+  }
 
   // Some Firefox channels/configurations still reject MV3 service workers
   // for temporary add-on installs. Fall back to background.scripts.

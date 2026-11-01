@@ -2,12 +2,15 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { IoWarningOutline } from 'react-icons/io5'
-import rtmLogo from '../assets/raptoreum.png'
-import { useWalletStore } from '../store/walletStore'
+import { NetworkIcon } from '../components/NetworkIcon'
+import { networkParams, serverStateOf, useWalletStore } from '../store/walletStore'
 
 const Connecting: React.FC = () => {
   const navigate = useNavigate()
-  const { connect, activeServer } = useWalletStore()
+  const state = useWalletStore()
+  const { connect } = state
+  const network = networkParams(state)
+  const { activeServer } = serverStateOf(state, network.id)
   const [warning, setWarning] = useState('')
 
   useEffect(() => {
@@ -38,7 +41,7 @@ const Connecting: React.FC = () => {
           transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
         />
         <div className="z-10 w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/35 flex items-center justify-center overflow-hidden animate-breathe">
-          <img src={rtmLogo} alt="Raptoreum" className="w-11 h-11 object-contain" />
+          <NetworkIcon network={network} size={44} />
         </div>
         <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 w-[120px] h-[2px] bg-dark-600">
           <motion.div

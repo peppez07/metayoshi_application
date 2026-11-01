@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { ElectrumClient, ElectrumError } from '../client'
+import { ElectrumClient, ElectrumError, parseJson } from '../client'
+import { toAtoms } from '../../rtm/amount'
 import { isValidServerUrl, RtmElectrum, RTM_GENESIS_HASH } from '../rtmElectrum'
 
 type Rpc = { id: number; method: string; params: unknown[] }
@@ -32,6 +33,18 @@ async function gateway(handler: (rpc: Rpc, req: IncomingMessage, res: ServerResp
   cleanup.push(() => client.close())
   return { client, calls, sessions, server }
 }
+
+describe('parseJson', () => {
+  test('keeps amounts above 2^53 base units exact and leaves everything else as JSON.parse does', () => {
+    const text = '{"confirmed":250214227465667123,"unconfirmed":-9007199254740993,"small":42,"fee":0.01003029,"exp":1e21,' +
+      '"note":"x:12345678901234567890,\\"q\\"","list":[9007199254740991,9007199254740992]}'
+    expect(parseJson(text)).toEqual({
+      confirmed: '250214227465667123', unconfirmed: '-9007199254740993', small: 42, fee: 0.01003029, exp: 1e21,
+      note: 'x:12345678901234567890,"q"', list: [9007199254740991, '9007199254740992']
+    })
+    expect(toAtoms(parseJson('{"v":250214227465667123}').v)).toBe(250214227465667123n)
+  })
+})
 
 describe('HTTP Electrum transport', () => {
   test('negotiates once for concurrent requests, verifies mainnet and keeps cursor requests in one session', async () => {
@@ -90,6 +103,22 @@ describe('HTTP Electrum transport', () => {
     expect((error as Error).message).toMatch(/synchroniz/i)
     expect((error as Error).message).not.toContain(raw)
     expect(calls.filter((rpc) => rpc.method === 'blockchain.transaction.broadcast')).toHaveLength(1)
+  })
+
+  test('shows the node\'s reason when it rejects a broadcast, without the raw transaction', async () => {
+    const raw = 'deadbeef'.repeat(50)
+    const { client, calls } = await gateway((rpc, _req, res) => res.end(JSON.stringify({
+      jsonrpc: '2.0', id: rpc.id, error: { code: 1, message: `the transaction was rejected by network rules.\n\nmin relay fee not met, 100 < 226\n[${raw}]` }
+    })))
+    const error = await client.request('blockchain.transaction.broadcast', [raw]).catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 1, message: 'The network rejected this transaction: min relay fee not met, 100 < 226' })
+    expect(calls.filter((rpc) => rpc.method === 'blockchain.transaction.broadcast')).toHaveLength(1)
+  })
+
+  test('keeps the cautious message when a broadcast\'s outcome is unknown', async () => {
+    const { client } = await gateway((_rpc, req) => { req.socket.destroy() })
+    const error = await client.request('blockchain.transaction.broadcast', ['signed']).catch((e: unknown) => e)
+    expect((error as Error).message).toMatch(/not confirmed\. Check its status/)
   })
 
   test('identifies an indexing server during the initial handshake', async () => {
