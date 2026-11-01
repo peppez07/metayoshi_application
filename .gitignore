@@ -4,10 +4,8 @@ node_modules
 .env.*.local
 metayoshi.build.json
 
-# build output
-dist/
-dist-chromium/
-dist-firefox/
+# build output: dist/, dist-chromium/ and dist-firefox/ are committed so the
+# repo carries ready-to-load builds; packaged archives are not.
 *.zip
 
 # extension signing keys
